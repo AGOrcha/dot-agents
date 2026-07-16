@@ -2,8 +2,10 @@ package config
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,17 +20,17 @@ import (
 
 // useTLSTokenClient points ociTokenHTTPClient at a client that trusts srv's
 // test TLS certificate for the duration of the test, preserving the
-// production rejectNonHTTPSRedirect policy. The token exchange now refuses a
-// non-https realm, so token-endpoint fixtures must be TLS servers; this
-// swaps in a client that can talk to httptest's self-signed cert while still
-// exercising the real redirect guard. The previous client is restored on
-// cleanup.
+// production rejectTokenEndpointRedirect policy. The token exchange now
+// refuses a non-https realm, so token-endpoint fixtures must be TLS servers;
+// this swaps in a client that can talk to httptest's self-signed cert while
+// still exercising the real redirect guard. The previous client is restored
+// on cleanup.
 func useTLSTokenClient(t *testing.T, srv *httptest.Server) {
 	t.Helper()
 	prev := ociTokenHTTPClient
 	c := srv.Client()
 	c.Timeout = 15 * time.Second
-	c.CheckRedirect = rejectNonHTTPSRedirect
+	c.CheckRedirect = rejectTokenEndpointRedirect
 	ociTokenHTTPClient = c
 	t.Cleanup(func() { ociTokenHTTPClient = prev })
 }
@@ -179,7 +181,7 @@ func TestRunOCICredentialHelper_ArgvNeverCarriesRequest(t *testing.T) {
 	}
 
 	sentinelRegistry := "sentinel-registry.example.com"
-	_, err := ociCredentialHelperRunner(context.Background(), helper, []byte(`{"registry":"`+sentinelRegistry+`","repository":"acme/skill"}`))
+	_, err := ociCredentialHelperRunner(context.Background(), helper, []byte(`{"registry":"`+sentinelRegistry+`","repository":"acme/skill"}`), nil)
 	if err != nil {
 		t.Fatalf("ociCredentialHelperRunner: %v", err)
 	}
@@ -245,7 +247,7 @@ func TestRunOCICredentialHelper_StderrNeverCaptured(t *testing.T) {
 	if err := os.WriteFile(helper, []byte("#!/bin/sh\ncat >/dev/null\necho \""+sentinel+"\" 1>&2\nexit 3\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ociCredentialHelperRunner(context.Background(), helper, []byte(`{"registry":"r"}`))
+	_, err := ociCredentialHelperRunner(context.Background(), helper, []byte(`{"registry":"r"}`), nil)
 	if err == nil {
 		t.Fatal("expected a non-zero-exit error")
 	}
@@ -280,7 +282,7 @@ func TestRunOCICredentialHelper_EnvAllowlist(t *testing.T) {
 	if err := os.WriteFile(helper, []byte("#!/bin/sh\nenv > "+envFile+"\ncat >/dev/null\nprintf '{\"token\":\"unused\"}'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ociCredentialHelperRunner(context.Background(), helper, []byte(`{"registry":"r"}`)); err != nil {
+	if _, err := ociCredentialHelperRunner(context.Background(), helper, []byte(`{"registry":"r"}`), nil); err != nil {
 		t.Fatalf("ociCredentialHelperRunner: %v", err)
 	}
 	dumped, err := os.ReadFile(envFile)
@@ -292,6 +294,68 @@ func TestRunOCICredentialHelper_EnvAllowlist(t *testing.T) {
 	}
 	if strings.Contains(string(dumped), "SOME_OTHER_SOURCE_TOKEN") {
 		t.Fatalf("helper inherited the non-allowlisted env var name: %s", dumped)
+	}
+}
+
+// TestRunOCICredentialHelper_StdoutBounded is the round-3 MEDIUM regression:
+// a helper that writes far more than a credential JSON document to stdout
+// must not have that output buffered without bound. The fixture writes 5
+// MiB in one burst (well over helperOutputLimit's 4 MiB); the runner must
+// never return that much data and must fail promptly rather than hang.
+//
+// The returned error is NOT asserted to be errHelperOutputTooLarge verbatim:
+// once capLimitedWriter's Write returns an error, the exec package's copy
+// goroutine stops draining the child's stdout pipe, so a fast writer like dd
+// gets SIGPIPE and exits abnormally — and (*exec.Cmd).Wait deliberately
+// prefers "the program exited abnormally" over the copy goroutine's error in
+// that case (see awaitGoroutines). What matters for the bound is proven
+// directly: the call fails, and no multi-megabyte buffer is ever returned.
+func TestRunOCICredentialHelper_StdoutBounded(t *testing.T) {
+	helper := writeHelperScript(t, `cat >/dev/null
+dd if=/dev/zero bs=1048576 count=5 2>/dev/null
+`)
+	out, err := ociCredentialHelperRunner(context.Background(), helper, []byte(`{"registry":"r"}`), nil)
+	if err == nil {
+		t.Fatal("expected an error when helper stdout exceeds the size limit")
+	}
+	if len(out) > helperOutputLimit {
+		t.Fatalf("runner returned %d bytes, exceeding helperOutputLimit (%d)", len(out), helperOutputLimit)
+	}
+}
+
+// TestRunOCICredentialHelper_HelperEnvOptIn is the round-3 LOW regression:
+// the fixed base allowlist breaks real ssh-agent/GPG/secretservice-backed
+// helpers that need e.g. SSH_AUTH_SOCK. A Source can opt a helper into an
+// additional env var NAME (value still resolved from the process env, never
+// from config); a name NOT opted in stays fail-closed by default even
+// though it is set in the parent process.
+func TestRunOCICredentialHelper_HelperEnvOptIn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("credential-helper subprocess fixture is POSIX-only")
+	}
+	optedIn := "sentinel-ssh-auth-sock-7c8d9e"
+	notOptedIn := "sentinel-not-opted-in-1a2b3c"
+	t.Setenv("SSH_AUTH_SOCK", optedIn)
+	t.Setenv("GNUPGHOME", notOptedIn)
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "env.txt")
+	helper := filepath.Join(dir, "helper.sh")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nenv > "+envFile+"\ncat >/dev/null\nprintf '{\"token\":\"unused\"}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ociCredentialHelperRunner(context.Background(), helper, []byte(`{"registry":"r"}`), []string{"SSH_AUTH_SOCK"}); err != nil {
+		t.Fatalf("ociCredentialHelperRunner: %v", err)
+	}
+	dumped, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("reading env dump: %v", err)
+	}
+	if !strings.Contains(string(dumped), "SSH_AUTH_SOCK="+optedIn) {
+		t.Fatalf("opted-in SSH_AUTH_SOCK was not forwarded: %s", dumped)
+	}
+	if strings.Contains(string(dumped), notOptedIn) || strings.Contains(string(dumped), "GNUPGHOME") {
+		t.Fatalf("non-opted-in GNUPGHOME leaked despite fail-closed default: %s", dumped)
 	}
 }
 
@@ -456,6 +520,95 @@ func TestExchangeBearerToken_RejectsDowngradeRedirect(t *testing.T) {
 	}
 	if stealHits.Load() != 0 {
 		t.Fatalf("credential was forwarded across an https->http downgrade redirect (%d hits)", stealHits.Load())
+	}
+}
+
+// TestExchangeBearerToken_RejectsSameHostDifferentPortRedirect is a round-3
+// HIGH-#1 negative case: an https token endpoint that 307-redirects to a
+// DIFFERENT PORT on the same loopback host must not have the credential
+// forwarded there. Go's stdlib Authorization-forwarding check
+// (shouldCopyHeaderOnRedirect) keys on url.Hostname(), which strips the
+// port, so a same-host different-port redirect looks like "no host change"
+// to the default policy even though it is a different listening service.
+// steal and tokenSrv are both httptest TLS servers on 127.0.0.1 with
+// distinct random ports, giving a real same-host different-port authority
+// change.
+func TestExchangeBearerToken_RejectsSameHostDifferentPortRedirect(t *testing.T) {
+	var stealHits atomic.Int32
+	steal := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stealHits.Add(1)
+		_, _ = w.Write([]byte(`{"token":"leaked"}`))
+	}))
+	defer steal.Close()
+
+	tokenSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, steal.URL+"/different-port", http.StatusTemporaryRedirect)
+	}))
+	defer tokenSrv.Close()
+	useTLSTokenClient(t, tokenSrv)
+
+	cred := resolvedOCICredential{Username: "svc-account", Secret: "sentinel-diffport-9f8e7d"}
+	_, err := exchangeBearerToken(context.Background(), ociAuthChallenge{Realm: tokenSrv.URL}, cred)
+	if err == nil {
+		t.Fatal("expected an error when the token endpoint redirects to a different port on the same host")
+	}
+	if stealHits.Load() != 0 {
+		t.Fatalf("credential was forwarded across a same-host different-port redirect (%d hits)", stealHits.Load())
+	}
+}
+
+// TestExchangeBearerToken_RejectsSubdomainRedirect is a round-3 HIGH-#1
+// negative case: an https token endpoint that 307-redirects to a SUBDOMAIN
+// of its own host must not have the credential forwarded there. Go's
+// stdlib Authorization-forwarding check permits this hop directly
+// (isDomainOrSubdomain treats foo.com -> sub.foo.com as safe to carry the
+// header). A custom DialContext resolves the synthetic subdomain hostname
+// straight to the steal listener's real loopback address, so this test
+// proves the policy at the network layer: if rejectTokenEndpointRedirect
+// ever let the redirect through, the dial WOULD reach steal (not fail on
+// DNS), and stealHits would be nonzero.
+func TestExchangeBearerToken_RejectsSubdomainRedirect(t *testing.T) {
+	var stealHits atomic.Int32
+	steal := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stealHits.Add(1)
+		_, _ = w.Write([]byte(`{"token":"leaked"}`))
+	}))
+	defer steal.Close()
+	stealAddr := steal.Listener.Addr().String()
+
+	const subdomainHost = "sub.oci-auth-redirect-test.invalid"
+	tokenSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://"+subdomainHost+"/subdomain", http.StatusTemporaryRedirect)
+	}))
+	defer tokenSrv.Close()
+
+	prev := ociTokenHTTPClient
+	ociTokenHTTPClient = &http.Client{
+		Timeout:       15 * time.Second,
+		CheckRedirect: rejectTokenEndpointRedirect,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if addr == subdomainHost+":443" {
+					addr = stealAddr
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, addr)
+			},
+			// steal's and tokenSrv's self-signed httptest certificates are
+			// issued for 127.0.0.1, not the synthetic subdomain hostname;
+			// this test proves the redirect-authority policy, not
+			// certificate validation, so hostname verification is skipped.
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test-only: proves redirect-authority rejection, not TLS validation
+		},
+	}
+	t.Cleanup(func() { ociTokenHTTPClient = prev })
+
+	cred := resolvedOCICredential{Username: "svc-account", Secret: "sentinel-subdomain-2b3c4d"}
+	_, err := exchangeBearerToken(context.Background(), ociAuthChallenge{Realm: tokenSrv.URL}, cred)
+	if err == nil {
+		t.Fatal("expected an error when the token endpoint redirects to a subdomain")
+	}
+	if stealHits.Load() != 0 {
+		t.Fatalf("credential was forwarded across a subdomain redirect (%d hits)", stealHits.Load())
 	}
 }
 

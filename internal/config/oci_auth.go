@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -56,6 +57,18 @@ type ociAuthConfig struct {
 	// it is never handed the secret request as an argv element — only via
 	// stdin (H12).
 	Helper string `json:"helper,omitempty"`
+	// HelperEnv opts additional environment variable NAMES into the helper
+	// subprocess's environment, beyond the fixed base allowlist
+	// (credentialHelperEnvAllowlist). This is a NAMES-only list (Codex
+	// round-3 LOW — the base allowlist breaks real ssh-agent/GPG/
+	// secretservice-backed helpers that need e.g. SSH_AUTH_SOCK or
+	// GNUPGHOME): a config author cannot embed a secret VALUE here, only opt
+	// a helper into reading an already-present env var by name. Values are
+	// resolved from the current process environment via the same
+	// os.LookupEnv mechanism as the base allowlist — never taken from this
+	// config. The default stays fail-closed: an unlisted variable is never
+	// forwarded, so a helper that needs one must be explicitly configured.
+	HelperEnv []string `json:"helper_env,omitempty"`
 }
 
 const (
@@ -164,7 +177,7 @@ func resolveCredentialHelperCredential(ctx context.Context, cfg ociAuthConfig, r
 	if err != nil {
 		return resolvedOCICredential{}, fmt.Errorf("oci credential-helper auth: encoding request: %w", err)
 	}
-	out, err := ociCredentialHelperRunner(ctx, cfg.Helper, reqBody)
+	out, err := ociCredentialHelperRunner(ctx, cfg.Helper, reqBody, cfg.HelperEnv)
 	if err != nil {
 		return resolvedOCICredential{}, fmt.Errorf("oci credential-helper auth: helper %q failed", cfg.Helper)
 	}
@@ -198,45 +211,105 @@ var credentialHelperEnvAllowlist = []string{
 	"SystemRoot", "USERPROFILE", "TEMP", "TMP", "PATHEXT", "ComSpec",
 }
 
-// allowlistedHelperEnv returns the current process's values for exactly the
-// allowlisted variable names, in "KEY=VALUE" form for exec.Cmd.Env. A name
-// that is unset in the parent is simply omitted.
-func allowlistedHelperEnv() []string {
-	env := make([]string, 0, len(credentialHelperEnvAllowlist))
-	for _, k := range credentialHelperEnvAllowlist {
+// allowlistedHelperEnv returns the current process's values for the base
+// allowlisted variable names PLUS extra — a per-Source opt-in list of
+// additional NAMES (never values) a specific helper is allowed to receive,
+// in "KEY=VALUE" form for exec.Cmd.Env. A name that is unset in the parent,
+// or empty, is simply omitted; a name present in both lists is emitted once.
+// extra still resolves its value from the process environment via the same
+// os.LookupEnv call as the base allowlist, so a config file can never smuggle
+// a literal secret value through this path — only opt into forwarding an
+// already-present variable by name (Codex round-3 LOW).
+func allowlistedHelperEnv(extra []string) []string {
+	seen := make(map[string]bool, len(credentialHelperEnvAllowlist)+len(extra))
+	env := make([]string, 0, len(credentialHelperEnvAllowlist)+len(extra))
+	add := func(k string) {
+		if k == "" || seen[k] {
+			return
+		}
+		seen[k] = true
 		if v, ok := os.LookupEnv(k); ok {
 			env = append(env, k+"="+v)
 		}
 	}
+	for _, k := range credentialHelperEnvAllowlist {
+		add(k)
+	}
+	for _, k := range extra {
+		add(k)
+	}
 	return env
+}
+
+// helperOutputLimit caps a credential helper's captured stdout. A resolved
+// credential is a small JSON document (git-credential-style: a token, or a
+// username+secret pair); this cap is a generous multiple of any legitimate
+// helper output while bounding memory if a misbehaving, compromised, or
+// PATH-hijacked helper writes an unbounded stream to stdout (Codex round-3
+// MEDIUM — cmd.Output() buffers stdout with no size limit).
+const helperOutputLimit = 4 << 20 // 4 MiB
+
+// errHelperOutputTooLarge is returned when a credential helper's stdout
+// exceeds helperOutputLimit.
+var errHelperOutputTooLarge = errors.New("oci credential-helper auth: helper output exceeded the size limit")
+
+// capLimitedWriter caps the number of bytes written to buf, failing with
+// errHelperOutputTooLarge instead of growing buf without bound once the
+// limit is exceeded.
+type capLimitedWriter struct {
+	buf   *bytes.Buffer
+	limit int
+}
+
+func (w *capLimitedWriter) Write(p []byte) (int, error) {
+	if w.buf.Len()+len(p) > w.limit {
+		return 0, errHelperOutputTooLarge
+	}
+	return w.buf.Write(p)
 }
 
 // runOCICredentialHelper invokes name as a subprocess, writing reqBody to
 // its stdin and returning its stdout. name is invoked with a single fixed
 // "get" argument (git-credential-style) — the request document and any
 // secret the helper resolves NEVER cross the process boundary via argv,
-// only via the stdin/stdout pipes (H12). Hardening (Codex round-2):
+// only via the stdin/stdout pipes (H12). extraEnv is the calling Source's
+// opt-in HelperEnv names (round-3 LOW), forwarded to allowlistedHelperEnv
+// alongside the fixed base allowlist. Hardening (Codex round-2, round-3):
 //   - ctx is honored via exec.CommandContext so a hung helper is cancelled
 //     when the caller's OCI pull deadline fires.
 //   - cmd.Stderr is set to io.Discard so the helper's stderr is genuinely
 //     dropped: with a nil Stderr, cmd.Output() would instead capture up to
 //     ~64 KiB of it into *exec.ExitError.Stderr, placing any credential the
 //     helper printed to stderr into a returned error object.
-//   - cmd.Env is the allowlist only, so the helper cannot read other
-//     sources' token env vars out of the inherited environment.
+//   - cmd.Env is the base allowlist plus extraEnv only, so the helper cannot
+//     read other sources' token env vars — or any other unlisted variable —
+//     out of the inherited environment.
+//   - cmd.Stdout is a capLimitedWriter (not cmd.Output()'s unbounded
+//     bytes.Buffer) so an over-large or runaway stdout stream is bounded
+//     instead of exhausting memory.
+//   - cmd.WaitDelay bounds how long cmd.Wait() can block on I/O completion:
+//     CommandContext alone kills the direct child when ctx is done, but an
+//     orphaned descendant that inherited the stdout/stderr pipe and never
+//     exits can still hold Wait() open indefinitely waiting for the pipe to
+//     close. WaitDelay forces Wait() to return (closing the pipes itself)
+//     once that grace period elapses.
 //
 // On failure only the raw (already secret-free by construction) exec error is
 // returned to the caller, which itself never echoes it.
-func runOCICredentialHelper(ctx context.Context, name string, reqBody []byte) ([]byte, error) {
+func runOCICredentialHelper(ctx context.Context, name string, reqBody []byte, extraEnv []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, "get")
 	cmd.Stdin = bytes.NewReader(reqBody)
 	cmd.Stderr = io.Discard
-	cmd.Env = allowlistedHelperEnv()
-	out, err := cmd.Output()
-	if err != nil {
+	cmd.Env = allowlistedHelperEnv(extraEnv)
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &capLimitedWriter{buf: &stdout, limit: helperOutputLimit}
+	cmd.WaitDelay = 5 * time.Second
+
+	if err := cmd.Run(); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return stdout.Bytes(), nil
 }
 
 // ociAuthChallenge is the parsed form of a registry's WWW-Authenticate
@@ -303,32 +376,44 @@ func splitAuthParams(s string) []string {
 	return parts
 }
 
-// rejectNonHTTPSRedirect is the token client's redirect policy (Codex round-2
-// HIGH — credential downgrade). Go's default redirect handling strips the
-// Authorization header only across DIFFERENT hosts; a same-host (or
-// subdomain) redirect from https to http, or to a different port, STILL
-// forwards the credential — the stdlib copy check keys on host, not scheme.
-// So the token exchange refuses to follow ANY redirect whose target is not
-// https: a malicious/MITM token endpoint cannot bounce a Basic credential or
-// bearer token to a cleartext http URL. The 10-redirect cap mirrors the
-// stdlib default the custom policy replaces.
-func rejectNonHTTPSRedirect(req *http.Request, via []*http.Request) error {
-	if req.URL.Scheme != "https" {
-		return fmt.Errorf("oci auth: refusing redirect to non-https token endpoint (scheme %q)", req.URL.Scheme)
+// rejectTokenEndpointRedirect is the token client's redirect policy (Codex
+// round-2 HIGH, then round-3 HIGH — credential downgrade / redirect-authority
+// confusion). The round-2 fix rejected a redirect whose target scheme was not
+// https, but that alone is not sufficient: Go's stdlib forwards the
+// Authorization header across a redirect whenever shouldCopyHeaderOnRedirect's
+// isDomainOrSubdomain check passes, which permits a same-host-but-different-
+// port hop AND a parent-domain -> subdomain hop (both still "https"), and
+// url.Hostname() strips the port entirely so a same-host different-port
+// redirect looks identical to no redirect at all. A malicious or compromised
+// token realm could therefore 307-redirect (staying https) to a different
+// port or a subdomain it controls and still receive the Basic/Bearer
+// credential.
+//
+// Binding the redirect target's exact host:port to the original realm's
+// authority (via[0].URL, with scheme-default ports applied) would close this,
+// but that comparison has its own normalization surface (default ports,
+// IPv6 literal brackets, IDN, case-folding) that is easy to get subtly wrong.
+// A legitimate OCI Distribution token endpoint never needs to bounce a
+// credentialed request — it responds with the token JSON directly — so this
+// policy instead refuses to follow ANY redirect at all. CheckRedirect is only
+// invoked once the client has already decided a response is a redirect, so
+// every call here IS a redirect attempt; there is no first-request case to
+// allow through.
+func rejectTokenEndpointRedirect(req *http.Request, via []*http.Request) error {
+	from := "token endpoint"
+	if len(via) > 0 {
+		from = via[len(via)-1].URL.String()
 	}
-	if len(via) >= 10 {
-		return fmt.Errorf("oci auth: stopped after 10 redirects")
-	}
-	return nil
+	return fmt.Errorf("oci auth: refusing to follow redirect from %s to %s (a token endpoint must respond directly, not redirect)", from, req.URL)
 }
 
 // ociTokenHTTPClient is the HTTP client seam for the token-endpoint
 // exchange, overridable in tests so no test touches the network. It carries
-// rejectNonHTTPSRedirect so a credential is never forwarded across an
-// https→http downgrade redirect.
+// rejectTokenEndpointRedirect so a credential is never forwarded to any
+// redirect target — same-host, subdomain, different-port, or otherwise.
 var ociTokenHTTPClient = &http.Client{
 	Timeout:       15 * time.Second,
-	CheckRedirect: rejectNonHTTPSRedirect,
+	CheckRedirect: rejectTokenEndpointRedirect,
 }
 
 // tokenEndpointResponse is the subset of the OCI Distribution token

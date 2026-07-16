@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -314,48 +315,126 @@ func registerSecret(secret string) {
 // marker. Safe to call on any string, including one with no registered
 // secrets present (returned unchanged).
 //
-// Secrets are replaced LONGEST-FIRST (Codex round-2 HIGH — order-dependent
-// partial leak). Replacing in registration order lets a shorter secret that
-// is a substring of a longer one fragment the longer one first — e.g. with
-// "abc" registered before "abcdef", redacting "abcdef" yields "[REDACTED]def"
-// and the later "abcdef" pass no longer matches, leaking the "def" tail.
-// Descending-length order guarantees the longest containing secret is
-// scrubbed before any of its substrings can fragment it.
+// Matching is single-pass and interval-merged (Codex round-2 HIGH, hardened
+// round-3 HIGH — equal-length partial overlap). The original round-2 fix
+// sorted secrets longest-first and ran a sequential ReplaceAll per secret;
+// that closes strict CONTAINMENT (a short secret that is a substring of a
+// longer one) but not EQUAL-LENGTH partial overlap, where neither secret
+// contains the other but their occurrences share characters — sort.Slice has
+// no equal-length tiebreak, and whichever secret's ReplaceAll pass runs
+// first consumes its span, leaving the other secret's non-overlapping tail
+// exposed. Concretely: registering "sekrit-AAAA-1" and "AAAA-1-sekrit" (both
+// 13 chars) and redacting "sekrit-AAAA-1-sekrit" produced
+// "[REDACTED]-sekrit" — a verbatim 7-char fragment of the second secret.
+//
+// The fix finds every match span for every registered secret against the
+// ORIGINAL (unmodified) string, merges overlapping/adjacent spans, and
+// replaces each merged span exactly once. This closes containment,
+// equal-length overlap, and any other overlap shape uniformly, because
+// merging (not sequential substitution order) decides what gets redacted.
 func redactSecrets(s string) string {
 	secretRedactorMu.Lock()
 	secrets := make([]string, len(registeredSecrets))
 	copy(secrets, registeredSecrets)
 	secretRedactorMu.Unlock()
-	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
-	for _, secret := range secrets {
-		s = strings.ReplaceAll(s, secret, "[REDACTED]")
+	if len(secrets) == 0 {
+		return s
 	}
-	return s
+
+	type span struct{ start, end int }
+	var spans []span
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		// Advance by 1 rune of progress (not len(secret)) so overlapping
+		// occurrences of the SAME secret are also found, matching the
+		// exhaustive-match requirement this merge strategy depends on.
+		for from := 0; from <= len(s)-len(secret); {
+			idx := strings.Index(s[from:], secret)
+			if idx < 0 {
+				break
+			}
+			start := from + idx
+			spans = append(spans, span{start: start, end: start + len(secret)})
+			from = start + 1
+		}
+	}
+	if len(spans) == 0 {
+		return s
+	}
+	sort.Slice(spans, func(i, j int) bool {
+		if spans[i].start != spans[j].start {
+			return spans[i].start < spans[j].start
+		}
+		return spans[i].end < spans[j].end
+	})
+	merged := make([]span, 0, len(spans))
+	merged = append(merged, spans[0])
+	for _, sp := range spans[1:] {
+		last := &merged[len(merged)-1]
+		if sp.start <= last.end {
+			if sp.end > last.end {
+				last.end = sp.end
+			}
+			continue
+		}
+		merged = append(merged, sp)
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	prev := 0
+	for _, m := range merged {
+		b.WriteString(s[prev:m.start])
+		b.WriteString("[REDACTED]")
+		prev = m.end
+	}
+	b.WriteString(s[prev:])
+	return b.String()
 }
 
 // redactedError wraps a cause so its rendered message is scrubbed of every
-// registered secret at the moment it is formatted — the H12 error-BOUNDARY
-// control (Codex round-2 HIGH #3). redactSecrets was previously wired only
-// into the audit event's copied detail field, so the error VALUE returned to
-// callers (printed to stderr, logged) was never scrubbed. Wrapping a cause in
-// a redactedError before it is placed on an ImportError.Err means every
-// consumer of the resulting error — ImportError.Error(), a CLI, a log line —
-// sees the redacted text, not just the audit detail. Unwrap is preserved so
-// errors.Is / errors.As still reach the original cause; only the rendered
-// string is scrubbed.
-type redactedError struct{ err error }
+// registered secret — the H12 error-BOUNDARY control (Codex round-2 HIGH
+// #3, hardened round-3 MEDIUM — Unwrap exposed the raw cause). redactSecrets
+// was previously wired only into the audit event's copied detail field, so
+// the error VALUE returned to callers (printed to stderr, logged) was never
+// scrubbed. Wrapping a cause in a redactedError before it is placed on an
+// ImportError.Err means every consumer of the resulting error —
+// ImportError.Error(), a CLI, a log line — sees the redacted text, not just
+// the audit detail.
+//
+// The redacted rendering is computed ONCE, at construction, and stored: msg
+// is what Error() always returns. Unwrap is deliberately NOT implemented —
+// exposing the raw cause via errors.Unwrap/errors.As would let a caller walk
+// past redactedError to the concrete cause and call ITS .Error() directly,
+// recovering the unredacted secret (a caller stopping only at *ImportError
+// today is safe by convention, not by construction — this closes that gap
+// so it holds even once a real caller unwraps further, e.g. once t8's live
+// puller is wired). Is IS implemented so errors.Is sentinel matching
+// (os.ErrNotExist, context.DeadlineExceeded, etc.) against the wrapped cause
+// keeps working: Is only returns a bool, so unlike As/Unwrap it cannot itself
+// hand the caller an object whose Error() leaks the raw cause.
+type redactedError struct {
+	msg   string
+	cause error
+}
 
-// newRedactedError wraps err so its Error() output is redacted. A nil cause
-// stays nil so callers can wrap unconditionally.
+// newRedactedError wraps err, computing its redacted rendering immediately
+// so the returned value's Error() output can never surface a secret
+// regardless of what a caller later does with it. A nil cause stays nil so
+// callers can wrap unconditionally.
 func newRedactedError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return redactedError{err: err}
+	return &redactedError{msg: redactSecrets(err.Error()), cause: err}
 }
 
-// Error renders the wrapped cause with all registered secrets scrubbed.
-func (e redactedError) Error() string { return redactSecrets(e.err.Error()) }
+// Error returns the pre-redacted rendering computed at construction.
+func (e *redactedError) Error() string { return e.msg }
 
-// Unwrap exposes the original cause for errors.Is / errors.As.
-func (e redactedError) Unwrap() error { return e.err }
+// Is delegates to errors.Is against the wrapped cause so sentinel-error
+// matching keeps working without exposing the cause itself (see the type
+// doc for why Unwrap/As are intentionally absent).
+func (e *redactedError) Is(target error) bool { return errors.Is(e.cause, target) }
