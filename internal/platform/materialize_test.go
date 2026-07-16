@@ -128,6 +128,125 @@ func TestValidateResolvedUnit_RejectsDigestMismatch(t *testing.T) {
 	}
 }
 
+func TestValidateResolvedUnit_RejectsMalformedContentDigest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	u := materializeUnit(t, home, "skills", "da-agc", "release-docs-refresh", map[string]string{"SKILL.md": "# s\n"})
+	u.ContentDigest = "not-a-digest"
+	if err := ValidateResolvedUnit(home, u); err == nil {
+		t.Fatalf("expected a malformed content digest to be rejected")
+	}
+}
+
+// --- t3b: invocation-time verify-at-use (H7/H16 defense-in-depth) ----------
+
+// materializeUnitWithContentDigest is materializeUnit plus the H16 content
+// anchor a t3-style driver would have recorded in its project's lock — the
+// value ProjectResolvedUnits re-verifies at the moment of use.
+func materializeUnitWithContentDigest(t *testing.T, home, family, sourceID, name string, files map[string]string) ResolvedUnit {
+	t.Helper()
+	bundle := testMaterializeBundle(files)
+	casPath, digest, err := MaterializeArtifact(home, family, sourceID, name, bundle)
+	if err != nil {
+		t.Fatalf("MaterializeArtifact(%s/%s): %v", family, name, err)
+	}
+	return ResolvedUnit{
+		Family: family, Name: name, SourceID: sourceID,
+		Digest: digest, CASPath: casPath,
+		ContentDigest: config.BundleContentDigest(bundle),
+	}
+}
+
+// tamperCASEntry overwrites a single file inside a store entry, simulating a
+// same-user post-materialize mutation of the writable CAS directory (the
+// store's files are chmod 0o444 — MaterializeToStore's read-only hardening —
+// so the tamper must first restore the write bit, exactly as an attacker
+// capable of `chmod +w` would).
+func tamperCASEntry(t *testing.T, casPath, relFile, content string) {
+	t.Helper()
+	p := filepath.Join(casPath, relFile)
+	if err := os.Chmod(p, 0o644); err != nil {
+		t.Fatalf("restore write bit for tamper: %v", err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatalf("tamper %s: %v", p, err)
+	}
+}
+
+// TestProjectResolvedUnits_VerifiesContentDigestAtUse is the t3b positive
+// case: a unit carrying a correct ContentDigest projects normally — the
+// invocation-time re-check must not reject an untampered entry.
+func TestProjectResolvedUnits_VerifiesContentDigestAtUse(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+
+	u := materializeUnitWithContentDigest(t, home, "skills", "da-agc", "release-docs-refresh", map[string]string{"SKILL.md": "---\nname: release-docs-refresh\n---\n"})
+
+	platforms := []Platform{NewClaude()}
+	if _, err := ProjectResolvedUnits("proj", repo, []ResolvedUnit{u}, platforms, false, true, "proj"); err != nil {
+		t.Fatalf("expected an untampered content-digest-carrying unit to project cleanly, got %v", err)
+	}
+	link := filepath.Join(repo, claudeDir, "skills", "release-docs-refresh")
+	if !links.IsManagedLink(link, u.CASPath) {
+		t.Fatalf("expected the skill to be linked at %s -> %s", link, u.CASPath)
+	}
+}
+
+// TestProjectResolvedUnits_CatchesPostVerifyTamperAtUse is the t3b CRITICAL
+// negative case, closing the exact gap the t3 round-2 review named: a
+// caller-side verify (verifyProjectionInputs, before ProjectResolvedUnits is
+// even called) is emulated by computing ContentDigest correctly at
+// materialize time; the store is then TAMPERED after that verify would have
+// run but before ProjectResolvedUnits links it. The call MUST fail closed —
+// and, critically, must NOT create the symlink first and fail only
+// afterward.
+func TestProjectResolvedUnits_CatchesPostVerifyTamperAtUse(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+
+	u := materializeUnitWithContentDigest(t, home, "skills", "da-agc", "release-docs-refresh", map[string]string{"SKILL.md": "---\nname: release-docs-refresh\n---\noriginal\n"})
+
+	// Simulate a same-user tamper landing AFTER the driver's earlier verify
+	// but BEFORE this ProjectResolvedUnits call reaches the symlink swap.
+	tamperCASEntry(t, u.CASPath, "SKILL.md", "TAMPERED")
+
+	platforms := []Platform{NewClaude()}
+	_, err := ProjectResolvedUnits("proj", repo, []ResolvedUnit{u}, platforms, false, true, "proj")
+	if err == nil {
+		t.Fatal("expected a post-verify CAS tamper to be caught at the moment of use")
+	}
+	link := filepath.Join(repo, claudeDir, "skills", "release-docs-refresh")
+	if _, statErr := os.Lstat(link); !os.IsNotExist(statErr) {
+		t.Fatalf("expected NO symlink to be created for a unit that failed the at-use verify, lstat err=%v", statErr)
+	}
+}
+
+// TestProjectResolvedUnits_EmptyContentDigestSkipsAtUseCheck documents the
+// backward-compatible default: a caller that has not threaded a
+// ContentDigest through (e.g. an older driver) still projects — t3b is
+// additive defense-in-depth, not a new hard requirement that breaks an
+// existing caller.
+func TestProjectResolvedUnits_EmptyContentDigestSkipsAtUseCheck(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+
+	u := materializeUnit(t, home, "skills", "da-agc", "release-docs-refresh", map[string]string{"SKILL.md": "---\nname: release-docs-refresh\n---\n"})
+	if u.ContentDigest != "" {
+		t.Fatalf("expected materializeUnit's default ResolvedUnit to carry no ContentDigest, got %q", u.ContentDigest)
+	}
+	// Tamper the store — with no anchor to check against, the at-use verify
+	// has nothing to compare and must not block projection.
+	tamperCASEntry(t, u.CASPath, "SKILL.md", "TAMPERED-BUT-UNCHECKED")
+
+	platforms := []Platform{NewClaude()}
+	if _, err := ProjectResolvedUnits("proj", repo, []ResolvedUnit{u}, platforms, false, true, "proj"); err != nil {
+		t.Fatalf("expected a unit with no ContentDigest to project unchanged (pre-t3b behavior), got %v", err)
+	}
+}
+
 // --- H13 CRITICAL: per-project isolation, caller-driven ---------------------
 
 // TestProjectResolvedUnits_PerProjectIsolation is the CRITICAL H13 acceptance

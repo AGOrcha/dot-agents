@@ -1063,6 +1063,20 @@ type ResolvedUnit struct {
 	// (config.ArtifactStorePath). Recomputed and asserted by
 	// ValidateResolvedUnit, never trusted as passed.
 	CASPath string
+	// ContentDigest is the OPTIONAL H16 content-integrity anchor
+	// (config.BundleContentDigest / the git-tracked "artifact-content" lock
+	// value) the caller resolved this unit against. When non-empty,
+	// ProjectResolvedUnits re-verifies it — via config.VerifyStoreContentDigest
+	// — immediately before the unit's CAS content is actually linked into the
+	// project (t3b, closing the verify→link TOCTOU: an earlier batch verify a
+	// driver ran before calling ProjectResolvedUnits does not, by itself, catch
+	// a store mutation that lands during this call). Left empty, a unit gets
+	// no invocation-time re-check — identical to pre-t3b behavior — so an
+	// older caller that has not yet threaded its lock's content digest through
+	// keeps working unchanged; the anchor is defense-in-depth on top of H13's
+	// existing identity/path binding, not a new hard requirement on every
+	// caller.
+	ContentDigest string
 }
 
 // MaterializeArtifact installs an H1-normalized bundle into the H2 content-
@@ -1107,6 +1121,53 @@ func ValidateResolvedUnit(agentsHome string, u ResolvedUnit, localScopes ...stri
 	want := config.ArtifactStorePath(agentsHome, u.Family, u.Digest)
 	if filepath.Clean(u.CASPath) != filepath.Clean(want) {
 		return fmt.Errorf("platform: resolved unit %s/%s: CAS path %q is not the store path for its digest (%q)", u.Family, u.Name, u.CASPath, want)
+	}
+	if u.ContentDigest != "" && !strings.HasPrefix(u.ContentDigest, "sha256:") {
+		return fmt.Errorf("platform: resolved unit %s/%s: malformed content digest %q", u.Family, u.Name, u.ContentDigest)
+	}
+	return nil
+}
+
+// verifyResolvedUnitsAtUse is t3b's invocation-time re-check (package-
+// artifact-install spec H7/H16 defense-in-depth): immediately before
+// ProjectResolvedUnits performs any actual link/render mutation, every unit
+// carrying a ContentDigest has its CAS entry re-walked and re-hashed —
+// config.VerifyStoreContentDigest, the SAME offline H16 primitive
+// verifyProjectionInputs uses — and compared against that anchor. A unit
+// whose CAS content was mutated or replaced AFTER an earlier caller-side
+// verify but BEFORE this call reaches the symlink swap is caught here,
+// closing the specific gap the t3 round-2 review named: "verifyProjectionInputs
+// re-hashes... but the symlink then references the live (dir-writable) CAS
+// tree and projection never re-hashes."
+//
+// A unit with an empty ContentDigest is skipped (no anchor to check against —
+// identical to pre-t3b behavior for a caller that has not threaded one
+// through). A present-but-mismatched or vanished CAS entry fails the WHOLE
+// call closed — the same all-or-nothing discipline ValidateResolvedUnit
+// already applies to identity/path validation — so a caller never links a
+// subset of units while silently skipping a tampered one.
+//
+// This does not, and cannot, close the window between this check and an
+// agent HOST later reading the file through the symlink (the "use" step
+// proper): that consumption happens in a wholly separate process this
+// binary does not control and returns from before. Narrowing that residual
+// further needs either holding a lock across consumption (not attempted:
+// the host, not dot-agents, owns that read) or truly-immutable storage (a
+// read-only bind mount), both deferred per the t3 review notes — this
+// function closes the verify→link half of the gap, which is the half a
+// materialize/projection caller can actually own.
+func verifyResolvedUnitsAtUse(agentsHome string, units []ResolvedUnit) error {
+	for _, u := range units {
+		if u.ContentDigest == "" {
+			continue
+		}
+		present, matches := config.VerifyStoreContentDigest(agentsHome, u.Family, u.Digest, u.ContentDigest)
+		if !present {
+			return fmt.Errorf("platform: resolved unit %s/%s: CAS entry vanished before use", u.Family, u.Name)
+		}
+		if !matches {
+			return fmt.Errorf("platform: resolved unit %s/%s: CAS content failed integrity re-check at moment of use (possible post-verify store tamper)", u.Family, u.Name)
+		}
 	}
 	return nil
 }
@@ -1179,6 +1240,12 @@ func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platfo
 			return formatSharedTargetPlanForDryRun(plan, repoPath), nil
 		}
 		if len(plan.Resources) > 0 {
+			// t3b — invocation-time re-verify, immediately before the ONLY
+			// mutating call in this branch, closing the verify→link gap down to
+			// this call's own window.
+			if err := verifyResolvedUnitsAtUse(agentsHome, units); err != nil {
+				return nil, err
+			}
 			return nil, plan.Execute(repoPath, agentsHome)
 		}
 		return nil, nil
@@ -1191,6 +1258,12 @@ func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platfo
 		return lines, nil
 	}
 	if len(plan.Resources) > 0 {
+		// t3b — same invocation-time re-verify as the !exact branch, run
+		// immediately before the exact-projection execute (the actual
+		// link/render mutation), not at dry-run/plan-build time.
+		if err := verifyResolvedUnitsAtUse(agentsHome, units); err != nil {
+			return nil, err
+		}
 		if err := executeResourcePlan(plan, repoPath, agentsHome); err != nil {
 			return nil, err
 		}

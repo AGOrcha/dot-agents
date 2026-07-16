@@ -487,3 +487,225 @@ func TestVerifyArtifactStoreDigest_DetectsTamperWithoutWriting(t *testing.T) {
 		}
 	}
 }
+
+// --- t3b: CAS orphan GC (H11/H17) -------------------------------------------
+
+// lockLiveArtifact registers project at projectPath as a bound project in
+// cfg/home (t.Setenv("AGENTS_HOME", home) must already be in effect) and
+// writes its .agentsrc.lock so it references digest as a kind:artifact unit —
+// the shape LiveArtifactDigests() reads.
+func lockLiveArtifact(t *testing.T, home, projectName, projectPath, ref, digest string) {
+	t.Helper()
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.AddProject(projectName, projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if err := WriteUnitsLock(projectPath, UnitsLock{Units: map[string]LockedUnit{
+		ref: {Kind: UnitKindArtifact, Digest: digest, FetchedAt: "2026-01-01T00:00:00Z"},
+	}}); err != nil {
+		t.Fatalf("write units lock: %v", err)
+	}
+}
+
+// TestGCOrphanedArtifactStore_RemovesOnlyTheOrphan is the core H11 positive
+// case: a store with one digest referenced by a project's lock (live) and one
+// digest referenced by nobody (orphan) — GC must remove EXACTLY the orphan.
+func TestGCOrphanedArtifactStore_RemovesOnlyTheOrphan(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	liveBundle := testBundle(t, map[string]string{"SKILL.md": "# live\n"})
+	livePath, liveDigest, _, err := MaterializeToStore(home, "skills", liveBundle)
+	if err != nil {
+		t.Fatalf("materialize live: %v", err)
+	}
+	orphanBundle := testBundle(t, map[string]string{"SKILL.md": "# orphan\n"})
+	orphanPath, orphanDigest, _, err := MaterializeToStore(home, "skills", orphanBundle)
+	if err != nil {
+		t.Fatalf("materialize orphan: %v", err)
+	}
+
+	lockLiveArtifact(t, home, "proj", filepath.Join(t.TempDir(), "proj"), "src:skill/live@main", liveDigest)
+
+	live, err := LiveArtifactDigests()
+	if err != nil {
+		t.Fatalf("LiveArtifactDigests: %v", err)
+	}
+	if !live[liveDigest] {
+		t.Fatalf("expected %q to be in the live digest set", liveDigest)
+	}
+	if live[orphanDigest] {
+		t.Fatalf("did not expect the orphan digest %q to be live", orphanDigest)
+	}
+
+	removed, err := GCOrphanedArtifactStore(home, "skills", live)
+	if err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != orphanDigest {
+		t.Fatalf("expected GC to remove exactly [%s], got %v", orphanDigest, removed)
+	}
+	if _, err := os.Stat(livePath); err != nil {
+		t.Fatalf("expected the LIVE store entry to survive GC, got err=%v", err)
+	}
+	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
+		t.Fatalf("expected the orphan store entry to be removed, got err=%v", err)
+	}
+}
+
+// TestGCOrphanedArtifactStore_ConcurrentlyAddedLockSurvives proves the H11
+// two-step contract end to end: a digest that looked orphaned when first
+// materialized is protected the moment ANOTHER project's lock references it
+// and LiveArtifactDigests is recomputed BEFORE GC runs — a caller who
+// recomputes liveDigests right before calling GC never deletes a
+// newly-referenced digest, even though it existed in the store unreferenced
+// for a while first.
+func TestGCOrphanedArtifactStore_ConcurrentlyAddedLockSurvives(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	// D_new starts life unreferenced by any lock — a naive GC computed right
+	// now would consider it an orphan.
+	newBundle := testBundle(t, map[string]string{"SKILL.md": "# will become live\n"})
+	newPath, newDigest, _, err := MaterializeToStore(home, "skills", newBundle)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	trueOrphanBundle := testBundle(t, map[string]string{"SKILL.md": "# never referenced\n"})
+	trueOrphanPath, trueOrphanDigest, _, err := MaterializeToStore(home, "skills", trueOrphanBundle)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+
+	// A second project's install races in AFTER materialize but BEFORE GC:
+	// it resolves and locks D_new.
+	lockLiveArtifact(t, home, "proj2", filepath.Join(t.TempDir(), "proj2"), "src:skill/newer@main", newDigest)
+
+	// The caller does the right thing: recompute liveDigests fresh, THEN GC —
+	// never reuses a set snapshotted before the concurrent lock landed.
+	live, err := LiveArtifactDigests()
+	if err != nil {
+		t.Fatalf("LiveArtifactDigests: %v", err)
+	}
+	if !live[newDigest] {
+		t.Fatalf("expected the concurrently-locked digest %q to be captured in the fresh union", newDigest)
+	}
+
+	removed, err := GCOrphanedArtifactStore(home, "skills", live)
+	if err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != trueOrphanDigest {
+		t.Fatalf("expected GC to remove exactly the true orphan [%s], got %v", trueOrphanDigest, removed)
+	}
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("expected the concurrently-referenced entry to survive GC, got err=%v", err)
+	}
+	if _, err := os.Stat(trueOrphanPath); !os.IsNotExist(err) {
+		t.Fatalf("expected the true orphan to be removed, got err=%v", err)
+	}
+}
+
+// TestGCOrphanedArtifactStore_NeverTouchesNonDigestEntries is the H17
+// negative case: a quarantine sibling (".corrupt-<nanos>") and a leftover
+// staging directory (".materialize-staging-*") sit alongside real digest
+// entries in the store root — GC must leave BOTH alone; only a directory
+// whose name is exactly a 64-hex digest is ever a delete candidate.
+func TestGCOrphanedArtifactStore_NeverTouchesNonDigestEntries(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	orphanBundle := testBundle(t, map[string]string{"SKILL.md": "# orphan\n"})
+	orphanPath, orphanDigest, _, err := MaterializeToStore(home, "skills", orphanBundle)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	root := ArtifactStoreRoot(home, "skills")
+	quarantine := orphanPath + ".corrupt-999"
+	if err := os.MkdirAll(quarantine, 0o755); err != nil {
+		t.Fatalf("mkdir quarantine sibling: %v", err)
+	}
+	staging := filepath.Join(root, ".materialize-staging-leftover")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatalf("mkdir staging leftover: %v", err)
+	}
+
+	removed, err := GCOrphanedArtifactStore(home, "skills", map[string]bool{})
+	if err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != orphanDigest {
+		t.Fatalf("expected GC to remove exactly the real orphan digest [%s], got %v", orphanDigest, removed)
+	}
+	if _, err := os.Stat(quarantine); err != nil {
+		t.Fatalf("expected the quarantine sibling to survive GC untouched, got err=%v", err)
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Fatalf("expected the staging leftover to survive GC untouched, got err=%v", err)
+	}
+}
+
+// TestGCOrphanedArtifactStore_MissingStoreRootIsNotAnError covers the
+// not-yet-populated store: nothing to collect, H11 vacuously satisfied.
+func TestGCOrphanedArtifactStore_MissingStoreRootIsNotAnError(t *testing.T) {
+	home := t.TempDir()
+	removed, err := GCOrphanedArtifactStore(home, "skills", map[string]bool{})
+	if err != nil {
+		t.Fatalf("expected a missing store root to be a no-op, got err=%v", err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("expected nothing removed from a missing store root, got %v", removed)
+	}
+}
+
+// TestGCOrphanedArtifactStore_ConcurrentCallersDoNotRace exercises repeated
+// concurrent GC sweeps over the SAME store+family (e.g. two overlapping
+// install/refresh invocations both triggering GC) under -race: every
+// goroutine must return without a data race, and the end state must be
+// exactly the live set surviving, the orphan gone.
+func TestGCOrphanedArtifactStore_ConcurrentCallersDoNotRace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	liveBundle := testBundle(t, map[string]string{"SKILL.md": "# live\n"})
+	livePath, liveDigest, _, err := MaterializeToStore(home, "skills", liveBundle)
+	if err != nil {
+		t.Fatalf("materialize live: %v", err)
+	}
+	orphanBundle := testBundle(t, map[string]string{"SKILL.md": "# orphan\n"})
+	orphanPath, _, _, err := MaterializeToStore(home, "skills", orphanBundle)
+	if err != nil {
+		t.Fatalf("materialize orphan: %v", err)
+	}
+	live := map[string]bool{liveDigest: true}
+
+	var wg sync.WaitGroup
+	errs := make([]error, 4)
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, err := GCOrphanedArtifactStore(home, "skills", live)
+			errs[idx] = err
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent GC call %d: %v", i, err)
+		}
+	}
+	if _, err := os.Stat(livePath); err != nil {
+		t.Fatalf("expected the live entry to survive concurrent GC, got err=%v", err)
+	}
+	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
+		t.Fatalf("expected the orphan entry to be gone after concurrent GC, got err=%v", err)
+	}
+}

@@ -449,3 +449,140 @@ func quarantineStoreEntry(storePath string) error {
 func VerifyArtifactStoreDigest(agentsHome, family, digest string, bundle Bundle) (present, matches bool) {
 	return VerifyStoreContentDigest(agentsHome, family, digest, bundleContentDigest(bundle))
 }
+
+// --- CAS orphan GC (package-artifact-install spec §6, H11/H17) -------------
+//
+// Store-level GC of no-longer-referenced digests was explicitly deferred by
+// MaterializeToStore's doc comment; t3b closes that gap. The store is never
+// safe to sweep on identity/mtime heuristics — the ONLY correctness invariant
+// (H11) is that a digest referenced by ANY project's lock is never removed,
+// so GC is deliberately split into two steps a caller must run in order:
+//
+//  1. LiveArtifactDigests() unions the kind:artifact digests referenced by
+//     EVERY known project's lock, computed FRESH, immediately before GC.
+//  2. GCOrphanedArtifactStore(..., liveDigests) removes only a family's store
+//     entries whose digest is ABSENT from that union.
+//
+// A lock added between step 1 and step 2 (a concurrent install/refresh in
+// another project) is the residual race this two-step contract does not
+// eliminate on its own — see GCOrphanedArtifactStore's doc for how a caller
+// closes it (recency window, or serializing GC behind the same advisory lock
+// installs use).
+
+// LiveArtifactDigests unions the kind:artifact content digests referenced by
+// every known, machine-bound project's lock (H11: this union MUST be
+// computed before any GC deletion — a digest referenced by even one project
+// is never treated as orphaned). It reads the identity registry (Load) to
+// discover every registered project, resolves each to its machine-local
+// bound path (GetProjectPath — an unbound project has no local lock to read
+// and is skipped, not an error), and reads that project's units lock
+// (ReadUnits) for every kind:artifact entry's Digest.
+//
+// A project whose lock cannot be read (never installed, corrupt, or removed
+// from disk since registration) is skipped rather than failing the whole
+// union closed: GC is best-effort reclamation, not a correctness-critical
+// path, and one bad project's lock must not block reclaiming orphans for
+// every other project. The returned set is family-agnostic (a raw digest
+// string, not scoped to skills/agents/plugins) — deliberately conservative:
+// treating a digest referenced under a DIFFERENT family as "live" only means
+// GCOrphanedArtifactStore under-collects (skips something it could have
+// safely removed), never that it removes something still referenced. H11
+// forbids the latter; the former is merely a smaller reclaim, not a
+// correctness violation.
+func LiveArtifactDigests() (map[string]bool, error) {
+	cfg, err := Load()
+	if err != nil {
+		return nil, fmt.Errorf("gc: load project registry: %w", err)
+	}
+	live := make(map[string]bool)
+	for _, name := range cfg.ListProjects() {
+		path := cfg.GetProjectPath(name)
+		if path == "" {
+			continue // known but unbound on this machine — nothing local to read
+		}
+		units, err := ReadUnits(path)
+		if err != nil {
+			continue // unreadable/corrupt lock — best-effort union, skip
+		}
+		for _, u := range units.Units {
+			if u.Kind == UnitKindArtifact && u.Digest != "" {
+				live[u.Digest] = true
+			}
+		}
+	}
+	return live, nil
+}
+
+// looksLikeStoreDigestDirName reports whether name has EXACTLY the shape
+// StoreDigestDir produces from a canonical "sha256:<hex>" digest (a bare
+// 64-char lowercase-hex string). It is GC's allowlist gate: only a directory
+// whose name has this exact shape is ever a delete candidate, so a
+// quarantined ".corrupt-<nanos>" sibling (quarantineStoreEntry) or a stray
+// ".materialize-staging-*" leftover from an interrupted materialize can never
+// be mistaken for a digest entry and swept.
+func looksLikeStoreDigestDirName(name string) bool {
+	return looksLikeSha256Digest("sha256:" + name)
+}
+
+// GCOrphanedArtifactStore reclaims CAS entries under
+// ArtifactStoreRoot(agentsHome, family) whose digest is NOT a member of
+// liveDigests (see LiveArtifactDigests). It is the read-modify-delete half of
+// t3b's GC: the caller computes liveDigests fresh, close to this call —
+// GCOrphanedArtifactStore trusts the set it is given and never re-derives it,
+// so a caller that wants the concurrent-install race closed must either
+// recompute liveDigests immediately before calling (shrinking, not
+// eliminating, the window) or serialize GC behind the same advisory lock
+// installs already take on the project's .agentsrc.lock (agentslock.Update) —
+// this function does not take that lock itself because it operates on the
+// SHARED store root, not any one project's lock file.
+//
+// H17 (no unsafe RemoveAll after an ownership check alone): every deletion
+// candidate must satisfy ALL three gates before RemoveAll runs —
+//  1. looksLikeStoreDigestDirName — the directory name is a well-formed
+//     64-hex digest segment (never a quarantine/staging sibling or any other
+//     stray entry, which are left untouched, not GC's concern);
+//  2. its digest is absent from liveDigests (H11 — never remove a live
+//     entry);
+//  3. assertUnderCASRoot re-derives the exact delete path from
+//     ArtifactStorePath and re-asserts it resolves to one clean segment
+//     under the family's CAS root — the same containment check
+//     MaterializeToStore itself applies before its first write, applied
+//     symmetrically before GC's only delete.
+//
+// A missing store root is not an error (nothing to collect yet, H11's
+// "never remove a live entry" is vacuously satisfied). A single entry's
+// delete failure aborts the sweep and returns everything removed so far
+// (fail-closed: a caller that gets a non-nil error must not assume the sweep
+// completed) rather than silently skipping the failure and continuing.
+func GCOrphanedArtifactStore(agentsHome, family string, liveDigests map[string]bool) (removed []string, err error) {
+	root := ArtifactStoreRoot(agentsHome, family)
+	entries, readErr := os.ReadDir(root)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("gc: read store root %s: %w", root, readErr)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !looksLikeStoreDigestDirName(name) {
+			continue // not a digest-keyed entry — quarantine/staging sibling, never GC's concern
+		}
+		digest := "sha256:" + name
+		if liveDigests[digest] {
+			continue // H11 — provably still referenced by some project's lock
+		}
+		target := ArtifactStorePath(agentsHome, family, digest)
+		if err := assertUnderCASRoot(agentsHome, family, target); err != nil {
+			return removed, fmt.Errorf("gc: %w", err)
+		}
+		if err := fsops.RemoveAll(target); err != nil {
+			return removed, fmt.Errorf("gc: remove orphan store entry %s: %w", target, err)
+		}
+		removed = append(removed, digest)
+	}
+	return removed, nil
+}
