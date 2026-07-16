@@ -485,6 +485,10 @@ assert_contains "git-source content-install: config verify -> OK" \
 # (d) a SECOND run with the lock present is a no-op: the units + artifact-
 # content sections are byte-unchanged (only the install-stamp timestamp
 # moves), and the projected files are byte-identical (H9 frozen = no rewrite).
+# TEMP-DIAG9 (revert before merge): the source lock is reportedly missing here.
+echo "DIAG9 ls-proj=$(ls -la "${PKG_PROJ}" 2>&1 | tr '\n' '|')" >&2
+echo "DIAG9 lockfiles=$(find "${PKG_PROJ}" -maxdepth 1 -name '.agentsrc.lock*' 2>&1 | tr '\n' '|')" >&2
+echo "DIAG9 cat-exit=$(cat "${PKG_PROJ}/.agentsrc.lock" >/dev/null 2>&1; echo $?)" >&2
 # Snapshot the pre-2nd-install lock + projected skill. The source lock was just
 # touched by `config verify`; on windows-latest a filter driver can briefly hold it,
 # so a bare cp would silently fail and leave the snapshot missing (every later read
