@@ -126,10 +126,10 @@ sys.exit(0 if (${pyexpr}) else 1)" 2>/dev/null; then
 # via diagnostics). Retrying the READ closes that window. A genuinely wrong state
 # still fails after the budget. Effectively one-shot on POSIX (first try succeeds).
 retry_test() {
-  local name="$1" cmd="$2" i
+  local name="$1" cmd="$2" i last
   echo -n "  Testing $name... "
-  for i in $(seq 1 25); do
-    if eval "$cmd" >/dev/null 2>&1; then
+  for i in $(seq 1 75); do
+    if last="$(eval "$cmd" 2>&1)"; then
       echo -e "${GREEN}✓${NC}"
       passed=$((passed + 1))
       return 0
@@ -137,6 +137,7 @@ retry_test() {
     sleep 0.2
   done
   echo -e "${RED}✗${NC}"
+  echo "    retry_test exhausted (~15s); last output: ${last}" >&2
   failed=$((failed + 1))
   return 0
 }
@@ -499,8 +500,17 @@ test_command "git-source content-install: projected skill byte-identical after t
 
 # ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
-PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])")"
+# Read the skill digest with retry: this lock read is subject to the same windows
+# read-after-write race, and if it returned empty the CAS path below would be
+# permanently malformed (a retry on `test -f` could never recover).
+PKG_SKILL_DIGEST=""
+for _i in $(seq 1 75); do
+  PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])" 2>/dev/null)"
+  case "${PKG_SKILL_DIGEST}" in sha256:*) break ;; esac
+  sleep 0.2
+done
 PKG_CAS_FILE="${AGENTS_HOME}/cache/artifacts/skills/${PKG_SKILL_DIGEST#sha256:}/SKILL.md"
+echo "    DIAG7 PKG_SKILL_DIGEST=${PKG_SKILL_DIGEST} CAS=${PKG_CAS_FILE}" >&2
 # retry_test: same windows read-after-write race on the CAS entry probe.
 retry_test "git-source content-install: skill CAS entry exists before tamper" "test -f '${PKG_CAS_FILE}'"
 chmod +w "${PKG_CAS_FILE}"
