@@ -91,7 +91,14 @@ func (s *DiskStore) Evict(root string) { s.cache.evict(rootKey(root)) }
 // EvictAll drops every cached snapshot (broker whole-cache push hook).
 func (s *DiskStore) EvictAll() { s.cache.clear() }
 
-func rootKey(root string) string { return "root:" + root }
+// rootKey canonicalizes a root into the cache key. The write path keys by the
+// store's configured (OS-native) roots while the broker's per-root Evict push
+// arrives with the event bridge's logical, forward-slash root; ToSlash(Clean)
+// collapses both to the same key so eviction matches the cached snapshot on
+// every OS (on non-Windows it is a no-op). Without it a backslash write key on
+// Windows would never match a forward-slash evict key and per-root eviction
+// would silently no-op, serving stale reads.
+func rootKey(root string) string { return "root:" + filepath.ToSlash(filepath.Clean(root)) }
 
 // rootSnapshot is one iter-log root's fully-parsed read view: the iteration
 // records, the two families of score sidecars, and the per-file mtimes used for
