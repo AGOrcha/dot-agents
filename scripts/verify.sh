@@ -117,6 +117,24 @@ sys.exit(0 if (${pyexpr}) else 1)" 2>/dev/null; then
   return 0
 }
 
+# settle_file PATH — poll until PATH can be opened for read (or ~4s elapse). On the
+# windows-latest runner a filesystem filter driver (Windows Defender) can briefly
+# hold a file `da` JUST atomically re-wrote (temp + MOVEFILE_REPLACE_EXISTING), so
+# the very next open raises a sharing violation even though the content is correct
+# and settled. Only the reads that immediately follow an install/materialize in the
+# package block are tight enough to hit that window; this gives the driver time to
+# release. Effectively a no-op on POSIX (the first probe succeeds).
+settle_file() {
+  local i
+  for i in $(seq 1 20); do
+    if python3 -c "import sys; open(sys.argv[1], 'rb').read()" "$1" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 0
+}
+
 echo -e "${BOLD}Basic Commands${NC}"
 test_command "--version" "$DOT_AGENTS --version"
 test_command "--help" "$DOT_AGENTS --help"
@@ -464,31 +482,21 @@ cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json"
 cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md"
 test_command "git-source content-install: install --yes (second run, frozen no-op)" \
   "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+# The lock was just atomically re-written; let a windows filter driver release it
+# before the immediate re-read (see settle_file). No-op on POSIX.
+settle_file "${PKG_PROJ}/.agentsrc.lock"
 assert_json_field "git-source content-install: units+artifact-content unchanged across the no-op re-run" \
   "python3 -c \"import json,sys; a=json.load(open('${SMOKE_ROOT}/pkg-lock-before.json')); b=json.load(open('${PKG_PROJ}/.agentsrc.lock')); print(json.dumps({'ok': a['units']==b['units'] and a['artifact-content']==b['artifact-content']}))\"" \
   "d['ok'] is True"
 test_command "git-source content-install: projected skill byte-identical after the no-op re-run" \
   "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
 
-# TEMP-DIAG6 (revert before merge): dump the exact units-section bytes of both
-# locks + a top-level key diff. No extra `da` calls.
-DIAG_BEFORE="${SMOKE_ROOT}/pkg-lock-before.json" DIAG_AFTER="${PKG_PROJ}/.agentsrc.lock" python3 - >&2 <<'PY' || true
-import json, os
-b = json.load(open(os.environ['DIAG_BEFORE'])); a = json.load(open(os.environ['DIAG_AFTER']))
-print('DIAG6 units_eq', a['units'] == b['units'], 'ac_eq', a.get('artifact-content') == b.get('artifact-content'))
-print('DIAG6 topkeys_before', sorted(b.keys()))
-print('DIAG6 topkeys_after ', sorted(a.keys()))
-print('DIAG6 units_before', json.dumps(b['units'], sort_keys=True))
-print('DIAG6 units_after ', json.dumps(a['units'], sort_keys=True))
-for k in ('artifact-content',):
-    if a.get(k) != b.get(k):
-        print('DIAG6 SECTION-DIFF', k, '| before=', json.dumps(b.get(k), sort_keys=True), '| after=', json.dumps(a.get(k), sort_keys=True))
-PY
-
 # ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
 PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])")"
 PKG_CAS_FILE="${AGENTS_HOME}/cache/artifacts/skills/${PKG_SKILL_DIGEST#sha256:}/SKILL.md"
+# Same windows read-after-write settle for the CAS entry before the existence probe.
+settle_file "${PKG_CAS_FILE}"
 test_command "git-source content-install: skill CAS entry exists before tamper" "test -f '${PKG_CAS_FILE}'"
 chmod +w "${PKG_CAS_FILE}"
 echo 'TAMPERED' > "${PKG_CAS_FILE}"
