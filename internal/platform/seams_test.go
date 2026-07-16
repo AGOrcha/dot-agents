@@ -527,7 +527,7 @@ func TestCodexPruneManagedCodexAgentTomls_RemoveErrorSurfaces(t *testing.T) {
 	fakeIO := withRemoveError(t, "reviewer.toml")
 
 	c := &codex{io: fakeIO}
-	err := c.pruneManagedCodexAgentTomls(agentsHome, "global", dst)
+	err := c.pruneManagedCodexAgentTomls(agentsHome, "global", filepath.Join(tmp, "repo"), dst)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("pruneManagedCodexAgentTomls err = %v, want %v", err, errSeamSynthetic)
 	}

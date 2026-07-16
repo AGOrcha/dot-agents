@@ -181,7 +181,7 @@ func TestPruneManagedCodexAgentTomls_NonENOENTErrorPropagates(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := NewCodex().(*codex)
-	if err := c.pruneManagedCodexAgentTomls(agentsHome, "scope-y", filepath.Join(tmp, "dst")); err == nil {
+	if err := c.pruneManagedCodexAgentTomls(agentsHome, "scope-y", filepath.Join(tmp, "repo"), filepath.Join(tmp, "dst")); err == nil {
 		t.Fatal("expected ENOTDIR-style error to propagate")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
@@ -2240,5 +2241,165 @@ func TestRunSharedTargetProjectionExact_ApplyExecuteErrorPropagates(t *testing.T
 	}
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("error = %v, want injected execute failure", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// t2b: CAS-aware projection for the FILE-shaped agents surfaces (Codex TOML
+// render, OpenCode/Copilot agent-file symlink).
+// ---------------------------------------------------------------------------
+
+// sourcedAgentBundle is a minimal AGENT.md bundle materializeUnit can turn
+// into a "agents"-family ResolvedUnit for the file-shaped projection tests.
+func sourcedAgentBundle(name, description string) map[string]string {
+	return map[string]string{
+		agentManifestName: "---\nname: " + name + "\ndescription: " + description + "\n---\n" + description + " body\n",
+	}
+}
+
+// TestProjectResolvedUnits_SourcedAgentReachesFileShapedPlatforms is the t2b
+// positive acceptance test: a sourced "agents" unit must reach Codex
+// (rendered `.toml`), OpenCode, and Copilot (symlinked `.md`/`.agent.md`) —
+// not only Claude's dir-mirror bucket, which t2 already covered.
+func TestProjectResolvedUnits_SourcedAgentReachesFileShapedPlatforms(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+
+	u := materializeUnit(t, home, "agents", "da-agc", "platform-dirs-change-analyst", sourcedAgentBundle("platform-dirs-change-analyst", "reviews platform dir changes"))
+
+	platforms := []Platform{NewClaude(), NewCodex(), NewOpenCode(), NewCopilot()}
+	if _, err := ProjectResolvedUnits("proj", repo, []ResolvedUnit{u}, platforms, false, true, "proj"); err != nil {
+		t.Fatalf("ProjectResolvedUnits: %v", err)
+	}
+
+	// Codex: a RENDERED .toml, not a symlink — content is derived from AGENT.md.
+	tomlPath := filepath.Join(repo, codexDir, "agents", "platform-dirs-change-analyst.toml")
+	tomlBytes, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("expected codex toml at %s: %v", tomlPath, err)
+	}
+	if !strings.Contains(string(tomlBytes), `name = "platform-dirs-change-analyst"`) {
+		t.Fatalf("codex toml missing rendered name: %q", tomlBytes)
+	}
+	if !strings.Contains(string(tomlBytes), "reviews platform dir changes") {
+		t.Fatalf("codex toml missing rendered description: %q", tomlBytes)
+	}
+
+	// OpenCode: a managed SYMLINK straight to the unit's CAS AGENT.md.
+	opencodeLink := filepath.Join(repo, opencodeDir, "agent", "platform-dirs-change-analyst.md")
+	wantSrc := filepath.Join(u.CASPath, agentManifestName)
+	if !links.IsManagedLink(opencodeLink, wantSrc) {
+		t.Fatalf("expected opencode agent link %s -> %s", opencodeLink, wantSrc)
+	}
+
+	// Copilot: same shape, .agent.md suffix.
+	copilotLink := filepath.Join(repo, copilotGitHubDir, "agents", "platform-dirs-change-analyst.agent.md")
+	if !links.IsManagedLink(copilotLink, wantSrc) {
+		t.Fatalf("expected copilot agent link %s -> %s", copilotLink, wantSrc)
+	}
+
+	// Claude (t2, sanity: the dir-mirror path must still work alongside t2b).
+	claudeDirLink := filepath.Join(repo, claudeDir, "agents", "platform-dirs-change-analyst")
+	if !links.IsManagedLink(claudeDirLink, u.CASPath) {
+		t.Fatalf("expected claude agent dir link %s -> %s", claudeDirLink, u.CASPath)
+	}
+}
+
+// TestProjectResolvedUnits_SourcedAgentExactPruneRemovesFileShapedOutputs is
+// the t2b negative/removal acceptance test: dropping the resolved unit must
+// prune the Codex/OpenCode/Copilot outputs it created, exactly like the
+// dir-mirror shapes already prune (materialize_test.go's
+// TestProjectResolvedUnits_ExactPruneRemovesDroppedUnit).
+func TestProjectResolvedUnits_SourcedAgentExactPruneRemovesFileShapedOutputs(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+
+	u := materializeUnit(t, home, "agents", "da-agc", "platform-dirs-change-analyst", sourcedAgentBundle("platform-dirs-change-analyst", "reviews platform dir changes"))
+	platforms := []Platform{NewCodex(), NewOpenCode(), NewCopilot()}
+	if _, err := ProjectResolvedUnits("proj", repo, []ResolvedUnit{u}, platforms, false, true, "proj"); err != nil {
+		t.Fatalf("project {unit}: %v", err)
+	}
+
+	tomlPath := filepath.Join(repo, codexDir, "agents", "platform-dirs-change-analyst.toml")
+	opencodeLink := filepath.Join(repo, opencodeDir, "agent", "platform-dirs-change-analyst.md")
+	copilotLink := filepath.Join(repo, copilotGitHubDir, "agents", "platform-dirs-change-analyst.agent.md")
+	for _, p := range []string{tomlPath, opencodeLink, copilotLink} {
+		if _, err := os.Lstat(p); err != nil {
+			t.Fatalf("expected %s to exist before removal: %v", p, err)
+		}
+	}
+
+	// Re-project with zero units → exact/prune must remove the SYMLINK-shaped
+	// outputs (OpenCode/Copilot) directly, via the one-to-zero prune floor.
+	if _, err := ProjectResolvedUnits("proj", repo, nil, platforms, false, true, "proj"); err != nil {
+		t.Fatalf("project {}: %v", err)
+	}
+	if _, err := os.Lstat(opencodeLink); !os.IsNotExist(err) {
+		t.Fatalf("expected opencode agent link pruned, err=%v", err)
+	}
+	if _, err := os.Lstat(copilotLink); !os.IsNotExist(err) {
+		t.Fatalf("expected copilot agent link pruned, err=%v", err)
+	}
+
+	// Codex's rendered .toml is a plain file, invisible to the generic
+	// symlink-only prune scan regardless of forced dirs — its removal is the
+	// dedicated pruneCodexRepoAgentTomls complement, which the real
+	// install/refresh flow runs via CreateLinks AFTER ProjectResolvedUnits
+	// (see commands/internal/lifecycle/install.go's runInstallSharedTargetsFor
+	// -> createInstallPlatformLink ordering). With no lock entry for the
+	// removed unit (this test never wrote one), pruneCodexRepoAgentTomls sees
+	// no sourced names to protect and removes the orphaned toml.
+	if err := NewCodex().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("codex CreateLinks (prune pass): %v", err)
+	}
+	if _, err := os.Lstat(tomlPath); !os.IsNotExist(err) {
+		t.Fatalf("expected codex toml pruned via pruneCodexRepoAgentTomls, err=%v", err)
+	}
+}
+
+// TestPruneCodexRepoAgentTomls_PreservesSourcedAgentToml is the fail-before-
+// fix guard for the legacy-prune interaction t2b had to close: codex's own
+// CreateLinks-time prune step (pruneCodexRepoAgentTomls) only knew about
+// LOCAL canonical agents, so it would delete a sourced agent's rendered
+// `.toml` moments after ProjectResolvedUnits created it. A `.toml` whose name
+// matches a locked kind:artifact "agent/<name>" unit must survive; an
+// unrelated stale `.toml` must still be pruned.
+func TestPruneCodexRepoAgentTomls_PreservesSourcedAgentToml(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	repo := filepath.Join(tmp, "repo")
+	dstRoot := filepath.Join(repo, codexDir, "agents")
+	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dstRoot, "platform-dirs-change-analyst.toml"), []byte("name = \"platform-dirs-change-analyst\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dstRoot, "unrelated-stale.toml"), []byte("name = \"unrelated-stale\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No local canonical agents bucket at all — the sourced name is the ONLY
+	// reason platform-dirs-change-analyst.toml should survive.
+	digest := "sha256:" + strings.Repeat("1", 64)
+	if err := config.WriteUnitsLock(repo, config.UnitsLock{
+		Units: map[string]config.LockedUnit{
+			"da-agc:agent/platform-dirs-change-analyst@main": {Kind: config.UnitKindArtifact, Digest: digest, FetchedAt: "2026-07-15T00:00:00Z"},
+		},
+	}); err != nil {
+		t.Fatalf("seed lock: %v", err)
+	}
+
+	if err := pruneCodexRepoAgentTomls("proj", repo, agentsHome); err != nil {
+		t.Fatalf("pruneCodexRepoAgentTomls: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dstRoot, "platform-dirs-change-analyst.toml")); err != nil {
+		t.Fatalf("sourced agent toml was pruned: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dstRoot, "unrelated-stale.toml")); !os.IsNotExist(err) {
+		t.Fatalf("expected the unrelated stale toml to be pruned, err=%v", err)
 	}
 }

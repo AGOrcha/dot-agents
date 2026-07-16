@@ -1023,10 +1023,11 @@ func ValidateResolvedUnit(agentsHome string, u ResolvedUnit, localScopes ...stri
 // Every unit is validated (H15 identity + H13/H16 CAS-path binding) before
 // projection; a single invalid unit fails the whole call closed. localScopes
 // are the reserved local scope names each unit's source id must not equal
-// (H3). Scope note: CAS projection covers the DIR-MIRROR shapes (skills +
-// agents-dir + plugins). The file-shaped agent builders (Codex toml,
-// OpenCode/Copilot agent files) are deliberately untouched and completed in
-// t2b.
+// (H3). CAS projection covers BOTH shapes: the DIR-MIRROR buckets (skills +
+// agents-dir + plugins, via buildCASIntents) AND the FILE-shaped agents
+// surfaces (Codex .toml render, OpenCode/Copilot agent-file symlink, via
+// collectSourcedAgentFileIntents) — t2b closed the gap where a sourced agent
+// reached only the dir-mirror platforms.
 func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platforms []Platform, dryRun, exact bool, localScopes ...string) ([]string, error) {
 	agentsHome := config.AgentsHome()
 	for _, u := range units {
@@ -1040,15 +1041,25 @@ func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platfo
 	}
 	roots := unionDirMirrorRoots(platforms)
 	cas := buildCASIntents(project, units, roots)
+	fileIntents := collectSourcedAgentFileIntents(project, units, platforms)
 
-	plan, err := BuildResourcePlan(append(local, cas...))
+	merged := make([]ResourceIntent, 0, len(local)+len(cas)+len(fileIntents))
+	merged = append(merged, local...)
+	merged = append(merged, cas...)
+	merged = append(merged, fileIntents...)
+	plan, err := BuildResourcePlan(merged)
 	if err != nil {
 		return nil, err
 	}
-	// Force the dir-mirror bucket roots into the prune scan even when a bucket
+	// Force the dir-mirror bucket roots — AND the file-shaped SYMLINK agents
+	// roots (t2b: OpenCode/Copilot) — into the prune scan even when a bucket
 	// has zero wanted targets this pass, so a bucket reduced to zero units
-	// still has its stale managed link removed (one-to-zero prune).
-	pruneDirs := resolvedPruneDirs(roots, repoPath)
+	// still has its stale managed link removed (one-to-zero prune). Codex's
+	// rendered `.toml` is excluded: it is never a symlink, so the generic
+	// prune scan can never reap it regardless of whether its directory is
+	// forced in — that shape's removal is pruneCodexRepoAgentTomls'/
+	// pruneManagedCodexAgentTomls' dedicated job (sourcedCodexAgentNames).
+	pruneDirs := mergeSortedDirs(resolvedPruneDirs(roots, repoPath), resolvedFileShapedAgentPruneDirs(platforms, repoPath))
 
 	if !exact {
 		if dryRun {
@@ -1080,42 +1091,56 @@ func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platfo
 	return nil, nil
 }
 
-// sharedDirMirrorRoots returns a platform's DIR-MIRROR bucket roots (bucket →
-// repo-relative target roots) INDEPENDENT of any local content, so CAS
-// projection and one-to-zero pruning work even when a project has no
-// local-authored sibling and even when the caller's unit set for the bucket
-// is empty. It mirrors exactly the roots each platform passes to
-// BuildSharedSkillMirrorIntents / BuildSharedAgentMirrorIntents /
-// BuildSharedPluginBundleIntents inside its SharedTargetIntents. The
-// FILE-shaped agent builders (Codex toml, OpenCode/Copilot agent files) are
-// deliberately excluded — those shapes are t2b. (Consolidating this into a
-// first-class platform method is a t2b follow-on.)
+// DirMirrorRootsProvider is implemented by platforms with DIR-MIRROR shaped
+// shared-target buckets (skills/agents/plugins dirs symlinked wholesale,
+// rather than rendered or symlinked per entry). DirMirrorRoots returns a
+// platform's bucket roots (bucket -> repo-relative target roots) INDEPENDENT
+// of any local content, so CAS projection (buildCASIntents) and one-to-zero
+// pruning work even when a project has no local-authored sibling and even
+// when the caller's unit set for the bucket is empty. It mirrors exactly the
+// roots each platform passes to BuildSharedSkillMirrorIntents /
+// BuildSharedAgentMirrorIntents / BuildSharedPluginBundleIntents inside its
+// SharedTargetIntents. Platforms whose agents bucket is FILE-shaped instead
+// (Codex .toml render, OpenCode/Copilot agent-file symlink) omit "agents"
+// here and implement SourcedAgentFileProjector instead (t2b).
+//
+// codex/opencode/copilot implement this in their own files; claude/cursor/
+// antigravity implement it below — t2b's write scope does not include
+// claude.go/cursor.go/antigravity.go, and Go permits a method on a
+// same-package type to live in a different file, so this is the narrowest
+// way to consolidate the former type-switch into first-class methods without
+// touching files outside this task's scope.
+type DirMirrorRootsProvider interface {
+	DirMirrorRoots() map[string][]string
+}
+
+func (c *claude) DirMirrorRoots() map[string][]string {
+	return map[string][]string{
+		"skills": {filepath.Join(claudeDir, "skills"), filepath.Join(claudeAgentsBucketDir, "skills")},
+		"agents": {filepath.Join(claudeDir, "agents")},
+	}
+}
+
+func (c *cursor) DirMirrorRoots() map[string][]string {
+	return map[string][]string{"agents": {filepath.Join(".claude", "agents")}}
+}
+
+func (a *antigravity) DirMirrorRoots() map[string][]string {
+	return map[string][]string{
+		"skills": {filepath.Join(antigravityDir, "skills")},
+		"agents": {filepath.Join(antigravityDir, "agents")},
+	}
+}
+
+// sharedDirMirrorRoots looks up a platform's DIR-MIRROR bucket roots via
+// DirMirrorRootsProvider. A platform without any dir-mirror bucket (none
+// currently) yields nil.
 func sharedDirMirrorRoots(p Platform) map[string][]string {
-	switch p.(type) {
-	case *claude:
-		return map[string][]string{
-			"skills": {filepath.Join(claudeDir, "skills"), filepath.Join(claudeAgentsBucketDir, "skills")},
-			"agents": {filepath.Join(claudeDir, "agents")},
-		}
-	case *codex:
-		return map[string][]string{"skills": {filepath.Join(codexAgentsDir, "skills")}}
-	case *opencode:
-		return map[string][]string{
-			"skills":  {filepath.Join(opencodeAgentsDir, "skills")},
-			"plugins": {filepath.Join(opencodeDir, "plugins")},
-		}
-	case *copilot:
-		return map[string][]string{"skills": {filepath.Join(copilotAgentsDir, "skills")}}
-	case *cursor:
-		return map[string][]string{"agents": {filepath.Join(".claude", "agents")}}
-	case *antigravity:
-		return map[string][]string{
-			"skills": {filepath.Join(antigravityDir, "skills")},
-			"agents": {filepath.Join(antigravityDir, "agents")},
-		}
-	default:
+	provider, ok := p.(DirMirrorRootsProvider)
+	if !ok {
 		return nil
 	}
+	return provider.DirMirrorRoots()
 }
 
 // unionDirMirrorRoots unions sharedDirMirrorRoots across platforms, de-duped
@@ -1159,6 +1184,40 @@ func resolvedPruneDirs(roots map[string][]string, repoPath string) []string {
 	return dirs
 }
 
+// SourcedAgentFilePruneRoot is implemented by platforms whose
+// SourcedAgentFileIntents materializes a SYMLINK (OpenCode/Copilot) rather
+// than a render (Codex): it names the repo-relative directory that must be
+// forced into the exact/prune scan even when the current call's unit set is
+// empty (H17 one-to-zero, extended from the dir-mirror buckets to t2b's
+// file-shaped CAS intents) — otherwise a unit projected on a prior call and
+// then fully removed leaves an orphaned managed symlink behind forever,
+// since no intent this call touches that directory at all. Codex does NOT
+// implement this: its rendered `.toml` is never a symlink, so forcing its
+// directory into the generic prune scan would not help — that shape's
+// removal is pruneCodexRepoAgentTomls'/pruneManagedCodexAgentTomls' own job.
+type SourcedAgentFilePruneRoot interface {
+	SourcedAgentFilePruneRoot() string
+}
+
+// resolvedFileShapedAgentPruneDirs is resolvedPruneDirs' counterpart for the
+// file-shaped SYMLINK agents roots: the absolute repo directories every
+// SourcedAgentFilePruneRoot-implementing platform in platforms must have
+// prune-scanned regardless of this call's unit set.
+func resolvedFileShapedAgentPruneDirs(platforms []Platform, repoPath string) []string {
+	var dirs []string
+	for _, p := range platforms {
+		provider, ok := p.(SourcedAgentFilePruneRoot)
+		if !ok {
+			continue
+		}
+		if root := provider.SourcedAgentFilePruneRoot(); root != "" {
+			dirs = append(dirs, resolveIntentTargetPath(root, repoPath))
+		}
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
 // casDirMirrorSpec maps a dir-mirror bucket to the marker + materializer a
 // CAS-direct intent for it carries. Buckets absent here are NOT dir-mirror
 // shapes in t2 (file-shaped agent projection is t2b) and are skipped.
@@ -1180,7 +1239,7 @@ func buildCASIntents(project string, units []ResolvedUnit, roots map[string][]st
 	for _, u := range units {
 		spec, ok := casDirMirrorSpec[u.Family]
 		if !ok {
-			continue // non-dir-mirror bucket (file-shaped agents are t2b)
+			continue // non-dir-mirror bucket (file-shaped agents: collectSourcedAgentFileIntents)
 		}
 		for _, targetRoot := range roots[u.Family] {
 			intents = append(intents, ResourceIntent{
@@ -1209,6 +1268,76 @@ func buildCASIntents(project string, units []ResolvedUnit, roots map[string][]st
 	return intents
 }
 
+// SourcedAgentFileProjector is implemented by platforms whose agents bucket
+// is FILE-shaped (a rendered or symlinked per-entry file, e.g. Codex's
+// rendered `.toml`, OpenCode/Copilot's symlinked `.md`/`.agent.md`) rather
+// than dir-mirror-shaped (buildCASIntents / casDirMirrorSpec). t2b closes the
+// gap where a sourced agent unit reached only the dir-mirror platforms:
+// ProjectResolvedUnits drives SourcedAgentFileIntents from the SAME
+// caller-supplied resolved-unit set (H13) as every other CAS intent. A
+// platform without a file-shaped agents bucket simply omits this method.
+type SourcedAgentFileProjector interface {
+	// SourcedAgentFileIntents returns the CAS-direct ResourceIntents this
+	// platform's file-shaped agents surface needs for units — implementations
+	// filter to Family == "agents" themselves (units may carry other families).
+	SourcedAgentFileIntents(project string, units []ResolvedUnit) []ResourceIntent
+}
+
+// collectSourcedAgentFileIntents aggregates SourcedAgentFileIntents across
+// platforms that implement it, mirroring collectSharedTargetIntents' shape
+// for the file-shaped CAS-direct half of projection.
+func collectSourcedAgentFileIntents(project string, units []ResolvedUnit, platforms []Platform) []ResourceIntent {
+	var intents []ResourceIntent
+	for _, p := range platforms {
+		if provider, ok := p.(SourcedAgentFileProjector); ok {
+			intents = append(intents, provider.SourcedAgentFileIntents(project, units)...)
+		}
+	}
+	return intents
+}
+
+// buildCASAgentFileIntents builds CAS-direct symlink ResourceIntents for one
+// platform's FILE-shaped agents surface whose materialization is a plain
+// symlink to the unit's canonical AGENT.md (OpenCode `.md`, Copilot
+// `.agent.md`): each sourced "agents"-family unit gets one intent symlinking
+// targetRoot/<name><destSuffix> straight to the unit's CAS AGENT.md file
+// (H13). The casDirectOrigin marker routes execution through the identical
+// H17 atomic managed-symlink swap the dir-mirror CAS intents use — only the
+// shape differs (DirectFile vs DirectDir). A render-shaped surface (Codex
+// .toml) cannot reuse this helper: casDirectOrigin intents are routed
+// straight to the symlink swap in executeResourceIntent, before the
+// shape/transport switch, so a render intent must NOT carry that marker (see
+// codex.go's SourcedAgentFileIntents).
+func buildCASAgentFileIntents(project string, units []ResolvedUnit, targetRoot, destSuffix, materializer string) []ResourceIntent {
+	intents := make([]ResourceIntent, 0, len(units))
+	for _, u := range units {
+		if u.Family != "agents" {
+			continue
+		}
+		intents = append(intents, ResourceIntent{
+			IntentID:    fmt.Sprintf("agents.sourced.file.%s.%s.%s", sanitizeIntentRoot(u.SourceID), u.Name, sanitizeIntentRoot(targetRoot)),
+			Project:     project,
+			Bucket:      "agents",
+			LogicalName: u.Name,
+			TargetPath:  filepath.Join(targetRoot, u.Name+destSuffix),
+			Ownership:   ResourceOwnershipSharedRepo,
+			SourceRef: ResourceSourceRef{
+				Scope:        "artifacts",
+				Bucket:       "cache",
+				RelativePath: filepath.Join(u.Family, config.StoreDigestDir(u.Digest), agentManifestName),
+				Kind:         ResourceSourceCanonicalFile,
+				Origin:       casDirectOrigin,
+			},
+			Shape:         ResourceShapeDirectFile,
+			Transport:     ResourceTransportSymlink,
+			Materializer:  materializer,
+			ReplacePolicy: ResourceReplaceNever,
+			PrunePolicy:   ResourcePruneTarget,
+		})
+	}
+	return intents
+}
+
 // casDirectOrigin marks a ResourceIntent whose source is a resolved
 // packages unit's immutable CAS path (H13). executeResourceIntent routes
 // such intents through the H17 atomic symlink swap instead of the shared
@@ -1228,14 +1357,26 @@ func isCASDirectIntent(intent ResourceIntent) bool {
 // FOREIGN symlink (one pointing outside managed storage) is left completely
 // untouched and the call fails closed. When a symlink cannot be created
 // (e.g. Windows without the privilege) it ALSO fails closed rather than
-// reaching any RemoveAll-based primitive. Publication is a same-dir temp
-// symlink + atomic os.Rename, so an existing managed link is replaced in one
-// step with no absent window, and a real dir/file at the target makes the
-// rename error out rather than deleting anything.
+// reaching any RemoveAll-based primitive.
+//
+// t2b hardening (verified-managed-link -> user-file rename TOCTOU): the
+// window this closes is between the identity verification above and the
+// final rename — if some other actor replaces target with real content in
+// that gap, the swap must never silently clobber it. On Linux the occupant
+// (already verified as OUR OWN managed link) is unlinked narrowly and the
+// new symlink is placed with renameNoClobber's RENAME_NOREPLACE, so a file
+// that lands in that gap makes the rename fail closed (EEXIST) instead of
+// being overwritten. Every other OS lacks a portable no-clobber rename
+// primitive in the stdlib; there renameNoClobber falls back to a plain
+// rename immediately followed by a read-back verification that the live
+// target now resolves to src, so a lost race against a concurrent writer is
+// at least detected and reported rather than silently believed successful
+// (a strictly weaker guarantee than Linux's — see resource_plan_renameat_*.go).
 func atomicManagedSymlinkSwap(src, target string) error {
 	if cur, err := os.Readlink(target); err == nil && cur == src {
 		return nil // already correct
 	}
+	existed := false
 	if _, err := os.Lstat(target); err == nil {
 		// Occupant present: only an identity-verified managed CAS link may be
 		// replaced. A real file/dir (Readlink would have failed) or a foreign
@@ -1244,6 +1385,7 @@ func atomicManagedSymlinkSwap(src, target string) error {
 		if !links.IsManagedLinkUnder(target, config.ArtifactsRoot(config.AgentsHome())) {
 			return fmt.Errorf("refusing to replace %s: not a managed CAS link (foreign symlink or user content) — leaving it intact", target)
 		}
+		existed = true
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("lstat projection target %s: %w", target, err)
 	}
@@ -1255,7 +1397,18 @@ func atomicManagedSymlinkSwap(src, target string) error {
 		// Fail closed — never fall back to a RemoveAll-based primitive (H17).
 		return fmt.Errorf("H17 atomic swap: cannot create temp symlink for %s (no unsafe fallback): %w", target, err)
 	}
-	if err := fsops.Rename(tmp, target); err != nil {
+	if existed {
+		// Unlink ONLY the identity-verified managed link (never RemoveAll, and
+		// never an unverified occupant) so the rename below lands on an ABSENT
+		// target and can use a no-clobber primitive instead of a blind replace.
+		// This is a narrow single-file unlink of exactly the link this call just
+		// verified, not a re-derivation of "what's safe to delete".
+		if err := fsops.Remove(target); err != nil && !os.IsNotExist(err) {
+			_ = fsops.Remove(tmp)
+			return fmt.Errorf("H17 atomic swap: removing verified managed link %s: %w", target, err)
+		}
+	}
+	if err := renameNoClobber(tmp, target, src); err != nil {
 		_ = fsops.Remove(tmp)
 		return fmt.Errorf("H17 atomic swap: rename %s -> %s: %w", target, src, err)
 	}

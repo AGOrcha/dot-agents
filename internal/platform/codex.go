@@ -240,8 +240,9 @@ func (c *codex) ensureUserSkills(agentsHome string) error {
 }
 
 func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
-	// TOML files are materialized by CollectAndExecuteSharedTargetPlan; prune stale
-	// `.toml` when canonical agents are removed.
+	// TOML files (local-authored AND sourced, t2b) are materialized by
+	// ProjectResolvedUnits/CollectAndExecuteSharedTargetPlan; prune stale
+	// `.toml` when their canonical AGENT.md (local or locked-sourced) is gone.
 	return pruneCodexRepoAgentTomls(project, repoPath, agentsHome)
 }
 
@@ -314,7 +315,7 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	}
 	errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, codexHooksJSON), agentsHome))
 
-	errs = append(errs, c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, codexDir, "agents")))
+	errs = append(errs, c.pruneManagedCodexAgentTomls(agentsHome, project, repoPath, filepath.Join(repoPath, codexDir, "agents")))
 
 	skillsDir := filepath.Join(repoPath, codexAgentsDir, "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
@@ -326,21 +327,61 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	return errors.Join(errs...)
 }
 
+// sourcedCodexAgentNames returns the names of currently-locked kind:artifact
+// "agents"-family packages units for the project at repoPath (t2b): the
+// generic exact/prune scan in resource_plan.go only reaps managed SYMLINKS
+// (links.IsManagedLinkUnder), so a Codex `.toml` — a rendered regular file,
+// never a symlink — is invisible to it. pruneCodexRepoAgentTomls /
+// pruneManagedCodexAgentTomls are the codex-specific prune complement for the
+// render shape (mirroring writeCodexAgents' local-only wanted-set pattern),
+// and need to know which sourced names to treat as "still wanted" without a
+// units parameter — codex's Platform interface carries none — so this reads
+// the project's own lock directly. A missing/unreadable lock or a ref this
+// process cannot parse yields an empty set (never an error): pruning then
+// falls back to exactly the pre-t2b local-canonical-only behavior.
+func sourcedCodexAgentNames(repoPath string) map[string]bool {
+	lock, err := config.ReadUnits(repoPath)
+	if err != nil {
+		return nil
+	}
+	names := map[string]bool{}
+	for ref, u := range lock.Units {
+		if u.Kind != config.UnitKindArtifact {
+			continue
+		}
+		parts, err := config.ParsePackageRef(ref)
+		if err != nil {
+			continue
+		}
+		i := strings.IndexByte(parts.ArtifactPath, '/')
+		if i <= 0 || parts.ArtifactPath[:i] != "agent" {
+			continue
+		}
+		names[parts.ArtifactPath[i+1:]] = true
+	}
+	return names
+}
+
 // pruneCodexRepoAgentTomls deletes stale `.codex/agents/*.toml` files in the
-// repo whose canonical AGENT.md no longer exists. ENOENT on the canonical
-// agents bucket OR the codex dst dir is a no-op — nothing to prune. Other
-// errors propagate.
+// repo whose canonical AGENT.md no longer exists — checked against BOTH the
+// local canonical agents bucket AND the project's locked sourced agent names
+// (t2b, sourcedCodexAgentNames), so a packages-resolved agent's rendered
+// toml survives this platform's own CreateLinks-time prune pass instead of
+// being deleted the instant after ProjectResolvedUnits renders it. A missing
+// local agents bucket is no longer a short-circuit no-op by itself — sourced
+// names must still be honored — so only a genuinely unreadable dst dir ends
+// the pass early.
 func pruneCodexRepoAgentTomls(project, repoPath, agentsHome string) error {
 	entries, err := listScopedResourceDirs(agentsHome, "agents", project, codexAgentMDFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	wanted := map[string]bool{}
 	for _, entry := range entries {
 		wanted[entry.Name+".toml"] = true
+	}
+	for name := range sourcedCodexAgentNames(repoPath) {
+		wanted[name+".toml"] = true
 	}
 	dstRoot := filepath.Join(repoPath, codexDir, "agents")
 	existing, err := os.ReadDir(dstRoot)
@@ -397,22 +438,32 @@ func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 }
 
 // pruneManagedCodexAgentTomls removes the per-entry `.toml` files that map to
-// canonical AGENT.md entries. ENOENT on the canonical agents bucket is a
-// no-op; other errors propagate.
-func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) error {
+// canonical AGENT.md entries — local canonical entries under scope AND the
+// project's locked sourced agent names (t2b, sourcedCodexAgentNames), so a
+// full RemoveLinks teardown also tears down a packages-resolved agent's
+// rendered toml, not only local-authored ones. ENOENT on the canonical
+// agents bucket is no longer a short-circuit no-op by itself (sourced names
+// must still be honored); removal errors are aggregated rather than
+// short-circuited so one stuck file cannot hide the rest.
+func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, repoPath, dstRoot string) error {
 	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, codexAgentMDFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	names := map[string]bool{}
 	for _, entry := range entries {
-		if err := c.io.Remove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {
-			return err
+		names[entry.Name] = true
+	}
+	for name := range sourcedCodexAgentNames(repoPath) {
+		names[name] = true
+	}
+	var errs []error
+	for name := range names {
+		if err := c.io.Remove(filepath.Join(dstRoot, name+".toml")); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func writeCodexAgentTomlFile(io platformIO, dst, agentMD string) error {
@@ -628,6 +679,57 @@ func (c *codex) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 		return nil, err
 	}
 	return append(skills, tomls...), nil
+}
+
+// DirMirrorRoots implements DirMirrorRootsProvider (resource_plan.go):
+// codex's skills bucket is dir-mirror shaped; its agents bucket is
+// FILE-shaped (rendered `.toml`, see SourcedAgentFileIntents) and is
+// deliberately absent here.
+func (c *codex) DirMirrorRoots() map[string][]string {
+	return map[string][]string{"skills": {filepath.Join(codexAgentsDir, "skills")}}
+}
+
+// SourcedAgentFileIntents implements SourcedAgentFileProjector
+// (resource_plan.go, t2b): codex's agents bucket renders a `.toml` per
+// entry rather than symlinking a whole dir, so a sourced "agents"-family
+// unit gets a RenderSingle/Write intent — NOT the casDirectOrigin marker
+// buildCASAgentFileIntents uses, since that marker routes execution
+// straight to the symlink swap in executeResourceIntent, before the
+// shape/transport switch that would otherwise dispatch to
+// executeRenderSingleWrite. The intent's SourceRef addresses the unit's
+// CAS AGENT.md directly (mirroring buildCASIntents' CAS addressing), so
+// executeRenderSingleWrite reads and renders it exactly like a local
+// canonical AGENT.md. Pruning this shape on removal is NOT handled by the
+// generic exact/prune scan (it only reaps managed symlinks) — see
+// pruneCodexRepoAgentTomls/sourcedCodexAgentNames.
+func (c *codex) SourcedAgentFileIntents(project string, units []ResolvedUnit) []ResourceIntent {
+	intents := make([]ResourceIntent, 0, len(units))
+	for _, u := range units {
+		if u.Family != "agents" {
+			continue
+		}
+		intents = append(intents, ResourceIntent{
+			IntentID:    fmt.Sprintf("agents.sourced.codex-toml.%s.%s", sanitizeIntentRoot(u.SourceID), u.Name),
+			Project:     project,
+			Bucket:      "agents",
+			LogicalName: u.Name,
+			TargetPath:  filepath.Join(codexDir, "agents", u.Name+".toml"),
+			Ownership:   ResourceOwnershipSharedRepo,
+			SourceRef: ResourceSourceRef{
+				Scope:        "artifacts",
+				Bucket:       "cache",
+				RelativePath: filepath.Join(u.Family, config.StoreDigestDir(u.Digest), agentManifestName),
+				Kind:         ResourceSourceCanonicalFile,
+				Origin:       "sourced-codex-agent-toml",
+			},
+			Shape:         ResourceShapeRenderSingle,
+			Transport:     ResourceTransportWrite,
+			Materializer:  codexAgentTomlMaterializer,
+			ReplacePolicy: ResourceReplaceIfManaged,
+			PrunePolicy:   ResourcePruneNone,
+		})
+	}
+	return intents
 }
 
 // CountLinks implements LinkCounter for the codex platform: returns the

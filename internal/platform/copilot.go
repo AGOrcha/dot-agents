@@ -629,6 +629,32 @@ func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) 
 	return append(skills, agents...), nil
 }
 
+// DirMirrorRoots implements DirMirrorRootsProvider (resource_plan.go):
+// copilot's skills bucket is dir-mirror shaped; its agents bucket is
+// FILE-shaped (symlinked `.agent.md` per entry, see SourcedAgentFileIntents)
+// and is deliberately absent here.
+func (c *copilot) DirMirrorRoots() map[string][]string {
+	return map[string][]string{"skills": {filepath.Join(copilotAgentsDir, "skills")}}
+}
+
+// SourcedAgentFileIntents implements SourcedAgentFileProjector
+// (resource_plan.go, t2b): copilot's agents bucket symlinks a single
+// `.agent.md` file per entry (mirroring BuildSharedAgentFileSymlinkIntents'
+// local-authored shape), so a sourced "agents"-family unit reuses the
+// generic CAS-direct file-symlink builder — the same H17 atomic swap the
+// dir-mirror CAS intents use, just DirectFile instead of DirectDir.
+func (c *copilot) SourcedAgentFileIntents(project string, units []ResolvedUnit) []ResourceIntent {
+	return buildCASAgentFileIntents(project, units, filepath.Join(copilotGitHubDir, "agents"), ".agent.md", "sourced-agent-file-symlink")
+}
+
+// SourcedAgentFilePruneRoot implements SourcedAgentFilePruneRoot
+// (resource_plan.go, t2b one-to-zero prune): SourcedAgentFileIntents' target
+// directory, so a fully-removed sourced agent's `.agent.md` symlink is
+// pruned even when this call's unit set no longer names it.
+func (c *copilot) SourcedAgentFilePruneRoot() string {
+	return filepath.Join(copilotGitHubDir, "agents")
+}
+
 // ManagedOutputs implements ManagedOutputReporter for copilot: the repo-relative
 // .gitignore patterns for every output `da refresh` projects/generates for the
 // GitHub Copilot platform (config-distribution-model §15 / D14 / R8). Copilot
