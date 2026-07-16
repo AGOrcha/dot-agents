@@ -485,8 +485,12 @@ assert_contains "git-source content-install: config verify -> OK" \
 # (d) a SECOND run with the lock present is a no-op: the units + artifact-
 # content sections are byte-unchanged (only the install-stamp timestamp
 # moves), and the projected files are byte-identical (H9 frozen = no rewrite).
-cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json"
-cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md"
+# Snapshot the pre-2nd-install lock + projected skill. The source lock was just
+# touched by `config verify`; on windows-latest a filter driver can briefly hold it,
+# so a bare cp would silently fail and leave the snapshot missing (every later read
+# of it then throws FileNotFoundError). Retry the cp until the source is readable.
+for _i in $(seq 1 75); do cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json" 2>/dev/null && break; sleep 0.2; done
+for _i in $(seq 1 75); do cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md" 2>/dev/null && break; sleep 0.2; done
 test_command "git-source content-install: install --yes (second run, frozen no-op)" \
   "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
 # retry_test: the lock read immediately follows the install's atomic re-write and
