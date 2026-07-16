@@ -168,7 +168,14 @@ func translateR3Event(ev svcevents.Event, cfg r3Config) (string, any, bool) {
 		}
 		root := ""
 		if p.SidecarPath != "" {
-			root = filepath.Dir(p.SidecarPath)
+			// Logical event-stream root key: forward-slash and OS-independent
+			// so it matches the store's normalized cache key on every OS.
+			// filepath.Dir strips the filename for both slash and OS-sep input
+			// (R3 may publish either); ToSlash then re-canonicalizes the
+			// separator that filepath.Dir cleaned to the OS form on Windows.
+			// The resolver's actual disk read re-derives the OS path via
+			// filepath.Join, so keeping this key logical is safe.
+			root = filepath.ToSlash(filepath.Dir(p.SidecarPath))
 		}
 		return TopicIterationScored, r3IterationScored{
 			SessionID: cfg.resolve(root, p.Iteration),

@@ -9,6 +9,7 @@ package events
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +63,56 @@ func TestAttachR3BusTranslatesIterationScored(t *testing.T) {
 	roots, all := evictor.snapshot()
 	if len(roots) != 1 || roots[0] != "roots/x" || all != 0 {
 		t.Errorf("eviction: roots=%v evictAll=%d, want [roots/x] and 0", roots, all)
+	}
+}
+
+// TestAttachR3BusRootKeyIsForwardSlash pins the OS-independence invariant that
+// regressed on Windows CI: the logical iteration.scored root — fed to BOTH the
+// session resolver and the per-root cache evictor — must be forward-slash on
+// every OS. filepath.Dir cleans a slash-style sidecar to the backslash OS-sep
+// on Windows; without filepath.ToSlash the resolver arg and eviction key carry
+// a backslash there, so the evict key stops matching the store's normalized
+// cache key and per-root eviction silently no-ops. The assertion holds on all
+// platforms (a no-op on POSIX, a real guard on Windows).
+func TestAttachR3BusRootKeyIsForwardSlash(t *testing.T) {
+	evictor := &recordingEvictor{}
+	b := New(Options{Heartbeat: noHeartbeat, Evictor: evictor})
+	defer b.Close()
+	bus := svcevents.NewInProcBus()
+	defer func() { _ = bus.Close() }()
+
+	var gotDir string
+	detach, err := b.AttachR3Bus(bus, WithR3SessionResolver(func(dir string, _ int) string {
+		gotDir = dir
+		return ""
+	}))
+	if err != nil {
+		t.Fatalf("AttachR3Bus: %v", err)
+	}
+	defer detach()
+	ch, cancel := b.Subscribe(context.Background())
+	defer cancel()
+
+	if err := bus.Publish(svcevents.TopicIterationScored, svcevents.IterationScored{
+		Iteration:   7,
+		SidecarPath: "roots/nested/dir/iter-7.score.yaml",
+	}); err != nil {
+		t.Fatalf("bus.Publish: %v", err)
+	}
+	mustReceive(t, ch)
+
+	if strings.ContainsRune(gotDir, '\\') {
+		t.Errorf("resolver root %q contains an OS separator; want forward-slash only", gotDir)
+	}
+	roots, _ := evictor.snapshot()
+	if len(roots) != 1 {
+		t.Fatalf("eviction roots = %v, want exactly one", roots)
+	}
+	if strings.ContainsRune(roots[0], '\\') {
+		t.Errorf("eviction root %q contains an OS separator; want forward-slash only", roots[0])
+	}
+	if roots[0] != gotDir {
+		t.Errorf("resolver root %q and eviction root %q disagree; keys must align", gotDir, roots[0])
 	}
 }
 
