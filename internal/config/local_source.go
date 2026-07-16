@@ -365,12 +365,29 @@ func (s *LocalSource) CASPathIgnored(relPath string) (bool, error) {
 // the local source's git tracking, and a write that silently failed to land
 // (a concurrent hand-edit, a filesystem anomaly) is caught before content
 // is exposed.
+//
+// Perf (package-artifact-install t9): this runs once per artifact — every
+// package/layer a resolve materializes — so a batch of N units paid N
+// redundant inter-process lock acquisitions (agentslock.AcquireFileLock) and
+// N no-op read-merge-writes of the SAME permanent, family/digest-independent
+// gitignore block. Profiling a 50-package warm hydrate showed this call as
+// the dominant cost (docs/PERF_BUDGET.md). CASPathIgnored is a read-only
+// check (no lock): probing it FIRST and skipping the lock-guarded install
+// when it already reports "ignored" removes the redundant work WITHOUT
+// weakening H14 — the fail-closed verify still runs on every single call
+// (an install-time cache of "already ensured" would not re-detect an
+// external revert between artifacts; this probe does, at read cost only). A
+// miss (first-ever materialize, or an external revert mid-batch) still falls
+// through to the full install + mandatory re-verify, unchanged from before.
 func EnsureAndVerifyCASIgnore(agentsHome, family, digest string) error {
 	ls := NewLocalSource(agentsHome, nil)
+	casRel := filepath.Join("cache", "artifacts", family, StoreDigestDir(digest))
+	if ok, err := ls.CASPathIgnored(casRel); err == nil && ok {
+		return nil
+	}
 	if err := ls.EnsureProvenanceGitignore(nil); err != nil {
 		return fmt.Errorf("materialize: install CAS ignore: %w", err)
 	}
-	casRel := filepath.Join("cache", "artifacts", family, StoreDigestDir(digest))
 	ok, err := ls.CASPathIgnored(casRel)
 	if err != nil {
 		return fmt.Errorf("materialize: verify CAS ignore: %w", err)

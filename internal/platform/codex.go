@@ -532,6 +532,22 @@ func writeCodexAgentTomlFile(io platformIO, dst, agentMD string) error {
 			return fmt.Errorf("codex toml occupant check %s: %w", dst, statErr)
 		}
 	} else {
+		// Perf (package-artifact-install t9): a verified managed render is ours
+		// to replace, but the steady-state re-run (every unchanged `da install`
+		// / `da refresh`) regenerates byte-identical content for every sourced
+		// agent every time — profiling a 200-agent warm re-projection showed
+		// this remove+write+rename triplet as the dominant cost (docs/
+		// PERF_BUDGET.md). A full byte compare against the CURRENT on-disk
+		// managed render — not a cheap mtime/size shortcut — skips the rewrite
+		// only when content is provably unchanged, so a genuinely stale render
+		// (source content changed) still regenerates correctly.
+		existing, readErr := os.ReadFile(dst)
+		if readErr == nil && bytes.Equal(existing, managed) {
+			return nil
+		}
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return fmt.Errorf("codex toml: reading prior managed render %s: %w", dst, readErr)
+		}
 		// A verified managed render is ours to replace; remove it first so the
 		// atomic rename below lands on an absent path (Windows os.Rename cannot
 		// replace an existing file). This unlink is safe: ownership was just

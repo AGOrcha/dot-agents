@@ -62,6 +62,10 @@ coverage/
 .tox/
 htmlcov/
 .playwright-cli/
+
+# Perf benchmark reports (scripts/perf/run-benchmarks.sh output — regenerated
+# per run, not committed; the harness script itself is tracked)
+scripts/perf/reports/*.txt
 # Temporary files
 *.tmp
 *.temp
