@@ -287,12 +287,17 @@ func TestWriteCodexAgentTomlFile_ExistingFileReplaced(t *testing.T) {
 	}
 }
 
-// TestWriteCodexAgentTomlFile_RefusesUserAuthoredFile is the defect 1
-// fail-before-fix guard: a NON-managed `.toml` (no marker = user-authored)
-// occupying the target must NOT be overwritten — the write fails closed and
-// the user's bytes survive untouched.
-func TestWriteCodexAgentTomlFile_RefusesUserAuthoredFile(t *testing.T) {
+// TestWriteCodexAgentTomlFile_DivergedUserAuthoredFilePreservedAtAlternate is
+// the t2c collision-resolution guard (supersedes t2b's unconditional
+// refuse): a NON-managed `.toml` (no marker) occupying the target whose
+// content DIVERGES from the render must not be silently clobbered, but the
+// write must also no longer fail closed — it preserves the diverged bytes at
+// a sibling alternate path, writes an import-conflict review note, and lands
+// the managed render at the canonical name.
+func TestWriteCodexAgentTomlFile_DivergedUserAuthoredFilePreservedAtAlternate(t *testing.T) {
 	tmp := t.TempDir()
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
 	agent := filepath.Join(tmp, "AGENT.md")
 	if err := os.WriteFile(agent, []byte("---\nname: x\n---\nbody\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -302,15 +307,168 @@ func TestWriteCodexAgentTomlFile_RefusesUserAuthoredFile(t *testing.T) {
 	if err := os.WriteFile(dst, []byte(userContent), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCodexAgentTomlFile(stdPlatformIO{}, dst, agent); err == nil {
-		t.Fatal("expected writeCodexAgentTomlFile to refuse overwriting a user-authored .toml")
+	if err := writeCodexAgentTomlFile(stdPlatformIO{}, dst, agent); err != nil {
+		t.Fatalf("writeCodexAgentTomlFile: unexpected error: %v", err)
 	}
+
+	rendered, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if managed, mErr := isManagedCodexToml(dst); mErr != nil || !managed {
+		t.Fatalf("expected canonical name to hold a managed render, got managed=%v err=%v", managed, mErr)
+	}
+	if strings.Contains(string(rendered), "mine") {
+		t.Fatalf("canonical name still carries the diverged user content: %q", rendered)
+	}
+
+	altPath := filepath.Join(tmp, "x.codex-preexisting.toml")
+	altGot, err := os.ReadFile(altPath)
+	if err != nil {
+		t.Fatalf("expected diverged content preserved at %s: %v", altPath, err)
+	}
+	if string(altGot) != userContent {
+		t.Fatalf("preserved alternate content = %q, want %q", altGot, userContent)
+	}
+
+	notesDir := filepath.Join(agentsHome, "review-notes", "import-conflicts")
+	entries, err := os.ReadDir(notesDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected exactly one import-conflict review note, got dir=%v err=%v", entries, err)
+	}
+	noteData, err := os.ReadFile(filepath.Join(notesDir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := string(noteData)
+	for _, want := range []string{"origin: codex", dst, altPath} {
+		if !strings.Contains(note, want) {
+			t.Errorf("review note missing %q:\n%s", want, note)
+		}
+	}
+}
+
+// TestWriteCodexAgentTomlFile_ByteIdenticalUnmarkedFileAdoptedSilently is the
+// t2c mark-adopt path: an unmarked `.toml` whose bytes already equal what
+// writeCodexAgentTomlFile would render (the marker-upgrade-migration
+// collision every pre-existing install hits on its first post-marker
+// refresh) is adopted silently — no error, the marker is added, and no
+// alternate file or review note is produced.
+func TestWriteCodexAgentTomlFile_ByteIdenticalUnmarkedFileAdoptedSilently(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	agent := filepath.Join(tmp, "AGENT.md")
+	if err := os.WriteFile(agent, []byte("---\nname: x\n---\nbody\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := renderCodexAgentToml(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "x.toml")
+	if err := os.WriteFile(dst, rendered, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeCodexAgentTomlFile(stdPlatformIO{}, dst, agent); err != nil {
+		t.Fatalf("writeCodexAgentTomlFile: unexpected error: %v", err)
+	}
+
 	got, err := os.ReadFile(dst)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != userContent {
-		t.Fatalf("user-authored .toml was modified: %q", got)
+	wantBody := string(rendered)
+	if !strings.HasPrefix(string(got), codexManagedTomlMarker+"\n") {
+		t.Fatalf("adopted file missing managed marker: %q", got)
+	}
+	if strings.TrimPrefix(string(got), codexManagedTomlMarker+"\n") != wantBody {
+		t.Fatalf("adopted file body changed: got %q want %q", got, wantBody)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmp, "x.codex-preexisting.toml")); !os.IsNotExist(err) {
+		t.Fatalf("byte-identical adoption must not create an alternate file, stat err=%v", err)
+	}
+	notesDir := filepath.Join(agentsHome, "review-notes", "import-conflicts")
+	if entries, err := os.ReadDir(notesDir); err == nil && len(entries) != 0 {
+		t.Fatalf("byte-identical adoption must not write a review note, found %d", len(entries))
+	}
+}
+
+// TestWriteCodexAgentTomlFile_RefusesNonRegularOccupant preserves t2b's
+// fail-closed refuse for occupants that can never be a prior render (a
+// directory in this case) — the content-aware adoption in t2c only applies
+// to regular files.
+func TestWriteCodexAgentTomlFile_RefusesNonRegularOccupant(t *testing.T) {
+	tmp := t.TempDir()
+	agent := filepath.Join(tmp, "AGENT.md")
+	if err := os.WriteFile(agent, []byte("---\nname: x\n---\nbody\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "x.toml")
+	if err := os.Mkdir(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCodexAgentTomlFile(stdPlatformIO{}, dst, agent); err == nil {
+		t.Fatal("expected writeCodexAgentTomlFile to refuse a non-regular occupant")
+	}
+	info, err := os.Stat(dst)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("non-regular occupant was modified: info=%v err=%v", info, err)
+	}
+}
+
+// TestCollectAndExecuteSharedTargetPlan_UpgradeMigrationCollisionResolvesClean
+// drives the t2c scenario end-to-end through the real projection entry point
+// (not the low-level writeCodexAgentTomlFile unit) — the exact shape a first
+// `da refresh`/`da install` after upgrading to the marker takes: a
+// pre-existing UNMARKED `.codex/agents/<name>.toml` (as every install from
+// before codexManagedTomlMarker existed has) must no longer refuse the
+// project, matching t2b's own fold-back
+// obs-codex-toml-marker-upgrade-migration.
+func TestCollectAndExecuteSharedTargetPlan_UpgradeMigrationCollisionResolvesClean(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureCodexAgent(t, agentsHome)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	tomlPath := filepath.Join(repo, ".codex", "agents", "implementer.toml")
+	if err := os.MkdirAll(filepath.Dir(tomlPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const preexisting = "# hand-edited before the marker existed\nname = \"implementer\"\ncustom = true\n"
+	if err := os.WriteFile(tomlPath, []byte(preexisting), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewCodex()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan must complete clean on a pre-marker collision, got: %v", err)
+	}
+
+	got, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(got), codexManagedTomlMarker+"\n") {
+		t.Fatalf("canonical name must carry the managed render after resolution: %q", got)
+	}
+	if !strings.Contains(string(got), `name = "implementer"`) {
+		t.Fatalf("canonical name must carry the dot-agents render, got: %q", got)
+	}
+
+	altPath := filepath.Join(repo, ".codex", "agents", "implementer.codex-preexisting.toml")
+	altGot, err := os.ReadFile(altPath)
+	if err != nil {
+		t.Fatalf("expected the hand-edited content preserved at %s: %v", altPath, err)
+	}
+	if string(altGot) != preexisting {
+		t.Fatalf("preserved content = %q, want %q", altGot, preexisting)
+	}
+
+	notesDir := filepath.Join(agentsHome, "review-notes", "import-conflicts")
+	entries, err := os.ReadDir(notesDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected exactly one import-conflict review note, got dir=%v err=%v", entries, err)
 	}
 }
 

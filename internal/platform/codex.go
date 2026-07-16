@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/ui"
+	"go.yaml.in/yaml/v3"
 )
 
 type codex struct {
@@ -75,6 +77,17 @@ func isManagedCodexToml(path string) (bool, error) {
 		return false, err
 	}
 	return isManagedCodexTomlBytes(data), nil
+}
+
+// IsManagedCodexAgentTomlFile reports whether path is a dot-agents managed
+// rendered codex agent `.toml` (carries codexManagedTomlMarker as its first
+// line). Exported for commands/import.go (t2c): the project-scope import
+// scan already walks `.codex/agents` (projectImportWalkDirs) and needs to
+// skip re-importing dot-agents' OWN renders as if they were foreign user
+// content — commands already imports internal/platform, so this is the one
+// cycle-free direction for import.go to consult codex's provenance check.
+func IsManagedCodexAgentTomlFile(path string) (bool, error) {
+	return isManagedCodexToml(path)
 }
 
 func NewCodex() Platform { return &codex{io: stdPlatformIO{}} }
@@ -473,9 +486,23 @@ func (c *codex) pruneManagedCodexAgentTomls(dstRoot string) error {
 // it with durable managed provenance (codexManagedTomlMarker as the first
 // line), enforcing ResourceReplaceIfManaged and writing atomically (defect 1):
 //
-//   - An existing occupant that is NOT a dot-agents managed render (a
-//     user-authored `.toml`, a symlink, or any foreign file) is REFUSED — the
-//     call fails closed and the occupant is left completely intact.
+//   - An existing occupant that is NOT a dot-agents managed render is
+//     content-aware (t2c, replacing the unconditional refuse — fold-back
+//     obs-codex-toml-marker-upgrade-migration): a REGULAR FILE whose bytes
+//     match the render body byte-for-byte is provably a prior dot-agents
+//     output written before the marker existed (the marker-upgrade migration
+//     collision every existing install hits on its first post-marker
+//     refresh) and is silently mark-adopted — see
+//     resolveUnmanagedCodexTomlCollision. A REGULAR FILE whose bytes diverge
+//     is genuine foreign/user content: it is preserved non-destructively at
+//     a sibling alternate path (RFC §6 stable naming) plus an
+//     import-conflict review note, and the SAME on-disk "agents" bucket
+//     project-scope walk `da import`/`da refresh` already runs
+//     (projectImportWalkDirs' ".codex/agents" entry, commands/import.go)
+//     picks the preserved sibling up as an ordinary import candidate on the
+//     next pass — reusing the existing import-to-scope machinery rather
+//     than a parallel one. A non-regular occupant (symlink, dir, device) is
+//     never a render candidate and keeps the original fail-closed refuse.
 //   - An absent path, or an existing managed render, is (re)written. The write
 //     is a same-dir temp file + rename, so a concurrent reader never sees a
 //     partial `.toml` (the prior Lstat-then-truncate-write could).
@@ -494,10 +521,14 @@ func writeCodexAgentTomlFile(io platformIO, dst, agentMD string) error {
 	}
 	if !isManaged {
 		// Distinguish "absent" (fine, create it) from "present but not ours"
-		// (fail closed — never clobber a user file).
-		if _, statErr := os.Lstat(dst); statErr == nil {
-			return fmt.Errorf("refusing to overwrite %s: not a dot-agents managed render (user-authored or foreign file) — leaving it intact", dst)
-		} else if !os.IsNotExist(statErr) {
+		// (content-aware collision resolution, never a silent clobber).
+		info, statErr := os.Lstat(dst)
+		switch {
+		case statErr == nil:
+			if err := resolveUnmanagedCodexTomlCollision(io, dst, content, info); err != nil {
+				return err
+			}
+		case !os.IsNotExist(statErr):
 			return fmt.Errorf("codex toml occupant check %s: %w", dst, statErr)
 		}
 	} else {
@@ -522,6 +553,146 @@ func writeCodexAgentTomlFile(io platformIO, dst, agentMD string) error {
 
 func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
 	return writeCodexAgentTomlFile(c.io, dst, agentMD)
+}
+
+// resolveUnmanagedCodexTomlCollision handles an existing occupant at dst
+// (Lstat already succeeded, info describes it) that lacks the managed-render
+// marker, replacing t2b's unconditional fail-closed refuse with content-aware
+// adoption (t2c, fold-back obs-codex-toml-marker-upgrade-migration):
+//
+//   - Not a regular file (symlink, dir, device, ...): never a render
+//     candidate — refuse unchanged, leaving the occupant completely intact.
+//   - A regular file whose bytes equal content (the render body dst is about
+//     to receive, marker not yet applied): provably OUR prior output written
+//     before the marker existed — return nil so the caller (re)writes the
+//     now-marked bytes over it. No data changes; no error.
+//   - A regular file whose bytes diverge from content: genuine foreign/user
+//     content. It is preserved non-destructively at a sibling alternate path
+//     in the same directory (RFC §6 stable naming, resource-intent-
+//     centralization) and an import-conflict review note is written, then
+//     nil is returned so the caller writes the managed render at the
+//     canonical name. The occupant's bytes are never lost — either they
+//     already equal what's about to be written, or they survive at the
+//     alternate path.
+func resolveUnmanagedCodexTomlCollision(io platformIO, dst string, content []byte, info os.FileInfo) error {
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("refusing to overwrite %s: not a dot-agents managed render (user-authored or foreign file) — leaving it intact", dst)
+	}
+	existing, err := os.ReadFile(dst)
+	if err != nil {
+		return fmt.Errorf("codex toml occupant read %s: %w", dst, err)
+	}
+	if bytes.Equal(existing, content) {
+		// Byte-identical to the render body: this occupant is provably a
+		// dot-agents render from before codexManagedTomlMarker existed (the
+		// render format itself is unchanged — the marker was added as a new
+		// FIRST line on top of it), so no marker-stripping/normalization is
+		// needed on either side of this comparison. Adopt silently.
+		return nil
+	}
+	return preserveDivergedCodexToml(io, dst, existing)
+}
+
+// preserveDivergedCodexToml moves a diverged, unmanaged occupant at dst to a
+// sibling alternate path in the same directory (never deletes it), then
+// writes an import-conflict review note recording both paths so a human can
+// reconcile. The vacated dst then lets writeCodexAgentTomlFile's caller
+// proceed to write the managed render at the canonical name. A review-note
+// write failure is logged and does not block the (already non-destructive)
+// preserve-and-adopt — the diverged bytes are safely on disk either way.
+func preserveDivergedCodexToml(io platformIO, dst string, existing []byte) error {
+	altPath := nextCodexPreexistingAltPath(dst)
+	if err := io.WriteFile(altPath, existing, 0644); err != nil {
+		return fmt.Errorf("codex toml: preserving diverged occupant %s: %w", dst, err)
+	}
+	if err := io.Remove(dst); err != nil && !os.IsNotExist(err) {
+		_ = io.Remove(altPath)
+		return fmt.Errorf("codex toml: vacating diverged occupant %s: %w", dst, err)
+	}
+	if err := writeCodexImportConflictReviewNote(dst, altPath); err != nil {
+		ui.Warn(fmt.Sprintf("codex toml: could not write import-conflict review note for %s: %v", dst, err))
+	}
+	return nil
+}
+
+// nextCodexPreexistingAltPath returns the first free sibling path in dst's
+// directory named <name>.codex-preexisting.toml, then
+// <name>.codex-preexisting-2.toml, -3, … (RFC §6 stable naming, mirroring
+// commands/import.go's importConflictStableBundleName sequence for hooks).
+func nextCodexPreexistingAltPath(dst string) string {
+	dir := filepath.Dir(dst)
+	base := strings.TrimSuffix(filepath.Base(dst), ".toml")
+	candidate := filepath.Join(dir, base+".codex-preexisting.toml")
+	if _, err := os.Lstat(candidate); os.IsNotExist(err) {
+		return candidate
+	}
+	for n := 2; ; n++ {
+		candidate = filepath.Join(dir, fmt.Sprintf("%s.codex-preexisting-%d.toml", base, n))
+		if _, err := os.Lstat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+}
+
+// codexImportConflictReviewNote mirrors the on-disk shape of
+// commands.importConflictReviewNote (resource-intent-centralization RFC §6,
+// commands/import.go) byte-for-byte on the YAML tags: internal/platform
+// cannot import package commands (commands already imports internal/platform,
+// so the reverse would cycle), so the shape is duplicated here rather than
+// shared — a review note under ~/.agents/review-notes/import-conflicts/
+// looks identical to an operator regardless of which package wrote it.
+type codexImportConflictReviewNote struct {
+	ID               string   `yaml:"id"`
+	Status           string   `yaml:"status"`
+	Kind             string   `yaml:"kind"`
+	Bucket           string   `yaml:"bucket"`
+	Scope            string   `yaml:"scope"`
+	LogicalName      string   `yaml:"logical_name"`
+	CanonicalTarget  string   `yaml:"canonical_target"`
+	AlternateTarget  string   `yaml:"alternate_target"`
+	Origin           string   `yaml:"origin"`
+	Rationale        string   `yaml:"rationale,omitempty"`
+	SuggestedActions []string `yaml:"suggested_actions,omitempty"`
+	CreatedAt        string   `yaml:"created_at"`
+}
+
+// writeCodexImportConflictReviewNote writes the review note for a diverged
+// unmanaged `.codex/agents/*.toml` collision. dst and altPath are recorded
+// as-is (absolute paths) — writeCodexAgentTomlFile is called with only the
+// materialized dst path (t2c intentionally leaves resource_plan.go's caller
+// contract untouched), so a project-relative path is not reliably derivable
+// here without re-deriving project identity from config; the absolute path
+// is still a precise, actionable pointer for the human reviewing the note.
+func writeCodexImportConflictReviewNote(dst, altPath string) error {
+	agentsHome := config.AgentsHome()
+	dir := filepath.Join(agentsHome, "review-notes", "import-conflicts")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	id := fmt.Sprintf("ic-%d", time.Now().UnixNano())
+	note := codexImportConflictReviewNote{
+		ID:              id,
+		Status:          "pending",
+		Kind:            "unmarked_render_collision",
+		Bucket:          "agents",
+		Scope:           filepath.Dir(filepath.Dir(filepath.Dir(dst))),
+		LogicalName:     strings.TrimSuffix(filepath.Base(dst), ".toml"),
+		CanonicalTarget: dst,
+		AlternateTarget: altPath,
+		Origin:          "codex",
+		Rationale:       "A pre-existing .codex/agents render collided with a dot-agents managed render at install/refresh time and lacked the managed-provenance marker (codexManagedTomlMarker); the diverged content was preserved at an alternate path per resource-intent-centralization RFC §6 rather than overwritten.",
+		SuggestedActions: []string{
+			"Compare canonical_target vs alternate_target and reconcile manually if the preserved content should be kept.",
+			"Delete the alternate file after merging if it is redundant — a subsequent `da import` also picks it up as an ordinary project-scope import candidate.",
+		},
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := yaml.Marshal(&note)
+	if err != nil {
+		return err
+	}
+	fn := filepath.Join(dir, id+".yaml")
+	return os.WriteFile(fn, append(data, '\n'), 0644)
 }
 
 func renderCodexAgentToml(agentMD string) ([]byte, error) {
