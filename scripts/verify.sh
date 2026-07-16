@@ -471,18 +471,15 @@ test_command "git-source content-install: projected skill byte-identical after t
   "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
 
 # TEMP-DIAG (remove before merge): pinpoint the windows-only churn + missing CAS.
-{
-  echo "DIAG AGENTS_HOME=${AGENTS_HOME}"
-  python3 -c "import json
-a=json.load(open('${SMOKE_ROOT}/pkg-lock-before.json')); b=json.load(open('${PKG_PROJ}/.agentsrc.lock'))
-ua=a['units'].get('da-agc:skill/release-docs-refresh@main'); ub=b['units'].get('da-agc:skill/release-docs-refresh@main')
-print('DIAG before-skill-unit', ua); print('DIAG after-skill-unit ', ub)
-print('DIAG digest_changed', (ua or {}).get('digest')!=(ub or {}).get('digest'))
-print('DIAG ac_changed', a.get('artifact-content')!=b.get('artifact-content'))
-print('DIAG unit_keys_before', sorted(a['units'])); print('DIAG unit_keys_after', sorted(b['units']))"
-  echo "DIAG verify-verbose:"; (cd "${PKG_PROJ}" && $DOT_AGENTS_ABS config verify 2>&1) | head -30
-  echo "DIAG ls CAS skills:"; ls -laR "${AGENTS_HOME}/cache/artifacts/skills" 2>&1 | head -30
-} 1>&2 || true
+echo "DIAG AGENTS_HOME=${AGENTS_HOME}" >&2
+echo "DIAG dbefore=$(python3 -c "import json;print(json.load(open('${SMOKE_ROOT}/pkg-lock-before.json'))['units'].get('da-agc:skill/release-docs-refresh@main',{}).get('digest'))" 2>&1)" >&2
+echo "DIAG dafter=$(python3 -c "import json;print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units'].get('da-agc:skill/release-docs-refresh@main',{}).get('digest'))" 2>&1)" >&2
+echo "DIAG ubefore=$(python3 -c "import json;print(sorted(json.load(open('${SMOKE_ROOT}/pkg-lock-before.json'))['units']))" 2>&1)" >&2
+echo "DIAG uafter=$(python3 -c "import json;print(sorted(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']))" 2>&1)" >&2
+echo "DIAG acbefore=$(python3 -c "import json;print(json.load(open('${SMOKE_ROOT}/pkg-lock-before.json')).get('artifact-content'))" 2>&1)" >&2
+echo "DIAG acafter=$(python3 -c "import json;print(json.load(open('${PKG_PROJ}/.agentsrc.lock')).get('artifact-content'))" 2>&1)" >&2
+echo "DIAG casfiles=$(find "${AGENTS_HOME}/cache/artifacts" -type f 2>&1 | head -20)" >&2
+echo "DIAG verify=$( (cd "${PKG_PROJ}" && $DOT_AGENTS_ABS config verify 2>&1) | tr '\n' '|' | head -c 800)" >&2
 
 # ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
