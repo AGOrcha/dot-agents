@@ -92,7 +92,8 @@ over the shared-home starter, so a project overrides the product base by droppin
 file into its prompts scope. Every dispatcher — the worker, the orchestrator, and the emitted
 swarm YAML — calls this one seam, so all consumers resolve the **same merged prompt**. A
 resolve stage that finds a matched stage with an empty model or empty model family MUST refuse:
-the projection is generated from the routing IR, never authored inline.
+the projection is generated from the routing IR, never authored inline, so an empty route is a
+build error caught at emit time, not a runtime surprise.
 
 **Cross-family gate binding.** The blocking adversarial review MUST run on a different model
 family than the executor; same family on both sides makes the review invalid. Bind that
@@ -145,6 +146,10 @@ abandonment:
 - **Fanout refusal** ⇒ a failed fanout writes an explicit fold-back for that task so an earlier
   successful sibling delegation is never stranded.
 
+The unifying invariant across all four modes: **there is no abandonment path**. Every failure is
+a routed, idempotent outcome that frees its slot and leaves a durable record, so a later pass can
+always reconstruct what happened without the failed worker still being alive.
+
 **Signal co-termination.** A single terminal/tmux restart can take a whole process tree down
 with pending tool calls. The driver encodes the fix: each inner pipeline gets its own process
 group so an interrupt co-terminates the driver *and* every agent it spawned, not just the
@@ -179,6 +184,19 @@ Verifiers and reviewers NEVER mutate canonical workflow state; only the gate sta
 owner-held PR, polls the delivery gate for the task's app-type, and authors the merge-back
 draft. Verification-then-review-then-gate is the ordering, and each stage's route must equal its
 own declared model and family.
+
+```
+executor
+  → bounded verifier slots       (each gated on the prior verifier's PASS)
+  → bounded routine review lenses (each gated on prior + all verifiers passed; read-only)
+  → the blocking cross-family lens
+  → the evidence gate
+```
+
+The ordering is load-bearing, not cosmetic: verification proves the change *works* before any
+reviewer spends tokens arguing about it, and review completes before the gate spends effort
+publishing it. Because each gate is a hard precondition on the next stage, a failure
+short-circuits the remaining spend instead of paying for stages that can no longer matter.
 
 **What real discipline looks like.** Separate live discipline from prescribed-but-dead prose:
 - **In-session verification is non-optional per app-type.** Where tool outcomes persist,
@@ -244,7 +262,8 @@ tool definitions alone.
   re-reads (see [§8](#8-context-budget-and-compaction)) — not the model.
 - **Dollar savings are cache-read-rate bound.** Only a minority of total dollars is
   outcome-addressable by swapping tiers; the majority re-prices purely by the swapped tier's
-  cache-read rate.
+  cache-read rate. A tier swap is therefore a *re-pricing* of the same volume far more than it is
+  a *reduction* of it.
 - **Stage granularity trades against the fixed tax.** Cheap-tier fractional savings rise with
   task length; the shortest tasks yield the least because the fixed tool-def block is
   model-priced but volume-fixed. Don't route a trivial task through a heavy tool-def context.
@@ -287,6 +306,10 @@ the following archetypes recur:
 | contract-native, no CLI | runs the loop-worker/orchestrator contract natively, without the CLI | native task spawning | **none** of tokens/cost/wallclock/model; **zero tool-result** |
 | minimal / smoke | n/a | — | tokens, credits (not cost), wallclock, model |
 
+The rows are a **capability partition**, not a ranking: two harnesses in the same row can share a
+projection shape, but two in different rows cannot — they differ on the most basic axis, whether
+they drive the CLI at all.
+
 **Consequences the projection layer must encode:**
 - **A single emitted projection cannot serve every archetype.** Some harnesses drive the CLI
   directly; others never do — they read workflow artifacts and orchestrate via their own
@@ -296,7 +319,7 @@ the following archetypes recur:
   `model_family × task_class × cache_regime × retry_regime`; **hard-exclude** any harness from
   an axis it cannot record (e.g. a harness that records no tokens/cost/wallclock/model from all
   four), and note the exclusion is a format property, invariant to workflow-vs-advisory use.
-  Never score a cell on an axis its harness cannot supply.
+  Never score a cell on an axis its harness cannot supply; a masked axis is absent, not zero.
 - **Scope findings correctly.** Cost and resilience outcomes generalize past the workflow
   sample; mechanism/orchestration projection MUST be gated on "is this a workflow session?" and
   never applied to advisory chat.
