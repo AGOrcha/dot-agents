@@ -1,7 +1,7 @@
 # KG & Adjacent Articles — Evaluation Against dot-agents
 
-**Written:** 2026-04-21 (addenda: 2026-04-23 added shivsakhuja Skill Graphs 2.0 as §A.1 entry 5; 2026-04-23 added akshay_pachaar *Build Agents that never forget* as §A.1 entry 6; 2026-04-27 added workflow spec/plan inventory corrections; 2026-05-03 added annimaniac *Six Levels of AI-Pilled Organizations* as new §A.5 group plus Part B theme 7 and §C.10/C.11/C.12; 2026-05-03 added ashwingop *Company Brain* series (Part 2 Factual Memory + Part 3 Interaction Memory) as §A.2 entry 6 plus Part B theme 8 and §C.13/C.14; 2026-05-08 added ashwingop Parts 4–7 (Action Memory, Memory as State, Year of Building, Semantics+Ontology) extending §A.2 entry 6; added alphasignalai *Single vs Multi-Agent* as §A.4 entry 5; added Part B theme 9; added §C.14/C.15; added Part G research-profile verification pass; added akshay_pachaar *IdeaBlocks* as §A.1 entry 7; added mem0ai *Memory Decay* as §A.2 entry 7; added ghumare64 *Runbooks* + trq212 *HTML* as §A.3 entries 5–6; added Part B theme 10; added §C.16/C.17; 2026-06-24 added Part H — five new x.com-sourced articles (compaction-orchestrator, prompt-debt, token-capital-efficiency, jailbreak-prompt-opt-duality [NEEDS-PASTE], agent-without-phone) evaluated against graph-backend-adapter-contract / scoped-knowledge-graphs / work-tracking-storage-abstraction / kg-command-surface-readiness + the KG-as-SOT typed-views theme; 2026-06-24 re-extracted all five via the `article-extract` skill Playwright path and conformed articles/ + extracts/ to the skill's title/author/date/method/body/key-quotes template — confirmed aminkarbasi's X-native article body is login-walled, not retrievable unauthenticated); 2026-07-13 added Part L — six delegation-economics / loop-craft / harness-config X sources (joon-lee Fable-vs-Opus delegation economics, blomfield self-improving-company, intuitmachine/arXiv Atomic Task Graph, jasonzhou loop-engineering, vtrivedy LangChain harness-profiles, thealexker harness-engineering guide) supplying measured anchors for the Part J/K delegation + model-routing clusters); 2026-07-13 added Part M — the *Bilevel Autoresearch* meta-loop paper (arXiv 2603.23420v2), theoretical anchor for the self-improvement/meta-loop thesis (mechanism-change ≫ parameter-change) plus safety corroboration for the skill-validation gate)
-**Scope:** 40 articles in `research/articles/` (KG + memory + harness + multi-agent + hooks/platform + delegation-economics + loop-craft + meta-loop/self-improvement). Compared against current specs in `.agents/workflow/specs/`, plans in `.agents/workflow/plans/`, proposals in `.agents/proposals/`, lessons in `.agents/lessons/`, and the scoped-KG / graph-bridge / app-type-profile / skill-tiering specs.
+**Written:** 2026-04-21 (addenda: 2026-04-23 added shivsakhuja Skill Graphs 2.0 as §A.1 entry 5; 2026-04-23 added akshay_pachaar *Build Agents that never forget* as §A.1 entry 6; 2026-04-27 added workflow spec/plan inventory corrections; 2026-05-03 added annimaniac *Six Levels of AI-Pilled Organizations* as new §A.5 group plus Part B theme 7 and §C.10/C.11/C.12; 2026-05-03 added ashwingop *Company Brain* series (Part 2 Factual Memory + Part 3 Interaction Memory) as §A.2 entry 6 plus Part B theme 8 and §C.13/C.14; 2026-05-08 added ashwingop Parts 4–7 (Action Memory, Memory as State, Year of Building, Semantics+Ontology) extending §A.2 entry 6; added alphasignalai *Single vs Multi-Agent* as §A.4 entry 5; added Part B theme 9; added §C.14/C.15; added Part G research-profile verification pass; added akshay_pachaar *IdeaBlocks* as §A.1 entry 7; added mem0ai *Memory Decay* as §A.2 entry 7; added ghumare64 *Runbooks* + trq212 *HTML* as §A.3 entries 5–6; added Part B theme 10; added §C.16/C.17; 2026-06-24 added Part H — five new x.com-sourced articles (compaction-orchestrator, prompt-debt, token-capital-efficiency, jailbreak-prompt-opt-duality [NEEDS-PASTE], agent-without-phone) evaluated against graph-backend-adapter-contract / scoped-knowledge-graphs / work-tracking-storage-abstraction / kg-command-surface-readiness + the KG-as-SOT typed-views theme; 2026-06-24 re-extracted all five via the `article-extract` skill Playwright path and conformed articles/ + extracts/ to the skill's title/author/date/method/body/key-quotes template — confirmed aminkarbasi's X-native article body is login-walled, not retrievable unauthenticated); 2026-07-13 added Part L — six delegation-economics / loop-craft / harness-config X sources (joon-lee Fable-vs-Opus delegation economics, blomfield self-improving-company, intuitmachine/arXiv Atomic Task Graph, jasonzhou loop-engineering, vtrivedy LangChain harness-profiles, thealexker harness-engineering guide) supplying measured anchors for the Part J/K delegation + model-routing clusters); 2026-07-13 added Part M — the *Bilevel Autoresearch* meta-loop paper (arXiv 2603.23420v2), theoretical anchor for the self-improvement/meta-loop thesis (mechanism-change ≫ parameter-change) plus safety corroboration for the skill-validation gate); 2026-07-14 added two sources to Part L — **L.8** (suryansh *Fable 5 Changes Software Engineering Forever*, opinion-grade engineer-as-orchestrator corroboration) and **L.9** (aibuilderclub *Loop Engineering Guide 2026*, the practitioner/conceptual theory-half of loop engineering — verifier-is-the-bottleneck thesis); one baseline Go reference (reddit r/golang, retrieval-blocked stub) is filed under `research/extracts/` and is out of scope for KG/harness evaluation)
+**Scope:** 42 articles in `research/articles/` (KG + memory + harness + multi-agent + hooks/platform + delegation-economics + loop-craft + meta-loop/self-improvement). Compared against current specs in `.agents/workflow/specs/`, plans in `.agents/workflow/plans/`, proposals in `.agents/proposals/`, lessons in `.agents/lessons/`, and the scoped-KG / graph-bridge / app-type-profile / skill-tiering specs.
 **Rubric per article:** core idea → pros → cons/tradeoffs → mapping to our stack with one of three labels:
 - **[OVERLAP-SHARPEN]** — we do it, they do it better or differently in a way we should learn from
 - **[GAP-ADOPT]** — we don't do it, worth adding
@@ -2001,6 +2001,106 @@ digest/parked. See the adoptables table handed to `knowledge-fold-back` for fina
 5. Where do the Blomfield "2,000 hours → 150-page manual in a weekend, self-updates monthly"
    figures come from, if anywhere citable? (L.2 — n=1 asserted; low priority.)
 
+### Part L — 2026-07-14 addendum: two loop-engineering / orchestration-thesis sources (L.8–L.9)
+
+**Why / provenance (§2).** Two just-extracted sources added after the 2026-07-13 batch closed,
+both in the loop-craft / engineer-as-orchestrator thread this Part already owns — so they extend
+Part L rather than opening a new part. Bodies in `research/articles/`. Both dedup against the L.4
+(jasonzhou, same org as L.9) / L.6 (Alex Ker) cluster: they *corroborate*, they do not add a
+measured member. Neither reopens a cell; the transcript plan's freeze discipline is irrelevant
+here (no adoptable touches its waves).
+
+*Footnote (Source C, out of scope).* One baseline Go reference — reddit r/golang *"Benchmark
+surprise: passing structs by value"* (retrieval-blocked stub, thread `1utgamn`) — is filed under
+`research/extracts/reddit-golang-baseline-2026-07.md` and is **out of scope for KG/harness
+evaluation** (baseline Go idiom: small-struct pass-by-value vs pointer/escape-analysis, not
+eval-weighted). Not assigned a Part; the header scope count does not include it.
+
+### L.8 Suryansh Tiwari — *Claude Fable 5 Changes Software Engineering Forever* (2026-07-13)
+
+**Core.** Opinion essay: engineering keeps abstracting (assembly → C → frameworks → cloud →
+copilots → "intelligence itself"); the engineer becomes the **orchestrator** — "the manager of
+intelligence… the operating system for an AI workforce" — directing specialized agents (Planner /
+Research / Coding / Testing / Security / Deployment) rather than writing lines. Attributes a
+"research → plan → implement → test → refactor → verify" long-horizon loop and multi-file
+refactoring to Fable 5. No data, no tooling, no code, no citations.
+
+**Evidence grade: `asserted` / opinion** — the lowest-graded tier in the corpus (growth account,
+21K views, zero measurements). Mass-audience corroboration only; every Fable-5 mechanism claim is
+the author's framing.
+
+**Pros.** Popular-audience confirmation that the engineer-as-orchestrator / "AI Workforce OS = the
+harness" thesis has escaped the practitioner niche — the same framing our ISP stack
+(orchestrator + executor + verifier) embodies and that L.4 (jasonzhou) and L.6 (Alex Ker) already
+articulate at practitioner grade.
+
+**Cons.** No new mechanism, config surface, or metric. Its "research→plan→implement→test→refactor
+→verify" loop is the *vibe*; the measured versions live in L.1 (Joon Lee delegation economics) and
+L.3 (ATG). Treat this piece as the vibe, those as the evidence.
+
+**Mapping.**
+- **[WE-AHEAD + OVERLAP-SHARPEN — lowest evidence grade in the batch]** No adoptable lever. Fold as
+  a single low-weight corroboration line, not a cluster: it restates L.4/L.6's orchestrator-role
+  thesis at essay grade for a general audience. Its only sharpen is rhetorical — a citable popular
+  framing that the orchestrator-role thesis is now mainstream. No routing, no gate change.
+
+### L.9 Shirley (AI Builder Club) — *Loop Engineering Guide (2026)* (2026-06-17, upd. 2026-07-02)
+
+**Core.** The org's canonical conceptual writeup of loop engineering: designing the repeating
+"discover → plan → execute → verify → (repeat until a condition is met)" cycle rather than one-shot
+prompts. Load-bearing thesis: **the verifier, not the model, is the bottleneck** — models generate
+cheaply, so verification decides whether motion creates value; "writing a strong verifier is the
+new prompt engineering." Layers a theory frame — **Andrew Ng's three-loop hierarchy** (agentic
+seconds–minutes / developer-feedback minutes–hours / external-feedback hours–weeks) + the human's
+**"context advantage"**; the **open-vs-closed loop** taxonomy; the **loop-vs-harness** distinction
+(the loop sits *within* harness engineering); **eval engineering** as the next step — on top of the
+same practical stack Jason Zhou (L.4) describes: contract (goal/boundaries/SOP), state+logs,
+verifier ("don't self-verify," measurable pass/fail defined upfront), triggers, orchestrator/
+executor/verifier split, compounding shared-folder signals. Names an **agent-ready-codebase
+"fourth pillar"**: legible (~100-line `CLAUDE.md` index + custom lints), executable (pre-warmed
+worktree envs), verifiable (automated tests + Playwright evidence).
+
+**Evidence grade: `practitioner/conceptual report`** — coherent framework and real templates, but
+**no measurements** (effect claims `[asserted]`; the 20–40 pages/day compounding figure
+`[UNVERIFIED]`). Above the growth-account opinion tier (L.8), below the measured anchors (L.1
+Cognition, L.5 LangChain). Genre: org content-funnel (AI Builder Club) — the **same org** as L.4,
+so not an independent second source on the shared loop anatomy.
+
+**Pros.** The **theory half** of loop engineering to L.4's operational half — same org,
+complementary. Its loop anatomy (contract / state+logs / verifier / trigger / 3-role split)
+matches our ISP stack field-for-field (already graded under L.4). The verifier-bottleneck thesis
+is the sharpest external articulation of why our verifier profiles + `verify` skill are
+load-bearing. Andrew Ng's three-loop hierarchy + "context advantage" and the open/closed taxonomy
+are clean framings the corpus lacked. The agent-ready-codebase pillar names our CLAUDE.md-as-index
++ custom-lint + worktree conventions as a coherent target.
+
+**Cons.** No numbers; conceptual/positioning content; templates are AI-Builder-Club-shaped; heavy
+overlap with L.4 (same org) means it corroborates rather than independently confirms the loop
+anatomy.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** the four-part loop anatomy + 3-role split is the theory-half articulation of
+  our ISP stack — cite alongside L.4 in the loop-taxonomy note (pipeline-architect first-question,
+  per J.5) as the canonical external framing. The extensions (Ng three-loop hierarchy,
+  context-advantage, open/closed taxonomy, loop-vs-harness, eval engineering) are conceptual
+  corroboration for our loop-discipline artifacts and the J.5/L.4/L.2 loop-taxonomy convergence.
+  Additive, digest-only.
+- **[OVERLAP-SHARPEN — verifier thesis]** "the verifier, not the model, is the bottleneck; a strong
+  verifier is the new prompt engineering" is the strongest external statement of our
+  verifier-profile / `verify`-skill bet (and L.4's "/verify is the deciding factor"). Corroboration
+  for the verifier-first design. No gate change.
+- **[GAP-NOTE — task-note candidate, owner: `full-loop-orchestration-runtime` or verifier-profile
+  work; NOT frozen]** the verifier-is-the-bottleneck thesis plus the agent-ready-codebase
+  legible/executable/verifiable framing map onto our **verifier profiles / `verify` skill** and our
+  **CLAUDE.md-as-index** convention — a possible positioning/docs task-note for the active
+  `full-loop-orchestration-runtime` or verifier-profile work (both un-frozen), scoped
+  corroboration-first, not a decision. **Note only** — the orchestrator routes whether this becomes
+  a fold-back; it sits next to L.6's parked 8-property harness self-assessment. Do NOT create the
+  fold-back from this eval pass.
+- **[WE-AHEAD]** "don't let an agent self-verify → a separate read-only verifier with detailed
+  specs" is already our ISP verifier stage (verifier ≠ implementer, separate agent, verdict-only).
+  We wire the separation the guide only prescribes. No action.
+
 ---
 
 ## Part M — 2026-07-13 addendum: Bilevel Autoresearch (meta-loop / self-improvement paper)
@@ -2105,4 +2205,10 @@ added 2026-07-13: supplies measured anchors (Cognition L.1, LangChain L.5, ATG p
 clusters Parts J/K corroborated only from linkless sources; frozen-plan items corroboration-
 first, config/pipeline/runtime items routed live to their own plans. Part M (Bilevel Autoresearch
 meta-loop paper) added 2026-07-13: theoretical anchor for the self-improvement/meta-loop thesis
-(mechanism-change ≫ parameter-change) + safety corroboration for the skill-validation gate.*
+(mechanism-change ≫ parameter-change) + safety corroboration for the skill-validation gate.
+Part L extended 2026-07-14 with two loop-craft sources — L.8 (suryansh, opinion-grade
+engineer-as-orchestrator corroboration; no adoptable lever) and L.9 (aibuilderclub Loop
+Engineering Guide, practitioner/conceptual theory-half of loop engineering carrying one
+[GAP-NOTE] verifier-bottleneck task-note candidate for the active full-loop-orchestration-runtime
+/ verifier-profile work); one baseline Go reference (reddit r/golang, retrieval-blocked stub)
+handled as a footnote only, out of scope. Scope count 40 → 42 (Source C not eval-weighted).*
