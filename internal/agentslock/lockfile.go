@@ -75,6 +75,23 @@ const inputsDigestKey = "inputs_digest"
 // signal. Production always uses 5s.
 var lockAcquireTimeout = 5 * time.Second
 
+// SetAcquireTimeout overrides the acquire budget and returns a restore function.
+// It is the cross-package seam for a concurrent-CONTENTION test that induces many
+// real, slow, LIVE holds: under the race detector the runtime stretches every
+// timing 10-20x, so on a loaded CI runner (the windows-latest leg especially,
+// where -race runs alongside coverage) a single legitimate hold can outlast the
+// 5s production budget even though the polling primitive is correct — no wakeup
+// is ever lost, only latency added. Such a test widens the budget here to stay
+// deterministic; production binaries (never built with -race) keep the 5s bound.
+// The override MUST stay BELOW lockStaleTTL for a test that expects a timeout,
+// else the held lock crosses the stale threshold and is reclaimed instead. Not
+// for parallel tests — it mutates a process-global (callers here run serially).
+func SetAcquireTimeout(d time.Duration) (restore func()) {
+	prev := lockAcquireTimeout
+	lockAcquireTimeout = d
+	return func() { lockAcquireTimeout = prev }
+}
+
 const (
 	lockRetryInterval = 10 * time.Millisecond
 	// lockStaleTTL bounds how long an unreleased lock is tolerated before a

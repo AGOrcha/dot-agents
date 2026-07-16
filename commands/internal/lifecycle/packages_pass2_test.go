@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/config"
@@ -607,6 +608,11 @@ func TestRunInstall_PackagesRefMaterializesLocksAndProjects(t *testing.T) {
 // read-outside-the-flush-lock shape, a pass-2 that read units before a
 // concurrent pass-1 layer write clobbered the layer key with its stale snapshot.
 func TestCommitArtifactLock_InterleavedWithPass1PreservesBothKeys(t *testing.T) {
+	// 24 rounds of real pass-1/pass-2 lock contention: under -race on a loaded CI
+	// runner a single legitimate hold can outlast the 5s production acquire budget
+	// (observed as a flaky "acquire ... timed out" on windows-latest). Widen the
+	// budget for this contention test; production keeps 5s.
+	defer agentslock.SetAcquireTimeout(60 * time.Second)()
 	tmp := t.TempDir()
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
 	proj := filepath.Join(tmp, "proj")
