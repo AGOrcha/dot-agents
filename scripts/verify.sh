@@ -493,23 +493,25 @@ for _i in $(seq 1 300); do cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lo
 for _i in $(seq 1 300); do cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md" 2>/dev/null && break; sleep 0.2; done
 test_command "git-source content-install: install --yes (second run, frozen no-op)" \
   "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
-# retry_test: the lock read immediately follows the install's atomic re-write and
-# can lose a windows filter-driver race (see retry_test). The python exits 0 only
-# when both sections are byte-unchanged — a frozen no-op is a true no-op now that
-# the units lock is timestamp-free.
+# The python compare reads both locks via bash — env var + stdin redirect — never
+# python open('/tmp/..'): on windows-latest python3 is the NATIVE Windows
+# interpreter and cannot resolve a Git-Bash MSYS /tmp path, so an open() there is a
+# deterministic FileNotFoundError, not the transient filter-driver race the retry
+# guards. bash IS MSYS-aware, so it opens the files; python only ever sees bytes.
 retry_test "git-source content-install: units+artifact-content unchanged across the no-op re-run" \
-  "python3 -c \"import json,sys; a=json.load(open('${SMOKE_ROOT}/pkg-lock-before.json')); b=json.load(open('${PKG_PROJ}/.agentsrc.lock')); sys.exit(0 if (a['units']==b['units'] and a['artifact-content']==b['artifact-content']) else 1)\""
+  "LOCK_BEFORE=\"\$(cat '${SMOKE_ROOT}/pkg-lock-before.json')\" python3 -c \"import json,os,sys; a=json.loads(os.environ['LOCK_BEFORE']); b=json.load(sys.stdin); sys.exit(0 if (a['units']==b['units'] and a['artifact-content']==b['artifact-content']) else 1)\" < '${PKG_PROJ}/.agentsrc.lock'"
 test_command "git-source content-install: projected skill byte-identical after the no-op re-run" \
   "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
 
 # ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
-# Read the skill digest with retry: this lock read is subject to the same windows
-# read-after-write race, and if it returned empty the CAS path below would be
-# permanently malformed (a retry on `test -f` could never recover).
+# Read the skill digest via stdin redirect (bash opens the MSYS path; native
+# Windows python3 cannot open a /tmp/.. path). An empty digest would malform the
+# CAS path below (skills//SKILL.md), so require the sha256: prefix; the loop also
+# absorbs any genuine transient hold.
 PKG_SKILL_DIGEST=""
 for _i in $(seq 1 300); do
-  PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])" 2>/dev/null)"
+  PKG_SKILL_DIGEST="$(python3 -c "import json,sys; print(json.load(sys.stdin)['units']['da-agc:skill/release-docs-refresh@main']['digest'])" < "${PKG_PROJ}/.agentsrc.lock" 2>/dev/null)"
   case "${PKG_SKILL_DIGEST}" in sha256:*) break ;; esac
   sleep 0.2
 done
