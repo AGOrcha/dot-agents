@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t7-oci-auth
+delegation_id: del-t7-oci-auth-1784172615
+decision: accept
+closed_at: "2026-07-16T05:16:10Z"

@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t9-perf-testing-optimization
+delegation_id: del-t9-perf-testing-optimization-1784186377
+decision: accept
+closed_at: "2026-07-16T09:11:35Z"

@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t3b-invocation-time-integrity
+delegation_id: del-t3b-invocation-time-integrity-1784166268
+decision: accept
+closed_at: "2026-07-16T02:06:04Z"

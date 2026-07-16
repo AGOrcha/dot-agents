@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t3-lock-and-wire-pass2
+delegation_id: del-t3-lock-and-wire-pass2-1784155939
+decision: accept
+closed_at: "2026-07-16T00:20:58Z"

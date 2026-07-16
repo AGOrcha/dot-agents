@@ -1,0 +1,20 @@
+schema_version: 1
+id: del-t5-wire-consumer-and-smoke-1784166254
+mode: delegated
+parent_plan_id: package-artifact-install
+parent_task_id: t5-wire-consumer-and-smoke
+title: Wire dot-agents onto da-agc and add the tree content-install smoke test
+summary: Delegated from plan Package artifact install (fetch → materialize → project resource content from a da source)
+write_scope:
+    - .agentsrc.json
+    - .agentsrc.lock
+    - scripts/verify.sh
+    - internal/config/resolver_test.go
+    - tests
+success_criteria: Declare the da-agc git source plus extends (layer) and packages (artifacts) in dot-agents .agentsrc.json. Prove config-layer parity and that fetched skill/agent trees materialize gitignored + locked + invocable. Extend the git-source-smoke fixture from layer-only to content install (DC2).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t5
+status: completed
+created_at: "2026-07-16T01:44:14Z"
+updated_at: "2026-07-16T02:28:14Z"

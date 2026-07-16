@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t2-materialize-store
+delegation_id: del-t2-materialize-store-1784094833
+decision: accept
+closed_at: "2026-07-15T22:50:39Z"
