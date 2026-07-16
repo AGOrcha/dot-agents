@@ -462,6 +462,9 @@ assert_contains "git-source content-install: config verify -> OK" \
 # moves), and the projected files are byte-identical (H9 frozen = no rewrite).
 cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json"
 cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md"
+# TEMP-DIAG3 (revert before merge): capture staleness + CAS BEFORE the 2nd install.
+echo "DIAG3 casfiles_before=$(find "${AGENTS_HOME}/cache/artifacts" -type d 2>&1 | tr '\n' '|')" >&2
+echo "DIAG3 verify_before=$( (cd "${PKG_PROJ}" && $DOT_AGENTS_ABS config verify 2>&1) | grep -i 'stale\|artifact\|package\|FAIL\|Summary' | tr '\n' '|')" >&2
 test_command "git-source content-install: install --yes (second run, frozen no-op)" \
   "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
 assert_json_field "git-source content-install: units+artifact-content unchanged across the no-op re-run" \
@@ -471,15 +474,20 @@ test_command "git-source content-install: projected skill byte-identical after t
   "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
 
 # TEMP-DIAG (remove before merge): pinpoint the windows-only churn + missing CAS.
-echo "DIAG AGENTS_HOME=${AGENTS_HOME}" >&2
-echo "DIAG dbefore=$(python3 -c "import json;print(json.load(open('${SMOKE_ROOT}/pkg-lock-before.json'))['units'].get('da-agc:skill/release-docs-refresh@main',{}).get('digest'))" 2>&1)" >&2
-echo "DIAG dafter=$(python3 -c "import json;print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units'].get('da-agc:skill/release-docs-refresh@main',{}).get('digest'))" 2>&1)" >&2
-echo "DIAG ubefore=$(python3 -c "import json;print(sorted(json.load(open('${SMOKE_ROOT}/pkg-lock-before.json'))['units']))" 2>&1)" >&2
-echo "DIAG uafter=$(python3 -c "import json;print(sorted(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']))" 2>&1)" >&2
-echo "DIAG acbefore=$(python3 -c "import json;print(json.load(open('${SMOKE_ROOT}/pkg-lock-before.json')).get('artifact-content'))" 2>&1)" >&2
-echo "DIAG acafter=$(python3 -c "import json;print(json.load(open('${PKG_PROJ}/.agentsrc.lock')).get('artifact-content'))" 2>&1)" >&2
-echo "DIAG casfiles=$(find "${AGENTS_HOME}/cache/artifacts" -type f 2>&1 | head -20)" >&2
-echo "DIAG verify=$( (cd "${PKG_PROJ}" && $DOT_AGENTS_ABS config verify 2>&1) | tr '\n' '|' | head -c 800)" >&2
+DIAG_BEFORE="${SMOKE_ROOT}/pkg-lock-before.json" DIAG_AFTER="${PKG_PROJ}/.agentsrc.lock" python3 - >&2 <<'PY' || true
+import json, os
+try:
+    b = json.load(open(os.environ['DIAG_BEFORE'])); a = json.load(open(os.environ['DIAG_AFTER']))
+    sk = 'da-agc:skill/release-docs-refresh@main'
+    print('DIAG dbefore', b['units'].get(sk, {}).get('digest'))
+    print('DIAG dafter ', a['units'].get(sk, {}).get('digest'))
+    print('DIAG digest_changed', b['units'].get(sk, {}).get('digest') != a['units'].get(sk, {}).get('digest'))
+    print('DIAG acbefore', b.get('artifact-content'))
+    print('DIAG acafter ', a.get('artifact-content'))
+except Exception as e:
+    print('DIAG python error:', repr(e))
+PY
+echo "DIAG casfiles_after=$(find "${AGENTS_HOME}/cache/artifacts" -type d 2>&1 | tr '\n' '|')" >&2
 
 # ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
