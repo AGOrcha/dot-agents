@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -56,6 +57,12 @@ type fakeOCIRegistry struct {
 	// pullCount tracks GET manifest/blob requests, so a test can assert the
 	// registry was NOT hit again (the frozen-lock no-op requirement).
 	pullCount int
+
+	// uploadLocationOverride, when non-empty, is returned verbatim as the
+	// blob-upload Location header instead of the normal same-origin relative
+	// one — used to simulate a malicious/compromised registry pointing the
+	// credentialed PUT at an attacker origin (H12 cross-origin guard coverage).
+	uploadLocationOverride string
 }
 
 func newFakeOCIRegistry(t *testing.T) (*httptest.Server, *fakeOCIRegistry) {
@@ -81,7 +88,11 @@ func (r *fakeOCIRegistry) handle(w http.ResponseWriter, req *http.Request) {
 	switch {
 	case strings.HasSuffix(path, "/blobs/uploads/") && req.Method == http.MethodPost:
 		r.uploads++
-		w.Header().Set("Location", fmt.Sprintf("/v2/%suploads/sess-%d", strings.TrimSuffix(path, "uploads/"), r.uploads))
+		loc := fmt.Sprintf("/v2/%suploads/sess-%d", strings.TrimSuffix(path, "uploads/"), r.uploads)
+		if r.uploadLocationOverride != "" {
+			loc = r.uploadLocationOverride
+		}
+		w.Header().Set("Location", loc)
 		w.WriteHeader(http.StatusAccepted)
 	case strings.Contains(path, "/blobs/uploads/") && req.Method == http.MethodPut:
 		digest := req.URL.Query().Get("digest")
@@ -294,6 +305,76 @@ func TestVerifyOCIPinAcceptsManifestDigest(t *testing.T) {
 }
 
 // --- round trip: publish -> tag pull -> pinned re-pull (frozen no-op) ------
+
+// TestResolveOCILocationOriginGuard is the H12 unit proof that a
+// registry-controlled blob-upload Location is pinned to the configured
+// registry origin before any credential is attached (t8 round-2 HIGH).
+func TestResolveOCILocationOriginGuard(t *testing.T) {
+	cases := []struct {
+		name    string
+		base    string
+		loc     string
+		wantErr bool
+	}{
+		{"relative-same-origin", "https://reg.example:5000", "/v2/x/blobs/uploads/sess-1", false},
+		{"absolute-same-origin", "https://reg.example:5000", "https://reg.example:5000/v2/x/uploads/sess-1", false},
+		{"absolute-same-host-default-port", "https://reg.example", "https://reg.example:443/v2/x/uploads/1", false},
+		{"cross-host", "https://reg.example:5000", "https://attacker.evil/steal", true},
+		{"same-host-different-port", "https://reg.example:5000", "https://reg.example:9999/v2/x/uploads/1", true},
+		{"https-to-http-downgrade", "https://reg.example", "http://reg.example/v2/x/uploads/1", true},
+		{"embedded-userinfo", "https://reg.example", "https://user:pass@reg.example/v2/x/uploads/1", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveOCILocation(tc.base, tc.loc)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected rejection, got resolved %q", got)
+				}
+				// The error must not echo a credential-bearing query/userinfo.
+				if strings.Contains(err.Error(), "user:pass") {
+					t.Fatalf("error leaked userinfo: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected rejection: %v", err)
+			}
+		})
+	}
+}
+
+// TestPublishTreeRefusesCrossOriginBlobUploadLocation proves end-to-end that a
+// malicious registry returning an attacker-origin blob-upload Location cannot
+// harvest the push credential: the credentialed PUT is never sent to the
+// attacker, the publish fails closed, and the attacker server records zero
+// requests (t8 round-2 HIGH, H12 credential exfiltration).
+func TestPublishTreeRefusesCrossOriginBlobUploadLocation(t *testing.T) {
+	withPackagesCache(t)
+	var attackerHits int32
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		atomic.AddInt32(&attackerHits, 1)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(attacker.Close)
+
+	srv, reg := newFakeOCIRegistry(t)
+	reg.uploadLocationOverride = attacker.URL + "/v2/evil/blobs/uploads/sess-steal"
+	src := ociTestSource(srv)
+	srcTree := buildFixtureTree(t)
+	parts := PackageRefParts{SourceID: "s", ArtifactPath: "skill/review-pr", VersionSpec: "v1.0.0"}
+
+	_, err := PublishTree(context.Background(), src, parts, srcTree)
+	if err == nil {
+		t.Fatal("expected PublishTree to refuse the cross-origin blob-upload Location")
+	}
+	if !strings.Contains(err.Error(), "cross-origin") {
+		t.Fatalf("expected a cross-origin rejection, got: %v", err)
+	}
+	if got := atomic.LoadInt32(&attackerHits); got != 0 {
+		t.Fatalf("credentialed request reached the attacker origin %d time(s) — credential exfiltrated", got)
+	}
+}
 
 func TestPublishAndPullRoundTripByteParity(t *testing.T) {
 	withPackagesCache(t)

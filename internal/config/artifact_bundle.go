@@ -310,19 +310,66 @@ func ociAuthenticatedRequest(ctx context.Context, method, rawURL string, body []
 
 // resolveOCILocation resolves a blob-upload session's (possibly relative)
 // Location header against base, per the OCI Distribution spec.
+//
+// H12 — the Location is REGISTRY-CONTROLLED and the caller attaches the push
+// credential to the resolved URL. A malicious/compromised registry can return
+// an absolute Location on an attacker origin; because the credentialed PUT is
+// an explicitly-built request (not a followed redirect), Go's cross-host
+// Authorization stripping does not apply. So the resolved endpoint MUST be on
+// the SAME origin as the configured registry — reject cross-origin, an
+// https->http downgrade, and embedded userinfo before the credential is ever
+// attached. A relative Location resolved against base is same-origin by
+// construction; only an absolute Location can escape.
 func resolveOCILocation(base, loc string) (string, error) {
 	u, err := url.Parse(loc)
 	if err != nil {
 		return "", fmt.Errorf("parsing upload location %q: %w", loc, err)
 	}
-	if u.IsAbs() {
-		return loc, nil
-	}
 	baseU, err := url.Parse(base)
 	if err != nil {
 		return "", fmt.Errorf("parsing registry base %q: %w", base, err)
 	}
-	return baseU.ResolveReference(u).String(), nil
+	resolved := u
+	if !u.IsAbs() {
+		resolved = baseU.ResolveReference(u)
+	}
+	if resolved.User != nil {
+		return "", fmt.Errorf("refusing blob-upload location with embedded userinfo (origin %s)", ociOriginString(resolved))
+	}
+	if !sameOCIOrigin(baseU, resolved) {
+		return "", fmt.Errorf("refusing cross-origin blob-upload location %s: not the configured registry origin %s", ociOriginString(resolved), ociOriginString(baseU))
+	}
+	return resolved.String(), nil
+}
+
+// sameOCIOrigin reports whether a and b share scheme + host + effective port
+// (applying the scheme's default port), i.e. the same web origin. Used to
+// pin a registry-controlled blob-upload Location to the configured registry
+// before a credential is attached (H12).
+func sameOCIOrigin(a, b *url.URL) bool {
+	return a.Scheme == b.Scheme && ociHostPort(a) == ociHostPort(b)
+}
+
+// ociHostPort returns host:port with the scheme's default port applied when
+// the URL omits an explicit port.
+func ociHostPort(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "https":
+			port = "443"
+		case "http":
+			port = "80"
+		}
+	}
+	return u.Hostname() + ":" + port
+}
+
+// ociOriginString is a credential-safe scheme://host[:port] rendering of a URL
+// for error text — it deliberately drops path, query (which may carry an OCI
+// upload-session _state token), and userinfo.
+func ociOriginString(u *url.URL) string {
+	return u.Scheme + "://" + ociHostPort(u)
 }
 
 // appendDigestQuery adds/overwrites the "digest" query parameter on rawURL,
@@ -374,9 +421,26 @@ func ociPushBlob(ctx context.Context, ref ociRef, auth json.RawMessage, data []b
 	}
 	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("completing blob upload at %s: unexpected status %s", putURL, resp2.Status)
+		// Drop the query (may carry an OCI upload-session _state token) from
+		// error text — redactSecrets only scrubs registered credentials.
+		return "", fmt.Errorf("completing blob upload at %s: unexpected status %s", urlWithoutQuery(putURL), resp2.Status)
 	}
 	return digest, nil
+}
+
+// urlWithoutQuery strips the query string (and userinfo) from a URL for
+// credential-safe error text; on a parse error it falls back to the substring
+// before the first "?".
+func urlWithoutQuery(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil {
+		u.RawQuery = ""
+		u.User = nil
+		return u.String()
+	}
+	if i := strings.IndexByte(rawURL, '?'); i >= 0 {
+		return rawURL[:i]
+	}
+	return rawURL
 }
 
 // ociPushLive is the real OCI Distribution push: an empty config blob (OCI
