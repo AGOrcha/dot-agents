@@ -194,7 +194,7 @@ tasks:
       app_type: docs
     - id: craft-reference-stable-relocation
       title: Relocate tailored full-loop craft reference to docs/ and repoint pipeline-architect skill
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents

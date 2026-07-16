@@ -33,6 +33,6 @@ success_criteria: |-
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: DashboardE2ESmoke
-status: active
+status: completed
 created_at: "2026-07-16T04:53:48Z"
-updated_at: "2026-07-16T04:53:48Z"
+updated_at: "2026-07-16T05:12:42Z"

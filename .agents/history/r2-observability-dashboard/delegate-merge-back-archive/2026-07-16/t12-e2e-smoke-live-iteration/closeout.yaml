@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+task_id: t12-e2e-smoke-live-iteration
+delegation_id: del-t12-e2e-smoke-live-iteration-1784177628
+decision: accept
+closed_at: "2026-07-16T05:12:42Z"

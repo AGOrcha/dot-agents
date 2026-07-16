@@ -410,7 +410,7 @@ tasks:
       app_type: web
     - id: t12-e2e-smoke-live-iteration
       title: End-to-end smoke — live iteration triggers UI update within 2s
-      status: in_progress
+      status: completed
       depends_on:
         - t07-standalone-service-bin
         - t09-feature-aggregate-view
@@ -516,7 +516,7 @@ tasks:
       app_type: docs
     - id: t15-rubric-versioning-ui
       title: Rubric explainer view (read /api/rubric, render weights + bands)
-      status: in_progress
+      status: completed
       depends_on:
         - t08-frontend-skeleton
         - t03-handlers-rest
