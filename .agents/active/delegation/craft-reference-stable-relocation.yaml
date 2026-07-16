@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-craft-reference-stable-relocation-1784177504
+mode: delegated
+parent_plan_id: transcript-analysis-and-pipeline-craft
+parent_task_id: craft-reference-stable-relocation
+title: Relocate tailored full-loop craft reference to docs/ and repoint pipeline-architect skill
+summary: Delegated from plan Local transcript analysis + pipeline craft extraction
+write_scope:
+    - docs/full-loop-pipeline-craft.md
+    - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/craft/
+success_criteria: FINAL LOCATION DECIDED (no longer deferred) — the pipeline-architect skill cites the plan-scoped .agents/workflow/plans/transcript-analysis-and-pipeline-craft/craft/full-loop-craft.md (SKILL.md lines 3+12, and instructions gotchas/design-pipeline/cost-tuning/verification-review/platform-capabilities line 4); plan archive would move that file to history and break the citation. Two-version split — (1) author a TAILORED operational reference at the tracked, stable home docs/full-loop-pipeline-craft.md (the sections 1-7 rules + how-to-apply, model/registry-agnostic, NO plan-evidence anchors) and repoint all 6 skill citations to it; (2) the plan-scoped craft/full-loop-craft.md STAYS as the evidence-linked design-spec record (keeps historical-hypotheses/rows anchors, archived with the plan). Add a context-budget/compaction section to the docs reference per research/articles-evaluation-context-engineering-and-foldback-design.md R4 (context-rot — effective context under 30 percent of advertised; compaction+file-systems+memory). NOTE the pipeline-architect skill is currently untracked machine state (not in any tracked scaffold) — coordinate with agent-ops-hardening fold-back scaffold-home-skill-sync-mechanism to add pipeline-architect to a tracked scaffold source so the reference and repointed citations are portable to a fresh machine. The Go projector cites 'craft section N' path-free (no repoint needed there).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: CraftRefRelocation
+status: active
+created_at: "2026-07-16T04:51:44Z"
+updated_at: "2026-07-16T04:51:44Z"

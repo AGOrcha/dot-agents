@@ -1,0 +1,32 @@
+schema_version: 1
+delegation_id: del-t13-r3-mount-integration-1784177640
+plan_id: r2-observability-dashboard
+task_id: t13-r3-mount-integration
+owner: R3MountIntegration
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-07-16T04:54:00Z"
+    reason: r2 dashboard completion wave
+scope:
+    write_scope:
+        - internal/dashboard/server/r3mount.go
+        - internal/dashboard/server/r3mount_test.go
+        - internal/dashboard/events/r3bridge.go
+        - internal/dashboard/events/r3bridge_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Does the dashboard mount the R3 publish primitive (replacing fswatch primary) with passing tests? If the R3 publish API is absent on master, STOP and raise blocked.
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+        - cli-runner
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

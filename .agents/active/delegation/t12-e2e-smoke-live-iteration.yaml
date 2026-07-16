@@ -1,0 +1,38 @@
+schema_version: 1
+id: del-t12-e2e-smoke-live-iteration-1784177628
+mode: delegated
+parent_plan_id: r2-observability-dashboard
+parent_task_id: t12-e2e-smoke-live-iteration
+title: End-to-end smoke — live iteration triggers UI update within 2s
+summary: 'Delegated from plan R2: Real-time observability and evaluation dashboard'
+write_scope:
+    - tests/e2e/dashboard_live_iteration_test.go
+    - web/dashboard/playwright.config.ts
+    - web/dashboard/e2e/live-iteration.spec.ts
+success_criteria: |-
+    Two complementary tests:
+
+    (a) Go integration test
+    (tests/e2e/dashboard_live_iteration_test.go):
+      1. spin up cmd/da-dashboard against a fresh tmpdir iter-log
+         fixture (3 iters);
+      2. open an SSE client to /api/v1/observability/events;
+      3. write a new iter-4.yaml + run scoring.ScoreIteration +
+         write the sidecar;
+      4. assert an iteration.scored frame arrives within 2s.
+
+    (b) Playwright UI smoke (web/dashboard/e2e/):
+      1. start the standalone service in test mode against the
+         same fixture,
+      2. navigate to /, assert RunsGrid renders,
+      3. drill into /runs/:sid, assert iteration count,
+      4. write a new iter-4 sidecar from the test harness,
+      5. assert the grid count increments without reload.
+
+    Both tests skip-guarded behind an `e2e` build tag.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: DashboardE2ESmoke
+status: active
+created_at: "2026-07-16T04:53:48Z"
+updated_at: "2026-07-16T04:53:48Z"

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "skill": "isp",
+  "run_id": "isp-2026-07-14-wave1",
+  "started_at": "2026-07-16T04:51:25.563217Z",
+  "plan_id": "r2-observability-dashboard",
+  "task_id": "t15-rubric-versioning-ui",
+  "agent_type": "main",
+  "lifecycle_point": "skill_entry",
+  "context": {
+    "git_head_at_start": "0f22d38f1d8752eedca85f2f0061f4419d3a4fb6",
+    "eligible_snapshot_loaded": true,
+    "max_batch": 5
+  }
+}

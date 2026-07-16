@@ -1,0 +1,31 @@
+schema_version: 1
+delegation_id: del-t12-e2e-smoke-live-iteration-1784177628
+plan_id: r2-observability-dashboard
+task_id: t12-e2e-smoke-live-iteration
+owner: DashboardE2ESmoke
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-07-16T04:53:48Z"
+    reason: r2 dashboard completion wave
+scope:
+    write_scope:
+        - tests/e2e/dashboard_live_iteration_test.go
+        - web/dashboard/playwright.config.ts
+        - web/dashboard/e2e/live-iteration.spec.ts
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Does a live iteration trigger a UI update within 2s, proven by an e2e smoke test?
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+        - cli-runner
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

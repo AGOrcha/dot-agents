@@ -1,0 +1,30 @@
+schema_version: 1
+delegation_id: del-craft-reference-stable-relocation-1784177504
+plan_id: transcript-analysis-and-pipeline-craft
+task_id: craft-reference-stable-relocation
+owner: CraftRefRelocation
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-07-16T04:51:44Z"
+scope:
+    write_scope:
+        - docs/full-loop-pipeline-craft.md
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/craft/
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Is docs/full-loop-pipeline-craft.md authored with all 6 pipeline-architect citations repointed and the plan craft/ preserved as evidence-spec?
+    app_type: docs
+    verifier_sequence:
+        - schema-check
+        - citation-check
+        - cli-runner
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout
