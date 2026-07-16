@@ -1135,6 +1135,81 @@ func TestArchiveCloseoutArtifacts_MarshalCloseoutError(t *testing.T) {
 	}
 }
 
+// TestArchiveCloseoutArtifacts_RemoveFailureWarnsButSucceeds covers the
+// post-archive cleanup: after the merge-back + contract + bundle are copied
+// into history, the ACTIVE sources are removed. If a remove fails (a Windows
+// sharing violation / delete-pending is the real-world trigger; POSIX rarely
+// hits it) the archive is already durable, so closeout MUST still succeed — but
+// each un-removed source must be surfaced with a loud warning. Historically
+// these were `_ = os.Remove(...)`, which swallowed the failure and left the
+// delegation looking active, so the next fanout reported an active contract.
+func TestArchiveCloseoutArtifacts_RemoveFailureWarnsButSucceeds(t *testing.T) {
+	repo := setupTestProject(t)
+	saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-x")
+	c, _ := loadDelegationContract(repo, "task-001")
+
+	if err := saveMergeBack(repo, &MergeBackSummary{
+		SchemaVersion: 1, TaskID: "task-001", ParentPlanID: "plan-001",
+		Title: "x", Summary: "s", VerificationResult: MergeBackVerification{Status: "pass"},
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed the active bundle so its remove is attempted (then denied) below.
+	bundlesDir := delegationBundlesDir(repo)
+	if err := os.MkdirAll(bundlesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundlesDir, c.ID+".yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deny child-deletion on all three active source dirs so the post-archive
+	// os.Remove calls fail. MakeDirWriteDenied keeps read+execute open, so the
+	// archive copies still run — only the removes fail, which is the bug's
+	// exact shape on Windows.
+	testutil.MakeDirWriteDenied(t, mergeBackDir(repo))
+	testutil.MakeDirWriteDenied(t, delegationDir(repo))
+	testutil.MakeDirWriteDenied(t, bundlesDir)
+
+	closeout := workflowDelegationCloseoutRecord{
+		SchemaVersion: 1, PlanID: "plan-001", TaskID: "task-001", DelegationID: c.ID,
+		Decision: "accept", ClosedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	var archiveDir string
+	var err error
+	out := captureStdoutToString(t, func() {
+		archiveDir, _, err = archiveCloseoutArtifacts(repo, "task-001", "plan-001", "accept", c, closeout)
+	})
+	if err != nil {
+		t.Fatalf("closeout must still succeed when the archive copies land but the removes are denied, got %v", err)
+	}
+
+	// Archive is durable.
+	if _, statErr := os.Stat(filepath.Join(archiveDir, "merge-back.md")); statErr != nil {
+		t.Errorf("expected archived merge-back.md, got stat err=%v", statErr)
+	}
+
+	// Each denied remove is surfaced loudly (not swallowed).
+	for _, want := range []string{
+		"could not remove active merge-back",
+		"could not remove active delegation contract",
+		"could not remove active delegation bundle",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected a loud warning containing %q, got: %q", want, out)
+		}
+	}
+
+	// The un-removable sources survive (the denial held), confirming the warn
+	// path — not a silent success — was exercised.
+	if _, statErr := os.Stat(filepath.Join(delegationDir(repo), "task-001.yaml")); statErr != nil {
+		t.Errorf("expected the active contract to survive the denied remove, got %v", statErr)
+	}
+}
+
 func TestLoadDelegationContract_ParseError(t *testing.T) {
 	repo := t.TempDir()
 	dir := delegationDir(repo)
