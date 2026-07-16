@@ -2368,12 +2368,8 @@ func TestGitArtifactFetcherTreeLayoutRejectsSubmodule(t *testing.T) {
 func TestGitCommittedTreeWalkerEnforcesPerFileCap(t *testing.T) {
 	st := memory.NewStorage()
 	rootHash := buildCommittedTree(t, st, map[string][]byte{"big.txt": make([]byte, 4096)}, nil)
-	root, err := object.GetTree(st, rootHash)
-	if err != nil {
-		t.Fatal(err)
-	}
 	limits := BundleLimits{MaxEntries: 10, MaxFiles: 10, MaxFileBytes: 1024, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 20}
-	_, err = NormalizeBundle(gitCommittedTreeWalker(root, limits), limits)
+	_, err := NormalizeBundle(gitCommittedTreeWalker(st, rootHash, limits), limits)
 	if err == nil {
 		t.Fatal("expected rejection of an oversized committed file on the git path")
 	}
@@ -2408,13 +2404,12 @@ func TestGitArtifactFetcherTreeLayoutRejectsOversizedBlob(t *testing.T) {
 }
 
 // TestGitCommittedTreeWalkerRejectsEntryFlood is the git half of the t1b
-// directory-flood adversarial test: unlike billy.Filesystem.ReadDir (no
-// bounded/batched form — always the whole listing in one call),
-// object.TreeWalker resolves and streams exactly one entry at a time as it
-// descends, so the accumulator's MaxEntries cap trips within one entry's
-// worth of over-read rather than after the whole subtree is buffered. A
-// small actual entry count against a tiny injected cap exercises the SAME
-// mechanism a real multi-million-entry flood would hit, at test speed.
+// directory-flood adversarial test: the committed-tree walk streams entries
+// one at a time as it recurses, so the accumulator's MaxEntries cap trips
+// within one entry's worth of over-read rather than after the whole subtree
+// is buffered. A small actual entry count against a tiny injected cap
+// exercises the SAME mechanism a real multi-million-entry flood would hit, at
+// test speed.
 func TestGitCommittedTreeWalkerRejectsEntryFlood(t *testing.T) {
 	st := memory.NewStorage()
 	files := make(map[string][]byte, 50)
@@ -2422,17 +2417,42 @@ func TestGitCommittedTreeWalkerRejectsEntryFlood(t *testing.T) {
 		files[fmt.Sprintf("f%03d.txt", i)] = []byte("x")
 	}
 	rootHash := buildCommittedTree(t, st, files, nil)
-	root, err := object.GetTree(st, rootHash)
-	if err != nil {
-		t.Fatal(err)
-	}
 	limits := BundleLimits{MaxEntries: 10, MaxFiles: 100, MaxFileBytes: 1 << 20, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 20}
-	_, err = NormalizeBundle(gitCommittedTreeWalker(root, limits), limits)
+	_, err := NormalizeBundle(gitCommittedTreeWalker(st, rootHash, limits), limits)
 	if err == nil {
 		t.Fatal("expected rejection of a git tree entry-count flood")
 	}
 	if !strings.Contains(err.Error(), "entry-count cap") {
 		t.Fatalf("expected an entry-count-cap rejection, got %v", err)
+	}
+}
+
+// TestGitCommittedTreeWalkerRejectsFlatTreeBeforeDecode is the t1b-review
+// flat-tree-decode bound: object.GetTree materializes a whole tree object's
+// entry slice into memory, so the walker MUST reject an oversized (flooded)
+// tree OBJECT via its pre-decode encoded-size gate before GetTree ever runs —
+// not merely via the post-decode MaxEntries cap. A directory with many entries
+// is built so its single tree object's encoded size exceeds the derived
+// tree-object cap; the walker rejects it with the "tree-object cap" reason,
+// proving the gate fired before decode. (Encoded size is checked via
+// EncodedObjectSize, which reads the object header without inflating it.)
+func TestGitCommittedTreeWalkerRejectsFlatTreeBeforeDecode(t *testing.T) {
+	st := memory.NewStorage()
+	// Enough entries that the tree object's encoded size (~28+ bytes/entry)
+	// clears the tiny tree-object cap derived below (MaxEntries*32 +
+	// MaxTotalPathBytes = 4*32 + 256 = 384 bytes).
+	files := make(map[string][]byte, 200)
+	for i := 0; i < 200; i++ {
+		files[fmt.Sprintf("f%04d.txt", i)] = []byte("x")
+	}
+	rootHash := buildCommittedTree(t, st, files, nil)
+	limits := BundleLimits{MaxEntries: 4, MaxFiles: 1000, MaxFileBytes: 1 << 20, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 256}
+	_, err := NormalizeBundle(gitCommittedTreeWalker(st, rootHash, limits), limits)
+	if err == nil {
+		t.Fatal("expected pre-decode rejection of an oversized flat tree object")
+	}
+	if !strings.Contains(err.Error(), "tree-object cap") {
+		t.Fatalf("expected a pre-decode tree-object-size rejection, got %v", err)
 	}
 }
 

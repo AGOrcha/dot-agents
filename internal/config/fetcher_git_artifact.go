@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -21,6 +20,9 @@ import (
 	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/go-git/go-git/v6/plumbing/protocol/packp"
+	"github.com/go-git/go-git/v6/plumbing/storer"
+	"github.com/go-git/go-git/v6/plumbing/transport"
 	"github.com/go-git/go-git/v6/storage/filesystem"
 
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
@@ -98,7 +100,7 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 		return FetchedArtifact{}, newArtifactImportError(parts, ReasonSchema, fmt.Errorf("git artifact path: %w", err))
 	}
 
-	wfs, tree, treeErr, commit, err := f.cloneAndResolve(src, parts)
+	wfs, store, tree, treeErr, commit, err := f.cloneAndResolve(src, parts)
 	if err != nil {
 		return FetchedArtifact{}, err
 	}
@@ -121,12 +123,12 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 		// Tree layout (spec D3): the ref names a resource directory, not a
 		// single file. The gitlink check REQUIRES the committed tree — without
 		// it a submodule flattened into an empty worktree dir would slip past
-		// rejectGitSubmodules and restore the pinning-defeat. So a directory
+		// the committed-tree walk and restore the pinning-defeat. So a directory
 		// artifact whose committed tree could not be resolved fails closed.
 		if tree == nil {
 			return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: cannot verify submodules — committed tree unavailable: %w", parts.ArtifactPath, commit, treeErr))
 		}
-		return f.fetchTreeBundle(tree, rel, parts, commit, posture, isPinned, pinned)
+		return f.fetchTreeBundle(store, tree, rel, parts, commit, posture, isPinned, pinned)
 	}
 
 	data, err := readArtifactFile(wfs, rootOS, parts, commit)
@@ -154,33 +156,27 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 
 // fetchTreeBundle walks the git subtree at canonicalRel (already confirmed to
 // be a directory) into a normalized Bundle (H1) and wraps it in a
-// FetchedArtifact. It first inspects the committed git tree object and
-// rejects any gitlink (submodule) entry: go-git flattens a `160000` submodule
-// into an empty directory in the worktree, so a worktree-only walk would
-// silently drop the gitlink's commit OID and let two different referenced
-// commits produce the same BundleDigest — a digest-defeat. Once the subtree
-// is proven gitlink-free, its content is read directly from the COMMITTED
-// tree/blob objects (gitCommittedTreeWalker) rather than the checked-out
-// worktree — t1b: a worktree ReadDir materializes a directory's ENTIRE
-// listing in one call before MaxEntries can reject a flood, where
-// object.TreeWalker resolves and streams one entry at a time, so the
-// accumulator's caps bound the walk as it happens rather than after the
-// whole subtree is buffered. Digest is the whole-subtree content digest
-// (BundleDigest), the tree-layout counterpart to a single blob's
-// artifactDigest, so a "pinned:sha256:..." version spec pins the whole
-// subtree. Tree-layout results are never written to the flat single-blob
-// packages cache (writeCachedArtifact addresses one blob, not a multi-file
-// tree); materialize (t2, spec H2) owns the tree's content-addressed store.
-func (f *gitArtifactFetcher) fetchTreeBundle(tree *object.Tree, canonicalRel string, parts PackageRefParts, commit string, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
-	if err := rejectGitSubmodules(tree, canonicalRel); err != nil {
-		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: %w", parts.ArtifactPath, commit, err))
-	}
-	sub, err := committedSubtreeAt(tree, canonicalRel)
+// FetchedArtifact. All content — the directory structure, the gitlink
+// (submodule) rejection, and every file's bytes — is read from the COMMITTED
+// tree/blob object graph (gitCommittedTreeWalker) rather than the checked-out
+// worktree, for two reasons: (1) go-git flattens a `160000` submodule into an
+// empty worktree directory, so a worktree-only walk would silently drop the
+// gitlink's commit OID and let two different referenced commits produce the
+// same BundleDigest — a digest-defeat; reading the committed tree modes
+// catches the gitlink. (2) The billy worktree filesystem has no bounded
+// ReadDir, so a flat directory flood could not be halted mid-enumeration.
+// Digest is the whole-subtree content digest (BundleDigest), so a
+// "pinned:sha256:..." version spec pins the whole subtree. Tree-layout
+// results are never written to the flat single-blob packages cache
+// (writeCachedArtifact addresses one blob, not a multi-file tree); materialize
+// (t2, spec H2) owns the tree's content-addressed store.
+func (f *gitArtifactFetcher) fetchTreeBundle(store storer.EncodedObjectStorer, tree *object.Tree, canonicalRel string, parts PackageRefParts, commit string, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
+	subHash, err := committedSubtreeHashAt(tree, canonicalRel)
 	if err != nil {
 		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: %w", parts.ArtifactPath, commit, err))
 	}
 	limits := DefaultBundleLimits()
-	bundle, err := NormalizeBundle(gitCommittedTreeWalker(sub, limits), limits)
+	bundle, err := NormalizeBundle(gitCommittedTreeWalker(store, subHash, limits), limits)
 	if err != nil {
 		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: %w", parts.ArtifactPath, commit, err))
 	}
@@ -194,146 +190,146 @@ func (f *gitArtifactFetcher) fetchTreeBundle(tree *object.Tree, canonicalRel str
 	return FetchedArtifact{Digest: digest, Bundle: &bundle, CacheHit: false, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: digest, ResolvedCommit: commit}}, nil
 }
 
-// rejectGitSubmodules fails closed if the committed git tree at canonicalRel,
-// or anything beneath it, is a gitlink (filemode.Submodule / `160000`). It
-// inspects the tree object graph directly — not the flattened worktree — so a
-// submodule that go-git checked out as an empty directory is still caught.
-// canonicalRel MUST be the same canonical path used for the worktree walk (see
-// FetchArtifact): when a directory is visible in the worktree but the committed
-// tree cannot resolve that exact path, this refuses rather than returning
-// success, closing the noncanonical-path bypass where the lookup silently
-// missed a gitlink. A nil tree fails closed — the committed tree is REQUIRED to
-// verify a directory artifact carries no gitlink; the caller guarantees a
-// non-nil tree for any directory pull, and this guard is the defense in depth.
-func rejectGitSubmodules(tree *object.Tree, canonicalRel string) error {
-	if tree == nil {
-		return fmt.Errorf("committed tree unavailable; cannot verify submodules for %q", canonicalRel)
-	}
+// committedSubtreeHashAt resolves the object hash of the artifact subtree at
+// canonicalRel within the commit's root tree, returning the root tree's own
+// hash when canonicalRel names the repository root ("" or "."). It resolves
+// the hash via FindEntry, which decodes only the ANCESTOR trees along the
+// path (shallow, normal-sized) and NOT the target subtree itself — so the
+// target's decode stays behind gitCommittedTreeWalker's pre-decode size gate
+// (t1b review: a flat target directory with millions of entries must not be
+// decoded here). It fails closed on the front-door cases the worktree
+// classification can hide: a path visible as a directory in the worktree but
+// absent from the committed tree (canonicalization/gitlink bypass), the
+// artifact path itself being a gitlink, or a non-tree object where the
+// worktree showed a directory.
+func committedSubtreeHashAt(root *object.Tree, canonicalRel string) (plumbing.Hash, error) {
 	rel := strings.Trim(filepath.ToSlash(canonicalRel), "/")
 	if rel == "" || rel == "." {
-		return walkTreeForSubmodules(tree, "")
+		return root.Hash, nil
 	}
-
-	entry, err := tree.FindEntry(rel)
+	entry, err := root.FindEntry(rel)
 	if err != nil {
-		// The path resolved to a directory in the worktree (FetchArtifact's Lstat
-		// confirmed it) but is absent from the committed tree — a canonicalization
-		// mismatch that could hide a gitlink. Fail closed.
-		return fmt.Errorf("path %q resolves in the worktree but not in the committed tree; refusing (possible gitlink/path bypass)", rel)
+		return plumbing.ZeroHash, fmt.Errorf("path %q resolves in the worktree but not in the committed tree; refusing (possible gitlink/path bypass)", rel)
 	}
 	if entry.Mode == filemode.Submodule {
-		return fmt.Errorf("path %q is a git submodule (gitlink); submodules are not permitted in an artifact bundle", rel)
+		return plumbing.ZeroHash, fmt.Errorf("path %q is a git submodule (gitlink); submodules are not permitted in an artifact bundle", rel)
 	}
-	sub, err := tree.Tree(rel)
-	if err != nil {
-		// The entry exists but is not a descendable tree while the worktree shows
-		// a directory — refuse rather than silently accept.
-		return fmt.Errorf("path %q is a directory in the worktree but not a tree in the committed object; refusing", rel)
+	if entry.Mode != filemode.Dir {
+		return plumbing.ZeroHash, fmt.Errorf("path %q is a directory in the worktree but not a tree in the committed object; refusing", rel)
 	}
-	return walkTreeForSubmodules(sub, rel)
+	return entry.Hash, nil
 }
 
-// walkTreeForSubmodules recursively rejects any filemode.Submodule entry in
-// tree, reporting the offending path prefixed by prefix.
-func walkTreeForSubmodules(tree *object.Tree, prefix string) error {
-	walker := object.NewTreeWalker(tree, true, nil)
-	defer walker.Close()
-	for {
-		name, entry, err := walker.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("walking git tree: %w", err)
-		}
-		if entry.Mode == filemode.Submodule {
-			return fmt.Errorf("tree entry %q is a git submodule (gitlink); submodules are not permitted in an artifact bundle", path.Join(prefix, name))
-		}
-	}
-}
-
-// committedSubtreeAt resolves the subtree at canonicalRel within tree,
-// returning tree itself unchanged when canonicalRel names the repository
-// root ("" or "."). The caller MUST already have proven the path is
-// gitlink-free (rejectGitSubmodules) before calling this: it performs no
-// gitlink check of its own, it only locates the already-verified subtree for
-// gitCommittedTreeWalker.
-func committedSubtreeAt(tree *object.Tree, canonicalRel string) (*object.Tree, error) {
-	rel := strings.Trim(filepath.ToSlash(canonicalRel), "/")
-	if rel == "" || rel == "." {
-		return tree, nil
-	}
-	sub, err := tree.Tree(rel)
-	if err != nil {
-		return nil, fmt.Errorf("resolve committed subtree %q: %w", rel, err)
-	}
-	return sub, nil
+// gitTreeObjectByteCap derives the per-tree-object encoded-size ceiling used
+// by gitCommittedTreeWalker's pre-decode gate. A git tree object encodes each
+// entry as `<mode> <name>\0<20-byte-hash>` — at least ~perTreeEntryOverhead
+// bytes plus the name — so a legal tree bounded by MaxEntries + the
+// whole-bundle path budget cannot exceed MaxEntries*overhead +
+// MaxTotalPathBytes. Any single tree object larger than that is a flood and is
+// rejected before object.GetTree materializes its entry slice.
+func gitTreeObjectByteCap(limits BundleLimits) int64 {
+	// mode ("100644 ") + NUL + 20-byte binary hash + slack per entry.
+	const perTreeEntryOverhead = 32
+	return int64(limits.MaxEntries)*perTreeEntryOverhead + int64(limits.MaxTotalPathBytes)
 }
 
 // gitCommittedTreeWalker returns a BundleWalker over the committed git tree
-// sub (the artifact's subtree, already gitlink-verified by the caller).
-// Unlike a worktree walk (billy.Filesystem.ReadDir has no bounded/batched
-// form — it always materializes a directory's ENTIRE listing in one call),
-// object.TreeWalker resolves and streams exactly one entry at a time as it
-// descends, lazily decoding each subtree object only when reached — so a
-// directory flooded with millions of entries is enumerated without ever
-// buffering a full listing: the accumulator's MaxEntries cap (applied via
-// emit, below) trips within one entry's worth of over-read, not after the
-// whole subtree has been materialized (t1b). Reading a file's bytes straight
-// from its committed blob — after checking the blob's declared Size against
-// the per-file cap, mirroring the tar/local paths' bound-before-read
-// discipline — also keeps the walk's source of truth for content identical
-// to the object rejectGitSubmodules already trusted, rather than a second,
-// possibly-diverging read through the checked-out worktree file.
-func gitCommittedTreeWalker(sub *object.Tree, limits BundleLimits) BundleWalker {
+// rooted at subHash, read directly from the object store s.
+//
+// t1b review hardening — the flat-tree decode bound: object.GetTree
+// materializes a WHOLE tree object's entry slice into memory, so a single
+// directory with millions of entries would exhaust memory during decode
+// before the accumulator's MaxEntries cap (which only sees entries AFTER
+// decode) could act. So before decoding any tree object this checks its
+// plaintext encoded size via s.EncodedObjectSize — which reads the object
+// header without inflating the whole object — against gitTreeObjectByteCap and
+// fails closed on an over-cap (flooded) tree. Each blob is likewise size-gated
+// via EncodedObjectSize before object.GetBlob resolves it, so an over-cap file
+// object is rejected before it is decoded/delta-resolved into memory. It
+// recurses manually (rather than via object.TreeWalker, which offers no
+// pre-decode hook) so the gate sits on every subtree; it also rejects any
+// gitlink (submodule) entry inline. This reads from the same committed object
+// graph the digest pins, not the checked-out worktree, so content cannot
+// diverge from what was verified.
+func gitCommittedTreeWalker(s storer.EncodedObjectStorer, subHash plumbing.Hash, limits BundleLimits) BundleWalker {
 	limits = limits.orDefault()
+	treeCap := gitTreeObjectByteCap(limits)
 	return func(emit func(RawBundleEntry) error) error {
-		walker := object.NewTreeWalker(sub, true, nil)
-		defer walker.Close()
-		for {
-			name, entry, err := walker.Next()
-			if err == io.EOF {
-				return nil
-			}
+		var walk func(prefix string, h plumbing.Hash) error
+		walk = func(prefix string, h plumbing.Hash) error {
+			size, err := s.EncodedObjectSize(h)
 			if err != nil {
-				return fmt.Errorf("walking committed git tree: %w", err)
+				return fmt.Errorf("git tree object %q: sizing: %w", prefix, err)
 			}
-			switch entry.Mode {
-			case filemode.Dir:
-				mode, _ := entry.Mode.ToOSFileMode()
-				if err := emit(RawBundleEntry{Path: name, Kind: rawKindDir, Mode: mode}); err != nil {
-					return err
+			if size > treeCap {
+				return fmt.Errorf("git tree object %q: encoded size %d exceeds tree-object cap of %d bytes", prefix, size, treeCap)
+			}
+			t, err := object.GetTree(s, h)
+			if err != nil {
+				return fmt.Errorf("git tree object %q: decoding: %w", prefix, err)
+			}
+			for i := range t.Entries {
+				e := &t.Entries[i]
+				name := e.Name
+				if prefix != "" {
+					name = prefix + "/" + e.Name
 				}
-			case filemode.Symlink:
-				if err := emit(RawBundleEntry{Path: name, Kind: rawKindSymlink}); err != nil {
-					return err
-				}
-			case filemode.Submodule:
-				// Defense in depth: the caller already walked this same subtree via
-				// rejectGitSubmodules and would have failed closed before this
-				// walker ever ran. A gitlink surfacing here means that guarantee
-				// broke somehow, so this fails closed too rather than skipping it.
-				return fmt.Errorf("git tree entry %q: submodule (gitlink) encountered mid-walk; refusing", name)
-			case filemode.Regular, filemode.Executable, filemode.Deprecated:
-				f, ferr := walker.Tree().TreeEntryFile(&entry)
-				if ferr != nil {
-					return fmt.Errorf("git tree file %q: resolving blob: %w", name, ferr)
-				}
-				data, derr := readCommittedBlobFile(name, f, limits)
-				if derr != nil {
-					return derr
-				}
-				mode, _ := entry.Mode.ToOSFileMode()
-				if err := emit(RawBundleEntry{Path: name, Kind: rawKindFile, Mode: mode, Size: int64(len(data)), Data: data}); err != nil {
-					return err
-				}
-			default:
-				if err := emit(RawBundleEntry{Path: name, Kind: rawKindOther}); err != nil {
-					return err
+				switch e.Mode {
+				case filemode.Dir:
+					mode, _ := e.Mode.ToOSFileMode()
+					if err := emit(RawBundleEntry{Path: name, Kind: rawKindDir, Mode: mode}); err != nil {
+						return err
+					}
+					if err := walk(name, e.Hash); err != nil {
+						return err
+					}
+				case filemode.Symlink:
+					if err := emit(RawBundleEntry{Path: name, Kind: rawKindSymlink}); err != nil {
+						return err
+					}
+				case filemode.Submodule:
+					return fmt.Errorf("git tree entry %q: submodule (gitlink) not permitted in an artifact bundle", name)
+				case filemode.Regular, filemode.Executable, filemode.Deprecated:
+					data, derr := readCommittedBlob(s, name, e.Hash, limits)
+					if derr != nil {
+						return derr
+					}
+					mode, _ := e.Mode.ToOSFileMode()
+					if err := emit(RawBundleEntry{Path: name, Kind: rawKindFile, Mode: mode, Size: int64(len(data)), Data: data}); err != nil {
+						return err
+					}
+				default:
+					if err := emit(RawBundleEntry{Path: name, Kind: rawKindOther}); err != nil {
+						return err
+					}
 				}
 			}
+			return nil
 		}
+		return walk("", subHash)
 	}
+}
+
+// readCommittedBlob reads the blob at hash from the object store s, size-gated
+// before decode. It checks the blob's plaintext size via EncodedObjectSize
+// (which reads the object header, not the whole content) against the per-file
+// cap BEFORE object.GetBlob resolves it — so an over-cap file object is
+// rejected before it is decoded (and, for a pack-delta object, before its
+// delta chain is applied) into memory. It then re-bounds the actual copy to
+// MaxFileBytes+1 independently, mirroring the tar/local paths.
+func readCommittedBlob(s storer.EncodedObjectStorer, name string, hash plumbing.Hash, limits BundleLimits) ([]byte, error) {
+	size, err := s.EncodedObjectSize(hash)
+	if err != nil {
+		return nil, fmt.Errorf("git tree file %q: sizing blob: %w", name, err)
+	}
+	if size > limits.MaxFileBytes {
+		return nil, fmt.Errorf("git tree file %q: size %d exceeds per-file cap of %d bytes", name, size, limits.MaxFileBytes)
+	}
+	blob, err := object.GetBlob(s, hash)
+	if err != nil {
+		return nil, fmt.Errorf("git tree file %q: resolving blob: %w", name, err)
+	}
+	return readCommittedBlobFile(name, object.NewFile(name, filemode.Regular, blob), limits)
 }
 
 // readCommittedBlobFile reads f's content from the committed object graph.
@@ -417,18 +413,18 @@ func readArtifactFile(wfs billy.Filesystem, rootOS string, parts PackageRefParts
 
 // cloneAndResolve validates the source URL, shallow-clones at the resolved
 // ref, and resolves the cloned HEAD. It returns the worktree filesystem, the
-// committed HEAD tree object (for the gitlink inspection in fetchTreeBundle),
-// a treeErr describing why the committed tree could NOT be resolved (nil on
-// success), and the resolved commit SHA, mapping each failure to its
-// ImportError reason. treeErr is NOT fatal for a single-file artifact (which
-// needs no tree), but a directory artifact fails closed when the tree is
-// unresolvable — a nil tree must never let a worktree directory bypass the
-// gitlink check (that would restore the pinning-defeat). The caller
-// (FetchArtifact) owns canonicalizing the artifact path and deciding the
-// content layout.
-func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) (wfs billy.Filesystem, tree *object.Tree, treeErr error, commit string, err error) {
+// clone's object store (for the committed tree/blob reads in fetchTreeBundle),
+// the committed HEAD tree object, a treeErr describing why the committed tree
+// could NOT be resolved (nil on success), and the resolved commit SHA, mapping
+// each failure to its ImportError reason. treeErr is NOT fatal for a
+// single-file artifact (which needs no tree), but a directory artifact fails
+// closed when the tree is unresolvable — a nil tree must never let a worktree
+// directory bypass the gitlink check (that would restore the pinning-defeat).
+// The caller (FetchArtifact) owns canonicalizing the artifact path and
+// deciding the content layout.
+func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) (wfs billy.Filesystem, store storer.EncodedObjectStorer, tree *object.Tree, treeErr error, commit string, err error) {
 	if err := validateGitSourceURL(src.URL, parts); err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, nil, nil, "", err
 	}
 
 	ref := gitArtifactRef(src, parts)
@@ -436,12 +432,13 @@ func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) 
 	defer cancel()
 	repo, wfs, err := f.clone(ctx, src.URL, gitFullRef(ref))
 	if err != nil {
-		return nil, nil, nil, "", newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
+		return nil, nil, nil, nil, "", newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
 	}
+	store = repo.Storer
 
 	head, err := repo.Head()
 	if err != nil {
-		return nil, nil, nil, "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
+		return nil, nil, nil, nil, "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
 	}
 	commit = head.Hash().String()
 
@@ -450,13 +447,13 @@ func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) 
 	// (a single-file artifact ignores it — it needs no tree).
 	commitObj, cerr := repo.CommitObject(head.Hash())
 	if cerr != nil {
-		return wfs, nil, fmt.Errorf("resolve commit object %s: %w", commit, cerr), commit, nil
+		return wfs, store, nil, fmt.Errorf("resolve commit object %s: %w", commit, cerr), commit, nil
 	}
 	t, terr := commitObj.Tree()
 	if terr != nil {
-		return wfs, nil, fmt.Errorf("resolve tree for commit %s: %w", commit, terr), commit, nil
+		return wfs, store, nil, fmt.Errorf("resolve tree for commit %s: %w", commit, terr), commit, nil
 	}
-	return wfs, t, nil, commit, nil
+	return wfs, store, t, nil, commit, nil
 }
 
 // gitArtifactCloneQuotaBytes bounds the ON-DISK footprint of BOTH the object
@@ -475,13 +472,40 @@ func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) 
 const gitArtifactCloneQuotaBytes = 256 << 20 // 256 MiB
 
 // gitCloneShallowQuotaBounded performs the same Depth:1, single-branch clone
-// as gitCloneShallow, but backs the object store and the checkout with a
-// disk-backed, quota-guarded filesystem in a fresh temp dir instead of an
-// in-memory storer+memfs (t1b, see gitArtifactCloneQuotaBytes). The returned
-// filesystem's Cleanup method — invoked by FetchArtifact once it is done
-// reading from it — removes the temp dir; a test-injected cloner is
-// unaffected (it returns a plain billy.Filesystem with no Cleanup method, so
-// the caller's best-effort type assertion is simply a no-op for it).
+// as gitCloneShallow, but adds two pre-materialization bounds against a
+// hostile/oversized upstream (t1b review):
+//
+//  1. Disk + byte quota. The object store and the checkout are backed by a
+//     disk-backed, quota-guarded filesystem in a fresh temp dir instead of an
+//     in-memory storer+memfs, so an oversized upstream fails closed against a
+//     fixed ceiling (gitArtifactCloneQuotaBytes) instead of exhausting host
+//     memory during checkout/store writes.
+//  2. Partial-clone blob-size filter. A `filter=blob:limit=<per-file-cap>` is
+//     requested first, so a filter-capable server (the real untrusted-remote
+//     case: GitHub/GitLab/self-hosted) never sends an over-budget blob into
+//     the client's pack/delta resolution at all — the over-budget object is
+//     never received or resolved into memory. Servers that do not advertise
+//     the filter capability (notably go-git's own file:// transport used by
+//     local fixtures) return transport.ErrFilterNotSupported; we then fall
+//     back to an unfiltered — but still quota-bounded — clone.
+//
+// RESIDUAL (documented, availability-only): the blob-size filter is the only
+// fetch-time object-size control go-git v6 exposes, and it applies to BLOBS
+// against FILTER-CAPABLE servers only. go-git resolves the received packfile
+// (including any in-memory delta-chain reconstruction and non-blob object
+// decode) BEFORE the quota-guarded storer sees a write, and exposes no hook to
+// bound that in-memory pack resolution. So a malicious pack built entirely of
+// deep delta chains over non-blob objects, or served by a filter-incapable
+// server, can still be resolved in memory before the quota fires. This is an
+// availability concern for an untrusted remote, not an integrity break (the
+// digest/pin still gate what is accepted); a harder bound would need a
+// transport-byte cap or a shell-`git` partial-clone fallback, tracked as a
+// follow-up.
+//
+// The returned filesystem's Cleanup method — invoked by FetchArtifact once it
+// is done reading — removes the temp dir; a test-injected cloner is unaffected
+// (it returns a plain billy.Filesystem with no Cleanup method, so the caller's
+// best-effort type assertion is a no-op for it).
 func gitCloneShallowQuotaBounded(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error) {
 	auth, err := gitSSHAuth(url)
 	if err != nil {
@@ -492,6 +516,26 @@ func gitCloneShallowQuotaBounded(ctx context.Context, url, ref string) (*gogit.R
 		clientOpts = []client.Option{client.WithSSHAuth(auth)}
 	}
 
+	// Request blobs strictly larger than the per-file cap be omitted server
+	// side. An omitted (over-cap) blob later reads back as a missing object and
+	// fails closed — which is the same outcome the per-file cap would enforce on
+	// read, achieved before the blob is ever transferred or delta-resolved.
+	blobLimit := uint64(DefaultBundleLimits().MaxFileBytes) + 1
+	filter := packp.FilterBlobLimit(blobLimit, packp.BlobLimitPrefixNone)
+
+	repo, wfs, err := cloneQuotaBoundedOnce(ctx, url, ref, clientOpts, filter)
+	if errors.Is(err, transport.ErrFilterNotSupported) {
+		// Server has no partial-clone support; fall back to an unfiltered but
+		// still quota-bounded clone (the disk/byte ceiling remains in force).
+		return cloneQuotaBoundedOnce(ctx, url, ref, clientOpts, "")
+	}
+	return repo, wfs, err
+}
+
+// cloneQuotaBoundedOnce performs one quota-bounded clone attempt with the given
+// (possibly empty) object filter, cleaning up its temp dir on any failure. An
+// empty filter means no partial-clone request (go-git treats "" as unset).
+func cloneQuotaBoundedOnce(ctx context.Context, url, ref string, clientOpts []client.Option, filter packp.Filter) (*gogit.Repository, billy.Filesystem, error) {
 	tmpDir, err := os.MkdirTemp("", "da-artifact-clone-*")
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating git artifact clone workdir: %w", err)
@@ -499,15 +543,16 @@ func gitCloneShallowQuotaBounded(ctx context.Context, url, ref string) (*gogit.R
 
 	storeFS := newQuotaFilesystem(osfs.New(filepath.Join(tmpDir, "objects")), gitArtifactCloneQuotaBytes)
 	checkoutFS := newQuotaFilesystem(osfs.New(filepath.Join(tmpDir, "worktree")), gitArtifactCloneQuotaBytes)
-	storer := filesystem.NewStorage(storeFS, cache.NewObjectLRUDefault())
+	store := filesystem.NewStorage(storeFS, cache.NewObjectLRUDefault())
 
-	repo, err := gogit.CloneContext(ctx, storer, checkoutFS, &gogit.CloneOptions{
+	repo, err := gogit.CloneContext(ctx, store, checkoutFS, &gogit.CloneOptions{
 		URL:           url,
 		ClientOptions: clientOpts,
 		ReferenceName: plumbing.ReferenceName(ref),
 		SingleBranch:  true,
 		Depth:         1,
 		Tags:          plumbing.NoTags,
+		Filter:        filter,
 	})
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
