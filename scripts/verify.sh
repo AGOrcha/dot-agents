@@ -170,6 +170,33 @@ export HOME="${SMOKE_ROOT}/home"
 export AGENTS_HOME="${SMOKE_ROOT}/home/.agents"
 export KG_HOME="${SMOKE_ROOT}/home/.kg"
 mkdir -p "${HOME}"
+
+# Deterministic platform DETECTION for the projection assertions. A platform's
+# link tree (.claude/skills/... etc.) is only written when that platform is
+# detected as installed (platform.IsInstalled → `claude` on PATH) AND enabled.
+# On a bare CI runner NO agent CLI is installed, so a fresh managed home lands
+# every platform disabled and install projects nothing — which silently defeats
+# any assertion that reads a projected file (a `cat` of a missing path emits an
+# error containing the path, so a substring `assert_contains` false-passes; only
+# the package block's `cp`/`diff` of the real file exposes it). Put a minimal
+# `claude` shim on PATH BEFORE `da init` so init detects+enables Claude and the
+# projection paths (H13 package projection especially) run identically on a dev
+# box and a bare runner. The shim only needs to answer the version probe.
+mkdir -p "${SMOKE_ROOT}/fakebin"
+# POSIX shim (Linux/macOS: exec.LookPath finds the extensionless executable).
+cat > "${SMOKE_ROOT}/fakebin/claude" <<'SHIM'
+#!/bin/sh
+echo "2.1.0 (Claude Code)"
+SHIM
+chmod +x "${SMOKE_ROOT}/fakebin/claude"
+# Windows shim: Go's exec.LookPath resolves via PATHEXT (.CMD/.BAT/.EXE), so an
+# extensionless script is invisible there — a sibling claude.cmd makes
+# IsInstalled (a LookPath probe) succeed on the windows-latest leg too.
+cat > "${SMOKE_ROOT}/fakebin/claude.cmd" <<'SHIM'
+@echo 2.1.0 (Claude Code)
+SHIM
+export PATH="${SMOKE_ROOT}/fakebin:${PATH}"
+
 PROJ="${SMOKE_ROOT}/proj"
 mkdir -p "${PROJ}/layers"
 
