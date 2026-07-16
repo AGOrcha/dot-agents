@@ -3811,3 +3811,108 @@ func TestGitFetcherSSHNoAgentNoKeyErrorsClearly(t *testing.T) {
 		t.Fatalf("expected the actionable ssh auth error, got: %v", err)
 	}
 }
+
+// --- H12 OCI auth seam wiring (t7) ------------------------------------------
+
+// TestOCIAuthHeaderForRefWiredThroughPuller proves the fetcher_oci.go wiring
+// point (ociAuthHeaderForRef) resolves the exact Authorization header value
+// a real puller (t8) needs from a source's reference-only auth block, and
+// that using it exactly as intended never lets the resolved secret leak into
+// FetchedArtifact — the structure downstream lock/cache-metadata recording
+// reads from.
+func TestOCIAuthHeaderForRefWiredThroughPuller(t *testing.T) {
+	withPackagesCache(t)
+	sentinel := "sentinel-fetcher-wiring-3d4e5f"
+	t.Setenv("OCI_TEST_WIRING_TOKEN", sentinel)
+
+	blob := []byte("artifact-bytes")
+	digest := "sha256:" + sha256Hex(blob)
+	var observedHeader string
+	f := &ociFetcher{puller: func(ctx context.Context, ref ociRef, auth []byte) (ociBlob, error) {
+		// This is exactly the pattern t8's real puller uses: resolve the
+		// Authorization header via the seam, use it only on the (here,
+		// simulated) outgoing request, and never fold it into the returned
+		// ociBlob.
+		header, err := ociAuthHeaderForRef(ctx, auth, ref, "")
+		if err != nil {
+			t.Fatalf("ociAuthHeaderForRef: %v", err)
+		}
+		observedHeader = header
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	src := Source{
+		Type: "oci",
+		URL:  "oci://reg.example/base",
+		Auth: json.RawMessage(`{"provider":"bearer","token_env":"OCI_TEST_WIRING_TOKEN"}`),
+	}
+	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	wantHeader := "Bearer " + sentinel
+	if observedHeader != wantHeader {
+		t.Fatalf("observed Authorization header = %q, want %q", observedHeader, wantHeader)
+	}
+
+	// H12: the resolved secret must never appear anywhere in the
+	// FetchedArtifact the caller receives (this is what downstream lock/
+	// cache-metadata recording reads from).
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), sentinel) {
+		t.Fatalf("FetchedArtifact leaked the resolved secret: %s", encoded)
+	}
+	// And src.Auth itself — the persisted reference — never mutates to carry
+	// the resolved value.
+	if strings.Contains(string(src.Auth), sentinel) {
+		t.Fatalf("Source.Auth mutated to carry the resolved secret: %s", src.Auth)
+	}
+}
+
+// TestOCIAuthHeaderForRefForcedErrorNoLeak forces a downstream transport
+// failure after the header was resolved and confirms the wrapped
+// ImportError's Error() text — the "forced error's string/stderr" surface —
+// never contains the sentinel secret.
+func TestOCIAuthHeaderForRefForcedErrorNoLeak(t *testing.T) {
+	withPackagesCache(t)
+	sentinel := "sentinel-forced-error-6f7e8d"
+	t.Setenv("OCI_TEST_FORCED_ERROR_TOKEN", sentinel)
+
+	f := &ociFetcher{puller: func(ctx context.Context, ref ociRef, auth []byte) (ociBlob, error) {
+		if _, err := ociAuthHeaderForRef(ctx, auth, ref, ""); err != nil {
+			t.Fatalf("ociAuthHeaderForRef: %v", err)
+		}
+		// Simulate a registry transport failure AFTER auth resolved — the
+		// puller's own error must not (and, per its construction, does not)
+		// embed the header/secret it just used.
+		return ociBlob{}, fmt.Errorf("registry connection reset")
+	}}
+	src := Source{
+		Type: "oci",
+		URL:  "oci://reg.example/base",
+		Auth: json.RawMessage(`{"provider":"bearer","token_env":"OCI_TEST_FORCED_ERROR_TOKEN"}`),
+	}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	if err == nil {
+		t.Fatal("expected a transport error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("forced error leaked the sentinel: %v", err)
+	}
+	// The audit-facing detail (importFailedEvent) redacts through the
+	// central registry too, so even an error that DID embed the sentinel
+	// would not leak into the audit stream (audit_test.go covers this
+	// directly; asserted here again against the real error produced by this
+	// fetch path).
+	var ie *ImportError
+	if !errors.As(err, &ie) {
+		t.Fatal("expected an *ImportError")
+	}
+	ev := importFailedEvent(ie, false)
+	detail, _ := ev.Fields["detail"].(string)
+	if strings.Contains(detail, sentinel) {
+		t.Fatalf("audit detail leaked the sentinel: %q", detail)
+	}
+}

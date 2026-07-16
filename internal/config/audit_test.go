@@ -208,6 +208,82 @@ func TestAsImportError(t *testing.T) {
 	}
 }
 
+// --- H12 central error redaction --------------------------------------------
+
+// TestRedactSecretsScrubsRegisteredSecret plants a sentinel secret via
+// registerSecret and asserts redactSecrets removes every occurrence from an
+// arbitrary string, leaving non-secret text untouched.
+func TestRedactSecretsScrubsRegisteredSecret(t *testing.T) {
+	sentinel := "sentinel-secret-tHiS-iS-tOp-sEcReT-9f8e7d"
+	registerSecret(sentinel)
+
+	in := "request failed: token=" + sentinel + " (status 401)"
+	got := redactSecrets(in)
+	if strings.Contains(got, sentinel) {
+		t.Fatalf("redactSecrets left the sentinel in place: %q", got)
+	}
+	want := "request failed: token=[REDACTED] (status 401)"
+	if got != want {
+		t.Errorf("redactSecrets = %q, want %q", got, want)
+	}
+
+	// Text with no registered secret is returned unchanged.
+	if got := redactSecrets("nothing sensitive here"); got != "nothing sensitive here" {
+		t.Errorf("redactSecrets mutated a clean string: %q", got)
+	}
+}
+
+// TestRegisterSecretDeduplicates confirms registering the same secret value
+// twice does not grow the registry (bounding its process-lifetime size when
+// a credential is re-resolved across repeated fetches).
+func TestRegisterSecretDeduplicates(t *testing.T) {
+	sentinel := "sentinel-dedupe-check-0a1b2c"
+	registerSecret(sentinel)
+	before := len(registeredSecrets)
+	registerSecret(sentinel)
+	if len(registeredSecrets) != before {
+		t.Fatalf("registerSecret grew the registry on a duplicate: %d -> %d", before, len(registeredSecrets))
+	}
+}
+
+// TestRedactSecretsEmptyStringNoOp confirms registerSecret("") never
+// registers a wildcard that would scrub every string to empty.
+func TestRedactSecretsEmptyStringNoOp(t *testing.T) {
+	before := len(registeredSecrets)
+	registerSecret("")
+	if len(registeredSecrets) != before {
+		t.Fatalf("registerSecret(\"\") grew the registry: %d -> %d", before, len(registeredSecrets))
+	}
+	if got := redactSecrets("some text"); got != "some text" {
+		t.Errorf("redactSecrets corrupted unrelated text: %q", got)
+	}
+}
+
+// TestImportFailedEventRedactsSentinelInDetail is the H12 sentinel-leak test
+// named directly by the spec: audit.go's importFailedEvent used to log
+// ie.Err.Error() raw. A sentinel secret embedded in a wrapped error (as a
+// naive implementation elsewhere in the auth path might do) must never reach
+// the emitted audit event's Fields["detail"].
+func TestImportFailedEventRedactsSentinelInDetail(t *testing.T) {
+	sentinel := "sentinel-audit-leak-4b2c1a"
+	registerSecret(sentinel)
+
+	ie := &ImportError{
+		Ref:      "acme-pkgs:skill/x@1.0",
+		SourceID: "acme-pkgs",
+		Reason:   ReasonAuth,
+		Err:      errors.New("oci token exchange failed for token " + sentinel),
+	}
+	ev := importFailedEvent(ie, false)
+	detail, _ := ev.Fields["detail"].(string)
+	if strings.Contains(detail, sentinel) {
+		t.Fatalf("importFailedEvent leaked the sentinel into the audit detail field: %q", detail)
+	}
+	if !strings.Contains(detail, "[REDACTED]") {
+		t.Errorf("importFailedEvent did not redact the sentinel: %q", detail)
+	}
+}
+
 // --- end-to-end emission through the resolver ------------------------------
 
 func TestResolveEmitsLayerAndSourceAndEffectiveEvents(t *testing.T) {

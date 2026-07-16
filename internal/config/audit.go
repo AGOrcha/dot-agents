@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -216,7 +218,7 @@ func importFailedEvent(ie *ImportError, optional bool) AuditEvent {
 		fields["source_id"] = ie.SourceID
 	}
 	if ie.Err != nil {
-		fields["detail"] = ie.Err.Error()
+		fields["detail"] = redactSecrets(ie.Err.Error())
 	}
 	return AuditEvent{
 		Action:  ActionImportFailed,
@@ -267,4 +269,56 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "…"
+}
+
+// --- H12 central error redaction --------------------------------------------
+//
+// registerSecret / redactSecrets are the config package's central credential-
+// non-disclosure backstop (package-artifact-install spec H12). The OCI auth
+// providers (oci_auth.go) register every resolved secret value the instant
+// they resolve it; every surface that formats an error string for a human or
+// an audit sink — importFailedEvent above — routes the text through
+// redactSecrets first. This is defense in depth: the auth providers are ALSO
+// written to never embed a resolved secret in an error message in the first
+// place, so redactSecrets is the safety net for a path this package did not
+// anticipate, not the primary control.
+
+var (
+	secretRedactorMu  sync.Mutex
+	registeredSecrets []string
+)
+
+// registerSecret records secret as material that must never appear verbatim
+// in a subsequently-formatted error, audit, or log string for the remainder
+// of this process. It is a no-op for an empty string so a caller can
+// register unconditionally right after a credential resolution without a
+// blank guard. A `da` invocation is a single short-lived process, so the
+// registry is intentionally never cleared: a secret must stay non-
+// disclosable for the rest of the run, not just the call that resolved it.
+func registerSecret(secret string) {
+	if secret == "" {
+		return
+	}
+	secretRedactorMu.Lock()
+	defer secretRedactorMu.Unlock()
+	for _, s := range registeredSecrets {
+		if s == secret {
+			return
+		}
+	}
+	registeredSecrets = append(registeredSecrets, secret)
+}
+
+// redactSecrets replaces every registered secret substring in s with a fixed
+// marker. Safe to call on any string, including one with no registered
+// secrets present (returned unchanged).
+func redactSecrets(s string) string {
+	secretRedactorMu.Lock()
+	secrets := make([]string, len(registeredSecrets))
+	copy(secrets, registeredSecrets)
+	secretRedactorMu.Unlock()
+	for _, secret := range secrets {
+		s = strings.ReplaceAll(s, secret, "[REDACTED]")
+	}
+	return s
 }

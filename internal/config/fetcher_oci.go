@@ -540,8 +540,26 @@ type ociBlob struct {
 // fetcher and the layer fetcher. Nil uses ociPull, the not-yet-wired real
 // registry client (returns a transport error until the live wire protocol lands;
 // the seam lets tests and the resolver drive the caching/posture/media-type
-// logic without a live registry).
+// logic without a live registry). The `auth` argument is always the source's
+// opaque, reference-only auth block (Source.Auth) — never a resolved secret;
+// a real puller resolves it per request via ociAuthHeaderForRef (t7 auth seam,
+// oci_auth.go), scoping the live credential to that one HTTP call.
 type ociPuller func(ctx context.Context, ref ociRef, auth []byte) (ociBlob, error)
+
+// ociAuthHeaderForRef is the auth SEAM a real OCI registry pull (t8) calls
+// per request to get its Authorization header value, given ref's registry +
+// repository and the source's opaque auth reference block. challengeHeader
+// is the WWW-Authenticate header value captured from a prior anonymous probe
+// response ("" before the first request); an empty return with a nil error
+// means "send unauthenticated" (no provider configured, or — for
+// credential-helper — no challenge has been discovered yet, so the caller
+// should send its anonymous probe first per the standard two-round-trip OCI
+// Distribution auth pattern). See oci_auth.go for the provider
+// implementations (bearer, credential-helper) and the H12 non-disclosure
+// contract they uphold: the resolved credential never outlives this call.
+func ociAuthHeaderForRef(ctx context.Context, auth json.RawMessage, ref ociRef, challengeHeader string) (string, error) {
+	return resolveOCIAuthorizationHeader(ctx, auth, ref.Registry, ref.Repository, challengeHeader)
+}
 
 // ociFetcher pulls a package artifact over the OCI Distribution wire protocol
 // and caches it content-addressed by digest. The wire protocol (manifest +
