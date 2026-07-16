@@ -117,21 +117,27 @@ sys.exit(0 if (${pyexpr}) else 1)" 2>/dev/null; then
   return 0
 }
 
-# settle_file PATH — poll until PATH can be opened for read (or ~4s elapse). On the
-# windows-latest runner a filesystem filter driver (Windows Defender) can briefly
-# hold a file `da` JUST atomically re-wrote (temp + MOVEFILE_REPLACE_EXISTING), so
-# the very next open raises a sharing violation even though the content is correct
-# and settled. Only the reads that immediately follow an install/materialize in the
-# package block are tight enough to hit that window; this gives the driver time to
-# release. Effectively a no-op on POSIX (the first probe succeeds).
-settle_file() {
-  local i
-  for i in $(seq 1 20); do
-    if python3 -c "import sys; open(sys.argv[1], 'rb').read()" "$1" >/dev/null 2>&1; then
+# retry_test DESC CMD — test_command that RETRIES CMD (up to ~5s, 200ms apart)
+# until it exits 0. A read that immediately follows an install/materialize can
+# transiently fail on the windows-latest runner: a filesystem filter driver
+# (Windows Defender) briefly holds a file `da` just atomically re-wrote
+# (temp + MOVEFILE_REPLACE_EXISTING), so the very next open raises a sharing
+# violation even though the content is correct and settled (proven byte-identical
+# via diagnostics). Retrying the READ closes that window. A genuinely wrong state
+# still fails after the budget. Effectively one-shot on POSIX (first try succeeds).
+retry_test() {
+  local name="$1" cmd="$2" i
+  echo -n "  Testing $name... "
+  for i in $(seq 1 25); do
+    if eval "$cmd" >/dev/null 2>&1; then
+      echo -e "${GREEN}✓${NC}"
+      passed=$((passed + 1))
       return 0
     fi
     sleep 0.2
   done
+  echo -e "${RED}✗${NC}"
+  failed=$((failed + 1))
   return 0
 }
 
@@ -482,12 +488,12 @@ cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json"
 cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md"
 test_command "git-source content-install: install --yes (second run, frozen no-op)" \
   "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
-# The lock was just atomically re-written; let a windows filter driver release it
-# before the immediate re-read (see settle_file). No-op on POSIX.
-settle_file "${PKG_PROJ}/.agentsrc.lock"
-assert_json_field "git-source content-install: units+artifact-content unchanged across the no-op re-run" \
-  "python3 -c \"import json,sys; a=json.load(open('${SMOKE_ROOT}/pkg-lock-before.json')); b=json.load(open('${PKG_PROJ}/.agentsrc.lock')); print(json.dumps({'ok': a['units']==b['units'] and a['artifact-content']==b['artifact-content']}))\"" \
-  "d['ok'] is True"
+# retry_test: the lock read immediately follows the install's atomic re-write and
+# can lose a windows filter-driver race (see retry_test). The python exits 0 only
+# when both sections are byte-unchanged — a frozen no-op is a true no-op now that
+# the units lock is timestamp-free.
+retry_test "git-source content-install: units+artifact-content unchanged across the no-op re-run" \
+  "python3 -c \"import json,sys; a=json.load(open('${SMOKE_ROOT}/pkg-lock-before.json')); b=json.load(open('${PKG_PROJ}/.agentsrc.lock')); sys.exit(0 if (a['units']==b['units'] and a['artifact-content']==b['artifact-content']) else 1)\""
 test_command "git-source content-install: projected skill byte-identical after the no-op re-run" \
   "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
 
@@ -495,17 +501,20 @@ test_command "git-source content-install: projected skill byte-identical after t
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
 PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])")"
 PKG_CAS_FILE="${AGENTS_HOME}/cache/artifacts/skills/${PKG_SKILL_DIGEST#sha256:}/SKILL.md"
-# Same windows read-after-write settle for the CAS entry before the existence probe.
-settle_file "${PKG_CAS_FILE}"
-test_command "git-source content-install: skill CAS entry exists before tamper" "test -f '${PKG_CAS_FILE}'"
+# retry_test: same windows read-after-write race on the CAS entry probe.
+retry_test "git-source content-install: skill CAS entry exists before tamper" "test -f '${PKG_CAS_FILE}'"
 chmod +w "${PKG_CAS_FILE}"
 echo 'TAMPERED' > "${PKG_CAS_FILE}"
-assert_contains "git-source content-install: tampered CAS fails config verify" \
-  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify)" "FAIL"
+# retry_test: `config verify` reads the CAS entry we just wrote — same windows
+# read-after-write race. Retry until verify observes the tamper (emits FAIL). Use
+# command substitution so the exit code reflects the grep MATCH, not verify's own
+# non-zero exit on FAIL (which pipefail would otherwise propagate).
+retry_test "git-source content-install: tampered CAS fails config verify" \
+  "test -n \"\$( (cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify 2>&1) | grep FAIL)\""
 test_command "git-source content-install: re-install self-heals the tampered CAS entry" \
   "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
-assert_contains "git-source content-install: config verify -> OK after self-heal" \
-  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify)" "OK"
+retry_test "git-source content-install: config verify -> OK after self-heal" \
+  "test -n \"\$( (cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify 2>&1) | grep 'OK')\""
 assert_contains "git-source content-install: self-healed skill content restored" \
   "cat '${SKILL_PROJECTED}'" "release-docs-refresh"
 
