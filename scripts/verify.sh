@@ -359,6 +359,115 @@ test_command "git-source: second explain (cache warm) succeeds" \
 test_command "git-source: sidecar dir-lock released (not leaked)" \
   "test ! -e '${GS_PROJ}/.agentsrc.lock.lock'"
 
+# ── GIT-SOURCE CONTENT-INSTALL smoke — packages materialize+lock+project (t5 dogfood, DC2) ─
+# package-artifact-install spec DC2 extends the git-source-smoke fixture above
+# from LAYER-only to CONTENT install: a bare-repo "tree" source (the same
+# file:// clone path a network remote takes) ships a skill + two agents laid
+# out exactly like the live AGorcha/da-agc source dot-agents' own
+# .agentsrc.json now declares as packages[] (skill/<name>/, agent/<name>/).
+# This proves the REAL end-to-end mechanism — fetch -> materialize -> lock
+# (kind:artifact + the artifact-content integrity anchor, H10) -> project
+# (H13) -> offline verify (H7) — hermetically and offline, no network
+# dependency in CI.
+PKG_WORK="${SMOKE_ROOT}/pkg-source-work"
+PKG_BARE="${SMOKE_ROOT}/pkg-source-layer.git"
+PKG_PROJ="${SMOKE_ROOT}/pkgsrc-proj"
+mkdir -p "${PKG_WORK}/skill/release-docs-refresh" "${PKG_WORK}/agent/platform-dirs-change-analyst" "${PKG_WORK}/agent/promise-gap-analyst"
+echo '# release-docs-refresh' > "${PKG_WORK}/skill/release-docs-refresh/SKILL.md"
+echo '# platform-dirs-change-analyst' > "${PKG_WORK}/agent/platform-dirs-change-analyst/AGENT.md"
+echo '# promise-gap-analyst' > "${PKG_WORK}/agent/promise-gap-analyst/AGENT.md"
+git init -q "${PKG_WORK}"
+git -C "${PKG_WORK}" symbolic-ref HEAD refs/heads/main
+git -C "${PKG_WORK}" add skill agent
+git -C "${PKG_WORK}" -c user.name=smoke -c user.email=smoke@local commit -q -m "da-agc mirror fixture"
+git clone -q --bare "${PKG_WORK}" "${PKG_BARE}"
+PKG_URL_PATH="${PKG_BARE}"
+if command -v cygpath >/dev/null 2>&1; then
+  PKG_URL_PATH="$(cygpath -m "${PKG_BARE}")"
+fi
+mkdir -p "${PKG_PROJ}"
+cat > "${PKG_PROJ}/.agentsrc.json" <<JSON
+{
+  "version": 1,
+  "project": "pkgsrc-project",
+  "sources": [ { "type": "git", "id": "da-agc", "url": "file://${PKG_URL_PATH}", "ref": "main" } ],
+  "packages": [
+    "da-agc:skill/release-docs-refresh@main",
+    "da-agc:agent/platform-dirs-change-analyst@main",
+    "da-agc:agent/promise-gap-analyst@main"
+  ]
+}
+JSON
+
+# FIRST-RUN: no lock, cold CAS.
+test_command "git-source content-install: lock absent before first run" "test ! -e '${PKG_PROJ}/.agentsrc.lock'"
+test_command "git-source content-install: install --yes (first run)" "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+
+# (a) the skill materialized + projected + present at its invocable path.
+SKILL_PROJECTED="${PKG_PROJ}/.claude/skills/release-docs-refresh/SKILL.md"
+assert_contains "git-source content-install: skill projected+invocable" \
+  "cat '${SKILL_PROJECTED}'" "release-docs-refresh"
+
+# (b) both agents present.
+assert_contains "git-source content-install: agent 1 projected" \
+  "cat '${PKG_PROJ}/.claude/agents/platform-dirs-change-analyst/AGENT.md'" "platform-dirs-change-analyst"
+assert_contains "git-source content-install: agent 2 projected" \
+  "cat '${PKG_PROJ}/.claude/agents/promise-gap-analyst/AGENT.md'" "promise-gap-analyst"
+
+# (c) the artifact-content lock section recorded with the content digest, plus
+# a kind:artifact units entry per ref (H10).
+assert_contains "git-source content-install: lock has artifact-content section" \
+  "cat '${PKG_PROJ}/.agentsrc.lock'" "artifact-content"
+assert_contains "git-source content-install: lock has the skill artifact unit" \
+  "cat '${PKG_PROJ}/.agentsrc.lock'" "da-agc:skill/release-docs-refresh@main"
+assert_json_field "git-source content-install: artifact-content anchors all 3 refs" \
+  "cat '${PKG_PROJ}/.agentsrc.lock'" \
+  "set(d['artifact-content'].keys()) == {'da-agc:skill/release-docs-refresh@main', 'da-agc:agent/platform-dirs-change-analyst@main', 'da-agc:agent/promise-gap-analyst@main'} and all(v.startswith('sha256:') for v in d['artifact-content'].values())"
+
+# (e) the offline H7 primitive (VerifyStoreContentDigest, wired into `config
+# verify`) passes over every projected ref.
+assert_contains "git-source content-install: config verify -> OK" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify)" "OK"
+
+# (d) a SECOND run with the lock present is a no-op: the units + artifact-
+# content sections are byte-unchanged (only the install-stamp timestamp
+# moves), and the projected files are byte-identical (H9 frozen = no rewrite).
+cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json"
+cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md"
+test_command "git-source content-install: install --yes (second run, frozen no-op)" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+assert_json_field "git-source content-install: units+artifact-content unchanged across the no-op re-run" \
+  "python3 -c \"import json,sys; a=json.load(open('${SMOKE_ROOT}/pkg-lock-before.json')); b=json.load(open('${PKG_PROJ}/.agentsrc.lock')); print(json.dumps({'ok': a['units']==b['units'] and a['artifact-content']==b['artifact-content']}))\"" \
+  "d['ok'] is True"
+test_command "git-source content-install: projected skill byte-identical after the no-op re-run" \
+  "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
+
+# ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
+# self-heals it (H16 quarantine + re-extract) ─────────────────────────────
+PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])")"
+PKG_CAS_FILE="${AGENTS_HOME}/cache/artifacts/skills/${PKG_SKILL_DIGEST#sha256:}/SKILL.md"
+test_command "git-source content-install: skill CAS entry exists before tamper" "test -f '${PKG_CAS_FILE}'"
+chmod +w "${PKG_CAS_FILE}"
+echo 'TAMPERED' > "${PKG_CAS_FILE}"
+assert_contains "git-source content-install: tampered CAS fails config verify" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify)" "FAIL"
+test_command "git-source content-install: re-install self-heals the tampered CAS entry" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+assert_contains "git-source content-install: config verify -> OK after self-heal" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify)" "OK"
+assert_contains "git-source content-install: self-healed skill content restored" \
+  "cat '${SKILL_PROJECTED}'" "release-docs-refresh"
+
+# ── Adversarial: deleting the lock forces a re-fetch on the next install ────
+rm -f "${PKG_PROJ}/.agentsrc.lock"
+test_command "git-source content-install: lock absent after deletion" "test ! -e '${PKG_PROJ}/.agentsrc.lock'"
+test_command "git-source content-install: install --yes re-fetches after lock deletion" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+assert_contains "git-source content-install: re-fetched lock re-anchors the skill" \
+  "cat '${PKG_PROJ}/.agentsrc.lock'" "da-agc:skill/release-docs-refresh@main"
+assert_contains "git-source content-install: re-fetched projection still invocable" \
+  "cat '${SKILL_PROJECTED}'" "release-docs-refresh"
+
 # ── Layer resolution + provenance combinations ───────────────────────────────
 # Valid rc lints clean.
 assert_contains "config lint (valid rc) -> OK" \
