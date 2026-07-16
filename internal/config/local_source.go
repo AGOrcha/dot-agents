@@ -387,34 +387,30 @@ func (s *LocalSource) CASPathIgnored(relPath string) (bool, error) {
 // (a concurrent hand-edit, a filesystem anomaly) is caught before content
 // is exposed.
 //
-// Perf (package-artifact-install t9): this runs once per artifact — every
-// package/layer a resolve materializes — so a batch of N units paid N
-// redundant inter-process lock acquisitions (agentslock.AcquireFileLock) and
-// N no-op read-merge-writes of the SAME permanent, family/digest-independent
-// gitignore block. Profiling a 50-package warm hydrate showed this call as
-// the dominant cost (docs/PERF_BUDGET.md). A fast path skips the
-// lock-guarded install (EnsureProvenanceGitignore) when the on-disk
-// .gitignore is ALREADY a provably canonical, da-written regular file
-// carrying the managed CAS-ignore line (gitignoreIsCanonicalCASIgnore) — see
-// that function's doc for why "regular file with our exact managed line",
-// not a general CASPathIgnored match, is the bar the fast path must clear.
-// Anything else (first-ever materialize, a symlinked/non-regular
-// .gitignore, external hand-edit, or a non-canonical form) falls through to
-// the full install + mandatory re-verify, unchanged from before — the
-// fail-closed H14 guarantee is never bypassed, only the redundant lock+write
-// on an already-provably-correct file is skipped.
+// t9 round-4 (cross-harness decision — DROPPED the fast path): rounds 1-3
+// added a per-call fast path that skipped the lock-guarded install when the
+// on-disk .gitignore already looked canonical, to avoid paying this cost
+// once per artifact in a batch. Three review rounds each surfaced a new way
+// the fast path's canonicity check could diverge from real git's actual
+// gitignore semantics (a symlinked .gitignore, a leading-whitespace pattern,
+// a trailing-tab-shadowed negation after the block) — a fail-closed SECURITY
+// gate kept getting re-approximated rather than staying provably correct.
+// The fast path is removed entirely: every call now ALWAYS canonicalizes
+// (EnsureProvenanceGitignore, which unconditionally rewrites .gitignore via
+// atomic temp+rename — replacing any symlink, stray negation, or other
+// divergent occupant with the exact managed form) and then re-verifies with
+// CASPathIgnored, unconditionally, on every artifact. This restores the
+// original H14 guarantee with zero approximation. The real future perf win
+// here is structural, not semantic: hoist this install+verify to run ONCE
+// per install/refresh invocation (the "cache/" pattern is
+// family/digest-independent) rather than once per artifact — see
+// docs/PERF_BUDGET.md's "dropped for security robustness" note.
 func EnsureAndVerifyCASIgnore(agentsHome, family, digest string) error {
 	ls := NewLocalSource(agentsHome, nil)
-	casRel := filepath.Join("cache", "artifacts", family, StoreDigestDir(digest))
-	gitignorePath := filepath.Join(ls.Root, gitignoreFileName)
-	if canonical, err := gitignoreIsCanonicalCASIgnore(gitignorePath); err == nil && canonical {
-		if ok, err := ls.CASPathIgnored(casRel); err == nil && ok {
-			return nil
-		}
-	}
 	if err := ls.EnsureProvenanceGitignore(nil); err != nil {
 		return fmt.Errorf("materialize: install CAS ignore: %w", err)
 	}
+	casRel := filepath.Join("cache", "artifacts", family, StoreDigestDir(digest))
 	ok, err := ls.CASPathIgnored(casRel)
 	if err != nil {
 		return fmt.Errorf("materialize: verify CAS ignore: %w", err)
@@ -423,105 +419,6 @@ func EnsureAndVerifyCASIgnore(agentsHome, family, digest string) error {
 		return fmt.Errorf("materialize: CAS path %q is not gitignored after install at %s — refusing to write fetched content into a git-tracked store", casRel, agentsHome)
 	}
 	return nil
-}
-
-// gitignoreIsCanonicalCASIgnore reports whether path is a REGULAR file (not
-// a symlink or any other non-regular occupant) whose content carries the
-// managed da-owned block with the permanent CAS-ignore line ("cache/") as
-// one of its lines, verbatim.
-//
-// t9 round-2 (cross-harness BLOCKER finding): the original fast path trusted
-// CASPathIgnored alone, which reads via os.ReadFile — a call that FOLLOWS
-// symlinks. Real git's own gitignore reader does not follow a symlinked
-// .gitignore (it is effectively treated as absent), so a symlinked
-// .gitignore whose TARGET happens to contain "cache/" made CASPathIgnored
-// report "ignored" while `git status` would not actually ignore the path —
-// exactly the divergence H14 exists to catch, and the old code only avoided
-// it by accident: EnsureProvenanceGitignore's WriteFileAtomic (temp+rename)
-// unconditionally replaced ANY occupant at the path — symlink included —
-// with a canonical regular file on every single call, so the divergent form
-// never survived long enough to be trusted. Skipping that unconditional
-// write (the perf fix) means the fast path must independently prove
-// canonicity before it is allowed to trust CASPathIgnored's answer.
-//
-// This checks for the EXACT managed line ("cache/", alwaysIgnoredCAS's sole
-// entry), not a CASPathIgnored-style pattern match — a literal per-line
-// string compare has no matcher-fidelity gap to be wrong about. It does not
-// require the block contain ONLY that line: an EnsureProvenanceGitignore
-// call carrying additional remotePaths still produces a canonical block the
-// fast path correctly recognizes.
-//
-// t9 round-3 (cross-harness BLOCKER finding — the same divergence CLASS,
-// closed structurally): CASPathIgnored keeps chasing individual gitignore
-// syntax edge cases (round 2 fixed leading whitespace and a symlinked
-// occupant); round 3 found YET ANOTHER variant — a re-inclusion
-// ("!cache/") after the managed block, paired with a trailing-tab shadow
-// ("cache/<TAB>") that a matcher-trim subtlety could misjudge as either
-// matching or not matching the managed line. Chasing each new syntax edge
-// individually does not close the CLASS. The structural fix: real git's
-// ignore rules are LAST-MATCH-WINS, so the managed block's "cache/" line
-// only reliably controls the outcome when NOTHING PATTERN-BEARING follows
-// it. This function now requires the managed block to be TERMINAL — every
-// line after its closing marker must be blank or a comment; any pattern
-// line (negation, shadow-variant, or anything else) after the block means
-// the file is NOT canonical, regardless of what it says or how any
-// particular matcher would trim it. This closes the whole divergence class
-// (not just the reported variant) independent of trim/whitespace/matcher
-// subtleties, because a genuinely terminal block cannot be shadowed by
-// definition.
-func gitignoreIsCanonicalCASIgnore(path string) (bool, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	if !info.Mode().IsRegular() {
-		// A symlink (or any non-regular occupant — device, FIFO, ...) is
-		// exactly the divergence git's own gitignore reader does not follow.
-		// Never trust it as canonical, regardless of what reading through it
-		// would show.
-		return false, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	required := map[string]bool{}
-	for _, p := range alwaysIgnoredCAS {
-		required[p] = true
-	}
-	inBlock := false
-	blockClosed := false
-	for _, line := range splitLines(string(data)) {
-		switch {
-		case line == gitignoreBlockBegin:
-			inBlock = true
-		case line == gitignoreBlockEnd:
-			inBlock = false
-			blockClosed = true
-		case inBlock:
-			delete(required, line)
-		case blockClosed:
-			// Terminal-block requirement: nothing but a blank or comment
-			// line may follow the managed block's closing marker. Any
-			// pattern line here — a negation, a re-inclusion, a
-			// whitespace-shadow variant, anything — could, under real
-			// git's last-match-wins semantics, override the managed
-			// "cache/" line no matter how this specific check trims or
-			// parses it. Trailing \r is stripped only for the blank/comment
-			// classification itself (mirroring CASPathIgnored's own
-			// trim rule); the line's actual pattern semantics are
-			// irrelevant here — its mere PRESENCE after the block disqualifies
-			// canonicity.
-			trimmed := strings.TrimRight(line, "\r")
-			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-				return false, nil
-			}
-		}
-	}
-	return blockClosed && len(required) == 0, nil
 }
 
 // readGitignore reads the .gitignore at path, treating a missing file as empty.
