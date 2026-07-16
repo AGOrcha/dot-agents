@@ -3,6 +3,7 @@ package config
 import (
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -389,6 +390,209 @@ func TestCASPathIgnoredUsesGitSemantics(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("git semantics must report the store path NOT ignored when no covering pattern exists")
+	}
+}
+
+// TestCASPathIgnored_LeadingWhitespaceNotSignificant is the t9 round-2
+// cross-harness regression test for finding #2: a gitignore line with
+// LEADING whitespace (" cache/") is NOT the same pattern as "cache/" under
+// real git semantics (gitignore(5): leading whitespace is significant,
+// unlike trailing whitespace which git strips). Before the fix,
+// strings.TrimSpace on both ends silently canonicalized " cache/" to
+// "cache/", making CASPathIgnored report "ignored" when real `git
+// check-ignore` would not. Asserted against the real git binary when
+// available; CASPathIgnored's own answer must agree with it.
+func TestCASPathIgnored_LeadingWhitespaceNotSignificant(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if _, err := git.PlainInit(home, false); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, gitignoreFileName), []byte(" cache/\n"), 0o644); err != nil {
+		t.Fatalf("seed leading-whitespace gitignore: %v", err)
+	}
+	casRel := filepath.Join("cache", "artifacts", "skills", "deadbeef")
+
+	ls := NewLocalSource(home, nil)
+	ok, err := ls.CASPathIgnored(casRel)
+	if err != nil {
+		t.Fatalf("CASPathIgnored: %v", err)
+	}
+	if ok {
+		t.Fatalf(`CASPathIgnored must NOT treat " cache/" (leading whitespace) as matching "cache/" — real git does not`)
+	}
+
+	assertRealGitDoesNotIgnore(t, home, filepath.Join("cache", "artifacts", "skills", "deadbeef", "layer.json"))
+}
+
+// TestEnsureAndVerifyCASIgnore_LeadingWhitespaceCanonicalizes is the t9
+// round-2 regression test proving the fast path in EnsureAndVerifyCASIgnore
+// does not trust a non-canonical " cache/" gitignore: it must fall through
+// to the full install (canonicalizing rewrite) rather than fast-returning on
+// a CASPathIgnored false positive, and after the call a real git check
+// confirms the store path is genuinely ignored.
+func TestEnsureAndVerifyCASIgnore_LeadingWhitespaceCanonicalizes(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if _, err := git.PlainInit(home, false); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, gitignoreFileName), []byte(" cache/\n"), 0o644); err != nil {
+		t.Fatalf("seed leading-whitespace gitignore: %v", err)
+	}
+
+	// The non-canonical file must not satisfy the fast-path gate.
+	if canonical, err := gitignoreIsCanonicalCASIgnore(filepath.Join(home, gitignoreFileName)); err != nil || canonical {
+		t.Fatalf("gitignoreIsCanonicalCASIgnore(leading-whitespace) = (%v, %v), want (false, nil)", canonical, err)
+	}
+
+	bundle := testBundle(t, map[string]string{"SKILL.md": "# fetched\n"})
+	if _, _, _, err := MaterializeToStore(home, "skills", bundle); err != nil {
+		t.Fatalf("MaterializeToStore: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, gitignoreFileName))
+	if err != nil {
+		t.Fatalf("read canonicalized .gitignore: %v", err)
+	}
+	if !strings.Contains(string(data), gitignoreBlockBegin) {
+		t.Fatalf("expected the managed block to be installed after canonicalization, got %q", data)
+	}
+
+	assertRealGitDoesIgnore(t, home, "cache/artifacts/skills/deadbeef/layer.json")
+}
+
+// TestEnsureAndVerifyCASIgnore_SymlinkedGitignoreCanonicalizes is the t9
+// round-2 cross-harness regression test for finding #1: a SYMLINKED
+// .gitignore whose target contains "cache/" makes CASPathIgnored (which
+// reads via os.ReadFile, following symlinks) report "ignored" — but real
+// git refuses to read a symlinked .gitignore (treats it as absent), so
+// `git status`/`git check-ignore` would NOT ignore the path. The fast path
+// must not trust this divergent form; EnsureAndVerifyCASIgnore must fall
+// through to the canonicalizing install, which replaces the symlink with a
+// real regular file (os.Rename on a symlink path replaces the link itself,
+// never the target) before verifying success.
+func TestEnsureAndVerifyCASIgnore_SymlinkedGitignoreCanonicalizes(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if _, err := git.PlainInit(home, false); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	target := filepath.Join(home, "real-gitignore-target")
+	if err := os.WriteFile(target, []byte("cache/\n"), 0o644); err != nil {
+		t.Fatalf("seed symlink target: %v", err)
+	}
+	gitignorePath := filepath.Join(home, gitignoreFileName)
+	if err := os.Symlink(target, gitignorePath); err != nil {
+		t.Skipf("cannot create symlinks on this platform: %v", err)
+	}
+
+	// The symlinked occupant must not satisfy the fast-path gate, even
+	// though CASPathIgnored (reading through the symlink) would say "ignored".
+	if canonical, err := gitignoreIsCanonicalCASIgnore(gitignorePath); err != nil || canonical {
+		t.Fatalf("gitignoreIsCanonicalCASIgnore(symlink) = (%v, %v), want (false, nil)", canonical, err)
+	}
+	ls := NewLocalSource(home, nil)
+	if ok, err := ls.CASPathIgnored(filepath.Join("cache", "artifacts", "skills", "deadbeef")); err != nil || !ok {
+		t.Fatalf("expected CASPathIgnored to (falsely) report ignored through the symlink target, got ok=%v err=%v", ok, err)
+	}
+	assertRealGitDoesNotIgnore(t, home, "cache/artifacts/skills/deadbeef/layer.json")
+
+	bundle := testBundle(t, map[string]string{"SKILL.md": "# fetched\n"})
+	if _, _, _, err := MaterializeToStore(home, "skills", bundle); err != nil {
+		t.Fatalf("MaterializeToStore: %v", err)
+	}
+
+	info, err := os.Lstat(gitignorePath)
+	if err != nil {
+		t.Fatalf("lstat canonicalized .gitignore: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("expected the symlink to be replaced by a regular file, still a symlink")
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("expected a regular file after canonicalization, mode=%v", info.Mode())
+	}
+
+	assertRealGitDoesIgnore(t, home, "cache/artifacts/skills/deadbeef/layer.json")
+}
+
+// realGitAvailable reports whether the real `git` binary can be invoked, and
+// skips the calling test if not (CI-portable: these regression tests assert
+// against the REAL git engine, not go-git, per the t9 round-2 finding that
+// go-git-backed approximations are exactly what diverged from git).
+func realGitAvailable(t *testing.T) string {
+	t.Helper()
+	bin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("real git binary not available")
+	}
+	return bin
+}
+
+// assertRealGitDoesIgnore plants relPath under repoRoot (a real git
+// repository) and asserts the real `git status --porcelain` does NOT report
+// it — i.e., real git ignores it.
+func assertRealGitDoesIgnore(t *testing.T, repoRoot, relPath string) {
+	t.Helper()
+	assertRealGitIgnoreState(t, repoRoot, relPath, true)
+}
+
+// assertRealGitDoesNotIgnore is the negative counterpart of
+// assertRealGitDoesIgnore.
+func assertRealGitDoesNotIgnore(t *testing.T, repoRoot, relPath string) {
+	t.Helper()
+	assertRealGitIgnoreState(t, repoRoot, relPath, false)
+}
+
+func assertRealGitIgnoreState(t *testing.T, repoRoot, relPath string, wantIgnored bool) {
+	t.Helper()
+	gitBin := realGitAvailable(t)
+	full := filepath.Join(repoRoot, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir probe path: %v", err)
+	}
+	if err := os.WriteFile(full, []byte("probe\n"), 0o644); err != nil {
+		t.Fatalf("write probe path: %v", err)
+	}
+	defer os.RemoveAll(filepath.Join(repoRoot, strings.SplitN(filepath.ToSlash(relPath), "/", 2)[0]))
+
+	// --untracked-files=all asks git not to collapse an untracked DIRECTORY
+	// to a single line; git still collapses a wholly-IGNORED directory to
+	// its own line (by design — it does not recurse into an ignored tree),
+	// so the match below checks whether any reported entry is a PREFIX of
+	// our probe path (covers both the exact-file and the collapsed-dir
+	// cases) rather than requiring an exact path match.
+	cmd := exec.Command(gitBin, "-C", repoRoot, "status", "--porcelain=v1", "--ignored=matching", "--untracked-files=all")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status --porcelain --ignored: %v\n%s", err, out)
+	}
+	slash := filepath.ToSlash(relPath)
+	reportedIgnored, reportedUntracked := false, false
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		marker, reportedPath := line[:2], line[3:]
+		covers := slash == reportedPath || strings.HasPrefix(slash, strings.TrimSuffix(reportedPath, "/")+"/")
+		if !covers {
+			continue
+		}
+		switch marker {
+		case "!!":
+			reportedIgnored = true
+		case "??":
+			reportedUntracked = true
+		}
+	}
+	switch {
+	case wantIgnored && !reportedIgnored:
+		t.Fatalf("expected real git to report %s as ignored (!!), got:\n%s", slash, out)
+	case !wantIgnored && reportedIgnored:
+		t.Fatalf("expected real git to NOT ignore %s, but it was reported ignored (!!):\n%s", slash, out)
+	case !wantIgnored && !reportedUntracked:
+		t.Fatalf("expected real git to report %s as untracked (??) since it is not ignored, got:\n%s", slash, out)
 	}
 }
 

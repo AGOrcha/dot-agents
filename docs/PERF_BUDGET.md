@@ -167,33 +167,109 @@ after the very first artifact in a batch (or the very first materialize ever
 against a given `AGENTS_HOME`), every subsequent call re-derives an identical
 answer.
 
-**Fix**: `EnsureAndVerifyCASIgnore` now probes `CASPathIgnored` (a read-only
-check — no lock, no write) FIRST. When it already reports "ignored", the call
-returns immediately, skipping the lock-guarded install entirely. A miss
-(first-ever materialize against this `AGENTS_HOME`, or an external revert
-mid-batch — e.g. a concurrent hand-edit) still falls through to the full
-install + a MANDATORY re-verify, unchanged from before: this is not a cached
-"already ensured this session" shortcut (which could miss an external
-revert), it is a real per-call verification, just ordered so the cheap check
-runs before the expensive one instead of after. H14's fail-closed guarantee —
-this function never returns success without a freshly verified ignored CAS
-path — is unchanged.
+**Fix (round 1, later corrected — see round 2 below)**: `EnsureAndVerifyCASIgnore`
+probes `CASPathIgnored` (a read-only check — no lock, no write) FIRST. When it
+already reports "ignored", the call returns immediately, skipping the
+lock-guarded install entirely. A miss (first-ever materialize against this
+`AGENTS_HOME`, or an external revert mid-batch — e.g. a concurrent hand-edit)
+still falls through to the full install + a MANDATORY re-verify.
 
-**Before / after** (`BenchmarkHydratePackagesUnits`, 50 packages):
+**Round-2 BLOCKER (cross-harness review) and fix**: the round-1 fast path
+trusted `CASPathIgnored` alone, but `CASPathIgnored` is an APPROXIMATION of
+real git ignore semantics via the go-git matcher, and two divergences let a
+`.gitignore` that real `git status`/`git check-ignore` would NOT treat as
+ignoring `cache/` still pass the fast-path check:
+
+1. **Symlinked `.gitignore`** — `CASPathIgnored` reads via `os.ReadFile`,
+   which FOLLOWS symlinks. Real git refuses to read a symlinked `.gitignore`
+   (opens it with the equivalent of `O_NOFOLLOW`; a symlinked `.gitignore` is
+   treated as absent). A symlinked `.gitignore` whose TARGET contains
+   `cache/` made the fast path report "ignored" while real git would not
+   ignore the path at all — fetched (attacker-influenced) CAS content would
+   land in a git-TRACKED store. The round-1 code only avoided this by
+   accident: it ALWAYS ran `EnsureProvenanceGitignore`, whose
+   `WriteFileAtomic` (temp+rename) unconditionally replaces ANY occupant at
+   the `.gitignore` path — symlink included — with a canonical regular file
+   on every call, so the divergent form never survived long enough to be
+   trusted. Removing that unconditional write (the perf win) removed the
+   accidental protection along with it.
+2. **Leading-whitespace pattern (`" cache/"`)** — `CASPathIgnored` used
+   `strings.TrimSpace` (both ends) before parsing each line. Real git's
+   `gitignore(5)` only strips TRAILING whitespace; LEADING whitespace is
+   significant, so `" cache/"` is a different (non-matching) pattern from
+   `"cache/"`. The old trim silently canonicalized the two, producing a false
+   "ignored" verdict.
+
+Both were empirically reproduced against the REAL `git` binary (not just
+go-git) in the regression tests below.
+
+**Fix**: two independent changes close both gaps without reintroducing the
+per-artifact lock cost for the steady-state case:
+
+- `CASPathIgnored` now only trims TRAILING whitespace (and a trailing `\r`
+  for a CRLF-authored file) per line — leading whitespace is preserved, so
+  the matcher tracks real git semantics for finding #2.
+- The fast path in `EnsureAndVerifyCASIgnore` is now gated by
+  `gitignoreIsCanonicalCASIgnore`: it `Lstat`s the `.gitignore` and requires
+  a REGULAR file (never a symlink or other non-regular occupant — closing
+  finding #1) whose content contains the exact managed block markers with
+  the permanent `cache/` line present as one of the block's lines (a literal
+  per-line string compare, not a pattern-matcher call, so it has no
+  matcher-fidelity gap to be wrong about). Only when BOTH the canonical-form
+  check AND `CASPathIgnored` agree does the call fast-return. A miss on
+  EITHER check (first-ever materialize, a symlinked/non-regular `.gitignore`,
+  a hand-edited non-canonical form, or an external revert mid-batch) falls
+  through to the full install + mandatory re-verify, unchanged from before —
+  H14's fail-closed guarantee (this function never returns success without a
+  freshly, genuinely verified ignored CAS path) is restored and, for the
+  symlink case, was never soundly true in the fast path to begin with.
+
+**Regression tests** (`internal/config/materialize_test.go`), asserted against
+the REAL `git` binary via `git status --porcelain=v1 --ignored=matching
+--untracked-files=all` (skipped if `git` is unavailable), not just go-git:
+
+- `TestCASPathIgnored_LeadingWhitespaceNotSignificant` — a `" cache/"`
+  (leading-whitespace) pattern: `CASPathIgnored` must report NOT ignored, and
+  the real git binary agrees (the probe path is reported `??`, untracked).
+- `TestEnsureAndVerifyCASIgnore_LeadingWhitespaceCanonicalizes` — same
+  fixture through the full call: `gitignoreIsCanonicalCASIgnore` must report
+  false (fast path not taken), `MaterializeToStore` succeeds by
+  canonicalizing, and the real git binary then reports the store `!!`
+  (ignored).
+- `TestEnsureAndVerifyCASIgnore_SymlinkedGitignoreCanonicalizes` — a
+  symlinked `.gitignore` whose target contains `cache/`:
+  `gitignoreIsCanonicalCASIgnore` reports false even though `CASPathIgnored`
+  (reading through the symlink) would say "ignored"; the real git binary
+  confirms the pre-fix divergence (reports the probe path `??`, NOT
+  ignored, exactly the BLOCKER scenario); after `MaterializeToStore` the
+  `.gitignore` is proven to be a real regular file (`os.Lstat`, not a
+  symlink) and the real git binary now reports the store `!!` (ignored).
+
+Each test was verified to actually fail against the pre-fix code (confirmed
+by temporarily reverting the fix locally and re-running), so they are proven
+regression guards, not tautologies.
+
+**Before / after** (`BenchmarkHydratePackagesUnits`, 50 packages; "after"
+numbers below are POST round-2 fix, i.e. what ships):
 
 | | ns/op | B/op | allocs/op |
 |---|---|---|---|
-| Cold, before | 32,031,000 | 1,630,217 | 12,614 |
-| Cold, after | 9,432,964 | 1,202,661 | 9,008 |
-| Cold Δ | **−71%** | −26% | −29% |
-| Warm, before | 30,837,458 | 1,476,179 | 12,489 |
-| Warm, after | 8,315,750 | 1,054,859 | 8,884 |
-| Warm Δ | **−73%** | −29% | −29% |
+| Cold, before (no fast path) | 32,031,000 | 1,630,217 | 12,614 |
+| Cold, after (canonical-gated fast path) | 10,345,531 | 1,277,487 | 9,505 |
+| Cold Δ | **−68%** | −22% | −25% |
+| Warm, before (no fast path) | 30,837,458 | 1,476,179 | 12,489 |
+| Warm, after (canonical-gated fast path) | 9,224,314 | 1,135,398 | 9,384 |
+| Warm Δ | **−70%** | −23% | −24% |
 
-This fix is the largest single win in the suite because it fires on BOTH the
-cold (`resolvePackagesUnits`) and warm (`hydratePackagesFromLock`) pass-2
-paths — every declared package, every `da install`/`da refresh` invocation,
-regardless of whether the packages set itself changed.
+The round-2 correctness fix (Lstat + canonical-block line scan before
+trusting the fast path) costs a small, expected amount versus the round-1
+number reported earlier (which incorrectly trusted `CASPathIgnored` alone) —
+roughly 9-19% slower than that unsound version, still **68-70% faster than
+having no fast path at all**. This fix remains the largest single win in the
+suite because it fires on BOTH the cold (`resolvePackagesUnits`) and warm
+(`hydratePackagesFromLock`) pass-2 paths — every declared package, every `da
+install`/`da refresh` invocation, regardless of whether the packages set
+itself changed.
 
 ## Already-fast / deliberately not optimized
 

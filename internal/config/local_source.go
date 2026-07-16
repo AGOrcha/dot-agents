@@ -335,6 +335,15 @@ func (s *LocalSource) EnsureProvenanceGitignore(remotePaths []string) error {
 // check. This is the H14 verification that closes the gap a naive
 // strings.Contains would miss — a pattern present but shadowed by a later
 // negation, or a path the pattern does not actually cover.
+//
+// t9 round-2 (cross-harness finding): only TRAILING whitespace (and a
+// trailing \r, for a CRLF-authored file) is stripped per line, mirroring
+// real git's gitignore(5) semantics — LEADING whitespace is significant
+// there (a line like " cache/" does NOT ignore "cache/"). The previous
+// strings.TrimSpace here stripped BOTH ends, so a leading-whitespace
+// pattern silently matched here while real `git status`/`git check-ignore`
+// would not treat it as ignored — a false "ignored" verdict for exactly the
+// gate H14 exists to prevent.
 func (s *LocalSource) CASPathIgnored(relPath string) (bool, error) {
 	if s.Root == "" {
 		return false, errors.New(errEmptyRoot)
@@ -344,12 +353,12 @@ func (s *LocalSource) CASPathIgnored(relPath string) (bool, error) {
 		return false, err
 	}
 	var patterns []gitignore.Pattern
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimRight(raw, " \t\r")
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		patterns = append(patterns, gitignore.ParsePattern(trimmed, nil))
+		patterns = append(patterns, gitignore.ParsePattern(line, nil))
 	}
 	matcher := gitignore.NewMatcher(patterns)
 	segs := strings.Split(strings.Trim(filepath.ToSlash(relPath), "/"), "/")
@@ -371,19 +380,25 @@ func (s *LocalSource) CASPathIgnored(relPath string) (bool, error) {
 // redundant inter-process lock acquisitions (agentslock.AcquireFileLock) and
 // N no-op read-merge-writes of the SAME permanent, family/digest-independent
 // gitignore block. Profiling a 50-package warm hydrate showed this call as
-// the dominant cost (docs/PERF_BUDGET.md). CASPathIgnored is a read-only
-// check (no lock): probing it FIRST and skipping the lock-guarded install
-// when it already reports "ignored" removes the redundant work WITHOUT
-// weakening H14 — the fail-closed verify still runs on every single call
-// (an install-time cache of "already ensured" would not re-detect an
-// external revert between artifacts; this probe does, at read cost only). A
-// miss (first-ever materialize, or an external revert mid-batch) still falls
-// through to the full install + mandatory re-verify, unchanged from before.
+// the dominant cost (docs/PERF_BUDGET.md). A fast path skips the
+// lock-guarded install (EnsureProvenanceGitignore) when the on-disk
+// .gitignore is ALREADY a provably canonical, da-written regular file
+// carrying the managed CAS-ignore line (gitignoreIsCanonicalCASIgnore) — see
+// that function's doc for why "regular file with our exact managed line",
+// not a general CASPathIgnored match, is the bar the fast path must clear.
+// Anything else (first-ever materialize, a symlinked/non-regular
+// .gitignore, external hand-edit, or a non-canonical form) falls through to
+// the full install + mandatory re-verify, unchanged from before — the
+// fail-closed H14 guarantee is never bypassed, only the redundant lock+write
+// on an already-provably-correct file is skipped.
 func EnsureAndVerifyCASIgnore(agentsHome, family, digest string) error {
 	ls := NewLocalSource(agentsHome, nil)
 	casRel := filepath.Join("cache", "artifacts", family, StoreDigestDir(digest))
-	if ok, err := ls.CASPathIgnored(casRel); err == nil && ok {
-		return nil
+	gitignorePath := filepath.Join(ls.Root, gitignoreFileName)
+	if canonical, err := gitignoreIsCanonicalCASIgnore(gitignorePath); err == nil && canonical {
+		if ok, err := ls.CASPathIgnored(casRel); err == nil && ok {
+			return nil
+		}
 	}
 	if err := ls.EnsureProvenanceGitignore(nil); err != nil {
 		return fmt.Errorf("materialize: install CAS ignore: %w", err)
@@ -396,6 +411,68 @@ func EnsureAndVerifyCASIgnore(agentsHome, family, digest string) error {
 		return fmt.Errorf("materialize: CAS path %q is not gitignored after install at %s — refusing to write fetched content into a git-tracked store", casRel, agentsHome)
 	}
 	return nil
+}
+
+// gitignoreIsCanonicalCASIgnore reports whether path is a REGULAR file (not
+// a symlink or any other non-regular occupant) whose content carries the
+// managed da-owned block with the permanent CAS-ignore line ("cache/") as
+// one of its lines, verbatim.
+//
+// t9 round-2 (cross-harness BLOCKER finding): the original fast path trusted
+// CASPathIgnored alone, which reads via os.ReadFile — a call that FOLLOWS
+// symlinks. Real git's own gitignore reader does not follow a symlinked
+// .gitignore (it is effectively treated as absent), so a symlinked
+// .gitignore whose TARGET happens to contain "cache/" made CASPathIgnored
+// report "ignored" while `git status` would not actually ignore the path —
+// exactly the divergence H14 exists to catch, and the old code only avoided
+// it by accident: EnsureProvenanceGitignore's WriteFileAtomic (temp+rename)
+// unconditionally replaced ANY occupant at the path — symlink included —
+// with a canonical regular file on every single call, so the divergent form
+// never survived long enough to be trusted. Skipping that unconditional
+// write (the perf fix) means the fast path must independently prove
+// canonicity before it is allowed to trust CASPathIgnored's answer.
+//
+// This checks for the EXACT managed line ("cache/", alwaysIgnoredCAS's sole
+// entry), not a CASPathIgnored-style pattern match — a literal per-line
+// string compare has no matcher-fidelity gap to be wrong about. It does not
+// require the block contain ONLY that line: an EnsureProvenanceGitignore
+// call carrying additional remotePaths still produces a canonical block the
+// fast path correctly recognizes.
+func gitignoreIsCanonicalCASIgnore(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		// A symlink (or any non-regular occupant — device, FIFO, ...) is
+		// exactly the divergence git's own gitignore reader does not follow.
+		// Never trust it as canonical, regardless of what reading through it
+		// would show.
+		return false, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	required := map[string]bool{}
+	for _, p := range alwaysIgnoredCAS {
+		required[p] = true
+	}
+	inBlock := false
+	for _, line := range splitLines(string(data)) {
+		switch {
+		case line == gitignoreBlockBegin:
+			inBlock = true
+		case line == gitignoreBlockEnd:
+			inBlock = false
+		case inBlock:
+			delete(required, line)
+		}
+	}
+	return len(required) == 0, nil
 }
 
 // readGitignore reads the .gitignore at path, treating a missing file as empty.
