@@ -185,7 +185,36 @@ func PublishTree(ctx context.Context, src Source, parts PackageRefParts, dirPath
 // redirect a blob GET to a CDN/blob-store, whereas a token endpoint must not
 // (rejectTokenEndpointRedirect), so the two clients carry different redirect
 // policies and live separately.
-var ociRegistryHTTPClient = &http.Client{Timeout: 60 * time.Second}
+var ociRegistryHTTPClient = &http.Client{
+	Timeout:       60 * time.Second,
+	CheckRedirect: guardOCIRegistryRedirect,
+}
+
+// guardOCIRegistryRedirect bounds credential exposure on a registry-controlled
+// 3xx over the shared registry transport (H12). Go preserves the Authorization
+// header across a redirect to the SAME host on a different scheme/port or to a
+// subdomain (it only strips cross-domain), so an unguarded client lets a
+// malicious/compromised registry bounce a credentialed request to an http
+// (cleartext, MITM-capturable) downgrade or a subdomain. Policy:
+//   - PUSH (the original request is not a GET — POST blob-upload start, PUT
+//     blob/manifest) has no legitimate redirect: refuse ANY redirect, mirroring
+//     oci_auth.go's rejectTokenEndpointRedirect for the credentialed legs.
+//   - PULL (GET) may legitimately follow a blob->CDN redirect, but never to a
+//     non-https target (which would carry or downgrade the credential in the
+//     clear). A cross-origin https CDN is allowed — Go strips Authorization on
+//     the cross-domain hop, and the pulled bytes are digest-verified regardless.
+func guardOCIRegistryRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 {
+		return nil
+	}
+	if via[0].Method != http.MethodGet {
+		return fmt.Errorf("oci registry: refusing to follow a redirect on a credentialed %s request (to %s)", via[0].Method, ociOriginString(req.URL))
+	}
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("oci registry: refusing redirect to non-https target %s", ociOriginString(req.URL))
+	}
+	return nil
+}
 
 // ociManifestMediaType is the OCI 1.1 image-manifest media type this client
 // pushes/expects. ociEmptyConfigMediaType is the OCI 1.1 "artifact with no

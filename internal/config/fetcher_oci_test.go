@@ -323,6 +323,10 @@ func TestResolveOCILocationOriginGuard(t *testing.T) {
 		{"same-host-different-port", "https://reg.example:5000", "https://reg.example:9999/v2/x/uploads/1", true},
 		{"https-to-http-downgrade", "https://reg.example", "http://reg.example/v2/x/uploads/1", true},
 		{"embedded-userinfo", "https://reg.example", "https://user:pass@reg.example/v2/x/uploads/1", true},
+		{"scheme-relative-network-path", "https://reg.example", "//attacker.evil/steal", true},
+		{"ipv6-same-origin", "https://[2001:db8::1]:5000", "https://[2001:db8::1]:5000/v2/x/uploads/1", false},
+		{"ipv6-cross-host", "https://[2001:db8::1]:5000", "https://[2001:db8::2]:5000/steal", true},
+		{"opaque-non-web-scheme", "https://reg.example", "mailto:evil@attacker.evil", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -339,6 +343,46 @@ func TestResolveOCILocationOriginGuard(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("unexpected rejection: %v", err)
+			}
+		})
+	}
+}
+
+// TestGuardOCIRegistryRedirect is the H12 proof for the shared registry
+// client's redirect policy: a credentialed PUSH (non-GET) refuses any redirect;
+// a PULL (GET) refuses a non-https (cleartext) target but may follow a
+// cross-origin https CDN redirect (Go strips Authorization cross-domain).
+func TestGuardOCIRegistryRedirect(t *testing.T) {
+	mkReq := func(method, rawurl string) *http.Request {
+		r, err := http.NewRequest(method, rawurl, nil)
+		if err != nil {
+			t.Fatalf("building %s %s: %v", method, rawurl, err)
+		}
+		return r
+	}
+	cases := []struct {
+		name       string
+		origMethod string
+		redirectTo string
+		wantErr    bool
+	}{
+		{"push-post-redirect-refused", http.MethodPost, "https://reg.example/other", true},
+		{"push-put-redirect-refused", http.MethodPut, "https://reg.example/other", true},
+		{"push-put-cross-origin-refused", http.MethodPut, "https://attacker.evil/steal", true},
+		{"pull-get-https-cdn-allowed", http.MethodGet, "https://cdn.example/blob", false},
+		{"pull-get-http-downgrade-refused", http.MethodGet, "http://reg.example/blob", true},
+		{"pull-get-same-host-https-allowed", http.MethodGet, "https://reg.example/blob", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := mkReq(tc.origMethod, "https://reg.example/v2/x/blobs/uploads/")
+			next := mkReq(http.MethodGet, tc.redirectTo)
+			err := guardOCIRegistryRedirect(next, []*http.Request{orig})
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected the redirect to be refused")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected the redirect to be allowed, got: %v", err)
 			}
 		})
 	}
