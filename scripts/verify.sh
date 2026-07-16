@@ -470,6 +470,20 @@ assert_json_field "git-source content-install: units+artifact-content unchanged 
 test_command "git-source content-install: projected skill byte-identical after the no-op re-run" \
   "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
 
+# TEMP-DIAG (remove before merge): pinpoint the windows-only churn + missing CAS.
+{
+  echo "DIAG AGENTS_HOME=${AGENTS_HOME}"
+  python3 -c "import json
+a=json.load(open('${SMOKE_ROOT}/pkg-lock-before.json')); b=json.load(open('${PKG_PROJ}/.agentsrc.lock'))
+ua=a['units'].get('da-agc:skill/release-docs-refresh@main'); ub=b['units'].get('da-agc:skill/release-docs-refresh@main')
+print('DIAG before-skill-unit', ua); print('DIAG after-skill-unit ', ub)
+print('DIAG digest_changed', (ua or {}).get('digest')!=(ub or {}).get('digest'))
+print('DIAG ac_changed', a.get('artifact-content')!=b.get('artifact-content'))
+print('DIAG unit_keys_before', sorted(a['units'])); print('DIAG unit_keys_after', sorted(b['units']))"
+  echo "DIAG verify-verbose:"; (cd "${PKG_PROJ}" && $DOT_AGENTS_ABS config verify 2>&1) | head -30
+  echo "DIAG ls CAS skills:"; ls -laR "${AGENTS_HOME}/cache/artifacts/skills" 2>&1 | head -30
+} 1>&2 || true
+
 # ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
 PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])")"
