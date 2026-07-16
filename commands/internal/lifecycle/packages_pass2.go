@@ -266,7 +266,7 @@ func fetchAndMaterializePackage(agentsHome string, sources []config.Source, ref,
 		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: materialize: %w", ref, err)
 	}
 	contentDigest := config.BundleContentDigest(*fetched.Bundle)
-	return platform.ResolvedUnit{Family: bucket, Name: name, SourceID: parts.SourceID, Digest: digest, CASPath: casPath}, contentDigest, nil
+	return platform.ResolvedUnit{Family: bucket, Name: name, SourceID: parts.SourceID, Digest: digest, CASPath: casPath, ContentDigest: contentDigest}, contentDigest, nil
 }
 
 // verifyProjectionInputs is the projection-boundary integrity re-check
