@@ -238,14 +238,6 @@ func fetchAndMaterializePackage(agentsHome string, sources []config.Source, ref,
 	if !ok {
 		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: no declared source %q", ref, parts.SourceID)
 	}
-	// OCI consume is deferred to t6 (package-artifact-install t3 review #5): the
-	// OCI fetcher returns only Data/Digest, never a normalized Bundle, so an
-	// oci-source packages ref cannot be materialized yet. Fail with a clear,
-	// actionable message instead of the misleading "not a directory-shaped
-	// bundle" a nil Bundle would otherwise produce downstream.
-	if src.Type == "oci" {
-		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: OCI package consume is not yet wired (tracked in t6-oci-consume); use a git or local source for now", ref)
-	}
 	bucket, name, err := splitPackageArtifactFamily(parts.ArtifactPath)
 	if err != nil {
 		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: %w", ref, err)

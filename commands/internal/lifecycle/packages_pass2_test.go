@@ -107,7 +107,15 @@ func TestHydratePackagesUnits_UnknownSourceErrors(t *testing.T) {
 // TestHydratePackagesUnits_OCISourceFailsGracefully is review #5: an oci-source
 // packages ref must fail with a clear "not yet wired (t6)" message, not the
 // confusing "not a directory-shaped bundle" a nil OCI Bundle would produce.
-func TestHydratePackagesUnits_OCISourceFailsGracefully(t *testing.T) {
+// TestHydratePackagesUnits_OCISourceReachesWirePull confirms t6 wired OCI
+// consume into pass-2: an oci-source packages ref is no longer short-circuited
+// by the old "not yet wired" stopgap — it flows through the real consume path
+// (fetch -> digest/type gate -> materialize) and fails only at the still-stubbed
+// live wire pull (ociPull), not at a lifecycle guard. When the wire protocol
+// lands this becomes a full round-trip; until then the failure must come from
+// the registry pull, never the removed stopgap or the confusing bundle-shape
+// message a nil Bundle used to produce.
+func TestHydratePackagesUnits_OCISourceReachesWirePull(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
 	proj := filepath.Join(tmp, "proj")
@@ -117,13 +125,16 @@ func TestHydratePackagesUnits_OCISourceFailsGracefully(t *testing.T) {
 	res := &config.EnsureResult{Snapshot: snapWithPackages(sources, "reg:skill/demo@1"), ReResolved: true}
 	_, _, err := HydratePackagesUnits(proj, "proj", res)
 	if err == nil {
-		t.Fatal("expected an oci-source packages ref to fail")
+		t.Fatal("expected an oci-source packages ref to fail at the unwired wire pull")
 	}
-	if !strings.Contains(err.Error(), "t6") || !strings.Contains(err.Error(), "OCI") {
-		t.Fatalf("expected a clear OCI-not-wired-yet (t6) error, got: %v", err)
+	if !strings.Contains(err.Error(), "oci wire protocol not yet wired") {
+		t.Fatalf("expected the real ociPull transport-stub error, got: %v", err)
 	}
 	if strings.Contains(err.Error(), "not a directory-shaped bundle") {
-		t.Fatalf("expected the graceful OCI message, not the confusing bundle-shape one: %v", err)
+		t.Fatalf("OCI now populates Bundle — must not hit the bundle-shape rejection: %v", err)
+	}
+	if strings.Contains(err.Error(), "not yet wired (tracked in t6") {
+		t.Fatalf("the pass-2 OCI stopgap should be gone, got: %v", err)
 	}
 }
 
