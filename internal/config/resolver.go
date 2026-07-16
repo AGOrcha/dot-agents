@@ -687,11 +687,9 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, loc
 	layerUnits := make(map[string]LockedUnit, len(locked))
 	for ref, l := range locked {
 		layerUnits[ref] = LockedUnit{
-			Kind:          UnitKindLayer,
-			Digest:        l.ResolvedSHA,
-			FetchedAt:     l.FetchedAt,
-			LastCheckedAt: l.FetchedAt,
-			CacheKey:      l.CacheKey,
+			Kind:     UnitKindLayer,
+			Digest:   l.ResolvedSHA,
+			CacheKey: l.CacheKey,
 		}
 	}
 	// kind:profile units (R2): the resolved profile fragments are recorded as

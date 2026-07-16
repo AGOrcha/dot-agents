@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/config"
@@ -160,7 +159,6 @@ func resolvePackagesUnits(projectPath, agentsHome string, snap *config.Snapshot,
 	contentByUnit := make([]string, 0, len(snap.Effective.Packages))
 	artifactUnits := make(map[string]config.LockedUnit, len(snap.Effective.Packages))
 	contentDigests := make(map[string]string, len(snap.Effective.Packages))
-	now := time.Now().UTC().Format(time.RFC3339)
 
 	for _, pkg := range snap.Effective.Packages {
 		unit, contentDigest, err := fetchAndMaterializePackage(agentsHome, sources, pkg.Ref, "", localScopes)
@@ -169,7 +167,7 @@ func resolvePackagesUnits(projectPath, agentsHome string, snap *config.Snapshot,
 		}
 		units = append(units, unit)
 		contentByUnit = append(contentByUnit, contentDigest)
-		artifactUnits[pkg.Ref] = config.LockedUnit{Kind: config.UnitKindArtifact, Digest: unit.Digest, FetchedAt: now, LastCheckedAt: now}
+		artifactUnits[pkg.Ref] = config.LockedUnit{Kind: config.UnitKindArtifact, Digest: unit.Digest}
 		contentDigests[pkg.Ref] = contentDigest
 	}
 

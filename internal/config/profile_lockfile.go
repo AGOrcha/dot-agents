@@ -83,15 +83,15 @@ func ProfileUnitDigest(p ConfigProfile) string {
 // authored namespace exists to prevent. The result is deterministic in content:
 // the digest is content-derived and the map is key-stable, so a re-run over the
 // same set yields byte-identical entries regardless of input order.
-func ProfileLockUnits(set ProfileSet, fetchedAt time.Time) map[string]LockedUnit {
-	stamp := fetchedAt.UTC().Format(time.RFC3339)
+// The fetchedAt parameter is retained for signature stability (the resolver
+// threads its clock seam through here) but is no longer recorded: the lock is
+// content-addressed and carries no per-unit timestamp (see LockedUnit).
+func ProfileLockUnits(set ProfileSet, _ time.Time) map[string]LockedUnit {
 	out := make(map[string]LockedUnit, len(set.Profiles))
 	for _, p := range sortProfilesByKey(set.Profiles) {
 		out[p.Key()] = LockedUnit{
-			Kind:          UnitKindProfile,
-			Digest:        ProfileUnitDigest(p),
-			FetchedAt:     stamp,
-			LastCheckedAt: stamp,
+			Kind:   UnitKindProfile,
+			Digest: ProfileUnitDigest(p),
 		}
 	}
 	return out

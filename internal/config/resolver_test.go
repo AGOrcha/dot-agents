@@ -797,8 +797,11 @@ func TestLayeredResolverUnitsLockDropsClockTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := locked["acme:org/base.json"]
-	if got.FetchedAt != "2026-04-19T14:00:00Z" {
-		t.Errorf("fetched_at = %q", got.FetchedAt)
+	// The units lock is content-addressed and clock-free: neither the demoted TTL
+	// NOR a per-unit fetched_at is recorded (a re-stamped timestamp churned the
+	// lock on every run — the H9 frozen-no-op break this drop fixes).
+	if got.FetchedAt != "" {
+		t.Errorf("fetched_at = %q, want empty (units lock is timestamp-free)", got.FetchedAt)
 	}
 	if got.TTLExpiresAt != "" {
 		t.Errorf("ttl_expires_at = %q, want empty (units lock drops the clock TTL)", got.TTLExpiresAt)
