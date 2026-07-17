@@ -59,13 +59,13 @@ func TestProfileLockUnits(t *testing.T) {
 	if len(units) != 2 {
 		t.Fatalf("want 2 locked profile units, got %d", len(units))
 	}
-	want := fixedFetchTime.Format(time.RFC3339)
 	for ref, u := range units {
 		if u.Kind != UnitKindProfile {
 			t.Fatalf("unit %q kind = %q, want %q", ref, u.Kind, UnitKindProfile)
 		}
-		if u.FetchedAt != want || u.LastCheckedAt != want {
-			t.Fatalf("unit %q timestamps = %q/%q, want %q", ref, u.FetchedAt, u.LastCheckedAt, want)
+		// Content-addressed lock: profile units carry NO wall-clock timestamp.
+		if u.FetchedAt != "" || u.LastCheckedAt != "" {
+			t.Fatalf("unit %q must carry no timestamp, got %q/%q", ref, u.FetchedAt, u.LastCheckedAt)
 		}
 		if !strings.HasPrefix(u.Digest, profileDigestPrefix) {
 			t.Fatalf("unit %q digest %q missing prefix", ref, u.Digest)

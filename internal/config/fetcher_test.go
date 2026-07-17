@@ -1,6 +1,7 @@
 package config
 
 import (
+	"archive/tar"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -15,12 +16,16 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-git/go-billy/v6"
 	"github.com/go-git/go-billy/v6/memfs"
+	"github.com/go-git/go-billy/v6/osfs"
 	gogit "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/filemode"
 	"github.com/go-git/go-git/v6/plumbing/object"
 	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v6/storage/memory"
@@ -287,7 +292,180 @@ func TestDigestDirAndPath(t *testing.T) {
 	}
 }
 
+// --- H8: packages cache temp+rename + verify-on-hit -------------------------
+
+// TestWriteCachedArtifactIsAtomic asserts the packages cache blob is
+// published via a same-dir temp+rename (fsops.WriteFileAtomic), not a plain
+// truncate-and-write: the destination file never exists in a partially
+// written state a concurrent reader could observe mid-write.
+func TestWriteCachedArtifactIsAtomic(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("atomic-write-blob")
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatalf("writeCachedArtifact: %v", err)
+	}
+	dir := filepath.Dir(cachedArtifactPath(digest))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "artifact.blob" {
+			t.Fatalf("expected only the final blob in %s, found stray entry %q (temp file leaked)", dir, e.Name())
+		}
+	}
+	data, ok := readCachedArtifact(digest)
+	if !ok || string(data) != string(blob) {
+		t.Fatalf("readCachedArtifact after write = (%q, %v), want (%q, true)", data, ok, blob)
+	}
+}
+
+// TestReadCachedArtifactRejectsTornOrCorruptBlob is H8's core property: a
+// cache blob whose on-disk bytes do not match the digest it is stored under
+// (a torn write, or on-disk tampering) is rejected on read rather than
+// trusted — the caller falls through to a fresh fetch instead of ever being
+// handed bytes that do not match what was asked for.
+func TestReadCachedArtifactRejectsTornOrCorruptBlob(t *testing.T) {
+	withPackagesCache(t)
+	real := []byte("the real artifact bytes")
+	digest := "sha256:" + sha256Hex(real)
+	// Simulate a torn/tampered cache entry: the file exists under the
+	// digest's directory, but its content does not hash to that digest.
+	if err := writeCachedArtifact(digest, []byte("corrupted-different-bytes")); err != nil {
+		t.Fatalf("writeCachedArtifact: %v", err)
+	}
+	if _, ok := readCachedArtifact(digest); ok {
+		t.Fatal("expected a digest-mismatched cache entry to be rejected, not trusted")
+	}
+}
+
+// TestGitArtifactFetcherPinnedCacheHitRejectsCorruptBlob proves the H8
+// verify-on-hit property end-to-end through a real fetcher: a corrupt cache
+// entry under a pinned digest is never returned as a cache hit — the
+// fetcher instead falls through to a real clone.
+func TestGitArtifactFetcherPinnedCacheHitRejectsCorruptBlob(t *testing.T) {
+	withPackagesCache(t)
+	real := []byte("pinned-git-blob")
+	digest := "sha256:" + sha256Hex(real)
+	if err := writeCachedArtifact(digest, []byte("torn-bytes-do-not-match-digest")); err != nil {
+		t.Fatalf("writeCachedArtifact: %v", err)
+	}
+	cloned := false
+	f := &gitArtifactFetcher{cloner: func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+		cloned = true
+		return nil, nil, errors.New("expected: falls through to a real clone")
+	}}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:" + digest})
+	if err == nil {
+		t.Fatal("expected an error once the corrupt cache entry is rejected and the fallback clone fails")
+	}
+	if !cloned {
+		t.Fatal("expected the corrupt cache entry to be rejected, falling through to a real clone")
+	}
+}
+
+// TestCacheDigestPathTraversalGuard is the audit-preempt regression: a
+// malformed, attacker-influenced digest (e.g. from a `pinned:sha256:../...`
+// version spec) must never be turned into a cache-path component. writes are
+// refused and reads miss, so no file is created or read outside the cache root.
+func TestCacheDigestPathTraversalGuard(t *testing.T) {
+	withPackagesCache(t)
+	for _, bad := range []string{
+		"sha256:../../../../etc/passwd",
+		"sha256:..",
+		"sha256:" + strings.Repeat("z", 64), // right length, non-hex
+		"sha256:deadbeef",                   // valid hex, wrong length
+		"notadigest",
+	} {
+		if err := writeCachedArtifact(bad, []byte("x")); err == nil {
+			t.Fatalf("writeCachedArtifact(%q) must refuse a malformed digest", bad)
+		}
+		if _, ok := readCachedArtifact(bad); ok {
+			t.Fatalf("readCachedArtifact(%q) must miss on a malformed digest", bad)
+		}
+	}
+	// A well-formed digest still round-trips.
+	good := "sha256:" + sha256Hex([]byte("real"))
+	if err := writeCachedArtifact(good, []byte("real")); err != nil {
+		t.Fatalf("well-formed digest must still cache: %v", err)
+	}
+	if _, ok := readCachedArtifact(good); !ok {
+		t.Fatal("well-formed digest must read back")
+	}
+}
+
+// TestReadConfinedCacheBlobRejectsOversized is the cache-read bound regression:
+// a cache blob larger than the cap is rejected (a miss) before the full read,
+// while an in-cap blob reads back — the local-path discipline applied to the
+// packages cache.
+func TestReadConfinedCacheBlobRejectsOversized(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "artifact.blob"), make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	if _, ok := readConfinedCacheBlob(root, "artifact.blob", 1024); ok {
+		t.Fatal("expected an over-cap cache blob to be rejected before the full read")
+	}
+	if data, ok := readConfinedCacheBlob(root, "artifact.blob", 1<<20); !ok || len(data) != 4096 {
+		t.Fatalf("expected an in-cap cache blob to read back, ok=%v len=%d", ok, len(data))
+	}
+}
+
+// TestReadCachedArtifactRejectsSymlinkedCacheEntry is the cache-read identity
+// regression: the cache blob is a symlink whose target's content DOES hash to
+// the requested digest. The old symlink-following os.ReadFile would return that
+// target as a hit; the confined no-follow read rejects it (a miss) — an
+// attacker cannot substitute cache content via a symlink.
+func TestReadCachedArtifactRejectsSymlinkedCacheEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	withPackagesCache(t)
+	content := []byte("cached-artifact-body")
+	digest := "sha256:" + sha256Hex(content)
+	blobPath := cachedArtifactPath(digest)
+	if err := os.MkdirAll(filepath.Dir(blobPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The real content lives outside the cache blob path; the cache "blob" is a
+	// symlink to it, and its target hashes to the requested digest.
+	targetDir := t.TempDir()
+	target := filepath.Join(targetDir, "real")
+	if err := os.WriteFile(target, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, blobPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readCachedArtifact(digest); ok {
+		t.Fatal("a symlinked cache entry must be rejected even when its target hashes to the digest")
+	}
+}
+
 // --- oci fetcher -----------------------------------------------------------
+
+// seedOCIArtifactCache writes both the content-addressed blob AND its OCI type
+// sidecar, mirroring what a validated fresh OCI artifact pull leaves on disk.
+// A digest-pinned cache hit is only trusted when the sidecar is present
+// (Finding 2 / H6-on-cache-hit), so a test that wants to exercise the cache
+// fast path must seed both — seeding the blob alone now (correctly) reads back
+// as a miss.
+func seedOCIArtifactCache(t *testing.T, digest string, blob []byte) {
+	t.Helper()
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeOCITypeSidecar(digest, ociArtifactMediaType, ociArtifactMediaType); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestOCIFetcherPullsAndCaches(t *testing.T) {
 	withPackagesCache(t)
@@ -299,7 +477,7 @@ func TestOCIFetcherPullsAndCaches(t *testing.T) {
 		if ref.Registry != "reg.example" {
 			t.Fatalf("registry = %q", ref.Registry)
 		}
-		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType}, nil
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example/base"}
 	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
@@ -325,9 +503,7 @@ func TestOCIFetcherDigestPinCacheHit(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("pinned-blob")
 	digest := "sha256:" + sha256Hex(blob)
-	if err := writeCachedArtifact(digest, blob); err != nil {
-		t.Fatal(err)
-	}
+	seedOCIArtifactCache(t, digest, blob)
 	pulled := false
 	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
 		pulled = true
@@ -364,18 +540,27 @@ func TestOCIFetcherDigestMismatch(t *testing.T) {
 	}
 }
 
-func TestOCIFetcherComputesDigestWhenRegistryOmits(t *testing.T) {
+// TestOCIFetcherRejectsMissingLayerDescriptorDigest is the round-3 item 1
+// regression test: a fresh packages/artifact TAG pull whose manifest OMITS the
+// layer-descriptor digest must be rejected before untar/cache, even with
+// correct media labels. A well-formed OCI manifest always declares the layer
+// descriptor digest, so an omission is malformed/malicious — and, critically,
+// leaving it fail-open would let a MITM bypass the integrity comparison simply
+// by not sending the digest. (Supersedes the old fail-OPEN
+// "computes digest when registry omits" assertion.)
+func TestOCIFetcherRejectsMissingLayerDescriptorDigest(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("no-digest-from-reg")
 	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
-		return ociBlob{Data: blob, MediaType: ociArtifactMediaType}, nil // registry omits digest
+		return ociBlob{Data: blob, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil // registry omits the layer descriptor digest
 	}}
-	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
-	if err != nil {
-		t.Fatalf("FetchArtifact: %v", err)
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting a manifest with no layer descriptor digest, got %v", err)
 	}
-	if got.Digest != "sha256:"+sha256Hex(blob) {
-		t.Fatalf("computed digest = %q", got.Digest)
+	if _, ok := readCachedArtifact("sha256:" + sha256Hex(blob)); ok {
+		t.Fatal("a pull with no integrity anchor must never be cached")
 	}
 }
 
@@ -419,9 +604,7 @@ func TestOCIFetcherRequiredPostureCacheHitFails(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("pinblob")
 	digest := "sha256:" + sha256Hex(blob)
-	if err := writeCachedArtifact(digest, blob); err != nil {
-		t.Fatal(err)
-	}
+	seedOCIArtifactCache(t, digest, blob)
 	f := &ociFetcher{}
 	src := Source{URL: "oci://reg.example", Auth: json.RawMessage(`{"signing":"required"}`)}
 	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:" + digest})
@@ -441,7 +624,7 @@ func TestOCIFetcherCacheWriteError(t *testing.T) {
 	}
 	blob := []byte("b")
 	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
-		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociArtifactMediaType}, nil
+		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
 	}}
 	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err == nil {
@@ -463,6 +646,346 @@ func TestOCIFetcherDefaultPullerErrors(t *testing.T) {
 	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err == nil {
 		t.Fatal("expected error from unwired default puller")
+	}
+}
+
+// TestOCIFetcherPopulatesBundleFromFreshPull is the core t6 verification bar
+// (CRITICAL, t3 review #5): a fresh OCI pull whose payload is a `+tar+gzip`
+// artifact bundle must populate FetchedArtifact.Bundle through the H1
+// fail-closed normalizer, exactly like the git/local/http fetchers, so the
+// pass-2 driver's "not a directory-shaped bundle" rejection no longer fires
+// for an OCI ref.
+func TestOCIFetcherPopulatesBundleFromFreshPull(t *testing.T) {
+	withPackagesCache(t)
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "SKILL.md", 0o644, []byte("skill body"))
+		tarAddDir(t, tw, "instructions", 0o755)
+		tarAddFile(t, tw, "instructions/x.md", 0o644, []byte("nested body"))
+	})
+	digest := "sha256:" + sha256Hex(blob)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	src := Source{Type: "oci", URL: "oci://reg.example/base"}
+	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Bundle == nil {
+		t.Fatal("expected a Bundle for a gzip-sniffed OCI artifact payload")
+	}
+	if string(got.Data) != string(blob) {
+		t.Fatal("expected Data to still carry the raw compressed bytes alongside Bundle")
+	}
+	byPath := make(map[string]BundleEntry, len(got.Bundle.Entries))
+	for _, e := range got.Bundle.Entries {
+		byPath[e.Path] = e
+	}
+	nested, ok := byPath["instructions/x.md"]
+	if !ok || string(nested.Data) != "nested body" {
+		t.Fatalf("expected nested instructions/x.md relative to the resource root, got paths %v", bundlePaths(*got.Bundle))
+	}
+}
+
+// TestOCIFetcherPopulatesBundleFromCachedPin proves a digest-pinned OCI pull
+// served from the local packages cache (no pull, no manifest to re-read) is
+// still decoded into a Bundle — the cache-hit path must not silently drop the
+// H1 normalization a fresh pull gets.
+func TestOCIFetcherPopulatesBundleFromCachedPin(t *testing.T) {
+	withPackagesCache(t)
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "SKILL.md", 0o644, []byte("cached body"))
+	})
+	digest := "sha256:" + sha256Hex(blob)
+	seedOCIArtifactCache(t, digest, blob)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{}, errors.New("should not pull on a pinned cache hit")
+	}}
+	src := Source{Type: "oci", URL: "oci://reg.example"}
+	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + digest})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if !got.CacheHit {
+		t.Fatal("expected a cache hit")
+	}
+	if got.Bundle == nil {
+		t.Fatal("expected a Bundle decoded from the cached pinned payload")
+	}
+	if len(got.Bundle.Entries) == 0 || got.Bundle.Entries[0].Path != "SKILL.md" {
+		t.Fatalf("unexpected bundle entries %+v", got.Bundle.Entries)
+	}
+}
+
+// TestOCIFetcherNonGzipBodyHasNoBundle mirrors the http fetcher's legacy
+// opaque-blob contract: a payload that does not sniff as gzip is not an
+// error, it simply carries no Bundle (spec D3: a plain single-file artifact
+// pull is not installable via packages, but the fetcher itself does not
+// decide that — the pass-2 driver does).
+func TestOCIFetcherNonGzipBodyHasNoBundle(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("plain single-file blob")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: artifactDigest(blob), MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Bundle != nil {
+		t.Fatalf("expected no Bundle for a non-gzip payload, got %+v", got.Bundle)
+	}
+}
+
+// TestOCIFetcherRejectsAdversarialBundle is the OCI half of the H1 adversarial
+// requirement, exercised through the REAL fetch path: a `../escape` entry in
+// the tar payload is rejected before FetchArtifact returns, and critically,
+// before the payload is ever written to the packages cache.
+func TestOCIFetcherRejectsAdversarialBundle(t *testing.T) {
+	withPackagesCache(t)
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "good.txt", 0o644, []byte("g"))
+		tarAddFile(t, tw, "../escape", 0o644, []byte("evil"))
+	})
+	digest := "sha256:" + sha256Hex(blob)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting the adversarial tarball, got %v", err)
+	}
+	if _, ok := readCachedArtifact(digest); ok {
+		t.Fatal("a rejected OCI bundle must not be written to the packages cache")
+	}
+}
+
+// TestOCIFetcherRejectsSpoofedDigestLabel is the H5 regression test (BLOCKER:
+// digest conflation): a registry (or a tampering man-in-the-middle) that
+// serves DIFFERENT bytes than a pin addresses, while LABELING the blob with
+// the pinned digest, must be rejected. The old "trust the reported digest
+// when non-empty" shape compared the spoofed label against the pin and let
+// this through; the fix recomputes SHA-256 over the actual payload, which
+// never matches the pin here.
+func TestOCIFetcherRejectsSpoofedDigestLabel(t *testing.T) {
+	withPackagesCache(t)
+	real := []byte("real-content")
+	tampered := []byte("tampered-content")
+	pin := "sha256:" + sha256Hex(real)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: tampered, Digest: pin, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	src := Source{URL: "oci://reg.example"}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + pin})
+	if err == nil {
+		t.Fatal("expected a digest-mismatch error from the recomputed payload hash, not the spoofed label")
+	}
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error, got %v", err)
+	}
+	if _, ok := readCachedArtifact(pin); ok {
+		t.Fatal("a payload whose bytes don't match the pin must never be cached under that pin")
+	}
+}
+
+// TestOCIFetcherRejectsTamperedTagPull is the Finding 1 (BLOCKER) regression
+// test: a TAG pull (no pin) whose manifest layer-descriptor declares digest D
+// but whose registry serves bytes that hash to D' must be rejected BEFORE the
+// bytes reach the untar decoder or the cache. The earlier shape discarded the
+// declared layer-descriptor digest and only compared against a pin, so a tag
+// pull had NO integrity check at all — a MITM serving tampered bytes under a
+// valid tag + correct media labels flowed straight through. TestOCIFetcher-
+// RejectsSpoofedDigestLabel only covered the pinned path.
+func TestOCIFetcherRejectsTamperedTagPull(t *testing.T) {
+	withPackagesCache(t)
+	declared := []byte("what the manifest was signed for")
+	tampered := []byte("what the MITM actually served")
+	declaredLayerDigest := "sha256:" + sha256Hex(declared)
+	tamperedDigest := "sha256:" + sha256Hex(tampered)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		// Correct media labels, correct declared layer digest — but the bytes
+		// don't match the declared digest.
+		return ociBlob{Data: tampered, Digest: declaredLayerDigest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	// A plain tag version-spec: ref.Digest is empty, so there is no pin.
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting the tampered tag pull, got %v", err)
+	}
+	// Rejected before cache/untar: neither the tampered nor the declared digest
+	// was written to the cache.
+	if _, ok := readCachedArtifact(tamperedDigest); ok {
+		t.Fatal("tampered tag-pull bytes must never be cached")
+	}
+	if _, ok := readCachedArtifact(declaredLayerDigest); ok {
+		t.Fatal("nothing must be cached under the declared layer digest for a rejected pull")
+	}
+}
+
+// TestWriteConfinedPackagesCacheFileRejectsSymlinkedDigestDir is the Finding 3
+// regression test: a symlink pre-created at the digest dir inside the packages
+// cache (an attacker-planted redirect) must not let a cache write escape the
+// cache root. The confined writer rejects a symlinked digest-dir component
+// outright.
+func TestWriteConfinedPackagesCacheFileRejectsSymlinkedDigestDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics; junction coverage is exercised via os.Root confinement")
+	}
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	digest := "sha256:" + sha256Hex([]byte("x"))
+	hexDir := digest[len("sha256:"):]
+	cacheRoot := filepath.Join(home, "cache", "packages")
+	if err := os.MkdirAll(cacheRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Plant a symlink at <cache>/<hexDir> pointing at an attacker-chosen dir
+	// OUTSIDE the cache.
+	victimDir := filepath.Join(home, "victim")
+	if err := os.MkdirAll(victimDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victimDir, filepath.Join(cacheRoot, hexDir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCachedArtifact(digest, []byte("payload")); err == nil {
+		t.Fatal("expected a symlinked digest dir to be rejected")
+	}
+	// The write must NOT have landed in the symlink target outside the cache.
+	if _, err := os.Stat(filepath.Join(victimDir, "artifact.blob")); err == nil {
+		t.Fatal("cache write escaped the cache root through a symlinked digest dir")
+	}
+}
+
+// TestOCIFetcherRejectsMissingManifestArtifactType is an H6 negative test: a
+// registry that omits the manifest-level artifactType must fail closed for a
+// packages/artifact pull — the old guard tolerated an empty served media type;
+// H6 removes that tolerance.
+func TestOCIFetcherRejectsMissingManifestArtifactType(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("artifact-bytes")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: artifactDigest(blob), MediaType: ociArtifactMediaType}, nil // ArtifactType omitted
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error for a missing manifest artifactType, got %v", err)
+	}
+}
+
+// TestOCIFetcherRejectsMismatchedManifestArtifactType is an H6 negative test:
+// a manifest declaring a different artifactType (e.g. the config-layer type,
+// which some other OCI blob in the same registry legitimately carries) must
+// be rejected before it is ever treated as an artifact bundle.
+func TestOCIFetcherRejectsMismatchedManifestArtifactType(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("artifact-bytes")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: artifactDigest(blob), MediaType: ociArtifactMediaType, ArtifactType: ociLayerMediaType}, nil
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error for a mismatched manifest artifactType, got %v", err)
+	}
+}
+
+// TestOCIFetcherRejectsMissingLayerMediaType is an H6 negative test: the
+// blob/descriptor's own media type must also be present — a manifest with a
+// correct artifactType but a registry that omits the layer descriptor's media
+// type must still fail (H6 requires BOTH checks, independently).
+func TestOCIFetcherRejectsMissingLayerMediaType(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("artifact-bytes")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: artifactDigest(blob), ArtifactType: ociArtifactMediaType}, nil // MediaType omitted
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error for a missing layer media type, got %v", err)
+	}
+}
+
+// TestOCIFetcherCacheHitWithoutSidecarIsNotTrusted is the Finding 2 regression
+// test: a valid tar seeded into the shared packages cache WITHOUT the OCI type
+// sidecar (as another source type — git/local/http — or a direct seed would
+// leave it) must NOT be trusted as an OCI artifact on a digest-pinned hit. The
+// blob alone carries no manifest artifactType / layer media type, so the fetcher
+// must treat the entry as a MISS and re-resolve the manifest. Here the puller is
+// the unwired stub, so the fall-through surfaces as a transport error rather
+// than silently materializing the unvalidated bytes (fail closed).
+func TestOCIFetcherCacheHitWithoutSidecarIsNotTrusted(t *testing.T) {
+	withPackagesCache(t)
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "SKILL.md", 0o644, []byte("seeded by another route"))
+	})
+	digest := "sha256:" + sha256Hex(blob)
+	// Blob present, but NO sidecar — mimics a non-OCI seed of the shared cache.
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	f := &ociFetcher{} // unwired puller -> any fall-through is a transport error
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + digest})
+	if err == nil {
+		t.Fatal("a sidecar-less cached blob must not be trusted as an OCI artifact; expected a fall-through error")
+	}
+	// Corrupting the sidecar's declared type must likewise NOT be trusted.
+	if err := writeOCITypeSidecar(digest, ociLayerMediaType, ociLayerMediaType); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + digest}); err == nil {
+		t.Fatal("a cached blob whose sidecar declares the wrong type must not be trusted")
+	}
+	// With the correct sidecar the SAME cached blob is trusted — proving the
+	// gate keys on the sidecar, not on some incidental difference.
+	if err := writeOCITypeSidecar(digest, ociArtifactMediaType, ociArtifactMediaType); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + digest})
+	if err != nil {
+		t.Fatalf("FetchArtifact with valid sidecar: %v", err)
+	}
+	if !got.CacheHit || got.Bundle == nil {
+		t.Fatalf("expected a trusted cache hit with a Bundle, got %+v", got)
+	}
+}
+
+// TestParseOCIRefRejectsSemVerRange proves a SemVer range version-spec is
+// rejected up front (spec §6: ranges stay deferred) rather than silently
+// forwarded to the registry as a literal (and almost certainly wrong) tag.
+func TestParseOCIRefRejectsSemVerRange(t *testing.T) {
+	cases := []string{"^1.2", "~1.2.3", ">=1.0", "1.x", "1.2.0 - 1.3.0", "*"}
+	src := Source{URL: "oci://reg.example/base"}
+	for _, spec := range cases {
+		t.Run(spec, func(t *testing.T) {
+			_, err := parseOCIRef(src, PackageRefParts{ArtifactPath: "skill/x", VersionSpec: spec})
+			if err == nil {
+				t.Fatalf("expected a deferred-range error for version-spec %q", spec)
+			}
+		})
+	}
+}
+
+// TestParseOCIRefAcceptsLiteralTags proves ordinary tag-shaped version specs
+// (unaffected by the SemVer-range guard) still resolve as literal tags.
+func TestParseOCIRefAcceptsLiteralTags(t *testing.T) {
+	cases := []string{"1.2.3", "latest", "main", "v2", ""}
+	src := Source{URL: "oci://reg.example/base"}
+	for _, spec := range cases {
+		t.Run(spec, func(t *testing.T) {
+			ref, err := parseOCIRef(src, PackageRefParts{ArtifactPath: "skill/x", VersionSpec: spec})
+			if err != nil {
+				t.Fatalf("parseOCIRef(%q): unexpected error %v", spec, err)
+			}
+			if ref.Tag != spec || ref.Digest != "" {
+				t.Fatalf("parseOCIRef(%q) = %+v, want Tag=%q Digest=\"\"", spec, ref, spec)
+			}
+		})
 	}
 }
 
@@ -626,6 +1149,126 @@ func TestHTTPArtifactFetcherCacheWriteError(t *testing.T) {
 	_, err := f.FetchArtifact(Source{URL: srv.URL}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err == nil {
 		t.Fatal("expected cache-write error")
+	}
+}
+
+// --- http artifact fetcher: tarball layout (H1) -----------------------------
+
+func httpTestServer(t *testing.T, body []byte) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestHTTPArtifactFetcherTarballSurvivesStructure is the tarball half of the
+// task's core verification bar: a gzip-sniffed http artifact body is
+// normalized into a Bundle whose paths are relative to the resource root,
+// with dirs, modes, and dotfiles surviving.
+func TestHTTPArtifactFetcherTarballSurvivesStructure(t *testing.T) {
+	withPackagesCache(t)
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "SKILL.md", 0o644, []byte("skill body"))
+		tarAddDir(t, tw, "instructions", 0o755)
+		tarAddFile(t, tw, "instructions/x.md", 0o644, []byte("nested body"))
+		tarAddFile(t, tw, ".env", 0o600, []byte(""))
+	})
+	srv := httpTestServer(t, blob)
+
+	f := &httpArtifactFetcher{client: srv.Client()}
+	got, err := f.FetchArtifact(Source{URL: srv.URL}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Bundle == nil {
+		t.Fatal("expected a Bundle for a gzip-sniffed tarball body")
+	}
+	if string(got.Data) != string(blob) {
+		t.Fatal("expected Data to still carry the raw compressed bytes alongside Bundle")
+	}
+
+	byPath := make(map[string]BundleEntry, len(got.Bundle.Entries))
+	for _, e := range got.Bundle.Entries {
+		byPath[e.Path] = e
+	}
+	nested, ok := byPath["instructions/x.md"]
+	if !ok || string(nested.Data) != "nested body" {
+		t.Fatalf("expected nested instructions/x.md relative to the resource root, got paths %v", bundlePaths(*got.Bundle))
+	}
+	if dir, ok := byPath["instructions"]; !ok || !dir.IsDir {
+		t.Fatalf("expected instructions dir entry to survive, got %+v", dir)
+	}
+	if _, ok := byPath[".env"]; !ok {
+		t.Fatalf("expected dotfile .env to survive, paths %v", bundlePaths(*got.Bundle))
+	}
+}
+
+// TestHTTPArtifactFetcherTarballRejectsAdversarialEntries is the http half of
+// the task's adversarial requirement, exercised through the REAL fetch path
+// (not just UntarBundle directly): a `../escape` entry, an absolute path, and
+// a symlink leaving the resource dir are each rejected before FetchArtifact
+// returns — and critically, before the fetched blob is ever written to the
+// packages cache, so a failed validation leaves no trace on disk.
+func TestHTTPArtifactFetcherTarballRejectsAdversarialEntries(t *testing.T) {
+	cases := []struct {
+		name string
+		add  func(tw *tar.Writer)
+	}{
+		{
+			name: "path traversal escape",
+			add: func(tw *tar.Writer) {
+				tarAddFile(t, tw, "good.txt", 0o644, []byte("g"))
+				tarAddFile(t, tw, "../escape", 0o644, []byte("evil"))
+			},
+		},
+		{
+			name: "absolute path",
+			add: func(tw *tar.Writer) {
+				tarAddFile(t, tw, "good.txt", 0o644, []byte("g"))
+				tarAddFile(t, tw, "/etc/passwd", 0o644, []byte("evil"))
+			},
+		},
+		{
+			name: "symlink leaving the resource dir",
+			add: func(tw *tar.Writer) {
+				tarAddFile(t, tw, "good.txt", 0o644, []byte("g"))
+				tarAddSymlink(t, tw, "escape-link", "../../../etc/passwd")
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withPackagesCache(t)
+			blob := buildTarGz(t, tc.add)
+			digest := "sha256:" + sha256Hex(blob)
+			srv := httpTestServer(t, blob)
+
+			f := &httpArtifactFetcher{client: srv.Client()}
+			_, err := f.FetchArtifact(Source{URL: srv.URL}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+			var ie *ImportError
+			if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+				t.Fatalf("want content error rejecting the adversarial tarball, got %v", err)
+			}
+			if _, ok := readCachedArtifact(digest); ok {
+				t.Fatal("a rejected tarball must not be written to the packages cache")
+			}
+		})
+	}
+}
+
+func TestHTTPArtifactFetcherNonGzipBodyHasNoBundle(t *testing.T) {
+	withPackagesCache(t)
+	srv := httpTestServer(t, []byte("plain single-file blob"))
+	f := &httpArtifactFetcher{client: srv.Client()}
+	got, err := f.FetchArtifact(Source{URL: srv.URL}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Bundle != nil {
+		t.Fatalf("expected no Bundle for a non-gzip legacy blob, got %+v", got.Bundle)
 	}
 }
 
@@ -1142,7 +1785,7 @@ func TestOCIFetcherCapturesDigestCacheKey(t *testing.T) {
 	blob := []byte("artifact-bytes")
 	digest := artifactDigest(blob)
 	f := &ociFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) (ociBlob, error) {
-		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType}, nil
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
 	}}
 	got, err := f.FetchArtifact(Source{Type: "oci", URL: "oci://reg.test/base"}, PackageRefParts{SourceID: "acme", ArtifactPath: "skill/x", VersionSpec: "1.0.0"})
 	if err != nil {
@@ -1673,6 +2316,558 @@ func TestGitArtifactRefResolution(t *testing.T) {
 	}
 }
 
+// --- git artifact fetcher: tree layout (H1) ---------------------------------
+
+// populatedRepoFS opens the on-disk fixture at dir (for HEAD resolution, as
+// committedRepoFS does) and returns an independent memfs the test populates
+// directly via setup, so a test can build an arbitrary worktree tree
+// (nested dirs, dotfiles, symlinks) without needing real git plumbing for
+// exotic entry types.
+func populatedRepoFS(t *testing.T, dir string, setup func(fs billy.Filesystem)) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		repo, err := gogit.PlainOpen(dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		wfs := memfs.New()
+		setup(wfs)
+		return repo, wfs, nil
+	}
+}
+
+// memfsWriteFile creates name (and its implicit parent dirs) in fs with body.
+func memfsWriteFile(t *testing.T, fs billy.Filesystem, name string, body []byte) {
+	t.Helper()
+	fh, err := fs.Create(name)
+	if err != nil {
+		t.Fatalf("memfs Create(%s): %v", name, err)
+	}
+	if _, err := fh.Write(body); err != nil {
+		t.Fatalf("memfs Write(%s): %v", name, err)
+	}
+	if err := fh.Close(); err != nil {
+		t.Fatalf("memfs Close(%s): %v", name, err)
+	}
+}
+
+// TestGitArtifactFetcherTreeLayoutSurvivesStructure is the tree-layout half
+// of the task's core verification bar: a git-subtree pull yields a Bundle
+// with paths relative to the resource root (nested instructions/x.md
+// appears as instructions/x.md), and dirs + modes + dotfiles survive.
+func TestGitArtifactFetcherTreeLayoutSurvivesStructure(t *testing.T) {
+	withPackagesCache(t)
+	f := &gitArtifactFetcher{cloner: gitTreeFixtureCloner(t, map[string][]byte{
+		"skill/SKILL.md":          []byte("skill body"),
+		"skill/instructions/x.md": []byte("nested body"),
+		"skill/.env":              []byte(""),
+	}, nil)}
+
+	got, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Bundle == nil {
+		t.Fatal("expected a Bundle for a directory artifact path")
+	}
+	if got.Data != nil {
+		t.Fatalf("expected no single-blob Data for a tree-layout pull, got %q", got.Data)
+	}
+
+	byPath := make(map[string]BundleEntry, len(got.Bundle.Entries))
+	for _, e := range got.Bundle.Entries {
+		byPath[e.Path] = e
+	}
+	nested, ok := byPath["instructions/x.md"]
+	if !ok || string(nested.Data) != "nested body" {
+		t.Fatalf("expected nested instructions/x.md relative to the resource root, got paths %v", bundlePaths(*got.Bundle))
+	}
+	if dir, ok := byPath["instructions"]; !ok || !dir.IsDir {
+		t.Fatalf("expected instructions dir entry to survive, got %+v", dir)
+	}
+	if _, ok := byPath[".env"]; !ok {
+		t.Fatalf("expected dotfile .env to survive, paths %v", bundlePaths(*got.Bundle))
+	}
+	if skill, ok := byPath["SKILL.md"]; !ok || string(skill.Data) != "skill body" {
+		t.Fatalf("expected SKILL.md content to survive, got %+v", skill)
+	}
+	if got.Digest != BundleDigest(*got.Bundle) {
+		t.Fatalf("digest = %q, want BundleDigest(%+v)", got.Digest, got.Bundle)
+	}
+}
+
+// TestGitArtifactFetcherTreeLayoutRejectsSymlinkEscape is the git half of
+// the task's adversarial requirement: a symlink anywhere in the subtree
+// (here pointing outside the resource dir) is rejected before the pull
+// succeeds, and no Bundle is returned.
+func TestGitArtifactFetcherTreeLayoutRejectsSymlinkEscape(t *testing.T) {
+	withPackagesCache(t)
+	f := &gitArtifactFetcher{cloner: gitTreeFixtureCloner(t, map[string][]byte{
+		"skill/SKILL.md": []byte("skill body"),
+	}, map[string]string{
+		"skill/escape-link": "../../../etc/passwd",
+	})}
+
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting the symlink, got %v", err)
+	}
+}
+
+// TestGitArtifactFetcherTreeLayoutPinnedDigestMismatch asserts a
+// "pinned:sha256:..." version spec pins the WHOLE subtree's BundleDigest: a
+// pull whose subtree hashes to something else is a content error, not a
+// silently-served mismatch.
+func TestGitArtifactFetcherTreeLayoutPinnedDigestMismatch(t *testing.T) {
+	withPackagesCache(t)
+	dir := t.TempDir()
+	makeGitFixtureAt(t, dir, "skill/SKILL.md", []byte("root"))
+	f := &gitArtifactFetcher{cloner: populatedRepoFS(t, dir, func(fs billy.Filesystem) {
+		memfsWriteFile(t, fs, "skill/SKILL.md", []byte("skill body"))
+	})}
+
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "pinned:sha256:deadbeef"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error for a pinned tree-layout digest mismatch, got %v", err)
+	}
+}
+
+// TestGitArtifactFetcherTreeLayoutRequiredPostureFails asserts the signing
+// posture stub applies to tree-layout pulls exactly as it does to a
+// single-file pull.
+func TestGitArtifactFetcherTreeLayoutRequiredPostureFails(t *testing.T) {
+	withPackagesCache(t)
+	dir := t.TempDir()
+	makeGitFixtureAt(t, dir, "skill/SKILL.md", []byte("root"))
+	f := &gitArtifactFetcher{cloner: populatedRepoFS(t, dir, func(fs billy.Filesystem) {
+		memfsWriteFile(t, fs, "skill/SKILL.md", []byte("skill body"))
+	})}
+
+	src := Source{Type: "git", URL: "file:///r", Ref: "main", Auth: json.RawMessage(`{"signing":"required"}`)}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
+	if err == nil {
+		t.Fatal("required posture must fail an unsigned tree-layout pull")
+	}
+}
+
+// submoduleCloner builds an in-memory repo whose committed tree at subPath
+// contains a gitlink (filemode.Submodule) entry, paired with a worktree memfs
+// that mimics go-git flattening that submodule into an empty directory — the
+// exact shape defect #4 exploits. The returned cloner drives the real
+// gitArtifactFetcher path (cloneAndResolve loads the commit tree from the same
+// storer).
+func submoduleCloner(t *testing.T) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	st := memory.NewStorage()
+
+	blob := st.NewEncodedObject()
+	blob.SetType(plumbing.BlobObject)
+	w, err := blob.Writer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("skill body")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	blobHash, err := st.SetEncodedObject(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A gitlink points at some commit OID that need not exist in this store.
+	subCommit := plumbing.NewHash("1111111111111111111111111111111111111111")
+
+	skillTree := &object.Tree{Entries: []object.TreeEntry{
+		{Name: "SKILL.md", Mode: filemode.Regular, Hash: blobHash},
+		{Name: "vendored", Mode: filemode.Submodule, Hash: subCommit},
+	}}
+	skillHash := encodeTree(t, st, skillTree)
+
+	rootTree := &object.Tree{Entries: []object.TreeEntry{
+		{Name: "skill", Mode: filemode.Dir, Hash: skillHash},
+	}}
+	rootHash := encodeTree(t, st, rootTree)
+
+	sig := object.Signature{Name: "t", Email: "t@example"}
+	commit := &object.Commit{Author: sig, Committer: sig, Message: "with submodule", TreeHash: rootHash}
+	commitObj := st.NewEncodedObject()
+	if err := commit.Encode(commitObj); err != nil {
+		t.Fatal(err)
+	}
+	commitHash, err := st.SetEncodedObject(commitObj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewHashReference("refs/heads/main", commitHash)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
+		t.Fatal(err)
+	}
+
+	wfs := memfs.New()
+	memfsWriteFile(t, wfs, "skill/SKILL.md", []byte("skill body"))
+	// go-git flattens the gitlink into an empty directory in the checkout.
+	if err := wfs.MkdirAll("skill/vendored", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		repo, err := gogit.Open(st, wfs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, wfs, nil
+	}
+}
+
+func encodeTree(t *testing.T, st *memory.Storage, tree *object.Tree) plumbing.Hash {
+	t.Helper()
+	obj := st.NewEncodedObject()
+	if err := tree.Encode(obj); err != nil {
+		t.Fatal(err)
+	}
+	h, err := st.SetEncodedObject(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// treeFixtureNode is one node (file, symlink, or dir) in the tree a
+// buildCommittedTree call assembles. A dir node's Children key is the child's
+// path segment; a leaf node (Data non-nil or Symlink set) has no children.
+type treeFixtureNode struct {
+	Data     []byte // non-nil for a regular file (may be empty)
+	Symlink  string // non-empty target for a symlink leaf
+	Children map[string]*treeFixtureNode
+}
+
+// buildCommittedTree writes files (path -> content) and symlinks (path ->
+// target) directly into st's object graph as real committed blob/tree
+// objects — no memfs, no real disk I/O — and returns the root tree's hash.
+// It is the t1b test counterpart to the git-ingestion path's switch to
+// committed-tree/blob reads (gitCommittedTreeWalker): unlike the worktree-fs
+// fixtures used elsewhere in this file (populatedRepoFS et al.), every path a
+// test declares here is REAL committed content, so a tree-based content
+// reader sees exactly the shape the test intends.
+func buildCommittedTree(t *testing.T, st *memory.Storage, files map[string][]byte, symlinks map[string]string) plumbing.Hash {
+	t.Helper()
+	root := &treeFixtureNode{Children: map[string]*treeFixtureNode{}}
+	for p, body := range files {
+		insertTreeFixtureNode(root, p, &treeFixtureNode{Data: body})
+	}
+	for p, target := range symlinks {
+		insertTreeFixtureNode(root, p, &treeFixtureNode{Symlink: target})
+	}
+	return encodeFixtureTree(t, st, root)
+}
+
+// insertTreeFixtureNode places leaf at path p (slash-separated) under root,
+// creating intermediate directory nodes as needed.
+func insertTreeFixtureNode(root *treeFixtureNode, p string, leaf *treeFixtureNode) {
+	parts := strings.Split(p, "/")
+	cur := root
+	for i, part := range parts {
+		if i == len(parts)-1 {
+			cur.Children[part] = leaf
+			return
+		}
+		next, ok := cur.Children[part]
+		if !ok || next.Children == nil {
+			next = &treeFixtureNode{Children: map[string]*treeFixtureNode{}}
+			cur.Children[part] = next
+		}
+		cur = next
+	}
+}
+
+// writeFixtureBlob stores body as a git blob object and returns its hash.
+func writeFixtureBlob(t *testing.T, st *memory.Storage, body []byte) plumbing.Hash {
+	blob := st.NewEncodedObject()
+	blob.SetType(plumbing.BlobObject)
+	w, err := blob.Writer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	h, err := st.SetEncodedObject(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// fixtureTreeSortKey returns name with a trailing slash for directory nodes so
+// entries sort as Git's tree encoding requires (treeEntrySortName).
+func fixtureTreeSortKey(n *treeFixtureNode, name string) string {
+	if n.Symlink == "" && n.Data == nil {
+		return name + "/"
+	}
+	return name
+}
+
+// encodeFixtureTree recursively encodes n and its children into git tree/blob
+// objects in st, returning the root tree hash.
+func encodeFixtureTree(t *testing.T, st *memory.Storage, n *treeFixtureNode) plumbing.Hash {
+	names := make([]string, 0, len(n.Children))
+	for name := range n.Children {
+		names = append(names, name)
+	}
+	// Git's tree encoding requires entries sorted as if a directory name
+	// carried a trailing slash (treeEntrySortName) — sort accordingly so
+	// Tree.Validate (called by Encode) accepts the constructed tree.
+	sort.Slice(names, func(i, j int) bool {
+		return fixtureTreeSortKey(n.Children[names[i]], names[i]) < fixtureTreeSortKey(n.Children[names[j]], names[j])
+	})
+	tree := &object.Tree{}
+	for _, name := range names {
+		child := n.Children[name]
+		switch {
+		case child.Symlink != "":
+			tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Symlink, Hash: writeFixtureBlob(t, st, []byte(child.Symlink))})
+		case child.Data != nil:
+			tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Regular, Hash: writeFixtureBlob(t, st, child.Data)})
+		default:
+			tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Dir, Hash: encodeFixtureTree(t, st, child)})
+		}
+	}
+	return encodeTree(t, st, tree)
+}
+
+// gitTreeFixtureCloner returns a cloner (the gitArtifactFetcher.cloner test
+// seam) whose repo's HEAD resolves to a commit over a tree built from files
+// and symlinks by buildCommittedTree. No memfs is populated: with content
+// reads sourced from the committed tree/blob graph (t1b), the worktree
+// filesystem is never consulted for a tree-layout pull, so an empty memfs is
+// sufficient here (FetchArtifact's directory-vs-file Lstat classification
+// still needs the artifact root to exist somewhere in the worktree fs for a
+// single-file pull, but every caller of this helper exercises a tree-layout
+// pull, which classifies via the committed tree once inside fetchTreeBundle).
+func gitTreeFixtureCloner(t *testing.T, files map[string][]byte, symlinks map[string]string) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	st := memory.NewStorage()
+	rootHash := buildCommittedTree(t, st, files, symlinks)
+
+	sig := object.Signature{Name: "t", Email: "t@example"}
+	commit := &object.Commit{Author: sig, Committer: sig, Message: "fixture", TreeHash: rootHash}
+	commitObj := st.NewEncodedObject()
+	if err := commit.Encode(commitObj); err != nil {
+		t.Fatal(err)
+	}
+	commitHash, err := st.SetEncodedObject(commitObj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewHashReference("refs/heads/main", commitHash)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
+		t.Fatal(err)
+	}
+
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		wfs := memfs.New()
+		// The top-level artifact path must exist in the worktree fs as a
+		// directory for FetchArtifact's initial Lstat classification — content
+		// underneath it is irrelevant since fetchTreeBundle reads the committed
+		// tree, not this fs.
+		if err := wfs.MkdirAll("skill", 0o755); err != nil {
+			return nil, nil, err
+		}
+		repo, err := gogit.Open(st, wfs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, wfs, nil
+	}
+}
+
+// TestGitArtifactFetcherTreeLayoutRejectsSubmodule is the defect #4
+// regression: the committed subtree carries a gitlink (mode 160000) that
+// go-git flattened into an empty worktree directory. A worktree-only walk
+// would silently drop the gitlink OID (letting two different referenced
+// commits yield the same BundleDigest); inspecting the committed tree modes
+// catches and rejects it. The two cases cover a submodule NESTED under the
+// artifact dir (the recursive tree-walk branch) and a submodule that IS the
+// artifact path (the FindEntry branch).
+func TestGitArtifactFetcherTreeLayoutRejectsSubmodule(t *testing.T) {
+	cases := map[string]string{
+		"submodule nested under the artifact dir": "skill",
+		"submodule is the artifact path":          "skill/vendored",
+		// Defect #3: noncanonical artifact paths resolve to the gitlink in the
+		// worktree memfs but must not slip past the committed-tree lookup.
+		"noncanonical dot-slit path":     "./skill/vendored",
+		"noncanonical dotdot round-trip": "skill/../skill/vendored",
+		"noncanonical repeated-sep path": "skill//vendored",
+	}
+	for name, artifactPath := range cases {
+		t.Run(name, func(t *testing.T) {
+			withPackagesCache(t)
+			f := &gitArtifactFetcher{cloner: submoduleCloner(t)}
+			_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: artifactPath, VersionSpec: "1"})
+			var ie *ImportError
+			if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+				t.Fatalf("want content error rejecting a git submodule (gitlink) entry, got %v", err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "submodule") {
+				t.Fatalf("error should name the submodule defect, got %v", err)
+			}
+		})
+	}
+}
+
+// TestGitCommittedTreeWalkerEnforcesPerFileCap is the defect #4 regression
+// (t1b re-shape: the walker now reads from the committed tree, not the
+// worktree): the per-file cap must hold on the git ingestion path too — an
+// oversized committed blob is rejected AT the walker (before the full read,
+// via the blob's declared Size), not only later by the accumulator. The
+// error naming "git tree file" proves the pre-read walker-level rejection.
+func TestGitCommittedTreeWalkerEnforcesPerFileCap(t *testing.T) {
+	st := memory.NewStorage()
+	rootHash := buildCommittedTree(t, st, map[string][]byte{"big.txt": make([]byte, 4096)}, nil)
+	limits := BundleLimits{MaxEntries: 10, MaxFiles: 10, MaxFileBytes: 1024, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 20}
+	_, err := NormalizeBundle(gitCommittedTreeWalker(st, rootHash, limits), limits)
+	if err == nil {
+		t.Fatal("expected rejection of an oversized committed file on the git path")
+	}
+	if !strings.Contains(err.Error(), "git tree file") || !strings.Contains(err.Error(), "per-file cap") {
+		t.Fatalf("expected a walker-level per-file-cap rejection, got %v", err)
+	}
+}
+
+// TestGitArtifactFetcherTreeLayoutRejectsOversizedBlob is the t1b end-to-end
+// adversarial test: a committed blob larger than BundleLimits.MaxFileBytes
+// inside a tree-layout pull is rejected by FetchArtifact itself (real
+// DefaultBundleLimits, not an injected tiny cap), proving the walker-level
+// per-file bound (TestGitCommittedTreeWalkerEnforcesPerFileCap) holds through
+// the full FetchArtifact -> fetchTreeBundle path, and that the blob's
+// declared Size is checked before its content is read (readCommittedBlobFile)
+// rather than after an unbounded read.
+func TestGitArtifactFetcherTreeLayoutRejectsOversizedBlob(t *testing.T) {
+	withPackagesCache(t)
+	big := make([]byte, DefaultBundleLimits().MaxFileBytes+1)
+	f := &gitArtifactFetcher{cloner: gitTreeFixtureCloner(t, map[string][]byte{
+		"skill/big.bin": big,
+	}, nil)}
+
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting an oversized committed blob, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "per-file cap") {
+		t.Fatalf("expected a per-file-cap rejection, got %v", err)
+	}
+}
+
+// TestGitCommittedTreeWalkerRejectsEntryFlood is the git half of the t1b
+// directory-flood adversarial test: the committed-tree walk streams entries
+// one at a time as it recurses, so the accumulator's MaxEntries cap trips
+// within one entry's worth of over-read rather than after the whole subtree
+// is buffered. A small actual entry count against a tiny injected cap
+// exercises the SAME mechanism a real multi-million-entry flood would hit, at
+// test speed.
+func TestGitCommittedTreeWalkerRejectsEntryFlood(t *testing.T) {
+	st := memory.NewStorage()
+	files := make(map[string][]byte, 50)
+	for i := 0; i < 50; i++ {
+		files[fmt.Sprintf("f%03d.txt", i)] = []byte("x")
+	}
+	rootHash := buildCommittedTree(t, st, files, nil)
+	limits := BundleLimits{MaxEntries: 10, MaxFiles: 100, MaxFileBytes: 1 << 20, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 20}
+	_, err := NormalizeBundle(gitCommittedTreeWalker(st, rootHash, limits), limits)
+	if err == nil {
+		t.Fatal("expected rejection of a git tree entry-count flood")
+	}
+	if !strings.Contains(err.Error(), "entry-count cap") {
+		t.Fatalf("expected an entry-count-cap rejection, got %v", err)
+	}
+}
+
+// TestGitCommittedTreeWalkerRejectsFlatTreeBeforeDecode is the t1b-review
+// flat-tree-decode bound: object.GetTree materializes a whole tree object's
+// entry slice into memory, so the walker MUST reject an oversized (flooded)
+// tree OBJECT via its pre-decode encoded-size gate before GetTree ever runs —
+// not merely via the post-decode MaxEntries cap. A directory with many entries
+// is built so its single tree object's encoded size exceeds the derived
+// tree-object cap; the walker rejects it with the "tree-object cap" reason,
+// proving the gate fired before decode. (Encoded size is checked via
+// EncodedObjectSize, which reads the object header without inflating it.)
+func TestGitCommittedTreeWalkerRejectsFlatTreeBeforeDecode(t *testing.T) {
+	st := memory.NewStorage()
+	// Enough entries that the tree object's encoded size (~28+ bytes/entry)
+	// clears the tiny tree-object cap derived below (MaxEntries*32 +
+	// MaxTotalPathBytes = 4*32 + 256 = 384 bytes).
+	files := make(map[string][]byte, 200)
+	for i := 0; i < 200; i++ {
+		files[fmt.Sprintf("f%04d.txt", i)] = []byte("x")
+	}
+	rootHash := buildCommittedTree(t, st, files, nil)
+	limits := BundleLimits{MaxEntries: 4, MaxFiles: 1000, MaxFileBytes: 1 << 20, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 256}
+	_, err := NormalizeBundle(gitCommittedTreeWalker(st, rootHash, limits), limits)
+	if err == nil {
+		t.Fatal("expected pre-decode rejection of an oversized flat tree object")
+	}
+	if !strings.Contains(err.Error(), "tree-object cap") {
+		t.Fatalf("expected a pre-decode tree-object-size rejection, got %v", err)
+	}
+}
+
+// unresolvableTreeCloner builds a repo whose HEAD resolves to a commit hash
+// that has NO commit object in storage — so repo.Head() succeeds but
+// CommitObject fails, leaving the committed tree unresolvable. The worktree
+// memfs still shows a "skill" directory, reproducing the gitlink error-path
+// bypass: a directory artifact whose committed tree cannot be resolved must
+// fail closed rather than skip the submodule check.
+func unresolvableTreeCloner(t *testing.T) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	st := memory.NewStorage()
+	dangling := plumbing.NewHash("2222222222222222222222222222222222222222")
+	if err := st.SetReference(plumbing.NewHashReference("refs/heads/main", dangling)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
+		t.Fatal(err)
+	}
+	wfs := memfs.New()
+	memfsWriteFile(t, wfs, "skill/SKILL.md", []byte("skill body"))
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		repo, err := gogit.Open(st, wfs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, wfs, nil
+	}
+}
+
+// TestGitArtifactFetcherDirectoryRejectsUnresolvableTree is the gitlink
+// error-path regression: when the committed-tree lookup fails, a directory
+// artifact must fail closed (the submodule check cannot run without the tree)
+// rather than silently walk the worktree and succeed.
+func TestGitArtifactFetcherDirectoryRejectsUnresolvableTree(t *testing.T) {
+	withPackagesCache(t)
+	f := &gitArtifactFetcher{cloner: unresolvableTreeCloner(t)}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error failing closed on an unresolvable committed tree, got %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "committed tree") {
+		t.Fatalf("error should name the unresolvable committed tree, got %v", err)
+	}
+}
+
 // --- local artifact fetcher ------------------------------------------------
 
 func TestLocalArtifactFetcherReadsAndCaches(t *testing.T) {
@@ -1812,18 +3007,440 @@ func TestLocalArtifactFetcherPinnedCacheHitRequiredPostureFails(t *testing.T) {
 }
 
 func TestLocalArtifactFetcherReadError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("owner-permission bits do not restrict reads the same way on windows")
+	}
 	withPackagesCache(t)
-	// Pointing ArtifactPath at a directory makes os.ReadFile fail with a
-	// non-IsNotExist error, covering the content-read error branch.
+	// A permission-denied file (not a missing one) makes os.ReadFile fail
+	// with a non-IsNotExist error, covering the content-read error branch.
 	srcDir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(srcDir, "adir"), 0o755); err != nil {
+	blocked := filepath.Join(srcDir, "blocked.json")
+	if err := os.WriteFile(blocked, []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(blocked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o644) })
 	f := &localArtifactFetcher{}
-	_, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "adir", VersionSpec: "1"})
+	_, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "blocked.json", VersionSpec: "1"})
 	var ie *ImportError
 	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
-		t.Fatalf("want content error reading a directory, got %v", err)
+		t.Fatalf("want content error reading a permission-denied file, got %v", err)
+	}
+}
+
+// --- local artifact fetcher: tree layout (H1, mirrors git) -----------------
+
+// TestLocalArtifactFetcherTreeLayoutSurvivesStructure asserts a local-source
+// directory subtree mirrors the git tree-layout contract: nested paths
+// relative to the resource root, dirs, modes, and dotfiles all survive.
+func TestLocalArtifactFetcherTreeLayoutSurvivesStructure(t *testing.T) {
+	withPackagesCache(t)
+	srcDir := t.TempDir()
+	skillDir := filepath.Join(srcDir, "skill")
+	if err := os.MkdirAll(filepath.Join(skillDir, "instructions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("skill body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "instructions", "x.md"), []byte("nested body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, ".env"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &localArtifactFetcher{}
+	got, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Bundle == nil {
+		t.Fatal("expected a Bundle for a directory artifact path")
+	}
+
+	byPath := make(map[string]BundleEntry, len(got.Bundle.Entries))
+	for _, e := range got.Bundle.Entries {
+		byPath[e.Path] = e
+	}
+	nested, ok := byPath["instructions/x.md"]
+	if !ok || string(nested.Data) != "nested body" {
+		t.Fatalf("expected nested instructions/x.md relative to the resource root, got paths %v", bundlePaths(*got.Bundle))
+	}
+	if dir, ok := byPath["instructions"]; !ok || !dir.IsDir {
+		t.Fatalf("expected instructions dir entry to survive, got %+v", dir)
+	}
+	if _, ok := byPath[".env"]; !ok {
+		t.Fatalf("expected dotfile .env to survive, paths %v", bundlePaths(*got.Bundle))
+	}
+}
+
+// TestLocalArtifactFetcherTreeLayoutRejectsSymlinkEscape mirrors the git
+// adversarial case: a symlink anywhere in the local subtree is rejected
+// before the pull succeeds, regardless of what it points to.
+func TestLocalArtifactFetcherTreeLayoutRejectsSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	withPackagesCache(t)
+	srcDir := t.TempDir()
+	skillDir := filepath.Join(srcDir, "skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("skill body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/passwd", filepath.Join(skillDir, "escape-link")); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &localArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting the symlink, got %v", err)
+	}
+}
+
+// TestLocalArtifactFetcherRejectsParentEscape is the defect #1 regression:
+// Source.Path is a real root and ArtifactPath walks OUT of it via "..".
+// The subpath is rejected before any filesystem join, so the secret that
+// lives outside the root is never opened or read.
+func TestLocalArtifactFetcherRejectsParentEscape(t *testing.T) {
+	withPackagesCache(t)
+	outer := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outer, "hostname"), []byte("SECRET-OUTSIDE-ROOT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(outer, "root")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &localArtifactFetcher{}
+	for _, escape := range []string{"../hostname", "../../etc/hostname"} {
+		got, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: escape, VersionSpec: "1"})
+		var ie *ImportError
+		if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+			t.Fatalf("ArtifactPath %q: want schema error rejecting the parent escape before any join, got %v", escape, err)
+		}
+		if got.Data != nil || got.Bundle != nil {
+			t.Fatalf("ArtifactPath %q: nothing outside the root may be read", escape)
+		}
+		if strings.Contains(string(got.Data), "SECRET") {
+			t.Fatalf("ArtifactPath %q: leaked out-of-root content", escape)
+		}
+	}
+}
+
+// TestLocalArtifactFetcherRejectsSymlinkComponentEscape is the defect #1
+// intermediate-symlink half: a symlink INSIDE the root points OUT of it, and
+// an artifact path threaded through that component is refused by the os.Root
+// confinement — an Lstat that only checked the final component would have
+// followed it.
+func TestLocalArtifactFetcherRejectsSymlinkComponentEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	withPackagesCache(t)
+	outer := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outer, "hostname"), []byte("SECRET-OUTSIDE-ROOT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(outer, "root")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink inside the root that escapes to the parent directory.
+	if err := os.Symlink(outer, filepath.Join(srcDir, "out")); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &localArtifactFetcher{}
+	got, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "out/hostname", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || (ie.Reason != ReasonContent && ie.Reason != ReasonNotFound) {
+		t.Fatalf("want content/not-found rejection of an escape via an intermediate symlink, got %v", err)
+	}
+	if strings.Contains(string(got.Data), "SECRET") || got.Bundle != nil {
+		t.Fatal("nothing reached through the escaping symlink may be read")
+	}
+}
+
+// TestLocalArtifactFetcherRejectsSymlinkRoot is the defect #1 symlink-root
+// half: the artifact path IS a symlink; it is rejected outright (H1 admits no
+// symlink), even though os.Root's Lstat of the final component does not follow
+// it.
+func TestLocalArtifactFetcherRejectsSymlinkRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	withPackagesCache(t)
+	outer := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outer, "secretdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(outer, "root")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outer, "secretdir"), filepath.Join(srcDir, "linkdir")); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &localArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "linkdir", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting a symlink at the artifact root, got %v", err)
+	}
+}
+
+// TestReadRootFileRejectsInRootSymlinkSwap is the defect #2 regression: after
+// the walker classifies a path as a regular file, the path is swapped for an
+// in-root symlink pointing at a DIFFERENT in-root file. os.Root would follow
+// that symlink, but the os.SameFile identity check between the pre-open Lstat
+// and the fstat of the opened fd catches the swap and fails closed — the
+// swapped-in decoy content is never returned.
+func TestReadRootFileRejectsInRootSymlinkSwap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "realfile"), []byte("REAL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "decoy"), []byte("DECOY-CONTENT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	// Classify "realfile" as a regular file, then swap it for an in-root symlink
+	// pointing at the decoy (the post-classify TOCTOU).
+	expected, err := root.Lstat("realfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(srcDir, "realfile")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("decoy", filepath.Join(srcDir, "realfile")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, data, err := readRootFile(root, "realfile", expected, DefaultBundleLimits())
+	if err == nil {
+		t.Fatal("expected identity-mismatch rejection of the swapped-in symlink")
+	}
+	if strings.Contains(string(data), "DECOY") {
+		t.Fatal("the swapped-in decoy content must never be returned")
+	}
+}
+
+// TestReadConfinedDirRejectsInRootSymlinkSwap is the directory half of defect
+// #2: a directory swapped for an in-root symlink to another in-root directory
+// after classification is caught by the same os.SameFile identity check.
+func TestReadConfinedDirRejectsInRootSymlinkSwap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	srcDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(srcDir, "realdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(srcDir, "decoydir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "decoydir", "secret.txt"), []byte("DECOY"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	expected, err := root.Lstat("realdir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(srcDir, "realdir")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("decoydir", filepath.Join(srcDir, "realdir")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := streamConfinedDir(root, "realdir", expected, func(os.DirEntry) error { return nil }); err == nil {
+		t.Fatal("expected identity-mismatch rejection of the swapped-in directory symlink")
+	}
+}
+
+// TestLocalRootWalkerEnforcesPerFileCap covers the confined local read path
+// (readRootFile): a file larger than the per-file cap is rejected during the
+// bounded, fstat-revalidated read — the local-tree half of the defect #2/#3
+// budget enforcement, exercised directly so a small cap can be injected.
+func TestLocalRootWalkerEnforcesPerFileCap(t *testing.T) {
+	srcDir := t.TempDir()
+	skillDir := filepath.Join(srcDir, "skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "big.txt"), make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	rootInfo, err := root.Lstat("skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	limits := BundleLimits{MaxEntries: 10, MaxFiles: 10, MaxFileBytes: 1024, MaxBytes: 1 << 20}
+	if _, err := NormalizeBundle(localRootWalker(root, "skill", rootInfo, limits), limits); err == nil {
+		t.Fatal("expected rejection of a local tree file exceeding the per-file cap")
+	}
+}
+
+// TestLocalRootWalkerRejectsEntryFlood is the t1b directory-flood adversarial
+// test: os.ReadDir(-1) (and (*os.File).ReadDir(-1)) would materialize a
+// directory's ENTIRE listing — a flood of millions of flat entries — into one
+// slice before MaxEntries ever got a chance to reject it. streamConfinedDir
+// instead reads in dirReadBatchSize batches, so the accumulator's MaxEntries
+// cap trips within one batch's worth of over-read rather than after the
+// whole directory is buffered. A small actual entry count against a tiny
+// injected cap exercises the SAME mechanism a real multi-million-entry flood
+// would hit, at test speed.
+func TestLocalRootWalkerRejectsEntryFlood(t *testing.T) {
+	srcDir := t.TempDir()
+	skillDir := filepath.Join(srcDir, "skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		name := filepath.Join(skillDir, fmt.Sprintf("f%03d.txt", i))
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	rootInfo, err := root.Lstat("skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	limits := BundleLimits{MaxEntries: 10, MaxFiles: 100, MaxFileBytes: 1 << 20, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 20}
+	_, err = NormalizeBundle(localRootWalker(root, "skill", rootInfo, limits), limits)
+	if err == nil {
+		t.Fatal("expected rejection of a local directory entry-count flood")
+	}
+	if !strings.Contains(err.Error(), "entry-count cap") {
+		t.Fatalf("expected an entry-count-cap rejection, got %v", err)
+	}
+}
+
+// TestLocalRootWalkerStreamsAcrossBatchBoundary proves streamConfinedDir's
+// batched ReadDir loop enumerates EVERY entry across more than one
+// dirReadBatchSize batch, not just the first — a directory bigger than one
+// batch must still fully succeed under a generous cap (regression guard for
+// an off-by-one in the batch loop introduced by t1b's move off ReadDir(-1)).
+func TestLocalRootWalkerStreamsAcrossBatchBoundary(t *testing.T) {
+	srcDir := t.TempDir()
+	skillDir := filepath.Join(srcDir, "skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const n = dirReadBatchSize + 25
+	for i := 0; i < n; i++ {
+		name := filepath.Join(skillDir, fmt.Sprintf("f%05d.txt", i))
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	rootInfo, err := root.Lstat("skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	limits := DefaultBundleLimits()
+	bundle, err := NormalizeBundle(localRootWalker(root, "skill", rootInfo, limits), limits)
+	if err != nil {
+		t.Fatalf("NormalizeBundle: %v", err)
+	}
+	fileCount := 0
+	for _, e := range bundle.Entries {
+		if !e.IsDir {
+			fileCount++
+		}
+	}
+	if fileCount != n {
+		t.Fatalf("expected all %d files to survive a multi-batch read, got %d", n, fileCount)
+	}
+}
+
+// TestQuotaFilesystemRejectsOverBudgetWrite is the t1b unit test for the
+// clone-quota mechanism gitCloneShallowQuotaBounded relies on: a write whose
+// declared bytes would drive the shared budget negative fails closed BEFORE
+// it reaches disk, instead of the unbounded write gitCloneShallow's default
+// in-memory storer+memfs would allow for an oversized upstream repository.
+// This proves the quota wrapper's mechanism directly at a small injected
+// budget — the same mechanism the real 256 MiB gitArtifactCloneQuotaBytes
+// ceiling applies against an oversized clone.
+func TestQuotaFilesystemRejectsOverBudgetWrite(t *testing.T) {
+	dir := t.TempDir()
+	qfs := newQuotaFilesystem(osfs.New(dir), 10)
+
+	f, err := qfs.Create("x.bin")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if _, err := f.Write(make([]byte, 5)); err != nil {
+		t.Fatalf("first write within budget: %v", err)
+	}
+	if _, err := f.Write(make([]byte, 10)); !errors.Is(err, errCloneQuotaExceeded) {
+		t.Fatalf("expected errCloneQuotaExceeded once a write exceeds the remaining budget, got %v", err)
+	}
+}
+
+// TestLocalArtifactFetcherTreeLayoutPinnedDigestMismatch mirrors the git
+// pinned-tree-digest-mismatch case for a local source.
+func TestLocalArtifactFetcherTreeLayoutPinnedDigestMismatch(t *testing.T) {
+	withPackagesCache(t)
+	srcDir := t.TempDir()
+	skillDir := filepath.Join(srcDir, "skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("skill body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &localArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "pinned:sha256:deadbeef"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error for a pinned tree-layout digest mismatch, got %v", err)
 	}
 }
 
@@ -2199,5 +3816,124 @@ func TestGitFetcherSSHNoAgentNoKeyErrorsClearly(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no default SSH key found") {
 		t.Fatalf("expected the actionable ssh auth error, got: %v", err)
+	}
+}
+
+// --- H12 OCI auth seam wiring (t7) ------------------------------------------
+
+// TestOCIAuthHeaderForRefWiredThroughPuller proves the fetcher_oci.go wiring
+// point (ociAuthHeaderForRef) resolves the exact Authorization header value
+// a real puller (t8) needs from a source's reference-only auth block, and
+// that using it exactly as intended never lets the resolved secret leak into
+// FetchedArtifact — the structure downstream lock/cache-metadata recording
+// reads from.
+func TestOCIAuthHeaderForRefWiredThroughPuller(t *testing.T) {
+	withPackagesCache(t)
+	sentinel := "sentinel-fetcher-wiring-3d4e5f"
+	t.Setenv("OCI_TEST_WIRING_TOKEN", sentinel)
+
+	blob := []byte("artifact-bytes")
+	digest := "sha256:" + sha256Hex(blob)
+	var observedHeader string
+	f := &ociFetcher{puller: func(ctx context.Context, ref ociRef, auth []byte) (ociBlob, error) {
+		// This is exactly the pattern t8's real puller uses: resolve the
+		// Authorization header via the seam, use it only on the (here,
+		// simulated) outgoing request, and never fold it into the returned
+		// ociBlob.
+		header, err := ociAuthHeaderForRef(ctx, auth, ref, "")
+		if err != nil {
+			t.Fatalf("ociAuthHeaderForRef: %v", err)
+		}
+		observedHeader = header
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	src := Source{
+		Type: "oci",
+		URL:  "oci://reg.example/base",
+		Auth: json.RawMessage(`{"provider":"bearer","token_env":"OCI_TEST_WIRING_TOKEN"}`),
+	}
+	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	wantHeader := "Bearer " + sentinel
+	if observedHeader != wantHeader {
+		t.Fatalf("observed Authorization header = %q, want %q", observedHeader, wantHeader)
+	}
+
+	// H12: the resolved secret must never appear anywhere in the
+	// FetchedArtifact the caller receives (this is what downstream lock/
+	// cache-metadata recording reads from).
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), sentinel) {
+		t.Fatalf("FetchedArtifact leaked the resolved secret: %s", encoded)
+	}
+	// And src.Auth itself — the persisted reference — never mutates to carry
+	// the resolved value.
+	if strings.Contains(string(src.Auth), sentinel) {
+		t.Fatalf("Source.Auth mutated to carry the resolved secret: %s", src.Auth)
+	}
+}
+
+// TestOCIAuthHeaderForRefForcedErrorNoLeak forces a downstream transport
+// failure whose error message DELIBERATELY embeds the resolved Authorization
+// header (simulating a future puller that is careless with the credential),
+// and confirms the error-boundary redaction (newRedactedError, Codex round-2
+// HIGH #3) scrubs it from BOTH the caller-visible error string AND the audit
+// event. This is the non-vacuous replacement for the prior version, which
+// returned a constant error the secret was never interpolated into — proving
+// nothing. With the boundary redaction removed, this test FAILS (the sentinel
+// survives in err.Error()), so it now guards the fix for the right reason.
+func TestOCIAuthHeaderForRefForcedErrorNoLeak(t *testing.T) {
+	withPackagesCache(t)
+	sentinel := "sentinel-forced-error-6f7e8d"
+	t.Setenv("OCI_TEST_FORCED_ERROR_TOKEN", sentinel)
+
+	var resolvedHeader string
+	f := &ociFetcher{puller: func(ctx context.Context, ref ociRef, auth []byte) (ociBlob, error) {
+		header, err := ociAuthHeaderForRef(ctx, auth, ref, "")
+		if err != nil {
+			t.Fatalf("ociAuthHeaderForRef: %v", err)
+		}
+		resolvedHeader = header
+		// Embed the resolved header (which carries the sentinel token) in the
+		// transport error, exactly the careless-puller case the boundary
+		// redaction must defend against.
+		return ociBlob{}, fmt.Errorf("registry probe failed after presenting %s", header)
+	}}
+	src := Source{
+		Type: "oci",
+		URL:  "oci://reg.example/base",
+		Auth: json.RawMessage(`{"provider":"bearer","token_env":"OCI_TEST_FORCED_ERROR_TOKEN"}`),
+	}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	if err == nil {
+		t.Fatal("expected a transport error")
+	}
+	// Guard against a vacuous pass: the header the puller embedded must
+	// actually contain the sentinel, otherwise the assertions below are
+	// true-by-construction.
+	if !strings.Contains(resolvedHeader, sentinel) {
+		t.Fatalf("test setup invalid: resolved header %q did not carry the sentinel", resolvedHeader)
+	}
+	// Caller-visible error string (CLI stderr / logs) is scrubbed.
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("caller-visible error leaked the sentinel: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Fatalf("expected the caller-visible error to show a redaction marker: %v", err)
+	}
+	// Audit event detail is scrubbed too.
+	var ie *ImportError
+	if !errors.As(err, &ie) {
+		t.Fatal("expected an *ImportError")
+	}
+	ev := importFailedEvent(ie, false)
+	detail, _ := ev.Fields["detail"].(string)
+	if strings.Contains(detail, sentinel) {
+		t.Fatalf("audit detail leaked the sentinel: %q", detail)
 	}
 }

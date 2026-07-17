@@ -104,52 +104,6 @@ func TestBuildSharedPluginBundleIntents_NonENOENTErrorPropagates(t *testing.T) {
 	}
 }
 
-// TestPruneCodexRepoAgentTomls_NonENOENTErrorPropagates exercises the
-// previously-dead non-ENOENT error path. Regression for `return nil` on
-// listScopedResourceDirs failures.
-func TestPruneCodexRepoAgentTomls_NonENOENTErrorPropagates(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	bucketParent := filepath.Join(agentsHome, "agents")
-	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(bucketParent, "proj"), []byte("masquerade"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	repo := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := pruneCodexRepoAgentTomls("proj", repo, agentsHome); err == nil {
-		t.Fatal("expected ENOTDIR-style error to propagate")
-	}
-}
-
-// TestPruneCodexRepoAgentTomls_DstReadErrorPropagates exercises the
-// previously-dead non-ENOENT path of the inner os.ReadDir(dstRoot) error.
-func TestPruneCodexRepoAgentTomls_DstReadErrorPropagates(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	// Make a valid agents bucket so listScopedResourceDirs succeeds with no
-	// entries, then make .codex/agents a file (not a dir) → ReadDir ENOTDIR.
-	if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	repo := filepath.Join(tmp, "repo")
-	codexDirAgents := filepath.Join(repo, ".codex")
-	if err := os.MkdirAll(codexDirAgents, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(codexDirAgents, "agents"), []byte("masquerade"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := pruneCodexRepoAgentTomls("proj", repo, agentsHome); err == nil {
-		t.Fatal("expected ENOTDIR-style error from ReadDir(dstRoot) to propagate")
-	}
-}
-
 // TestWriteCodexAgents_NonENOENTErrorPropagates exercises the dead branch in
 // writeCodexAgents on listScopedResourceDirs failure.
 func TestWriteCodexAgents_NonENOENTErrorPropagates(t *testing.T) {
@@ -168,21 +122,48 @@ func TestWriteCodexAgents_NonENOENTErrorPropagates(t *testing.T) {
 	}
 }
 
-// TestPruneManagedCodexAgentTomls_NonENOENTErrorPropagates exercises the dead
-// branch in pruneManagedCodexAgentTomls.
+// TestPruneManagedCodexAgentTomls_NonENOENTErrorPropagates asserts a
+// present-but-unlistable dstRoot surfaces (not swallowed as convergence):
+// dstRoot is a regular file → ReadDir ENOTDIR propagates.
 func TestPruneManagedCodexAgentTomls_NonENOENTErrorPropagates(t *testing.T) {
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	bucketParent := filepath.Join(agentsHome, "agents")
-	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(bucketParent, "scope-y"), []byte("masquerade"), 0o644); err != nil {
+	dstRoot := filepath.Join(tmp, "agents-file")
+	if err := os.WriteFile(dstRoot, []byte("masquerade"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	c := NewCodex().(*codex)
-	if err := c.pruneManagedCodexAgentTomls(agentsHome, "scope-y", filepath.Join(tmp, "dst")); err == nil {
+	if err := c.pruneManagedCodexAgentTomls(dstRoot); err == nil {
 		t.Fatal("expected ENOTDIR-style error to propagate")
+	}
+}
+
+// TestPruneManagedCodexAgentTomls_RemovesManagedKeepsUser proves the RemoveLinks
+// teardown removes only dot-agents managed renders and leaves a user-authored
+// .toml intact (defect 1 + defect 4: ownership from on-disk provenance, not a
+// lock read).
+func TestPruneManagedCodexAgentTomls_RemovesManagedKeepsUser(t *testing.T) {
+	tmp := t.TempDir()
+	dstRoot := filepath.Join(tmp, "agents")
+	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managed := filepath.Join(dstRoot, "reviewer.toml")
+	if err := os.WriteFile(managed, []byte(codexManagedTomlMarker+"\nname = \"reviewer\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	user := filepath.Join(dstRoot, "mine.toml")
+	if err := os.WriteFile(user, []byte("name = \"mine\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCodex().(*codex)
+	if err := c.pruneManagedCodexAgentTomls(dstRoot); err != nil {
+		t.Fatalf("pruneManagedCodexAgentTomls: %v", err)
+	}
+	if _, err := os.Stat(managed); !os.IsNotExist(err) {
+		t.Fatalf("managed render should be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(user); err != nil {
+		t.Fatalf("user-authored .toml must survive teardown: %v", err)
 	}
 }
 

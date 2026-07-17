@@ -2,9 +2,11 @@ schema_version: 1
 id: r2-observability-dashboard
 title: 'R2: Real-time observability and evaluation dashboard'
 status: active
-summary: Web dashboard (React/TS frontend + Go backend API) over session telemetry, loop-run metrics, and R1 scores. Read-through reads (no new store in v1) from .agents/active/iteration-log/ + iter-N.score.yaml sidecars; SSE push channel for sub-2-second live updates; drill-down from aggregate view to per-iteration signal breakdown and integrity observations.
+summary: |-
+    Web dashboard (React/TS frontend + Go backend API) over session telemetry, loop-run metrics, and R1 scores. Read-through reads (no new store in v1) from .agents/active/iteration-log/ + iter-N.score.yaml sidecars; SSE push channel for sub-2-second live updates; drill-down from aggregate view to per-iteration signal breakdown and integrity observations.
+    - (fb:bakaus-path-keyed-memory) Bakaus Dark-Arts #4 — path-keyed memory. Derive the snapshot and score slug from the resolved file path not the request phrasing, so a teammate pointing at the same target inherits the score trend across sessions. Check the scoring and journal keying uses resolved-path identity. Source research/articles/pbakaus-dark-arts-skill-engineering.md
 created_at: "2026-05-25T19:12:51Z"
-updated_at: "2026-07-10T14:08:02Z"
+updated_at: "2026-07-15T03:45:21Z"
 owner: dot-agents
 success_criteria: Backend API serves telemetry + scores; React/TS UI renders live run health; real-time updates as runs progress (push-based, not polling); drill-down from aggregate view to single run's iterations and signals works end-to-end.
 verification_strategy: curl /api/runs returns JSON; UI loads + receives push event within 2s of iteration-log write; manual smoke against a live run; per-iteration drill-down test.

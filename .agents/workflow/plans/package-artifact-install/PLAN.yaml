@@ -1,0 +1,11 @@
+schema_version: 1
+id: package-artifact-install
+title: Package artifact install (fetch → materialize → project resource content from a da source)
+status: draft
+summary: 'Build the unbuilt install/materialize half of config-distribution: fetch skill/agent bundles (tree/tarball) from a da source and lay them into a gitignored sourced-scope split of ~/.agents, lock-tracked and projected via the shipped exact/prune path. First consumer: dot-agents'' own specifics from the da-agc git source.'
+created_at: "2026-07-15T02:53:54Z"
+updated_at: "2026-07-15T22:29:51Z"
+owner: dot-agents
+success_criteria: 'End-to-end: da-agc git source + packages ref -> da install -> release-docs-refresh skill + platform-dirs-change-analyst agent materialized into ~/.agents/<family>/da-agc/<name>/, gitignored from agents-config, kind:artifact unit in .agentsrc.lock, projected + invocable; tree-layout git-source content-install smoke passes; re-refresh no-op; local-authored units byte-unchanged.'
+verification_strategy: go test ./internal/config/... ./commands/... ./internal/platform/...; extend verify/git-source-smoke fixture to content install; assert gitignore split (git -C ~/.agents status clean of fetched files), idempotent re-refresh, and local-authored parity.
+current_focus_task: Materialize a fetched bundle into the gitignored sourced-scope store

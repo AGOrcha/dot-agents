@@ -2,12 +2,14 @@ package platform
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
 )
 
@@ -15,6 +17,58 @@ type resourceDir struct {
 	Name string
 	Dir  string
 	File string
+}
+
+// ErrReservedSourceID reports a packages ref whose source id collides with a
+// local scope segment (package-artifact-install spec §3A H3): the universal
+// "global" scope or a caller-supplied local project scope name. errors.Is
+// lets a caller distinguish this from any other materialize failure.
+var ErrReservedSourceID = errors.New("platform: source id collides with a reserved local scope")
+
+// reservedLocalScopes are the scope segments a packages source id may never
+// equal (H3): the universal "global" scope shared by every project.
+var reservedLocalScopes = []string{"global"}
+
+// ValidateResolvedUnitIdentity enforces the H15 identity-component
+// containment contract for a resolved packages unit's on-disk identity:
+// family, source-id, and name must EACH be a single canonical path segment
+// (config.ValidateStoreSegment — rejects "."/".."/separators/absolute/
+// volume/NUL), and the source id must not collide with a reserved local
+// scope (H3 — "global" or any caller-supplied local scope, typically the
+// consuming project's own scope name). It is the single gate every
+// materialize/projection entry point calls BEFORE deriving any filesystem
+// path from caller-influenced identity, so a hostile ".." source id can
+// never widen a CAS or projection path.
+func ValidateResolvedUnitIdentity(family, sourceID, name string, localScopes ...string) error {
+	if err := config.ValidateStoreSegment(family); err != nil {
+		return fmt.Errorf("platform: family: %w", err)
+	}
+	if err := config.ValidateStoreSegment(sourceID); err != nil {
+		return fmt.Errorf("platform: source id: %w", err)
+	}
+	if err := config.ValidateStoreSegment(name); err != nil {
+		return fmt.Errorf("platform: resource name: %w", err)
+	}
+	return validateSourceIDScope(sourceID, localScopes...)
+}
+
+// validateSourceIDScope rejects a source id equal to a reserved local scope
+// (H3): "global", or any of the caller-supplied local scope names (the
+// consuming project's own scope). Distinct source ids never collide with
+// each other — each project links its own resolved digest directly, so
+// there is no shared cross-source alias to contend over (H13).
+func validateSourceIDScope(sourceID string, localScopes ...string) error {
+	for _, scope := range reservedLocalScopes {
+		if sourceID == scope {
+			return fmt.Errorf("%w: %q", ErrReservedSourceID, sourceID)
+		}
+	}
+	for _, scope := range localScopes {
+		if scope != "" && sourceID == scope {
+			return fmt.Errorf("%w: %q", ErrReservedSourceID, sourceID)
+		}
+	}
+	return nil
 }
 
 // removeHardlinkedManaged is the error-propagating adapter every RemoveLinks

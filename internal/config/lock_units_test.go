@@ -144,9 +144,9 @@ func TestReadUnitsMigratesLegacyV1(t *testing.T) {
 	if layer.Kind != UnitKindLayer {
 		t.Fatalf("config layer not tagged layer: %+v", layer)
 	}
-	// resolved_sha → digest; ttl_expires_at is dropped; fetched_at seeds
-	// last_checked_at (review-nudge basis).
-	if layer.Digest != digestBase || layer.LastCheckedAt != "2026-05-01T00:00:00Z" {
+	// resolved_sha → digest; ttl_expires_at AND the legacy per-unit timestamps are
+	// dropped — the units lock is content-addressed and carries no wall-clock stamp.
+	if layer.Digest != digestBase || layer.FetchedAt != "" || layer.LastCheckedAt != "" {
 		t.Fatalf("layer migration mismatch: %+v", layer)
 	}
 	// cache_key MUST survive legacy→units migration so the §7A.4 cache-key

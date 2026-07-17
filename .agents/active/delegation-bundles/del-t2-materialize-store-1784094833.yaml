@@ -1,0 +1,54 @@
+schema_version: 1
+delegation_id: del-t2-materialize-store-1784094833
+plan_id: package-artifact-install
+task_id: t2-materialize-store
+owner: t2-materialize-store
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-07-15T05:53:53Z"
+    reason: Critical-path next slice after t1; serial internal/config writer; base carries t1
+scope:
+    write_scope:
+        - internal/config/materialize.go
+        - internal/config/local_source.go
+        - internal/links/gitignore.go
+        - internal/platform/resource_plan.go
+        - internal/platform/resources.go
+    base_branch: feat/package-artifact-install
+    lineage:
+        source_tasks:
+            - t1-bundle-fetch
+        rationale: operator supplied --base-branch; manual sequencing (spec §2.5 v1)
+prompt:
+    inline:
+        - Implement ONLY t2 materialize (H2 content-addressed immutable path + H3 reserved _sourced namespace + H4 permanent-ignore-install-before-expose + reuse the shipped exact/prune projection). Do NOT wire pass-2 or the lock (that is t3). Consume the Bundle that t1's fetchers already return.
+        - H3 — install target ~/.agents/<family>/_sourced/<source-id>/<name>/; reject a source-id that equals a local scope; refuse to replace any path lacking sourced provenance. H4 — the _sourced ignore is permanent (never removed on package removal
+        - only on store deletion)
+        - installed AND verified before the tree is exposed
+        - CAS/locked block rewrite. Stage then atomic-rename.
+context:
+    required_files:
+        - .agents/workflow/specs/package-artifact-install/design.md
+verification:
+    feedback_goal: Prove a fetched bundle materializes into a content-addressed IMMUTABLE store path (H2) projected at ~/.agents/<family>/_sourced/<source-id>/<name>/ (H3); that git -C ~/.agents status shows ZERO fetched files because the _sourced ignore is permanent and installed BEFORE the tree is exposed (H4); that materialize REFUSES to replace any path lacking sourced provenance (no local-authored clobber) and rejects a source-id equal to a local scope (global, project name); that re-materializing an unchanged digest is a byte-identical no-op (idempotent); and that projection reuses RunSharedTargetProjectionExact, not a parallel linker (D4)
+    scenario_tags:
+        - gitignore-split
+        - scope-collision
+        - idempotent-remateralize
+        - exact-prune-reuse
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+        - cli-runner
+    evidence_policy:
+        require_negative_coverage: true
+        sandbox_mutations: true
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

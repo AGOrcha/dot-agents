@@ -2079,3 +2079,87 @@ func TestAcquireReleaseConcurrentChurn(t *testing.T) {
 		t.Fatalf("lock name must be free after the churn: stat err=%v", err)
 	}
 }
+
+// TestUpdate_SerializesConcurrentReadModifyWrite proves the review #3
+// lost-update fix: N concurrent Update callers that each read the shared
+// "units" section, add their own key, and write it back all survive — none
+// clobbers another's key with a stale whole-section snapshot. The same
+// workload through an unsynchronized Open→read→SetSection→Flush loses keys
+// because the read happens outside the flush lock.
+func TestUpdate_SerializesConcurrentReadModifyWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".agentsrc.lock")
+
+	const writers = 16
+	var wg sync.WaitGroup
+	wg.Add(writers)
+	errs := make([]error, writers)
+	for i := 0; i < writers; i++ {
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = Update(path, func(lf *Lockfile) error {
+				units := map[string]string{}
+				if _, err := lf.Section("units", &units); err != nil {
+					return err
+				}
+				units[fmt.Sprintf("k%d", i)] = fmt.Sprintf("v%d", i)
+				return lf.SetSection("units", units)
+			})
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("writer %d: %v", i, err)
+		}
+	}
+
+	lf, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	units := map[string]string{}
+	if _, err := lf.Section("units", &units); err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != writers {
+		t.Fatalf("expected all %d concurrently-written keys to survive, got %d: %v", writers, len(units), units)
+	}
+	for i := 0; i < writers; i++ {
+		if units[fmt.Sprintf("k%d", i)] != fmt.Sprintf("v%d", i) {
+			t.Fatalf("lost key k%d — concurrent RMW clobbered it: %v", i, units)
+		}
+	}
+}
+
+// TestUpdate_AbortsWithoutWriteOnError proves fn returning an error leaves the
+// document untouched (no partial write).
+func TestUpdate_AbortsWithoutWriteOnError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".agentsrc.lock")
+
+	if err := Update(path, func(lf *Lockfile) error {
+		return lf.SetSection("units", map[string]string{"keep": "1"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sentinel := fmt.Errorf("abort")
+	if err := Update(path, func(lf *Lockfile) error {
+		_ = lf.SetSection("units", map[string]string{"clobber": "2"})
+		return sentinel
+	}); err != sentinel {
+		t.Fatalf("expected the sentinel error back, got %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("expected no write on an aborted Update\nbefore: %s\nafter:  %s", before, after)
+	}
+}
