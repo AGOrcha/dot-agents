@@ -309,6 +309,24 @@
           "description": "Producer poll cadence in seconds."
         }
       }
+    },
+    "work_tracking": {
+      "type": "object",
+      "description": "Coordination-state storage plane (work-tracking-storage-abstraction spec). read_from is the §9 read-from-master shim: 'master' resolves TASKS.yaml/PLAN.yaml from the canonical ref (origin/<default-branch>) via git show so worktree isolation cannot make the orchestrator/scout re-dispatch in-flight work; 'worktree' (default) reads the per-worktree working copy. Writes are unchanged either way. NOTE: additionalProperties is intentionally left open — the git-ref WorkStore backend later adds `backend` to this same object.",
+      "properties": {
+        "read_from": {
+          "type": "string",
+          "enum": ["worktree", "master"],
+          "default": "worktree",
+          "description": "Where coordination state is READ from: 'worktree' (default) — the per-worktree working copy (today's behaviour); 'master' — the canonical ref (origin/<default-branch>) via git show. Read-side only; writes land in the working copy regardless."
+        },
+        "write_to": {
+          "type": "string",
+          "enum": ["worktree", "state-ref"],
+          "default": "worktree",
+          "description": "Where a status transition is WRITTEN: 'worktree' (default) — only the per-worktree working copy (today's behaviour, no git ref written); 'state-ref' — ALSO mirror the transition to refs/agents/state via atomic compare-and-swap (git update-ref <new> <old>, retry-on-mismatch), the git-ref shared SOT orthogonal to the code branch and never merged into the default branch. Additive: the working copy is written regardless. Backend selection (work_tracking.backend) supersedes this focused gate in a later task."
+        }
+      }
     }
   },
   "$defs": {

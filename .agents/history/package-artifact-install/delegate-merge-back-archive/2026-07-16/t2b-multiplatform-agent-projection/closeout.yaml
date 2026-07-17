@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t2b-multiplatform-agent-projection
+delegation_id: del-t2b-multiplatform-agent-projection-1784161771
+decision: accept
+closed_at: "2026-07-16T01:40:46Z"

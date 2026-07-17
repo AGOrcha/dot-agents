@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-t3b-invocation-time-integrity-1784166268
+mode: delegated
+parent_plan_id: package-artifact-install
+parent_task_id: t3b-invocation-time-integrity
+title: Invocation-time integrity + CAS orphan GC (close the verify-to-use TOCTOU; defense-in-depth)
+summary: Delegated from plan Package artifact install (fetch → materialize → project resource content from a da source)
+write_scope:
+    - internal/config/materialize.go
+    - internal/platform/resource_plan.go
+success_criteria: From the t3 round-2 re-review — two narrow residuals deliberately deferred (same-user local race, out of the realistic threat model, so low priority). (a) verify-to-link TOCTOU — verifyProjectionInputs re-hashes the CAS tree before ProjectResolvedUnits, but the symlink then references the live (dir-writable) CAS tree and projection never re-hashes, so a same-user process can replace a 0o444 file in the writable dir between verify and link/use. Closing it needs invocation-time verification (re-hash at the link/execution boundary) or truly-immutable storage (read-only bind mount / per-entry read-only dir with a GC-safe teardown). (b) a mid-fetch failure can leave the first already-materialized CAS entry orphaned — add store GC of unreferenced digest entries. The core H7 anchor (offline content-digest, all refs) and install/verify-time tamper detection already shipped in t3.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t3b
+status: completed
+created_at: "2026-07-16T01:44:28Z"
+updated_at: "2026-07-16T01:59:14Z"

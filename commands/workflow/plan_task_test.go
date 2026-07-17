@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -4799,5 +4800,157 @@ func TestTasksYamlLock_TimeoutWrapsClearError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "TASKS.yaml locked by another process, timed out waiting") {
 		t.Fatalf("expected wrapped timeout message, got: %v", err)
+	}
+}
+
+// ── read-from-master shim (work_tracking.read_from) ────────────────────────────
+
+const readFromMasterPlanID = "rfm"
+
+// tasksYAMLWithStatus renders a minimal single-task TASKS.yaml for planID whose
+// only task carries the given status — the field the read-from-master tests
+// assert on to tell the canonical-ref copy apart from the worktree copy.
+func tasksYAMLWithStatus(planID, status string) string {
+	return "schema_version: 1\nplan_id: \"" + planID + "\"\ntasks:\n" +
+		"  - id: \"t1\"\n    title: \"task one\"\n    status: \"" + status + "\"\n" +
+		"    verification_required: true\n"
+}
+
+// planYAMLActive renders a minimal active PLAN.yaml for planID.
+func planYAMLActive(planID string) string {
+	return "schema_version: 1\nid: \"" + planID + "\"\ntitle: \"" + planID + "\"\nstatus: \"active\"\n"
+}
+
+// seedMasterRefRepo builds a git repo whose PLAN.yaml/TASKS.yaml for planID are
+// committed and pushed to an origin remote (so origin/<default-branch> and
+// origin/HEAD resolve), writes .agentsrc.json with the given work_tracking
+// read_from value ("" ⇒ no work_tracking block), then diverges the WORKTREE
+// TASKS.yaml from the committed ref copy. refStatus is the status recorded on
+// the canonical ref; worktreeStatus is the (different) status in the working
+// copy — the two must differ so a test can prove which copy the loader read.
+func seedMasterRefRepo(t *testing.T, readFrom, refStatus, worktreeStatus string) string {
+	t.Helper()
+	repo := t.TempDir()
+	agentsrc := `{"version":1,"project":"p","sources":[{"type":"local"}]}`
+	if readFrom != "" {
+		agentsrc = `{"version":1,"project":"p","sources":[{"type":"local"}],"work_tracking":{"read_from":"` + readFrom + `"}}`
+	}
+	rel := ".agents/workflow/plans/" + readFromMasterPlanID + "/"
+	testutil.InitGitRepo(t, repo, map[string]string{
+		".agentsrc.json":   agentsrc,
+		rel + "PLAN.yaml":  planYAMLActive(readFromMasterPlanID),
+		rel + "TASKS.yaml": tasksYAMLWithStatus(readFromMasterPlanID, refStatus),
+	})
+	origin := t.TempDir()
+	gitRun(t, origin, "init", "--bare")
+	branch := gitOut(t, repo, "rev-parse", "--abbrev-ref", "HEAD")
+	gitRun(t, repo, "remote", "add", "origin", origin)
+	gitRun(t, repo, "push", "origin", branch)
+	gitRun(t, repo, "fetch", "origin")
+	gitRun(t, repo, "remote", "set-head", "origin", branch)
+	// Diverge the worktree copy from the canonical ref copy.
+	wtPath := filepath.Join(repo, filepath.FromSlash(rel), "TASKS.yaml")
+	if err := os.WriteFile(wtPath, []byte(tasksYAMLWithStatus(readFromMasterPlanID, worktreeStatus)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+// TestLoadCanonicalTasks_ReadFromMaster proves the core shim contract: with
+// work_tracking.read_from=master, loadCanonicalTasks resolves TASKS.yaml from
+// the canonical ref (origin/<default-branch>) via `git show`, NOT the divergent
+// per-worktree working copy.
+func TestLoadCanonicalTasks_ReadFromMaster(t *testing.T) {
+	repo := seedMasterRefRepo(t, "master", "pending", "completed")
+	tf, err := loadCanonicalTasks(repo, readFromMasterPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	if got := tf.Tasks[0].Status; got != "pending" {
+		t.Fatalf("read_from=master must return the ref copy (status pending), got %q — worktree copy leaked", got)
+	}
+}
+
+// TestLoadCanonicalTasks_ReadFromWorktreeDefault proves the default path is
+// unchanged: with no work_tracking config, loadCanonicalTasks returns the
+// worktree working copy even though a DIFFERENT copy exists on the canonical
+// ref — the ref is never consulted unless read_from=master is set.
+func TestLoadCanonicalTasks_ReadFromWorktreeDefault(t *testing.T) {
+	repo := seedMasterRefRepo(t, "", "pending", "completed")
+	tf, err := loadCanonicalTasks(repo, readFromMasterPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	if got := tf.Tasks[0].Status; got != "completed" {
+		t.Fatalf("default path must return the worktree copy (status completed), got %q", got)
+	}
+}
+
+// TestLoadCanonicalTasks_ExplicitWorktreeReadsWorktree proves read_from set
+// explicitly to "worktree" behaves like the default (working copy wins).
+func TestLoadCanonicalTasks_ExplicitWorktreeReadsWorktree(t *testing.T) {
+	repo := seedMasterRefRepo(t, "worktree", "pending", "completed")
+	tf, err := loadCanonicalTasks(repo, readFromMasterPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	if got := tf.Tasks[0].Status; got != "completed" {
+		t.Fatalf("read_from=worktree must return the worktree copy (completed), got %q", got)
+	}
+}
+
+// TestLoadCanonicalPlan_ReadFromMaster proves PLAN.yaml is also resolved from
+// the canonical ref under read_from=master (the eligibility/next paths load the
+// plan through loadCanonicalPlan).
+func TestLoadCanonicalPlan_ReadFromMaster(t *testing.T) {
+	repo := seedMasterRefRepo(t, "master", "pending", "completed")
+	// Diverge the worktree PLAN.yaml to a non-active status; the ref copy stays active.
+	planPath := filepath.Join(repo, ".agents", "workflow", "plans", readFromMasterPlanID, "PLAN.yaml")
+	if err := os.WriteFile(planPath, []byte("schema_version: 1\nid: \""+readFromMasterPlanID+"\"\ntitle: \"x\"\nstatus: \"paused\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := loadCanonicalPlan(repo, readFromMasterPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalPlan: %v", err)
+	}
+	if plan.Status != "active" {
+		t.Fatalf("read_from=master must return the ref PLAN.yaml (status active), got %q", plan.Status)
+	}
+}
+
+// TestReadCanonicalStateFile_MasterFallsBackToWorktree proves the graceful
+// degradation: under read_from=master, a file that does NOT exist on the
+// canonical ref (e.g. a plan created only in the worktree, not yet pushed to
+// the default branch) falls back to the worktree copy instead of failing.
+func TestReadCanonicalStateFile_MasterFallsBackToWorktree(t *testing.T) {
+	repo := seedMasterRefRepo(t, "master", "pending", "completed")
+	// A second plan that exists only in the worktree (never committed to the ref).
+	rel := filepath.Join(".agents", "workflow", "plans", "worktree-only")
+	if err := os.MkdirAll(filepath.Join(repo, rel), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, rel, "TASKS.yaml"), []byte(tasksYAMLWithStatus("worktree-only", "in_progress")), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tf, err := loadCanonicalTasks(repo, "worktree-only")
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks must fall back to the worktree copy, got: %v", err)
+	}
+	if got := tf.Tasks[0].Status; got != "in_progress" {
+		t.Fatalf("fallback must read the worktree copy (in_progress), got %q", got)
+	}
+}
+
+// TestOriginDefaultBranch_NoOriginEmpty proves the default-branch resolver
+// returns "" (⇒ caller falls back to the worktree) when there is no origin
+// remote, so master mode can never break a single-worktree repo without a remote.
+func TestOriginDefaultBranch_NoOriginEmpty(t *testing.T) {
+	repo := t.TempDir()
+	testutil.InitGitRepo(t, repo, map[string]string{"README.md": "x\n"})
+	if b := originDefaultBranch(repo); b != "" {
+		t.Fatalf("expected empty default branch without an origin remote, got %q", b)
+	}
+	if r := canonicalStateRef(repo); r != "" {
+		t.Fatalf("expected empty canonical ref without an origin remote, got %q", r)
 	}
 }

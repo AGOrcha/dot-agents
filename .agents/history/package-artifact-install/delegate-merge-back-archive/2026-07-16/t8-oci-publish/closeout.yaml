@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t8-oci-publish
+delegation_id: del-t8-oci-publish-1784179156
+decision: accept
+closed_at: "2026-07-16T07:18:24Z"

@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t6-oci-consume
+delegation_id: del-t6-oci-consume-1784165382
+decision: accept
+closed_at: "2026-07-16T03:29:11Z"

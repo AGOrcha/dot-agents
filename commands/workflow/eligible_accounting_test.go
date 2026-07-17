@@ -455,3 +455,32 @@ func TestIncompleteCanonicalDependencies_IntraPlan(t *testing.T) {
 		t.Fatalf("expected only in_progress dep 'b' incomplete, got %v", got)
 	}
 }
+
+// TestPlanTaskStatuses_ReadFromMaster proves the scout's eligibility read path
+// (planTaskStatuses → loadCanonicalPlan + loadCanonicalTasks) resolves task
+// status from the canonical ref under work_tracking.read_from=master, not the
+// divergent worktree copy. This is the re-dispatch-storm fix: the ref shows the
+// authoritative status the worktree copy has drifted from.
+func TestPlanTaskStatuses_ReadFromMaster(t *testing.T) {
+	repo := seedMasterRefRepo(t, "master", "completed", "pending")
+	statuses, err := planTaskStatuses(repo, readFromMasterPlanID)
+	if err != nil {
+		t.Fatalf("planTaskStatuses: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0] != "completed" {
+		t.Fatalf("eligibility read must reflect the ref status [completed], got %v (worktree copy leaked)", statuses)
+	}
+}
+
+// TestPlanTaskStatuses_ReadFromWorktreeDefault proves the same eligibility path
+// is unchanged by default: it reflects the worktree copy when read_from is unset.
+func TestPlanTaskStatuses_ReadFromWorktreeDefault(t *testing.T) {
+	repo := seedMasterRefRepo(t, "", "completed", "pending")
+	statuses, err := planTaskStatuses(repo, readFromMasterPlanID)
+	if err != nil {
+		t.Fatalf("planTaskStatuses: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0] != "pending" {
+		t.Fatalf("default eligibility read must reflect the worktree status [pending], got %v", statuses)
+	}
+}

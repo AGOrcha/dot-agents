@@ -216,3 +216,20 @@ growth-account leads in this digest to `measured-with-method` where the batch su
   `obs-per-model-family-harness-override-layer`) — NOT a transcript-plan change. Cache-aware
   routing + minimal-repair re-entry routed to `full-loop-orchestration-runtime` (fold-backs
   `cache-aware-model-routing`, `minimal-repair-freeze-validated-regions`).
+
+## 2026-07-15 addendum — Part N corroboration (Great Flattening, targeted pass)
+
+Additive, gate-neutral — no wave decision reopened. Full evaluation:
+`research/articles-evaluation-kg-and-adjacent.md` Part N; source
+`research/articles/myprasanna-great-flattening.md` (vendor manifesto, practitioner-report
+grade; all numbers [UNVERIFIED]).
+
+### 13. myprasanna: "profile the bottleneck, drown it in tokens" (tokenmaxxing) — CORROBORATION ONLY
+- Nth independent invention of this plan's premise — profile where the lifecycle still
+  spends human attention, then spend tokens there, re-profiled every model release. Adds
+  citable vocabulary ("the seat is the wrong unit of compute — the token is"; "tokenmaxx,
+  not peoplemaxx") and the re-tune cadence observation ("Opus 4.8 reset the answers end of
+  May; Fable 5 reset them again two weeks later" [UNVERIFIED]).
+- **Consumer — framing/citation only.** No measured content; upgrades nothing; touches no
+  cell, rubric, or frozen decision. Cite alongside the craft doc's profiling rationale when
+  external motivation is useful.

@@ -1,0 +1,20 @@
+schema_version: 1
+id: del-t2-materialize-store-1784094833
+mode: delegated
+parent_plan_id: package-artifact-install
+parent_task_id: t2-materialize-store
+title: Materialize a fetched bundle into the gitignored sourced-scope store
+summary: Delegated from plan Package artifact install (fetch → materialize → project resource content from a da source)
+write_scope:
+    - internal/config/materialize.go
+    - internal/config/local_source.go
+    - internal/links/gitignore.go
+    - internal/platform/resource_plan.go
+    - internal/platform/resources.go
+success_criteria: Materialize into a content-addressed immutable store path (H2) and project it at the reserved _sourced namespace ~/.agents/<family>/_sourced/<source-id>/<name>/ (H3) — never a segment equal to a local scope (global, project name); refuse replacing any path lacking sourced provenance. H4 — the _sourced ignore is permanent, installed+verified BEFORE the tree is exposed, CAS/locked block rewrite, removed only on store deletion. Validate bundle then staging-dir + atomic rename. Reuse RunSharedTargetProjectionExact (D4), no parallel linker.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t2-materialize-store
+status: completed
+created_at: "2026-07-15T05:53:53Z"
+updated_at: "2026-07-15T22:50:39Z"

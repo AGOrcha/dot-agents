@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "skill": "iteration-close",
+  "run_id": "20260716T015847Z",
+  "started_at": "2026-07-16T01:58:47.471354Z",
+  "plan_id": "package-artifact-install",
+  "task_id": "t3b-invocation-time-integrity",
+  "agent_type": "loop-worker",
+  "lifecycle_point": "skill_entry",
+  "expected_artifacts": [
+    ".agents/active/iteration-log/iter-70.yaml",
+    ".agents/active/merge-back/t3b-invocation-time-integrity.md"
+  ],
+  "context": {
+    "git_head_at_start": "8c15b47d415a87de670bd5b19fe67a8782962ca3",
+    "write_scope": [
+      "internal/config/materialize.go",
+      "internal/config/materialize_test.go",
+      "internal/platform/resource_plan.go",
+      "internal/platform/materialize_test.go"
+    ]
+  }
+}

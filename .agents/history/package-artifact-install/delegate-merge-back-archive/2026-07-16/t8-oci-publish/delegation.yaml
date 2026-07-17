@@ -1,0 +1,19 @@
+schema_version: 1
+id: del-t8-oci-publish-1784179156
+mode: delegated
+parent_plan_id: package-artifact-install
+parent_task_id: t8-oci-publish
+title: OCI publish producer on the unified surface + round-trip byte-parity smoke
+summary: Delegated from plan Package artifact install (fetch → materialize → project resource content from a da source)
+write_scope:
+    - internal/config/artifact_bundle.go
+    - commands/config
+    - scripts/verify.sh
+    - internal/config/fetcher_oci_test.go
+success_criteria: Publish producer on the CANONICAL UNIFIED resource CRUD surface (owner ruling 2026-07-15) — do NOT revive the retired da packages family / commands/packages. Pack a resource tree into a typed +tar+gzip artifact-bundle via the H1 normalizer, push to an OCI registry at namespace/family/name tag, emit the sha256 digest. OCI round-trip smoke — publish to a local test registry then pull via an oci source; assert materialize, H5/H6 media-type+digest validation, and RECURSIVE byte-parity of source vs materialized tree (R8). Depends on t7 for auth reuse.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t8
+status: completed
+created_at: "2026-07-16T05:19:16Z"
+updated_at: "2026-07-16T07:18:24Z"

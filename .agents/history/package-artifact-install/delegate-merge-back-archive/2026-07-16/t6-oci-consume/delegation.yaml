@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-t6-oci-consume-1784165382
+mode: delegated
+parent_plan_id: package-artifact-install
+parent_task_id: t6-oci-consume
+title: Consume OCI artifacts (fetch, tag/digest resolve, media-type validate)
+summary: Delegated from plan Package artifact install (fetch → materialize → project resource content from a da source)
+write_scope:
+    - internal/config/fetcher_oci.go
+    - internal/config/resolver.go
+    - internal/config/oci_resolve.go
+success_criteria: 'H5 — pinned: addresses the manifest; recompute SHA-256 over the fetched payload and compare to the layer descriptor BEFORE cache/untar; lock the verified content digest; handle manifest-digest not equal blob-digest. H6 — require manifest artifactType == artifact-bundle media type AND the family-specific type; reject empty/missing/mismatch (remove the empty-type tolerance at fetcher_oci.go:423-434). CRITICAL from t3 review — the OCI fetcher returns only Data+Digest and never populates FetchedArtifact.Bundle, so every OCI package fails the pass-2 driver as ''not a directory-shaped bundle''. Run fresh AND cached OCI payloads through UntarBundle/MaybeUntarBundle (t1''s H1 normalizer) to populate Bundle, and add an OCI-to-pass2 integration test. Reuse the t2 materialize path. SemVer ranges deferred.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t6
+status: completed
+created_at: "2026-07-16T01:29:42Z"
+updated_at: "2026-07-16T03:29:11Z"

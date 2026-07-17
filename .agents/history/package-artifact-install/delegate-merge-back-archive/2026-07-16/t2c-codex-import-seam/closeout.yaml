@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t2c-codex-import-seam
+delegation_id: del-t2c-codex-import-seam-1784166699
+decision: accept
+closed_at: "2026-07-16T02:28:14Z"

@@ -2607,3 +2607,85 @@ type stubFetcher struct {
 func (f *stubFetcher) Fetch(context.Context, events.FetchSpec) ([]byte, error) {
 	return f.out, f.err
 }
+
+// TestWorkTracking_ReadFromRoundTrip verifies work_tracking.read_from decodes
+// into the typed WorkTracking field (never ExtraFields), round-trips through
+// Marshal/Unmarshal, and drives the ReadFromMaster helper.
+func TestWorkTracking_ReadFromRoundTrip(t *testing.T) {
+	raw := []byte(`{"version":2,"project":"p","sources":[{"type":"local"}],"work_tracking":{"read_from":"master"}}`)
+	var rc AgentsRC
+	if err := json.Unmarshal(raw, &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rc.WorkTracking == nil || rc.WorkTracking.ReadFrom != WorkTrackingReadFromMaster {
+		t.Fatalf("read_from not decoded into typed field: %+v", rc.WorkTracking)
+	}
+	if _, leaked := rc.ExtraFields["work_tracking"]; leaked {
+		t.Fatal("work_tracking leaked into ExtraFields — agentsRCKnown out of sync")
+	}
+	if !rc.ReadFromMaster() {
+		t.Fatal("ReadFromMaster() must be true for read_from=master")
+	}
+	data, err := json.Marshal(&rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back AgentsRC
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	if back.WorkTracking == nil || back.WorkTracking.ReadFrom != WorkTrackingReadFromMaster {
+		t.Fatalf("read_from lost on round-trip: %+v", back.WorkTracking)
+	}
+}
+
+// TestWorkTracking_ReadFromMasterDefaults asserts the default (absent / empty /
+// worktree) config leaves ReadFromMaster false — the byte-for-byte-unchanged
+// read path — and a nil receiver is safe.
+func TestWorkTracking_ReadFromMasterDefaults(t *testing.T) {
+	var nilRC *AgentsRC
+	if nilRC.ReadFromMaster() {
+		t.Fatal("nil receiver must not read from master")
+	}
+	cases := []struct {
+		name string
+		json string
+	}{
+		{"absent", `{"version":1,"sources":[{"type":"local"}]}`},
+		{"empty", `{"version":1,"sources":[{"type":"local"}],"work_tracking":{}}`},
+		{"worktree", `{"version":1,"sources":[{"type":"local"}],"work_tracking":{"read_from":"worktree"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var rc AgentsRC
+			if err := json.Unmarshal([]byte(tc.json), &rc); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if rc.ReadFromMaster() {
+				t.Fatalf("%s config must not read from master", tc.name)
+			}
+		})
+	}
+}
+
+// TestWorkTracking_SchemaValidates confirms a manifest carrying
+// work_tracking.read_from=master passes the compiled agentsrc.schema.json (so
+// `da config lint` accepts the shim's config key) and that an out-of-enum
+// read_from value is rejected.
+func TestWorkTracking_SchemaValidates(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	parse := func(s string) any {
+		t.Helper()
+		var doc any
+		if err := json.Unmarshal([]byte(s), &doc); err != nil {
+			t.Fatalf("parse fixture: %v", err)
+		}
+		return doc
+	}
+	if err := sch.Validate(parse(`{"version":2,"project":"p","sources":[{"type":"local"}],"work_tracking":{"read_from":"master"}}`)); err != nil {
+		t.Fatalf("work_tracking.read_from=master must validate: %v", err)
+	}
+	if err := sch.Validate(parse(`{"version":2,"sources":[{"type":"local"}],"work_tracking":{"read_from":"nonsense"}}`)); err == nil {
+		t.Fatal("schema must reject an out-of-enum read_from value")
+	}
+}

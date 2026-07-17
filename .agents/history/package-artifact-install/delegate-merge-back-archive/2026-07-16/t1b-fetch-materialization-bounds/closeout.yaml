@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t1b-fetch-materialization-bounds
+delegation_id: del-t1b-fetch-materialization-bounds-1784161769
+decision: accept
+closed_at: "2026-07-16T01:28:47Z"
