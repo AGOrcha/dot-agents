@@ -59,6 +59,8 @@ func newCreateCmd() *cobra.Command {
 		parentPR   int
 		appType    string
 		profile    string
+		plan       string
+		task       string
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -66,12 +68,28 @@ func newCreateCmd() *cobra.Command {
 		Long: "Forks a new branch+worktree named --name from --base-branch, records the\n" +
 			"base-branch tip as the worktree's immutable base ref, and registers the\n" +
 			"worktree metadata (purpose, parent PR). The recorded base is what\n" +
-			"`merge-back` reads later — it is never re-derived.",
+			"`merge-back` reads later — it is never re-derived.\n\n" +
+			"The recorded app_type is resolved task/plan-first: --app-type overrides,\n" +
+			"else --task's app_type (from the plan's TASKS.yaml), else --plan's\n" +
+			"default_app_type (from PLAN.yaml). The resolved app_type drives the\n" +
+			"execution_profile shape loaded from .agentsrc.json and recorded on the\n" +
+			"worktree.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			coord, err := openCoordinator()
 			if err != nil {
 				return err
+			}
+			root, err := repoRoot()
+			if err != nil {
+				return err
+			}
+			resolvedAppType := resolveEffectiveAppType(cmd.ErrOrStderr(), root, appType, plan, task)
+			if resolvedAppType == "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning: no app_type resolved (pass --app-type, or --plan/--task with an app_type set) — recording worktree with no resolved agent config")
+			}
+			if profile == "" {
+				profile = "loop-worker"
 			}
 			opts := gitwt.CreateOptions{
 				Name:       name,
@@ -79,7 +97,7 @@ func newCreateCmd() *cobra.Command {
 				BaseBranch: baseBranch,
 				Purpose:    purpose,
 				ParentPR:   parentPR,
-				AppType:    appType,
+				AppType:    resolvedAppType,
 				Profile:    profile,
 			}
 			resolveAgentConfig(cmd.ErrOrStderr(), &opts)
@@ -95,8 +113,10 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&baseBranch, "base-branch", "", "Parent branch whose current tip is recorded as the base")
 	cmd.Flags().StringVar(&purpose, "purpose", "", "Free-form registry note (task/slice this worktree serves)")
 	cmd.Flags().IntVar(&parentPR, "parent-pr", 0, "Pull-request number this work feeds into")
-	cmd.Flags().StringVar(&appType, "app-type", "", "App type whose execution_profile shape is loaded and recorded on the worktree")
-	cmd.Flags().StringVar(&profile, "profile", "", "Execution profile the task runs under (recorded verbatim, e.g. loop-worker)")
+	cmd.Flags().StringVar(&appType, "app-type", "", "app_type whose execution_profile shape is loaded + recorded. If unset, resolved from --task's app_type then --plan's default_app_type. Pass this flag to override or set a specific one.")
+	cmd.Flags().StringVar(&plan, "plan", "", "resolve app_type (and record identity) from this canonical plan/task's metadata")
+	cmd.Flags().StringVar(&task, "task", "", "resolve app_type (and record identity) from this canonical plan/task's metadata")
+	cmd.Flags().StringVar(&profile, "profile", "", "delegate profile to record (default loop-worker); not a task/plan field")
 	mustMarkRequired(cmd, "name", "path", "base-branch")
 	return cmd
 }
