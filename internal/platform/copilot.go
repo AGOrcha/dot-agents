@@ -32,6 +32,7 @@ const (
 	copilotAgentsDir         = ".agents"
 	copilotHomeDir           = ".copilot"
 	copilotHooksDir          = "hooks"
+	copilotAgentMDSuffix     = ".agent.md"
 )
 
 func NewCopilot() Platform { return &copilot{io: stdPlatformIO{}} }
@@ -501,7 +502,7 @@ func (c *copilot) removeSkillsLinks(repoPath, agentsHome string) error {
 }
 
 func (c *copilot) removeAgentLinks(project, repoPath, agentsHome string) error {
-	const suffix = ".agent.md"
+	const suffix = copilotAgentMDSuffix
 	agentsDir := filepath.Join(repoPath, copilotGitHubDir, "agents")
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
@@ -622,7 +623,7 @@ func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) 
 	if err != nil {
 		return nil, err
 	}
-	agents, err := BuildSharedAgentFileSymlinkIntents(project, filepath.Join(copilotGitHubDir, "agents"), ".agent.md")
+	agents, err := BuildSharedAgentFileSymlinkIntents(project, filepath.Join(copilotGitHubDir, "agents"), copilotAgentMDSuffix)
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +645,7 @@ func (c *copilot) DirMirrorRoots() map[string][]string {
 // generic CAS-direct file-symlink builder — the same H17 atomic swap the
 // dir-mirror CAS intents use, just DirectFile instead of DirectDir.
 func (c *copilot) SourcedAgentFileIntents(project string, units []ResolvedUnit) []ResourceIntent {
-	return buildCASAgentFileIntents(project, units, filepath.Join(copilotGitHubDir, "agents"), ".agent.md", "sourced-agent-file-symlink")
+	return buildCASAgentFileIntents(project, units, filepath.Join(copilotGitHubDir, "agents"), copilotAgentMDSuffix, "sourced-agent-file-symlink")
 }
 
 // SourcedAgentFilePruneRoot implements SourcedAgentFilePruneRoot

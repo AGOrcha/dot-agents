@@ -28,6 +28,8 @@ const (
 	agentManifestName          = "AGENT.md"
 	codexAgentTomlMaterializer = "codex-agent-toml"
 	emptySourcePathErr         = "empty source path"
+	sha256DigestPrefix         = "sha256:"
+	sharedTargetsNoneLine      = "shared targets: (none)"
 	skillManifestName          = "SKILL.md"
 )
 
@@ -620,7 +622,7 @@ func RunSharedTargetProjectionExact(project, repoPath string, platforms []Platfo
 	if dryRun {
 		lines := dryRunExactProjectionLines(plan, platforms, repoPath)
 		if len(lines) == 0 {
-			return []string{"shared targets: (none)"}, nil
+			return []string{sharedTargetsNoneLine}, nil
 		}
 		return lines, nil
 	}
@@ -693,41 +695,63 @@ type ManagedRenderProjector interface {
 func pruneManagedRenders(platforms []Platform, repoPath string, wanted map[string]bool) ([]string, error) {
 	var pruned []string
 	var errs []error
-	for _, p := range platforms {
-		rp, ok := p.(ManagedRenderProjector)
+	for _, plat := range platforms {
+		rp, ok := plat.(ManagedRenderProjector)
 		if !ok {
 			continue
 		}
-		dir := resolveIntentTargetPath(rp.ManagedRenderDir(), repoPath)
-		entries, err := osReadDir(dir)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				errs = append(errs, fmt.Errorf("listing managed render dir %s: %w", dir, err))
-			}
-			continue
-		}
-		for _, e := range entries {
-			candidate := filepath.Join(dir, e.Name())
-			if wanted[candidate] {
-				continue
-			}
-			isRender, provErr := rp.IsManagedRender(candidate)
-			if provErr != nil {
-				errs = append(errs, fmt.Errorf("managed render provenance %s: %w", candidate, provErr))
-				continue
-			}
-			if !isRender {
-				continue // user/foreign file — never touch
-			}
-			if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
-				errs = append(errs, fmt.Errorf("prune managed render %s: %w", candidate, err))
-				continue
-			}
-			pruned = append(pruned, candidate)
-		}
+		gotPruned, gotErrs := pruneManagedRendersForPlatform(rp, repoPath, wanted)
+		pruned = append(pruned, gotPruned...)
+		errs = append(errs, gotErrs...)
 	}
 	sort.Strings(pruned)
 	return pruned, errors.Join(errs...)
+}
+
+// pruneManagedRendersForPlatform reaps one ManagedRenderProjector platform's
+// stale managed renders under its ManagedRenderDir. A missing dir is an empty
+// set (no error); any other listing failure is surfaced.
+func pruneManagedRendersForPlatform(rp ManagedRenderProjector, repoPath string, wanted map[string]bool) (pruned []string, errs []error) {
+	dir := resolveIntentTargetPath(rp.ManagedRenderDir(), repoPath)
+	entries, err := osReadDir(dir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("listing managed render dir %s: %w", dir, err))
+		}
+		return nil, errs
+	}
+	for _, e := range entries {
+		candidate := filepath.Join(dir, e.Name())
+		if wanted[candidate] {
+			continue
+		}
+		removed, err := pruneManagedRenderEntry(rp, candidate)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if removed {
+			pruned = append(pruned, candidate)
+		}
+	}
+	return pruned, errs
+}
+
+// pruneManagedRenderEntry removes a single candidate iff it is provably one of
+// rp's managed renders. A user/foreign file (isRender false) is left untouched
+// and reported as not removed; a missing entry counts as removed.
+func pruneManagedRenderEntry(rp ManagedRenderProjector, candidate string) (bool, error) {
+	isRender, provErr := rp.IsManagedRender(candidate)
+	if provErr != nil {
+		return false, fmt.Errorf("managed render provenance %s: %w", candidate, provErr)
+	}
+	if !isRender {
+		return false, nil // user/foreign file — never touch
+	}
+	if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("prune managed render %s: %w", candidate, err)
+	}
+	return true, nil
 }
 
 // staleManagedRenderTargets is the read-only scan pruneManagedRenders and the
@@ -990,7 +1014,7 @@ func DryRunSharedTargetPlanLines(project, repoPath string, platforms []Platform)
 		return nil, err
 	}
 	if len(plan.Resources) == 0 {
-		return []string{"shared targets: (none)"}, nil
+		return []string{sharedTargetsNoneLine}, nil
 	}
 	return formatSharedTargetPlanForDryRun(plan, repoPath), nil
 }
@@ -1115,14 +1139,14 @@ func ValidateResolvedUnit(agentsHome string, u ResolvedUnit, localScopes ...stri
 	if err := ValidateResolvedUnitIdentity(u.Family, u.SourceID, u.Name, localScopes...); err != nil {
 		return err
 	}
-	if !strings.HasPrefix(u.Digest, "sha256:") || len(u.Digest) != len("sha256:")+64 {
+	if !strings.HasPrefix(u.Digest, sha256DigestPrefix) || len(u.Digest) != len(sha256DigestPrefix)+64 {
 		return fmt.Errorf("platform: resolved unit %s/%s: malformed digest %q", u.Family, u.Name, u.Digest)
 	}
 	want := config.ArtifactStorePath(agentsHome, u.Family, u.Digest)
 	if filepath.Clean(u.CASPath) != filepath.Clean(want) {
 		return fmt.Errorf("platform: resolved unit %s/%s: CAS path %q is not the store path for its digest (%q)", u.Family, u.Name, u.CASPath, want)
 	}
-	if u.ContentDigest != "" && !strings.HasPrefix(u.ContentDigest, "sha256:") {
+	if u.ContentDigest != "" && !strings.HasPrefix(u.ContentDigest, sha256DigestPrefix) {
 		return fmt.Errorf("platform: resolved unit %s/%s: malformed content digest %q", u.Family, u.Name, u.ContentDigest)
 	}
 	return nil
@@ -1201,10 +1225,8 @@ func verifyResolvedUnitsAtUse(agentsHome string, units []ResolvedUnit) error {
 // reached only the dir-mirror platforms.
 func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platforms []Platform, dryRun, exact bool, localScopes ...string) ([]string, error) {
 	agentsHome := config.AgentsHome()
-	for _, u := range units {
-		if err := ValidateResolvedUnit(agentsHome, u, localScopes...); err != nil {
-			return nil, err
-		}
+	if err := validateResolvedUnits(agentsHome, units, localScopes); err != nil {
+		return nil, err
 	}
 	local, err := collectSharedTargetIntents(project, platforms)
 	if err != nil {
@@ -1233,27 +1255,51 @@ func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platfo
 	pruneDirs := mergeSortedDirs(resolvedPruneDirs(roots, repoPath), resolvedFileShapedAgentPruneDirs(platforms, repoPath))
 
 	if !exact {
-		if dryRun {
-			if len(plan.Resources) == 0 {
-				return []string{"shared targets: (none)"}, nil
-			}
-			return formatSharedTargetPlanForDryRun(plan, repoPath), nil
-		}
-		if len(plan.Resources) > 0 {
-			// t3b — invocation-time re-verify, immediately before the ONLY
-			// mutating call in this branch, closing the verify→link gap down to
-			// this call's own window.
-			if err := verifyResolvedUnitsAtUse(agentsHome, units); err != nil {
-				return nil, err
-			}
-			return nil, plan.Execute(repoPath, agentsHome)
-		}
-		return nil, nil
+		return projectResolvedUnitsInexact(plan, repoPath, agentsHome, units, dryRun)
 	}
+	return projectResolvedUnitsExact(plan, platforms, repoPath, agentsHome, units, pruneDirs, dryRun)
+}
+
+// validateResolvedUnits validates every caller-supplied unit before it is
+// trusted as a projection input; a single invalid unit fails the whole call
+// closed (H15 identity + H13/H16 CAS-path binding).
+func validateResolvedUnits(agentsHome string, units []ResolvedUnit, localScopes []string) error {
+	for _, u := range units {
+		if err := ValidateResolvedUnit(agentsHome, u, localScopes...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// projectResolvedUnitsInexact is the additive (non-exact) branch of
+// ProjectResolvedUnits: dry-run preview or write-the-wanted-set with no prune.
+func projectResolvedUnitsInexact(plan ResourcePlan, repoPath, agentsHome string, units []ResolvedUnit, dryRun bool) ([]string, error) {
+	if dryRun {
+		if len(plan.Resources) == 0 {
+			return []string{sharedTargetsNoneLine}, nil
+		}
+		return formatSharedTargetPlanForDryRun(plan, repoPath), nil
+	}
+	if len(plan.Resources) > 0 {
+		// t3b — invocation-time re-verify, immediately before the ONLY
+		// mutating call in this branch, closing the verify→link gap down to
+		// this call's own window.
+		if err := verifyResolvedUnitsAtUse(agentsHome, units); err != nil {
+			return nil, err
+		}
+		return nil, plan.Execute(repoPath, agentsHome)
+	}
+	return nil, nil
+}
+
+// projectResolvedUnitsExact is the EXACT/PRUNE branch of ProjectResolvedUnits:
+// dry-run diff, or execute-then-prune (symlink prune + managed-render prune).
+func projectResolvedUnitsExact(plan ResourcePlan, platforms []Platform, repoPath, agentsHome string, units []ResolvedUnit, pruneDirs []string, dryRun bool) ([]string, error) {
 	if dryRun {
 		lines := dryRunExactProjectionLines(plan, platforms, repoPath)
 		if len(lines) == 0 {
-			return []string{"shared targets: (none)"}, nil
+			return []string{sharedTargetsNoneLine}, nil
 		}
 		return lines, nil
 	}
@@ -1371,7 +1417,7 @@ func resolvedPruneDirs(roots map[string][]string, repoPath string) []string {
 	return dirs
 }
 
-// SourcedAgentFilePruneRoot is implemented by platforms whose
+// SourcedAgentFilePruneRootProvider is implemented by platforms whose
 // SourcedAgentFileIntents materializes a SYMLINK (OpenCode/Copilot) rather
 // than a render (Codex): it names the repo-relative directory that must be
 // forced into the exact/prune scan even when the current call's unit set is
@@ -1383,7 +1429,7 @@ func resolvedPruneDirs(roots map[string][]string, repoPath string) []string {
 // directory into the generic symlink prune scan would not help — that shape's
 // removal is the managed-RENDER prune (pruneManagedRenders via
 // ManagedRenderProjector), which scans the codex render dir separately.
-type SourcedAgentFilePruneRoot interface {
+type SourcedAgentFilePruneRootProvider interface {
 	SourcedAgentFilePruneRoot() string
 }
 
@@ -1394,7 +1440,7 @@ type SourcedAgentFilePruneRoot interface {
 func resolvedFileShapedAgentPruneDirs(platforms []Platform, repoPath string) []string {
 	var dirs []string
 	for _, p := range platforms {
-		provider, ok := p.(SourcedAgentFilePruneRoot)
+		provider, ok := p.(SourcedAgentFilePruneRootProvider)
 		if !ok {
 			continue
 		}

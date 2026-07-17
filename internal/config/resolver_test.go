@@ -1423,12 +1423,14 @@ func gitTreeFixtureClonerMultiRoot(t *testing.T, files map[string][]byte, artifa
 // da-agc source (confirmed via `gh api repos/AGOrcha/da-agc/git/trees/main`
 // at authoring time: skill/release-docs-refresh/SKILL.md,
 // agent/platform-dirs-change-analyst/AGENT.md, agent/promise-gap-analyst/AGENT.md).
-var daAgcMirrorRefs = []struct {
+type daAgcMirrorRef struct {
 	artifactPath string
 	bucket       string // resource-plan bucket (packageFamilyBuckets in packages_pass2.go)
 	marker       string
 	body         string
-}{
+}
+
+var daAgcMirrorRefs = []daAgcMirrorRef{
 	{"skill/release-docs-refresh", "skills", "SKILL.md", "# release-docs-refresh\n"},
 	{"agent/platform-dirs-change-analyst", "agents", "AGENT.md", "# platform-dirs-change-analyst\n"},
 	{"agent/promise-gap-analyst", "agents", "AGENT.md", "# promise-gap-analyst\n"},
@@ -1462,51 +1464,65 @@ func TestGitArtifactFetcher_DaAgcMirror_MaterializesAllThreeRefsAndVerifies(t *t
 
 	for _, ref := range daAgcMirrorRefs {
 		t.Run(ref.artifactPath, func(t *testing.T) {
-			f := &gitArtifactFetcher{cloner: daAgcMirrorFixtureCloner(t)}
-			fetched, err := f.FetchArtifact(src, PackageRefParts{SourceID: "da-agc", ArtifactPath: ref.artifactPath, VersionSpec: "main"})
-			if err != nil {
-				t.Fatalf("FetchArtifact(%s): %v", ref.artifactPath, err)
-			}
-			if fetched.Bundle == nil {
-				t.Fatalf("expected a tree Bundle for %s", ref.artifactPath)
-			}
-
-			storePath, digest, installed, err := MaterializeToStore(agentsHome, ref.bucket, *fetched.Bundle)
-			if err != nil {
-				t.Fatalf("MaterializeToStore(%s): %v", ref.artifactPath, err)
-			}
-			if !installed {
-				t.Fatalf("expected the first materialize of %s to install", ref.artifactPath)
-			}
-			data, err := os.ReadFile(filepath.Join(storePath, ref.marker))
-			if err != nil || string(data) != ref.body {
-				t.Fatalf("materialized %s content = %q, err=%v, want %q", ref.marker, data, err, ref.body)
-			}
-
-			content := BundleContentDigest(*fetched.Bundle)
-			present, matches := VerifyStoreContentDigest(agentsHome, ref.bucket, digest, content)
-			if !present || !matches {
-				t.Fatalf("VerifyStoreContentDigest(%s) = present=%v matches=%v, want true/true", ref.artifactPath, present, matches)
-			}
-
-			// R4: a second fetch+materialize of the byte-identical upstream is a
-			// no-op — no rewrite, same digest, same store path.
-			f2 := &gitArtifactFetcher{cloner: daAgcMirrorFixtureCloner(t)}
-			fetched2, err := f2.FetchArtifact(src, PackageRefParts{SourceID: "da-agc", ArtifactPath: ref.artifactPath, VersionSpec: "main"})
-			if err != nil {
-				t.Fatalf("second FetchArtifact(%s): %v", ref.artifactPath, err)
-			}
-			storePath2, digest2, installed2, err := MaterializeToStore(agentsHome, ref.bucket, *fetched2.Bundle)
-			if err != nil {
-				t.Fatalf("second MaterializeToStore(%s): %v", ref.artifactPath, err)
-			}
-			if installed2 {
-				t.Fatalf("expected the second materialize of %s to be a no-op (installed=false)", ref.artifactPath)
-			}
-			if storePath2 != storePath || digest2 != digest {
-				t.Fatalf("second materialize of %s diverged: storePath %q->%q digest %q->%q", ref.artifactPath, storePath, storePath2, digest, digest2)
-			}
+			storePath, digest := ref.fetchMaterializeVerify(t, src, agentsHome)
+			ref.assertSecondMaterializeNoop(t, src, agentsHome, storePath, digest)
 		})
+	}
+}
+
+// fetchMaterializeVerify fetches ref, materializes it into the store (asserting
+// a fresh install), confirms the marker content, and verifies the store
+// content digest. It returns the resulting store path and digest.
+func (ref daAgcMirrorRef) fetchMaterializeVerify(t *testing.T, src Source, agentsHome string) (storePath, digest string) {
+	t.Helper()
+	f := &gitArtifactFetcher{cloner: daAgcMirrorFixtureCloner(t)}
+	fetched, err := f.FetchArtifact(src, PackageRefParts{SourceID: "da-agc", ArtifactPath: ref.artifactPath, VersionSpec: "main"})
+	if err != nil {
+		t.Fatalf("FetchArtifact(%s): %v", ref.artifactPath, err)
+	}
+	if fetched.Bundle == nil {
+		t.Fatalf("expected a tree Bundle for %s", ref.artifactPath)
+	}
+
+	storePath, digest, installed, err := MaterializeToStore(agentsHome, ref.bucket, *fetched.Bundle)
+	if err != nil {
+		t.Fatalf("MaterializeToStore(%s): %v", ref.artifactPath, err)
+	}
+	if !installed {
+		t.Fatalf("expected the first materialize of %s to install", ref.artifactPath)
+	}
+	data, err := os.ReadFile(filepath.Join(storePath, ref.marker))
+	if err != nil || string(data) != ref.body {
+		t.Fatalf("materialized %s content = %q, err=%v, want %q", ref.marker, data, err, ref.body)
+	}
+
+	content := BundleContentDigest(*fetched.Bundle)
+	present, matches := VerifyStoreContentDigest(agentsHome, ref.bucket, digest, content)
+	if !present || !matches {
+		t.Fatalf("VerifyStoreContentDigest(%s) = present=%v matches=%v, want true/true", ref.artifactPath, present, matches)
+	}
+	return storePath, digest
+}
+
+// assertSecondMaterializeNoop is the R4 no-op check: a second fetch+materialize
+// of the byte-identical upstream must not rewrite anything — installed=false
+// with the same store path and digest.
+func (ref daAgcMirrorRef) assertSecondMaterializeNoop(t *testing.T, src Source, agentsHome, storePath, digest string) {
+	t.Helper()
+	f2 := &gitArtifactFetcher{cloner: daAgcMirrorFixtureCloner(t)}
+	fetched2, err := f2.FetchArtifact(src, PackageRefParts{SourceID: "da-agc", ArtifactPath: ref.artifactPath, VersionSpec: "main"})
+	if err != nil {
+		t.Fatalf("second FetchArtifact(%s): %v", ref.artifactPath, err)
+	}
+	storePath2, digest2, installed2, err := MaterializeToStore(agentsHome, ref.bucket, *fetched2.Bundle)
+	if err != nil {
+		t.Fatalf("second MaterializeToStore(%s): %v", ref.artifactPath, err)
+	}
+	if installed2 {
+		t.Fatalf("expected the second materialize of %s to be a no-op (installed=false)", ref.artifactPath)
+	}
+	if storePath2 != storePath || digest2 != digest {
+		t.Fatalf("second materialize of %s diverged: storePath %q->%q digest %q->%q", ref.artifactPath, storePath, storePath2, digest, digest2)
 	}
 }
 
@@ -1527,12 +1543,7 @@ func TestVerifyStoreContentDigest_DaAgcMirror_DetectsCASTamper(t *testing.T) {
 	skillRef := daAgcMirrorRefs[0]
 	agentRef := daAgcMirrorRefs[1]
 
-	materialize := func(ref struct {
-		artifactPath string
-		bucket       string
-		marker       string
-		body         string
-	}) (storePath, digest, content string) {
+	materialize := func(ref daAgcMirrorRef) (storePath, digest, content string) {
 		f := &gitArtifactFetcher{cloner: daAgcMirrorFixtureCloner(t)}
 		fetched, err := f.FetchArtifact(src, PackageRefParts{SourceID: "da-agc", ArtifactPath: ref.artifactPath, VersionSpec: "main"})
 		if err != nil {

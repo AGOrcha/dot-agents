@@ -512,7 +512,7 @@ test_command "git-source content-install: projected skill byte-identical after t
 PKG_SKILL_DIGEST=""
 for _i in $(seq 1 300); do
   PKG_SKILL_DIGEST="$(python3 -c "import json,sys; print(json.load(sys.stdin)['units']['da-agc:skill/release-docs-refresh@main']['digest'])" < "${PKG_PROJ}/.agentsrc.lock" 2>/dev/null)"
-  case "${PKG_SKILL_DIGEST}" in sha256:*) break ;; esac
+  case "${PKG_SKILL_DIGEST}" in sha256:*) break ;; *) ;; esac
   sleep 0.2
 done
 PKG_CAS_FILE="${AGENTS_HOME}/cache/artifacts/skills/${PKG_SKILL_DIGEST#sha256:}/SKILL.md"

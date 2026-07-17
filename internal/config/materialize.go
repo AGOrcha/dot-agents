@@ -163,20 +163,10 @@ func MaterializeToStore(agentsHome, family string, bundle Bundle) (storePath, di
 
 	expected := bundleContentDigest(bundle)
 
-	if fi, statErr := os.Stat(storePath); statErr == nil {
-		// H16 — never trust existence alone. Re-walk and re-verify; only a
-		// verified entry is the idempotent no-op. A mismatch (corruption,
-		// wrong type, partial write, tamper) is quarantined and re-extracted.
-		if fi.IsDir() {
-			if ok, _ := verifyStoreContent(storePath, expected); ok {
-				return storePath, digest, false, nil
-			}
-		}
-		if qerr := quarantineStoreEntry(storePath); qerr != nil {
-			return "", "", false, fmt.Errorf("materialize: quarantine corrupt store entry %s: %w", storePath, qerr)
-		}
-	} else if !os.IsNotExist(statErr) {
-		return "", "", false, fmt.Errorf("materialize: stat store path %s: %w", storePath, statErr)
+	if verified, err := verifyOrQuarantineExisting(storePath, expected); err != nil {
+		return "", "", false, err
+	} else if verified {
+		return storePath, digest, false, nil
 	}
 
 	root := ArtifactStoreRoot(agentsHome, family)
@@ -191,17 +181,10 @@ func MaterializeToStore(agentsHome, family string, bundle Bundle) (storePath, di
 	if err := writeBundleTree(staging, bundle); err != nil {
 		return "", "", false, fmt.Errorf("materialize: stage bundle: %w", err)
 	}
-	if err := fsops.Rename(staging, storePath); err != nil {
-		// Lost a race to a concurrent materializer of the SAME digest. Its
-		// content MUST verify (same digest ⇒ identical content, H2); trust it
-		// only after H16 verification, never on the bare rename failure.
-		if fi, statErr := os.Stat(storePath); statErr == nil && fi.IsDir() {
-			if ok, _ := verifyStoreContent(storePath, expected); ok {
-				return storePath, digest, false, nil
-			}
-			return "", "", false, fmt.Errorf("materialize: concurrent store entry at %s failed integrity verification", storePath)
-		}
-		return "", "", false, fmt.Errorf("materialize: publish store path %s: %w", storePath, err)
+	if hit, err := publishStagedEntry(staging, storePath, expected); err != nil {
+		return "", "", false, err
+	} else if hit {
+		return storePath, digest, false, nil
 	}
 	// H-hardening (package-artifact-install t3 review #2c): tighten the just-
 	// published, content-addressed entry to read-only so a casual post-install
@@ -212,6 +195,51 @@ func MaterializeToStore(agentsHome, family string, bundle Bundle) (storePath, di
 	// H7/projection-boundary content check remains the authoritative guard).
 	makeStoreEntryReadOnly(storePath)
 	return storePath, digest, true, nil
+}
+
+// verifyOrQuarantineExisting inspects a pre-existing store path for a digest
+// (H16 verify-on-hit): a directory whose on-disk content re-verifies against
+// expected is a trusted idempotent hit (verified=true); a present-but-
+// unverifiable entry (corruption, wrong type, partial write, tamper) is
+// quarantined so the caller re-extracts, and a genuinely absent path is a
+// clean miss (verified=false, nil). A stat error other than not-exist, or a
+// quarantine failure, is surfaced so the caller fails closed.
+func verifyOrQuarantineExisting(storePath, expected string) (verified bool, err error) {
+	fi, statErr := os.Stat(storePath)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return false, nil
+		}
+		return false, fmt.Errorf("materialize: stat store path %s: %w", storePath, statErr)
+	}
+	if fi.IsDir() {
+		if ok, _ := verifyStoreContent(storePath, expected); ok {
+			return true, nil
+		}
+	}
+	if qerr := quarantineStoreEntry(storePath); qerr != nil {
+		return false, fmt.Errorf("materialize: quarantine corrupt store entry %s: %w", storePath, qerr)
+	}
+	return false, nil
+}
+
+// publishStagedEntry atomically renames staging into storePath. Losing the
+// rename race to a concurrent materializer of the SAME digest is not an error:
+// the concurrent entry's content MUST verify (same digest ⇒ identical content,
+// H2), so it is re-verified (H16) and reported as a trusted no-op (hit=true).
+// A concurrent entry that fails verification, or any other rename failure, is
+// surfaced so the caller fails closed.
+func publishStagedEntry(staging, storePath, expected string) (hit bool, err error) {
+	if err := fsops.Rename(staging, storePath); err != nil {
+		if fi, statErr := os.Stat(storePath); statErr == nil && fi.IsDir() {
+			if ok, _ := verifyStoreContent(storePath, expected); ok {
+				return true, nil
+			}
+			return false, fmt.Errorf("materialize: concurrent store entry at %s failed integrity verification", storePath)
+		}
+		return false, fmt.Errorf("materialize: publish store path %s: %w", storePath, err)
+	}
+	return false, nil
 }
 
 // makeStoreEntryReadOnly walks a published store entry and drops the write
@@ -356,7 +384,7 @@ func bundleContentDigest(b Bundle) string {
 		_, _ = fmt.Fprintf(h, "%s\x00%d\x00", f.path, len(f.data))
 		h.Write(f.data)
 	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+	return sha256Prefix + hex.EncodeToString(h.Sum(nil))
 }
 
 // storeContentDigest recomputes the H16 integrity digest from an on-disk
@@ -405,7 +433,7 @@ func storeContentDigest(dir string) (string, error) {
 		_, _ = fmt.Fprintf(h, "%s\x00%d\x00", f.path, len(f.data))
 		h.Write(f.data)
 	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+	return sha256Prefix + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // verifyStoreContent reports whether the on-disk store entry at dir matches
@@ -544,7 +572,7 @@ func LiveArtifactDigests() (map[string]bool, error) {
 // ".materialize-staging-*" leftover from an interrupted materialize can never
 // be mistaken for a digest entry and swept.
 func looksLikeStoreDigestDirName(name string) bool {
-	return looksLikeSha256Digest("sha256:" + name)
+	return looksLikeSha256Digest(sha256Prefix + name)
 }
 
 // GCOrphanedArtifactStore reclaims CAS entries under
@@ -605,7 +633,7 @@ func GCOrphanedArtifactStore(agentsHome, family string, liveDigests map[string]b
 		if !looksLikeStoreDigestDirName(name) {
 			continue // not a digest-keyed entry — quarantine/staging sibling, never GC's concern
 		}
-		digest := "sha256:" + name
+		digest := sha256Prefix + name
 		if liveDigests[digest] {
 			continue // H11 — provably still referenced by some project's lock
 		}

@@ -202,7 +202,7 @@ func packagesCacheRoot() string {
 // digest. The "sha256:" prefix is stripped so the on-disk directory is a clean
 // hex name (spec §8: ~/.agents/cache/packages/<digest>/).
 func cachedArtifactPath(digest string) string {
-	return filepath.Join(packagesCacheRoot(), digestDir(digest), "artifact.blob")
+	return filepath.Join(packagesCacheRoot(), digestDir(digest), artifactBlobName)
 }
 
 // digestDir maps a canonical "sha256:<hex>" digest to its cache subdirectory
@@ -217,6 +217,10 @@ func digestDir(digest string) string {
 	return digest
 }
 
+// sha256Prefix is the canonical algorithm prefix on a "sha256:<hex>" content
+// digest, shared by the digest primitives here and in materialize.go.
+const sha256Prefix = "sha256:"
+
 // looksLikeSha256Digest reports whether digest is a well-formed
 // "sha256:<64 lowercase hex>" string. It is the canonicalize-once gate that
 // keeps an attacker-influenced digest (e.g. a "pinned:sha256:../../etc"
@@ -224,11 +228,10 @@ func digestDir(digest string) string {
 // otherwise turn "../../etc" into a directory-traversal segment when joined
 // under the packages cache root.
 func looksLikeSha256Digest(digest string) bool {
-	const prefix = "sha256:"
-	if !strings.HasPrefix(digest, prefix) {
+	if !strings.HasPrefix(digest, sha256Prefix) {
 		return false
 	}
-	hexPart := digest[len(prefix):]
+	hexPart := digest[len(sha256Prefix):]
 	if len(hexPart) != 64 {
 		return false
 	}
@@ -244,7 +247,7 @@ func looksLikeSha256Digest(digest string) bool {
 // artifactDigest computes the canonical "sha256:<hex>" content digest of data.
 func artifactDigest(data []byte) string {
 	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return sha256Prefix + hex.EncodeToString(sum[:])
 }
 
 // readCachedArtifact returns the cached blob for digest, or (nil,false). Per
@@ -272,7 +275,7 @@ func readCachedArtifact(digest string) ([]byte, bool) {
 		return nil, false
 	}
 	defer func() { _ = root.Close() }()
-	data, ok := readConfinedCacheBlob(root, filepath.Join(digestDir(digest), "artifact.blob"), DefaultBundleLimits().MaxFileBytes)
+	data, ok := readConfinedCacheBlob(root, filepath.Join(digestDir(digest), artifactBlobName), DefaultBundleLimits().MaxFileBytes)
 	if !ok {
 		return nil, false
 	}
@@ -359,8 +362,12 @@ func writeCachedArtifact(digest string, data []byte) error {
 	if !looksLikeSha256Digest(digest) {
 		return fmt.Errorf("refusing to cache artifact under malformed digest %q", digest)
 	}
-	return writeConfinedPackagesCacheFile(digestDir(digest), "artifact.blob", data)
+	return writeConfinedPackagesCacheFile(digestDir(digest), artifactBlobName, data)
 }
+
+// artifactBlobName is the fixed filename of a cached package artifact bundle
+// under its digest dir (~/.agents/cache/packages/<digest>/artifact.blob).
+const artifactBlobName = "artifact.blob"
 
 // ociTypeSidecarName is the per-digest sidecar recording the OCI type metadata
 // (manifest artifactType + layer media type) that a fresh packages/artifact
@@ -653,7 +660,7 @@ func digestFromVersionSpec(spec string) (string, bool) {
 	const pin = "pinned:"
 	if strings.HasPrefix(spec, pin) {
 		d := spec[len(pin):]
-		if strings.HasPrefix(d, "sha256:") {
+		if strings.HasPrefix(d, sha256Prefix) {
 			return d, true
 		}
 	}

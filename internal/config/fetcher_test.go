@@ -2559,83 +2559,90 @@ type treeFixtureNode struct {
 func buildCommittedTree(t *testing.T, st *memory.Storage, files map[string][]byte, symlinks map[string]string) plumbing.Hash {
 	t.Helper()
 	root := &treeFixtureNode{Children: map[string]*treeFixtureNode{}}
-	insert := func(p string, leaf *treeFixtureNode) {
-		parts := strings.Split(p, "/")
-		cur := root
-		for i, part := range parts {
-			if i == len(parts)-1 {
-				cur.Children[part] = leaf
-				return
-			}
-			next, ok := cur.Children[part]
-			if !ok || next.Children == nil {
-				next = &treeFixtureNode{Children: map[string]*treeFixtureNode{}}
-				cur.Children[part] = next
-			}
-			cur = next
-		}
-	}
 	for p, body := range files {
-		insert(p, &treeFixtureNode{Data: body})
+		insertTreeFixtureNode(root, p, &treeFixtureNode{Data: body})
 	}
 	for p, target := range symlinks {
-		insert(p, &treeFixtureNode{Symlink: target})
+		insertTreeFixtureNode(root, p, &treeFixtureNode{Symlink: target})
 	}
+	return encodeFixtureTree(t, st, root)
+}
 
-	writeBlob := func(body []byte) plumbing.Hash {
-		blob := st.NewEncodedObject()
-		blob.SetType(plumbing.BlobObject)
-		w, err := blob.Writer()
-		if err != nil {
-			t.Fatal(err)
+// insertTreeFixtureNode places leaf at path p (slash-separated) under root,
+// creating intermediate directory nodes as needed.
+func insertTreeFixtureNode(root *treeFixtureNode, p string, leaf *treeFixtureNode) {
+	parts := strings.Split(p, "/")
+	cur := root
+	for i, part := range parts {
+		if i == len(parts)-1 {
+			cur.Children[part] = leaf
+			return
 		}
-		if _, err := w.Write(body); err != nil {
-			t.Fatal(err)
+		next, ok := cur.Children[part]
+		if !ok || next.Children == nil {
+			next = &treeFixtureNode{Children: map[string]*treeFixtureNode{}}
+			cur.Children[part] = next
 		}
-		if err := w.Close(); err != nil {
-			t.Fatal(err)
-		}
-		h, err := st.SetEncodedObject(blob)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return h
+		cur = next
 	}
+}
 
-	var encode func(n *treeFixtureNode) plumbing.Hash
-	encode = func(n *treeFixtureNode) plumbing.Hash {
-		names := make([]string, 0, len(n.Children))
-		for name := range n.Children {
-			names = append(names, name)
-		}
-		// Git's tree encoding requires entries sorted as if a directory name
-		// carried a trailing slash (treeEntrySortName) — sort accordingly so
-		// Tree.Validate (called by Encode) accepts the constructed tree.
-		sort.Slice(names, func(i, j int) bool {
-			a, b := names[i], names[j]
-			if n.Children[names[i]].Symlink == "" && n.Children[names[i]].Data == nil {
-				a += "/"
-			}
-			if n.Children[names[j]].Symlink == "" && n.Children[names[j]].Data == nil {
-				b += "/"
-			}
-			return a < b
-		})
-		tree := &object.Tree{}
-		for _, name := range names {
-			child := n.Children[name]
-			switch {
-			case child.Symlink != "":
-				tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Symlink, Hash: writeBlob([]byte(child.Symlink))})
-			case child.Data != nil:
-				tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Regular, Hash: writeBlob(child.Data)})
-			default:
-				tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Dir, Hash: encode(child)})
-			}
-		}
-		return encodeTree(t, st, tree)
+// writeFixtureBlob stores body as a git blob object and returns its hash.
+func writeFixtureBlob(t *testing.T, st *memory.Storage, body []byte) plumbing.Hash {
+	blob := st.NewEncodedObject()
+	blob.SetType(plumbing.BlobObject)
+	w, err := blob.Writer()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return encode(root)
+	if _, err := w.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	h, err := st.SetEncodedObject(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// fixtureTreeSortKey returns name with a trailing slash for directory nodes so
+// entries sort as Git's tree encoding requires (treeEntrySortName).
+func fixtureTreeSortKey(n *treeFixtureNode, name string) string {
+	if n.Symlink == "" && n.Data == nil {
+		return name + "/"
+	}
+	return name
+}
+
+// encodeFixtureTree recursively encodes n and its children into git tree/blob
+// objects in st, returning the root tree hash.
+func encodeFixtureTree(t *testing.T, st *memory.Storage, n *treeFixtureNode) plumbing.Hash {
+	names := make([]string, 0, len(n.Children))
+	for name := range n.Children {
+		names = append(names, name)
+	}
+	// Git's tree encoding requires entries sorted as if a directory name
+	// carried a trailing slash (treeEntrySortName) — sort accordingly so
+	// Tree.Validate (called by Encode) accepts the constructed tree.
+	sort.Slice(names, func(i, j int) bool {
+		return fixtureTreeSortKey(n.Children[names[i]], names[i]) < fixtureTreeSortKey(n.Children[names[j]], names[j])
+	})
+	tree := &object.Tree{}
+	for _, name := range names {
+		child := n.Children[name]
+		switch {
+		case child.Symlink != "":
+			tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Symlink, Hash: writeFixtureBlob(t, st, []byte(child.Symlink))})
+		case child.Data != nil:
+			tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Regular, Hash: writeFixtureBlob(t, st, child.Data)})
+		default:
+			tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Dir, Hash: encodeFixtureTree(t, st, child)})
+		}
+	}
+	return encodeTree(t, st, tree)
 }
 
 // gitTreeFixtureCloner returns a cloner (the gitArtifactFetcher.cloner test

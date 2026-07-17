@@ -715,30 +715,39 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, loc
 	// symmetrically serialized, so interleaved pass-1/pass-2 writers preserve
 	// each other's keys instead of losing them.
 	return agentslock.Update(AgentsLockPath(projectPath), func(lf *agentslock.Lockfile) error {
-		merged := make(map[string]LockedUnit, len(layerUnits)+len(profileUnits))
 		existing := map[string]LockedUnit{}
 		if _, err := lf.Section(LockSectionUnits, &existing); err != nil {
 			return err
 		}
-		for ref, u := range existing {
-			if u.Kind == UnitKindArtifact {
-				merged[ref] = u
-			}
-		}
-		for ref, u := range layerUnits {
-			merged[ref] = u
-		}
-		// A profile key never collides with a layer/artifact ref; on the
-		// impossible collision the profile entry wins (mirrors UnitsLock.allUnits).
-		for key, u := range profileUnits {
-			merged[key] = u
-		}
+		merged := mergeLockUnits(existing, layerUnits, profileUnits)
 		if err := lf.SetSection(LockSectionUnits, merged); err != nil {
 			return err
 		}
 		lf.SetInputsDigest(digest)
 		return nil
 	})
+}
+
+// mergeLockUnits builds the merged §7A units map: it preserves the
+// kind:artifact units a concurrent packages pass committed (read under the
+// same lock), overwrites with the freshly resolved layer units, and finally
+// applies the profile units. A profile key never collides with a layer/
+// artifact ref; on the impossible collision the profile entry wins (mirrors
+// UnitsLock.allUnits).
+func mergeLockUnits(existing, layerUnits, profileUnits map[string]LockedUnit) map[string]LockedUnit {
+	merged := make(map[string]LockedUnit, len(layerUnits)+len(profileUnits))
+	for ref, u := range existing {
+		if u.Kind == UnitKindArtifact {
+			merged[ref] = u
+		}
+	}
+	for ref, u := range layerUnits {
+		merged[ref] = u
+	}
+	for key, u := range profileUnits {
+		merged[key] = u
+	}
+	return merged
 }
 
 // effectiveUserLocalPath returns the user-local manifest path the resolver

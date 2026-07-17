@@ -87,68 +87,88 @@ func (r *fakeOCIRegistry) handle(w http.ResponseWriter, req *http.Request) {
 
 	switch {
 	case strings.HasSuffix(path, "/blobs/uploads/") && req.Method == http.MethodPost:
-		r.uploads++
-		loc := fmt.Sprintf("/v2/%suploads/sess-%d", strings.TrimSuffix(path, "uploads/"), r.uploads)
-		if r.uploadLocationOverride != "" {
-			loc = r.uploadLocationOverride
-		}
-		w.Header().Set("Location", loc)
-		w.WriteHeader(http.StatusAccepted)
+		r.handleBlobUploadStart(w, path)
 	case strings.Contains(path, "/blobs/uploads/") && req.Method == http.MethodPut:
-		digest := req.URL.Query().Get("digest")
-		data, err := io.ReadAll(req.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		r.blobs[digest] = data
-		w.WriteHeader(http.StatusCreated)
+		r.handleBlobUploadPut(w, req)
 	case strings.Contains(path, "/blobs/") && req.Method == http.MethodGet:
-		r.pullCount++
-		digest := path[strings.LastIndex(path, "/blobs/")+len("/blobs/"):]
-		data, ok := r.blobs[digest]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		if r.tamperBlobDigest != "" && digest == r.tamperBlobDigest {
-			data = r.tamperedData
-		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		_, _ = w.Write(data)
+		r.handleBlobGet(w, path)
 	case strings.Contains(path, "/manifests/") && req.Method == http.MethodPut:
-		ref := path[strings.LastIndex(path, "/manifests/")+len("/manifests/"):]
-		data, err := io.ReadAll(req.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		r.manifests[ref] = data
-		sum := sha256.Sum256(data)
-		r.manifests["sha256:"+hex.EncodeToString(sum[:])] = data
-		w.WriteHeader(http.StatusCreated)
+		r.handleManifestPut(w, req, path)
 	case strings.Contains(path, "/manifests/") && req.Method == http.MethodGet:
-		r.pullCount++
-		ref := path[strings.LastIndex(path, "/manifests/")+len("/manifests/"):]
-		data, ok := r.manifests[ref]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		if r.corruptManifestType {
-			var doc map[string]any
-			if err := json.Unmarshal(data, &doc); err == nil {
-				doc["artifactType"] = "application/vnd.wrong.type"
-				if rewritten, err := json.Marshal(doc); err == nil {
-					data = rewritten
-				}
-			}
-		}
-		w.Header().Set("Content-Type", ociManifestMediaType)
-		_, _ = w.Write(data)
+		r.handleManifestGet(w, path)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+func (r *fakeOCIRegistry) handleBlobUploadStart(w http.ResponseWriter, path string) {
+	r.uploads++
+	loc := fmt.Sprintf("/v2/%suploads/sess-%d", strings.TrimSuffix(path, "uploads/"), r.uploads)
+	if r.uploadLocationOverride != "" {
+		loc = r.uploadLocationOverride
+	}
+	w.Header().Set("Location", loc)
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (r *fakeOCIRegistry) handleBlobUploadPut(w http.ResponseWriter, req *http.Request) {
+	digest := req.URL.Query().Get("digest")
+	data, err := io.ReadAll(req.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	r.blobs[digest] = data
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (r *fakeOCIRegistry) handleBlobGet(w http.ResponseWriter, path string) {
+	r.pullCount++
+	digest := path[strings.LastIndex(path, "/blobs/")+len("/blobs/"):]
+	data, ok := r.blobs[digest]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if r.tamperBlobDigest != "" && digest == r.tamperBlobDigest {
+		data = r.tamperedData
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	_, _ = w.Write(data)
+}
+
+func (r *fakeOCIRegistry) handleManifestPut(w http.ResponseWriter, req *http.Request, path string) {
+	ref := path[strings.LastIndex(path, "/manifests/")+len("/manifests/"):]
+	data, err := io.ReadAll(req.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	r.manifests[ref] = data
+	sum := sha256.Sum256(data)
+	r.manifests["sha256:"+hex.EncodeToString(sum[:])] = data
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (r *fakeOCIRegistry) handleManifestGet(w http.ResponseWriter, path string) {
+	r.pullCount++
+	ref := path[strings.LastIndex(path, "/manifests/")+len("/manifests/"):]
+	data, ok := r.manifests[ref]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if r.corruptManifestType {
+		var doc map[string]any
+		if err := json.Unmarshal(data, &doc); err == nil {
+			doc["artifactType"] = "application/vnd.wrong.type"
+			if rewritten, err := json.Marshal(doc); err == nil {
+				data = rewritten
+			}
+		}
+	}
+	w.Header().Set("Content-Type", ociManifestMediaType)
+	_, _ = w.Write(data)
 }
 
 // ociTestSource builds the oci Source pointing at srv, with basePath "".

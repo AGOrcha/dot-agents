@@ -321,16 +321,20 @@ type ociAuthChallenge struct {
 	Scope   string
 }
 
+// bearerPrefix is the HTTP "Bearer " Authorization scheme prefix, shared by
+// the WWW-Authenticate challenge parser and every bearer header this file
+// builds.
+const bearerPrefix = "Bearer "
+
 // parseWWWAuthenticateChallenge parses a WWW-Authenticate header value into
 // its Bearer realm/service/scope components. Only the "Bearer" scheme is
 // understood; a Basic/Digest challenge or malformed header reports ok=false.
 func parseWWWAuthenticateChallenge(header string) (ociAuthChallenge, bool) {
-	const scheme = "Bearer "
-	if !strings.HasPrefix(header, scheme) {
+	if !strings.HasPrefix(header, bearerPrefix) {
 		return ociAuthChallenge{}, false
 	}
 	var ch ociAuthChallenge
-	for _, part := range splitAuthParams(header[len(scheme):]) {
+	for _, part := range splitAuthParams(header[len(bearerPrefix):]) {
 		kv := strings.SplitN(part, "=", 2)
 		if len(kv) != 2 {
 			continue
@@ -464,7 +468,7 @@ func exchangeBearerToken(ctx context.Context, challenge ociAuthChallenge, cred r
 	case cred.Username != "" && cred.Secret != "":
 		req.SetBasicAuth(cred.Username, cred.Secret)
 	case cred.Token != "":
-		req.Header.Set("Authorization", "Bearer "+cred.Token)
+		req.Header.Set("Authorization", bearerPrefix+cred.Token)
 	}
 
 	resp, err := ociTokenHTTPClient.Do(req)
@@ -535,7 +539,7 @@ func resolveOCIAuthorizationHeader(ctx context.Context, auth json.RawMessage, re
 	// returned a ready-made token) is presented directly — no token-endpoint
 	// round trip needed.
 	if cred.Token != "" {
-		return "Bearer " + cred.Token, nil
+		return bearerPrefix + cred.Token, nil
 	}
 	if cred.Username == "" || cred.Secret == "" {
 		return "", nil
@@ -551,5 +555,5 @@ func resolveOCIAuthorizationHeader(ctx context.Context, auth json.RawMessage, re
 	if err != nil {
 		return "", err
 	}
-	return "Bearer " + token, nil
+	return bearerPrefix + token, nil
 }

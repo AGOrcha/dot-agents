@@ -332,17 +332,8 @@ func (a *bundleAccumulator) add(e RawBundleEntry) error {
 		return fmt.Errorf("bundle exceeds entry-count cap of %d", a.limits.MaxEntries)
 	}
 
-	switch e.Kind {
-	case rawKindFile, rawKindDir:
-		// continues to path validation below
-	case rawKindSymlink:
-		return fmt.Errorf("bundle entry %q: symlinks are not permitted", e.Path)
-	case rawKindHardlink:
-		return fmt.Errorf("bundle entry %q: hardlinks are not permitted", e.Path)
-	case rawKindDevice:
-		return fmt.Errorf("bundle entry %q: device/fifo entries are not permitted", e.Path)
-	default:
-		return fmt.Errorf("bundle entry %q: unsupported entry type", e.Path)
+	if err := checkEntryKind(e); err != nil {
+		return err
 	}
 
 	cp, err := canonicalBundlePath(e.Path)
@@ -364,29 +355,58 @@ func (a *bundleAccumulator) add(e RawBundleEntry) error {
 	}
 
 	if e.Kind == rawKindFile {
-		if e.Size < 0 {
-			return fmt.Errorf("bundle entry %q: negative declared size", cp)
-		}
-		// The walker must hand over content read at the SAME size it declares,
-		// so a between-stat-and-read divergence (a file that grew, or an entry
-		// whose header lied about its length) cannot be admitted.
-		if int64(len(e.Data)) != e.Size {
-			return fmt.Errorf("bundle entry %q: declared size %d does not match %d bytes read", cp, e.Size, len(e.Data))
-		}
-		if e.Size > a.limits.MaxFileBytes {
-			return fmt.Errorf("bundle entry %q: exceeds per-file cap of %d bytes", cp, a.limits.MaxFileBytes)
-		}
-		a.fileCount++
-		if a.fileCount > a.limits.MaxFiles {
-			return fmt.Errorf("bundle exceeds file-count cap of %d", a.limits.MaxFiles)
-		}
-		a.totalBytes += e.Size
-		if a.totalBytes > a.limits.MaxBytes {
-			return fmt.Errorf("bundle exceeds expanded-size cap of %d bytes", a.limits.MaxBytes)
+		if err := a.addFileCaps(cp, e); err != nil {
+			return err
 		}
 	}
 
 	a.entries = append(a.entries, BundleEntry{Path: cp, IsDir: e.Kind == rawKindDir, Mode: e.Mode, Data: e.Data})
+	return nil
+}
+
+// checkEntryKind gates a raw entry's kind: regular files and directories pass
+// (nil) and continue to path validation, while symlinks, hardlinks, device/
+// fifo entries, and unknown types are rejected with a specific reason.
+func checkEntryKind(e RawBundleEntry) error {
+	switch e.Kind {
+	case rawKindFile, rawKindDir:
+		return nil
+	case rawKindSymlink:
+		return fmt.Errorf("bundle entry %q: symlinks are not permitted", e.Path)
+	case rawKindHardlink:
+		return fmt.Errorf("bundle entry %q: hardlinks are not permitted", e.Path)
+	case rawKindDevice:
+		return fmt.Errorf("bundle entry %q: device/fifo entries are not permitted", e.Path)
+	default:
+		return fmt.Errorf("bundle entry %q: unsupported entry type", e.Path)
+	}
+}
+
+// addFileCaps enforces the file-only invariants — non-negative declared size,
+// the len(Data)==Size read/declare match, and the per-file/file-count/
+// expanded-byte caps — updating the accumulator's running counters. cp is the
+// canonical path used in error messages.
+func (a *bundleAccumulator) addFileCaps(cp string, e RawBundleEntry) error {
+	if e.Size < 0 {
+		return fmt.Errorf("bundle entry %q: negative declared size", cp)
+	}
+	// The walker must hand over content read at the SAME size it declares,
+	// so a between-stat-and-read divergence (a file that grew, or an entry
+	// whose header lied about its length) cannot be admitted.
+	if int64(len(e.Data)) != e.Size {
+		return fmt.Errorf("bundle entry %q: declared size %d does not match %d bytes read", cp, e.Size, len(e.Data))
+	}
+	if e.Size > a.limits.MaxFileBytes {
+		return fmt.Errorf("bundle entry %q: exceeds per-file cap of %d bytes", cp, a.limits.MaxFileBytes)
+	}
+	a.fileCount++
+	if a.fileCount > a.limits.MaxFiles {
+		return fmt.Errorf("bundle exceeds file-count cap of %d", a.limits.MaxFiles)
+	}
+	a.totalBytes += e.Size
+	if a.totalBytes > a.limits.MaxBytes {
+		return fmt.Errorf("bundle exceeds expanded-size cap of %d bytes", a.limits.MaxBytes)
+	}
 	return nil
 }
 
@@ -480,36 +500,58 @@ func (s *streamCeilingReader) Read(p []byte) (int, error) {
 func tarWalker(blob []byte, limits BundleLimits) BundleWalker {
 	limits = limits.orDefault()
 	return func(emit func(RawBundleEntry) error) error {
-		gz, err := gzip.NewReader(bytes.NewReader(blob))
-		if err != nil {
-			return fmt.Errorf("not a valid gzip stream: %w", err)
-		}
-		defer func() { _ = gz.Close() }()
-		tr := tar.NewReader(&streamCeilingReader{r: gz, remaining: limits.MaxStreamBytes})
+		return walkTar(blob, limits, emit)
+	}
+}
 
-		for {
-			hdr, err := tr.Next()
-			if err == io.EOF {
-				return nil
-			}
-			if err != nil {
-				return fmt.Errorf("reading tar entry: %w", err)
-			}
-			kind := rawKindForTarType(hdr.Typeflag)
-			entry := RawBundleEntry{Path: hdr.Name, Kind: kind, Mode: hdr.FileInfo().Mode(), Size: hdr.Size}
-			if kind == rawKindFile {
-				data, err := readTarFile(tr, hdr, limits)
-				if err != nil {
-					return err
-				}
-				entry.Data = data
-				entry.Size = int64(len(data))
-			}
-			if err := emit(entry); err != nil {
-				return err
-			}
+// walkTar drives a single streaming pass over a `+tar+gzip` blob, decoding
+// each entry through tarEntryFromHeader and handing it to emit. It stops and
+// propagates the moment emit errors, so the accumulator's caps bound the walk
+// while the archive is still being expanded (entry flood, over-cap file, and
+// whole-stream ceiling are all enforced here).
+func walkTar(blob []byte, limits BundleLimits, emit func(RawBundleEntry) error) error {
+	gz, err := gzip.NewReader(bytes.NewReader(blob))
+	if err != nil {
+		return fmt.Errorf("not a valid gzip stream: %w", err)
+	}
+	defer func() { _ = gz.Close() }()
+	tr := tar.NewReader(&streamCeilingReader{r: gz, remaining: limits.MaxStreamBytes})
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("reading tar entry: %w", err)
+		}
+		entry, err := tarEntryFromHeader(tr, hdr, limits)
+		if err != nil {
+			return err
+		}
+		if err := emit(entry); err != nil {
+			return err
 		}
 	}
+}
+
+// tarEntryFromHeader builds a RawBundleEntry from a decoded tar header,
+// reading and bounding file content for regular files (with the post-read
+// length as the authoritative size). Non-file entries carry the header's
+// declared metadata only.
+func tarEntryFromHeader(tr *tar.Reader, hdr *tar.Header, limits BundleLimits) (RawBundleEntry, error) {
+	kind := rawKindForTarType(hdr.Typeflag)
+	entry := RawBundleEntry{Path: hdr.Name, Kind: kind, Mode: hdr.FileInfo().Mode(), Size: hdr.Size}
+	if kind != rawKindFile {
+		return entry, nil
+	}
+	data, err := readTarFile(tr, hdr, limits)
+	if err != nil {
+		return RawBundleEntry{}, err
+	}
+	entry.Data = data
+	entry.Size = int64(len(data))
+	return entry, nil
 }
 
 // readTarFile copies a tar file entry's content, bounded independently of the

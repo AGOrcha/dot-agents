@@ -128,7 +128,7 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 		if tree == nil {
 			return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: cannot verify submodules — committed tree unavailable: %w", parts.ArtifactPath, commit, treeErr))
 		}
-		return f.fetchTreeBundle(store, tree, rel, parts, commit, posture, isPinned, pinned)
+		return f.fetchTreeBundle(store, tree, rel, parts, commit, posture)
 	}
 
 	data, err := readArtifactFile(wfs, rootOS, parts, commit)
@@ -170,7 +170,11 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 // results are never written to the flat single-blob packages cache
 // (writeCachedArtifact addresses one blob, not a multi-file tree); materialize
 // (t2, spec H2) owns the tree's content-addressed store.
-func (f *gitArtifactFetcher) fetchTreeBundle(store storer.EncodedObjectStorer, tree *object.Tree, canonicalRel string, parts PackageRefParts, commit string, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
+func (f *gitArtifactFetcher) fetchTreeBundle(store storer.EncodedObjectStorer, tree *object.Tree, canonicalRel string, parts PackageRefParts, commit string, posture SigningPosture) (FetchedArtifact, error) {
+	// The pin is re-derived from parts here (the same parse FetchArtifact runs)
+	// so the tree path needs no extra pin params. A tree pull's digest is the
+	// whole-subtree BundleDigest, matched against the pinned digest below.
+	pinned, isPinned := digestFromVersionSpec(parts.VersionSpec)
 	subHash, err := committedSubtreeHashAt(tree, canonicalRel)
 	if err != nil {
 		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: %w", parts.ArtifactPath, commit, err))
@@ -253,60 +257,76 @@ func gitTreeObjectByteCap(limits BundleLimits) int64 {
 // diverge from what was verified.
 func gitCommittedTreeWalker(s storer.EncodedObjectStorer, subHash plumbing.Hash, limits BundleLimits) BundleWalker {
 	limits = limits.orDefault()
-	treeCap := gitTreeObjectByteCap(limits)
 	return func(emit func(RawBundleEntry) error) error {
-		var walk func(prefix string, h plumbing.Hash) error
-		walk = func(prefix string, h plumbing.Hash) error {
-			size, err := s.EncodedObjectSize(h)
-			if err != nil {
-				return fmt.Errorf("git tree object %q: sizing: %w", prefix, err)
-			}
-			if size > treeCap {
-				return fmt.Errorf("git tree object %q: encoded size %d exceeds tree-object cap of %d bytes", prefix, size, treeCap)
-			}
-			t, err := object.GetTree(s, h)
-			if err != nil {
-				return fmt.Errorf("git tree object %q: decoding: %w", prefix, err)
-			}
-			for i := range t.Entries {
-				e := &t.Entries[i]
-				name := e.Name
-				if prefix != "" {
-					name = prefix + "/" + e.Name
-				}
-				switch e.Mode {
-				case filemode.Dir:
-					mode, _ := e.Mode.ToOSFileMode()
-					if err := emit(RawBundleEntry{Path: name, Kind: rawKindDir, Mode: mode}); err != nil {
-						return err
-					}
-					if err := walk(name, e.Hash); err != nil {
-						return err
-					}
-				case filemode.Symlink:
-					if err := emit(RawBundleEntry{Path: name, Kind: rawKindSymlink}); err != nil {
-						return err
-					}
-				case filemode.Submodule:
-					return fmt.Errorf("git tree entry %q: submodule (gitlink) not permitted in an artifact bundle", name)
-				case filemode.Regular, filemode.Executable, filemode.Deprecated:
-					data, derr := readCommittedBlob(s, name, e.Hash, limits)
-					if derr != nil {
-						return derr
-					}
-					mode, _ := e.Mode.ToOSFileMode()
-					if err := emit(RawBundleEntry{Path: name, Kind: rawKindFile, Mode: mode, Size: int64(len(data)), Data: data}); err != nil {
-						return err
-					}
-				default:
-					if err := emit(RawBundleEntry{Path: name, Kind: rawKindOther}); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
+		w := &gitTreeWalk{store: s, limits: limits, treeCap: gitTreeObjectByteCap(limits), emit: emit}
+		return w.walk("", subHash)
+	}
+}
+
+// gitTreeWalk carries the committed-tree walk state so the recursive tree walk
+// and its per-entry handler are flat methods rather than deeply nested closures.
+type gitTreeWalk struct {
+	store   storer.EncodedObjectStorer
+	limits  BundleLimits
+	treeCap int64
+	emit    func(RawBundleEntry) error
+}
+
+// walk size-gates the tree object at h via EncodedObjectSize BEFORE decoding it
+// (the t1b pre-decode flood bound: object.GetTree would otherwise materialize a
+// million-entry tree's whole entry slice into memory), decodes it, and
+// dispatches each entry through handleEntry.
+func (w *gitTreeWalk) walk(prefix string, h plumbing.Hash) error {
+	size, err := w.store.EncodedObjectSize(h)
+	if err != nil {
+		return fmt.Errorf("git tree object %q: sizing: %w", prefix, err)
+	}
+	if size > w.treeCap {
+		return fmt.Errorf("git tree object %q: encoded size %d exceeds tree-object cap of %d bytes", prefix, size, w.treeCap)
+	}
+	t, err := object.GetTree(w.store, h)
+	if err != nil {
+		return fmt.Errorf("git tree object %q: decoding: %w", prefix, err)
+	}
+	for i := range t.Entries {
+		if err := w.handleEntry(prefix, &t.Entries[i]); err != nil {
+			return err
 		}
-		return walk("", subHash)
+	}
+	return nil
+}
+
+// handleEntry emits one committed-tree entry, recursing into subtrees. A
+// submodule (gitlink) is rejected — a worktree walk would flatten it to an
+// empty dir and drop its commit OID, defeating the digest. A regular/executable
+// file is read size-gated from the object graph; a symlink and any other object
+// are emitted by kind. Returning nil lets walk's loop advance to the next entry;
+// a non-nil error aborts the whole walk.
+func (w *gitTreeWalk) handleEntry(prefix string, e *object.TreeEntry) error {
+	name := e.Name
+	if prefix != "" {
+		name = prefix + "/" + e.Name
+	}
+	switch e.Mode {
+	case filemode.Dir:
+		mode, _ := e.Mode.ToOSFileMode()
+		if err := w.emit(RawBundleEntry{Path: name, Kind: rawKindDir, Mode: mode}); err != nil {
+			return err
+		}
+		return w.walk(name, e.Hash)
+	case filemode.Symlink:
+		return w.emit(RawBundleEntry{Path: name, Kind: rawKindSymlink})
+	case filemode.Submodule:
+		return fmt.Errorf("git tree entry %q: submodule (gitlink) not permitted in an artifact bundle", name)
+	case filemode.Regular, filemode.Executable, filemode.Deprecated:
+		data, derr := readCommittedBlob(w.store, name, e.Hash, w.limits)
+		if derr != nil {
+			return derr
+		}
+		mode, _ := e.Mode.ToOSFileMode()
+		return w.emit(RawBundleEntry{Path: name, Kind: rawKindFile, Mode: mode, Size: int64(len(data)), Data: data})
+	default:
+		return w.emit(RawBundleEntry{Path: name, Kind: rawKindOther})
 	}
 }
 

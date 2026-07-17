@@ -202,7 +202,7 @@ func TestResolvePackagesUnits_MaterializesLocksAndReturnsUnit(t *testing.T) {
 	if locked.Digest != u.Digest {
 		t.Fatalf("locked digest %q != resolved unit digest %q", locked.Digest, u.Digest)
 	}
-	if anchor := readArtifactContentDigests(proj)["da-agc:skill/demo@1"]; anchor == "" {
+	if readArtifactContentDigests(proj)["da-agc:skill/demo@1"] == "" {
 		t.Fatal("expected a committed content-integrity anchor for the ref")
 	}
 }
@@ -624,30 +624,12 @@ func TestCommitArtifactLock_InterleavedWithPass1PreservesBothKeys(t *testing.T) 
 	artAnchors := map[string]string{"da-agc:skill/demo@1": "sha256:content"}
 	layerUnit := config.LockedUnit{Kind: config.UnitKindLayer, Digest: "sha256:layer"}
 
-	// pass-1 mimic: exactly resolver.writeUnitsLock's Update shape — read units
-	// under the lock, preserve existing artifact units, (re)write the layer unit.
-	pass1 := func() error {
-		return agentslock.Update(lockPath, func(lf *agentslock.Lockfile) error {
-			existing := map[string]config.LockedUnit{}
-			if _, err := lf.Section(config.LockSectionUnits, &existing); err != nil {
-				return err
-			}
-			merged := map[string]config.LockedUnit{"da-agc:layer.json@main": layerUnit}
-			for ref, u := range existing {
-				if u.Kind == config.UnitKindArtifact {
-					merged[ref] = u
-				}
-			}
-			return lf.SetSection(config.LockSectionUnits, merged)
-		})
-	}
-
 	var wg sync.WaitGroup
 	errs := make(chan error, rounds*2)
 	for i := 0; i < rounds; i++ {
 		wg.Add(2)
 		go func() { defer wg.Done(); errs <- commitArtifactLock(proj, artUnits, artAnchors) }()
-		go func() { defer wg.Done(); errs <- pass1() }()
+		go func() { defer wg.Done(); errs <- commitArtifactLockPass1Mimic(lockPath, layerUnit) }()
 	}
 	wg.Wait()
 	close(errs)
@@ -667,4 +649,23 @@ func TestCommitArtifactLock_InterleavedWithPass1PreservesBothKeys(t *testing.T) 
 	if u, ok := lock.Units["da-agc:skill/demo@1"]; !ok || u.Kind != config.UnitKindArtifact {
 		t.Fatalf("pass-1 clobbered the concurrent pass-2 artifact unit: %v", lock.Units)
 	}
+}
+
+// commitArtifactLockPass1Mimic mimics resolver.writeUnitsLock's Update shape:
+// read units under the lock, preserve existing artifact units, (re)write the
+// layer unit.
+func commitArtifactLockPass1Mimic(lockPath string, layerUnit config.LockedUnit) error {
+	return agentslock.Update(lockPath, func(lf *agentslock.Lockfile) error {
+		existing := map[string]config.LockedUnit{}
+		if _, err := lf.Section(config.LockSectionUnits, &existing); err != nil {
+			return err
+		}
+		merged := map[string]config.LockedUnit{"da-agc:layer.json@main": layerUnit}
+		for ref, u := range existing {
+			if u.Kind == config.UnitKindArtifact {
+				merged[ref] = u
+			}
+		}
+		return lf.SetSection(config.LockSectionUnits, merged)
+	})
 }

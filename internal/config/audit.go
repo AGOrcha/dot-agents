@@ -341,46 +341,11 @@ func redactSecrets(s string) string {
 		return s
 	}
 
-	type span struct{ start, end int }
-	var spans []span
-	for _, secret := range secrets {
-		if secret == "" {
-			continue
-		}
-		// Advance by 1 rune of progress (not len(secret)) so overlapping
-		// occurrences of the SAME secret are also found, matching the
-		// exhaustive-match requirement this merge strategy depends on.
-		for from := 0; from <= len(s)-len(secret); {
-			idx := strings.Index(s[from:], secret)
-			if idx < 0 {
-				break
-			}
-			start := from + idx
-			spans = append(spans, span{start: start, end: start + len(secret)})
-			from = start + 1
-		}
-	}
+	spans := collectSecretSpans(s, secrets)
 	if len(spans) == 0 {
 		return s
 	}
-	sort.Slice(spans, func(i, j int) bool {
-		if spans[i].start != spans[j].start {
-			return spans[i].start < spans[j].start
-		}
-		return spans[i].end < spans[j].end
-	})
-	merged := make([]span, 0, len(spans))
-	merged = append(merged, spans[0])
-	for _, sp := range spans[1:] {
-		last := &merged[len(merged)-1]
-		if sp.start <= last.end {
-			if sp.end > last.end {
-				last.end = sp.end
-			}
-			continue
-		}
-		merged = append(merged, sp)
-	}
+	merged := mergeSecretSpans(spans)
 
 	var b strings.Builder
 	b.Grow(len(s))
@@ -392,6 +357,58 @@ func redactSecrets(s string) string {
 	}
 	b.WriteString(s[prev:])
 	return b.String()
+}
+
+// secretSpan is a [start,end) byte range within a string that matches a
+// registered secret and must be redacted.
+type secretSpan struct{ start, end int }
+
+// collectSecretSpans returns every match span of every registered secret
+// against the ORIGINAL string s. It advances by one rune of progress (not
+// len(secret)) so overlapping occurrences of the SAME secret are also found,
+// matching the exhaustive-match requirement the merge strategy depends on.
+func collectSecretSpans(s string, secrets []string) []secretSpan {
+	var spans []secretSpan
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		for from := 0; from <= len(s)-len(secret); {
+			idx := strings.Index(s[from:], secret)
+			if idx < 0 {
+				break
+			}
+			start := from + idx
+			spans = append(spans, secretSpan{start: start, end: start + len(secret)})
+			from = start + 1
+		}
+	}
+	return spans
+}
+
+// mergeSecretSpans sorts spans by start (end as tiebreak) and coalesces every
+// overlapping or adjacent span so each redacted region is emitted exactly once
+// regardless of substitution order.
+func mergeSecretSpans(spans []secretSpan) []secretSpan {
+	sort.Slice(spans, func(i, j int) bool {
+		if spans[i].start != spans[j].start {
+			return spans[i].start < spans[j].start
+		}
+		return spans[i].end < spans[j].end
+	})
+	merged := make([]secretSpan, 0, len(spans))
+	merged = append(merged, spans[0])
+	for _, sp := range spans[1:] {
+		last := &merged[len(merged)-1]
+		if sp.start <= last.end {
+			if sp.end > last.end {
+				last.end = sp.end
+			}
+			continue
+		}
+		merged = append(merged, sp)
+	}
+	return merged
 }
 
 // redactedError wraps a cause so its rendered message is scrubbed of every

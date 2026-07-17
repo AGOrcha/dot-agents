@@ -49,12 +49,8 @@ func PackagesArtifactDigestResolver(projectPath string) config.UnitDigestFunc {
 			// so skip rather than false-alarm.
 			return "", false
 		}
-		parts, err := config.ParsePackageRef(ref)
-		if err != nil {
-			return "", false
-		}
-		bucket, _, err := splitPackageArtifactFamily(parts.ArtifactPath)
-		if err != nil {
+		bucket, ok := packageArtifactBucket(ref)
+		if !ok {
 			return "", false
 		}
 
@@ -73,4 +69,18 @@ func PackagesArtifactDigestResolver(projectPath string) config.UnitDigestFunc {
 		}
 		return locked.Digest, true
 	}
+}
+
+// packageArtifactBucket resolves the CAS bucket for a package ref, returning
+// false when the ref cannot be parsed or its artifact family split fails.
+func packageArtifactBucket(ref string) (string, bool) {
+	parts, err := config.ParsePackageRef(ref)
+	if err != nil {
+		return "", false
+	}
+	bucket, _, err := splitPackageArtifactFamily(parts.ArtifactPath)
+	if err != nil {
+		return "", false
+	}
+	return bucket, true
 }

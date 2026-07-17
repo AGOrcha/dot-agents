@@ -413,6 +413,14 @@ func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 			return err
 		}
 	}
+	return c.pruneUnwantedCodexTomls(dstRoot, wanted)
+}
+
+// pruneUnwantedCodexTomls removes the managed rendered `.toml`s under dstRoot
+// that are no longer wanted. An absent dstRoot is a no-op; a
+// present-but-unlistable path is a real fault to surface. Per-file removal
+// faults and provenance-read faults are aggregated rather than swallowed.
+func (c *codex) pruneUnwantedCodexTomls(dstRoot string, wanted map[string]bool) error {
 	existing, err := os.ReadDir(dstRoot)
 	if err != nil {
 		// Absent dstRoot is a no-op (nothing rendered anything into it); a
@@ -427,22 +435,27 @@ func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 		if !strings.HasSuffix(e.Name(), ".toml") || wanted[e.Name()] {
 			continue
 		}
-		// Ownership-gated prune (defect 1): only a dot-agents managed render is
-		// removable — a user-authored `.toml` sibling is left intact.
-		candidate := filepath.Join(dstRoot, e.Name())
-		isManaged, provErr := isManagedCodexToml(candidate)
-		if provErr != nil {
-			errs = append(errs, fmt.Errorf("codex toml provenance %s: %w", candidate, provErr))
-			continue
-		}
-		if !isManaged {
-			continue
-		}
-		if err := c.io.Remove(candidate); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, fmt.Errorf("prune managed codex toml %s: %w", candidate, err))
-		}
+		errs = append(errs, c.pruneManagedCodexTomlEntry(filepath.Join(dstRoot, e.Name())))
 	}
 	return errors.Join(errs...)
+}
+
+// pruneManagedCodexTomlEntry removes candidate only when it is a dot-agents
+// managed render (defect 1): a user-authored `.toml` sibling is left intact,
+// and a provenance-read fault is surfaced rather than swallowed. Returns nil
+// when the candidate is skipped or removed successfully.
+func (c *codex) pruneManagedCodexTomlEntry(candidate string) error {
+	isManaged, provErr := isManagedCodexToml(candidate)
+	if provErr != nil {
+		return fmt.Errorf("codex toml provenance %s: %w", candidate, provErr)
+	}
+	if !isManaged {
+		return nil
+	}
+	if err := c.io.Remove(candidate); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("prune managed codex toml %s: %w", candidate, err)
+	}
+	return nil
 }
 
 // pruneManagedCodexAgentTomls removes EVERY dot-agents managed rendered
@@ -533,40 +546,16 @@ func writeCodexAgentTomlFile(io platformIO, dst, agentMD string) error {
 		return fmt.Errorf("codex toml provenance check %s: %w", dst, err)
 	}
 	if !isManaged {
-		// Distinguish "absent" (fine, create it) from "present but not ours"
-		// (content-aware collision resolution, never a silent clobber).
-		info, statErr := os.Lstat(dst)
-		switch {
-		case statErr == nil:
-			if err := resolveUnmanagedCodexTomlCollision(io, dst, content, info); err != nil {
-				return err
-			}
-		case !os.IsNotExist(statErr):
-			return fmt.Errorf("codex toml occupant check %s: %w", dst, statErr)
+		if err := handleUnmanagedCodexTomlOccupant(io, dst, content); err != nil {
+			return err
 		}
 	} else {
-		// Perf (package-artifact-install t9): a verified managed render is ours
-		// to replace, but the steady-state re-run (every unchanged `da install`
-		// / `da refresh`) regenerates byte-identical content for every sourced
-		// agent every time — profiling a 200-agent warm re-projection showed
-		// this remove+write+rename triplet as the dominant cost (docs/
-		// PERF_BUDGET.md). A full byte compare against the CURRENT on-disk
-		// managed render — not a cheap mtime/size shortcut — skips the rewrite
-		// only when content is provably unchanged, so a genuinely stale render
-		// (source content changed) still regenerates correctly.
-		existing, readErr := os.ReadFile(dst)
-		if readErr == nil && bytes.Equal(existing, managed) {
+		skip, err := prepareManagedCodexTomlRewrite(io, dst, managed)
+		if err != nil {
+			return err
+		}
+		if skip {
 			return nil
-		}
-		if readErr != nil && !os.IsNotExist(readErr) {
-			return fmt.Errorf("codex toml: reading prior managed render %s: %w", dst, readErr)
-		}
-		// A verified managed render is ours to replace; remove it first so the
-		// atomic rename below lands on an absent path (Windows os.Rename cannot
-		// replace an existing file). This unlink is safe: ownership was just
-		// proven, and the removed bytes are a regenerable render.
-		if err := io.Remove(dst); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("codex toml: removing prior managed render %s: %w", dst, err)
 		}
 	}
 	tmp := dst + ".da-toml-tmp"
@@ -582,6 +571,49 @@ func writeCodexAgentTomlFile(io platformIO, dst, agentMD string) error {
 
 func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
 	return writeCodexAgentTomlFile(c.io, dst, agentMD)
+}
+
+// handleUnmanagedCodexTomlOccupant resolves an existing occupant at dst that
+// lacks the managed-render marker: an absent path is fine (nothing to do), a
+// present occupant goes through content-aware collision resolution and a real
+// Lstat fault propagates.
+func handleUnmanagedCodexTomlOccupant(io platformIO, dst string, content []byte) error {
+	// Distinguish "absent" (fine, create it) from "present but not ours"
+	// (content-aware collision resolution, never a silent clobber).
+	info, statErr := os.Lstat(dst)
+	switch {
+	case statErr == nil:
+		return resolveUnmanagedCodexTomlCollision(io, dst, content, info)
+	case !os.IsNotExist(statErr):
+		return fmt.Errorf("codex toml occupant check %s: %w", dst, statErr)
+	}
+	return nil
+}
+
+// prepareManagedCodexTomlRewrite decides whether the proven-managed render at
+// dst must be rewritten. It returns skip=true when the on-disk bytes already
+// equal managed (steady-state no-op, package-artifact-install t9 perf), else
+// removes the prior render so the caller's atomic rename lands on an absent
+// path (Windows os.Rename cannot replace an existing file).
+func prepareManagedCodexTomlRewrite(io platformIO, dst string, managed []byte) (bool, error) {
+	// A full byte compare against the CURRENT on-disk managed render — not a
+	// cheap mtime/size shortcut — skips the rewrite only when content is
+	// provably unchanged, so a genuinely stale render (source content changed)
+	// still regenerates correctly.
+	existing, readErr := os.ReadFile(dst)
+	if readErr == nil && bytes.Equal(existing, managed) {
+		return true, nil
+	}
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return false, fmt.Errorf("codex toml: reading prior managed render %s: %w", dst, readErr)
+	}
+	// A verified managed render is ours to replace; remove it first so the
+	// atomic rename below lands on an absent path. This unlink is safe:
+	// ownership was just proven, and the removed bytes are a regenerable render.
+	if err := io.Remove(dst); err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("codex toml: removing prior managed render %s: %w", dst, err)
+	}
+	return false, nil
 }
 
 // resolveUnmanagedCodexTomlCollision handles an existing occupant at dst
