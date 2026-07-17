@@ -113,6 +113,24 @@ jobs:
           fi
           echo "Release signing-toolchain pin guard passed: signing tools are version+sha256 pinned, no dotnet 'sign', no --prerelease/@latest."
 
+  # Named soak-clock signal for §11.6 / t6d: this gate must stay green for
+  # 3 consecutive weeks before the CRG bridge may be decommissioned.
+  crg-parity-gate:
+    name: CRG parity gate (decommission soak signal)
+    runs-on: ubuntu-latest
+    needs: lint-workflows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+
+      - name: Run hermetic CRG parity harness
+        run: go test -race -count=1 -run '^(TestPostprocessParity_TenCommitDualRead|TestPostprocessParity_CatchesDivergence|TestRegression_CrossPathParity_ClampsAreTheSameNumbers)$' ./internal/adapters/builtin/crg ./internal/graphstore
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
