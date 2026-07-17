@@ -174,7 +174,7 @@ func resolvePackagesUnits(projectPath, agentsHome string, snap *config.Snapshot,
 	if err := commitArtifactLock(projectPath, artifactUnits, contentDigests); err != nil {
 		return nil, fmt.Errorf("packages: recording lock units: %w", err)
 	}
-	if err := verifyProjectionInputs(agentsHome, units, contentByUnit); err != nil {
+	if err := verifyProjectionInputsFn(agentsHome, units, contentByUnit); err != nil {
 		return nil, err
 	}
 	return units, nil
@@ -211,11 +211,19 @@ func hydratePackagesFromLock(projectPath, agentsHome string, snap *config.Snapsh
 		units = append(units, unit)
 		contentByUnit = append(contentByUnit, contentDigest)
 	}
-	if err := verifyProjectionInputs(agentsHome, units, contentByUnit); err != nil {
+	if err := verifyProjectionInputsFn(agentsHome, units, contentByUnit); err != nil {
 		return nil, err
 	}
 	return units, nil
 }
+
+// verifyProjectionInputsFn is the unexported test seam over
+// verifyProjectionInputs. Both resolvePackagesUnits and hydratePackagesFromLock
+// call through it so a test can force the projection-boundary re-check to fail:
+// the real check only errors when a CAS entry is removed or tampered BETWEEN the
+// inline materialize and this verify, an interleaving unreachable from a
+// single-threaded call through the normal path.
+var verifyProjectionInputsFn = verifyProjectionInputs
 
 // fetchAndMaterializePackage parses ref and fetches it — at the manifest's
 // own declared version-spec when pinDigest is empty (the resolve half, which
@@ -312,11 +320,19 @@ func commitArtifactLock(projectPath string, artifactUnits map[string]config.Lock
 		for ref, u := range artifactUnits {
 			merged[ref] = u
 		}
-		if err := lf.SetSection(config.LockSectionUnits, merged); err != nil {
+		if err := setUnitsSectionFn(lf, merged); err != nil {
 			return err
 		}
 		return lf.SetSection(artifactContentLockSection, contentDigests)
 	})
+}
+
+// setUnitsSectionFn is the unexported test seam over the units-section write in
+// commitArtifactLock. It never errors through the normal path — "units" is not a
+// reserved key and a map[string]config.LockedUnit always marshals — so a test
+// overrides it to exercise the defensive SetSection error return.
+var setUnitsSectionFn = func(lf *agentslock.Lockfile, merged map[string]config.LockedUnit) error {
+	return lf.SetSection(config.LockSectionUnits, merged)
 }
 
 // readArtifactContentDigests loads the artifact-content integrity section
