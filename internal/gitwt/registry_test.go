@@ -547,70 +547,58 @@ func TestPruneScanListFails(t *testing.T) {
 // the base lookup into the tip resolution that fails.
 func TestPruneScanUnchangedSinceBaseIndeterminate(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
-	expired := now.Add(-2 * time.Hour)
 
 	t.Run("worktree dir unresolvable", func(t *testing.T) {
-		f := newFixture(t)
-		reg := newRegistry(t, f, time.Hour, now)
-		addBranch(t, f, "wd")
-		if _, err := reg.Create("wd", Metadata{CreatedAt: expired, LastUsed: expired}); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		dir, _ := f.mgr.(*manager).adminDir("wd")
-		if err := os.Remove(filepath.Join(dir, "gitdir")); err != nil {
-			t.Fatalf("rm gitdir: %v", err)
-		}
-		scan, err := reg.PruneScan()
-		if err != nil {
-			t.Fatalf("PruneScan: %v", err)
-		}
-		if !contains(scan.Kept, "wd") || contains(scan.Eligible, "wd") {
-			t.Fatalf("scan=%+v, want wd kept (indeterminate worktree dir)", scan)
-		}
+		assertPruneScanKeepsIndeterminate(t, now, "wd", func(t *testing.T, f *fixture) {
+			dir, _ := f.mgr.(*manager).adminDir("wd")
+			if err := os.Remove(filepath.Join(dir, "gitdir")); err != nil {
+				t.Fatalf("rm gitdir: %v", err)
+			}
+		})
 	})
 
 	t.Run("worktree unopenable", func(t *testing.T) {
-		f := newFixture(t)
-		reg := newRegistry(t, f, time.Hour, now)
-		addBranch(t, f, "op")
-		if _, err := reg.Create("op", Metadata{CreatedAt: expired, LastUsed: expired}); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		// Corrupt the worktree's .git pointer so Open fails while the admin
-		// gitdir pointer (worktreeDir) still resolves.
-		if err := os.WriteFile(filepath.Join(f.wtPath("op"), ".git"), []byte("garbage"), 0o644); err != nil {
-			t.Fatalf("corrupt .git: %v", err)
-		}
-		scan, err := reg.PruneScan()
-		if err != nil {
-			t.Fatalf("PruneScan: %v", err)
-		}
-		if !contains(scan.Kept, "op") || contains(scan.Eligible, "op") {
-			t.Fatalf("scan=%+v, want op kept (indeterminate: unopenable)", scan)
-		}
+		assertPruneScanKeepsIndeterminate(t, now, "op", func(t *testing.T, f *fixture) {
+			// Corrupt the worktree's .git pointer so Open fails while the admin
+			// gitdir pointer (worktreeDir) still resolves.
+			if err := os.WriteFile(filepath.Join(f.wtPath("op"), ".git"), []byte("garbage"), 0o644); err != nil {
+				t.Fatalf("corrupt .git: %v", err)
+			}
+		})
 	})
 
 	t.Run("worktree head unreadable", func(t *testing.T) {
-		f := newFixture(t)
-		reg := newRegistry(t, f, time.Hour, now)
-		addBranch(t, f, "hd")
-		if _, err := reg.Create("hd", Metadata{CreatedAt: expired, LastUsed: expired}); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		// Point the worktree HEAD at a dangling ref so Open succeeds but Head
-		// resolution fails.
-		dir, _ := f.mgr.(*manager).adminDir("hd")
-		if err := os.WriteFile(filepath.Join(dir, "HEAD"), []byte("ref: refs/heads/does-not-exist\n"), 0o644); err != nil {
-			t.Fatalf("corrupt HEAD: %v", err)
-		}
-		scan, err := reg.PruneScan()
-		if err != nil {
-			t.Fatalf("PruneScan: %v", err)
-		}
-		if !contains(scan.Kept, "hd") || contains(scan.Eligible, "hd") {
-			t.Fatalf("scan=%+v, want hd kept (indeterminate: HEAD unreadable)", scan)
-		}
+		assertPruneScanKeepsIndeterminate(t, now, "hd", func(t *testing.T, f *fixture) {
+			// Point the worktree HEAD at a dangling ref so Open succeeds but Head
+			// resolution fails.
+			dir, _ := f.mgr.(*manager).adminDir("hd")
+			if err := os.WriteFile(filepath.Join(dir, "HEAD"), []byte("ref: refs/heads/does-not-exist\n"), 0o644); err != nil {
+				t.Fatalf("corrupt HEAD: %v", err)
+			}
+		})
 	})
+}
+
+// assertPruneScanKeepsIndeterminate registers an expired worktree, applies
+// corrupt to break its tip resolution, then asserts PruneScan KEEPS it (never
+// auto-prunes on data it cannot read).
+func assertPruneScanKeepsIndeterminate(t *testing.T, now time.Time, name string, corrupt func(t *testing.T, f *fixture)) {
+	t.Helper()
+	expired := now.Add(-2 * time.Hour)
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, now)
+	addBranch(t, f, name)
+	if _, err := reg.Create(name, Metadata{CreatedAt: expired, LastUsed: expired}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	corrupt(t, f)
+	scan, err := reg.PruneScan()
+	if err != nil {
+		t.Fatalf("PruneScan: %v", err)
+	}
+	if !contains(scan.Kept, name) || contains(scan.Eligible, name) {
+		t.Fatalf("scan=%+v, want %s kept (indeterminate)", scan, name)
+	}
 }
 
 // TestGetReadSidecarRealError proves a real (non-not-found) sidecar read error
