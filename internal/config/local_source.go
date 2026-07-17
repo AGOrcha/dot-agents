@@ -83,6 +83,14 @@ const (
 // used to drop the WHOLE managed block.
 var alwaysIgnoredCAS = []string{"cache/"}
 
+// provenanceGitignoreInstallFn is a seam over the install step
+// EnsureAndVerifyCASIgnore runs before its verify. The verify legs (a
+// post-install CASPathIgnored read error, or a "still not ignored after
+// install" refusal) are unreachable once the real install has canonicalized
+// .gitignore to the covering managed block, so a test overrides this to a
+// no-op and controls the on-disk .gitignore directly to reach them.
+var provenanceGitignoreInstallFn = (*LocalSource).EnsureProvenanceGitignore
+
 // GitRepo is the seam over the git operations the local source needs. The
 // production implementation is in-process via go-git (no `git` subprocess, no
 // PATH lookup — the repo-wide policy since the config fetcher rewrite); tests
@@ -407,7 +415,7 @@ func (s *LocalSource) CASPathIgnored(relPath string) (bool, error) {
 // docs/PERF_BUDGET.md's "dropped for security robustness" note.
 func EnsureAndVerifyCASIgnore(agentsHome, family, digest string) error {
 	ls := NewLocalSource(agentsHome, nil)
-	if err := ls.EnsureProvenanceGitignore(nil); err != nil {
+	if err := provenanceGitignoreInstallFn(ls, nil); err != nil {
 		return fmt.Errorf("materialize: install CAS ignore: %w", err)
 	}
 	casRel := filepath.Join("cache", "artifacts", family, StoreDigestDir(digest))

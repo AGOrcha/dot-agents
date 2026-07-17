@@ -194,6 +194,13 @@ func (l BundleLimits) orDefault() BundleLimits {
 	return l
 }
 
+// pathCleanFn is a seam over path.Clean so the post-clean "cannot happen"
+// containment guards below (an absolute or ".."/empty-segment result) stay
+// reachable under test — path.Clean itself never yields any of them from an
+// input that already passed the pre-clean checks, so these fail-closed guards
+// are only exercisable by overriding the cleaner.
+var pathCleanFn = path.Clean
+
 // canonicalBundlePath validates and canonicalizes a raw bundle entry path per
 // H1: relative, forward-slash, no empty/"."/".."/absolute/drive-letter/UNC
 // component. It rejects (never silently strips or best-effort sanitizes)
@@ -222,7 +229,7 @@ func canonicalBundlePath(raw string) (string, error) {
 		return "", fmt.Errorf("path %q is absolute", raw)
 	}
 
-	clean := path.Clean(raw)
+	clean := pathCleanFn(raw)
 	if clean == "." {
 		return "", fmt.Errorf("path %q resolves to the bundle root", raw)
 	}
@@ -264,7 +271,7 @@ func validateArtifactSubpath(raw string) (string, error) {
 	if path.IsAbs(raw) {
 		return "", fmt.Errorf("artifact path %q is absolute", raw)
 	}
-	clean := path.Clean(raw)
+	clean := pathCleanFn(raw)
 	if clean == "." {
 		return ".", nil
 	}

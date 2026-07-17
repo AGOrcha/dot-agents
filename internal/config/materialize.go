@@ -41,6 +41,21 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
+// Production seams over stdlib/internal helpers whose failure legs are
+// fail-closed "cannot happen" guards: the derived inputs (a BundleDigest, a
+// store path re-derived from a validated segment, a WalkDir-produced child
+// path, an agentslock-mapped missing lock) can never actually violate them, so
+// the guards are only reachable by overriding the seam in a test. Kept as
+// package vars matching the repo's existing seam style (renameLockDirFn et al).
+var (
+	filepathIsAbsFn      = filepath.IsAbs
+	bundleDigestFn       = BundleDigest
+	assertUnderCASRootFn = assertUnderCASRoot
+	publishStagedEntryFn = publishStagedEntry
+	storeWalkRelFn       = filepath.Rel
+	readUnitsFn          = ReadUnits
+)
+
 // ArtifactStoreRoot returns the H2 content-addressed, immutable backing
 // store root for family: "<agentsHome>/cache/artifacts/<family>/". Every
 // entry under it is named by its bundle digest and, once published, is
@@ -97,7 +112,7 @@ func ValidateStoreSegment(seg string) error {
 	if strings.ContainsRune(seg, 0) {
 		return fmt.Errorf("path segment %q contains a NUL byte", seg)
 	}
-	if filepath.IsAbs(seg) {
+	if filepathIsAbsFn(seg) {
 		return fmt.Errorf("path segment %q is absolute", seg)
 	}
 	return nil
@@ -143,7 +158,7 @@ func MaterializeToStore(agentsHome, family string, bundle Bundle) (storePath, di
 	if err := ValidateStoreSegment(family); err != nil {
 		return "", "", false, fmt.Errorf("materialize: family: %w", err)
 	}
-	digest = BundleDigest(bundle)
+	digest = bundleDigestFn(bundle)
 	if !looksLikeSha256Digest(digest) {
 		// Cannot happen — BundleDigest always emits "sha256:<64 hex>" — but
 		// this is the same fail-closed discipline H1 applies to every other
@@ -151,7 +166,7 @@ func MaterializeToStore(agentsHome, family string, bundle Bundle) (storePath, di
 		return "", "", false, fmt.Errorf("materialize: unexpected bundle digest shape %q", digest)
 	}
 	storePath = ArtifactStorePath(agentsHome, family, digest)
-	if err := assertUnderCASRoot(agentsHome, family, storePath); err != nil {
+	if err := assertUnderCASRootFn(agentsHome, family, storePath); err != nil {
 		return "", "", false, fmt.Errorf("materialize: %w", err)
 	}
 
@@ -181,7 +196,7 @@ func MaterializeToStore(agentsHome, family string, bundle Bundle) (storePath, di
 	if err := writeBundleTree(staging, bundle); err != nil {
 		return "", "", false, fmt.Errorf("materialize: stage bundle: %w", err)
 	}
-	if hit, err := publishStagedEntry(staging, storePath, expected); err != nil {
+	if hit, err := publishStagedEntryFn(staging, storePath, expected); err != nil {
 		return "", "", false, err
 	} else if hit {
 		return storePath, digest, false, nil
@@ -413,7 +428,7 @@ func storeContentDigest(dir string) (string, error) {
 		if d.Type()&fs.ModeSymlink != 0 || !d.Type().IsRegular() {
 			return fmt.Errorf("store entry %s contains a non-regular file %s", dir, p)
 		}
-		rel, err := filepath.Rel(dir, p)
+		rel, err := storeWalkRelFn(dir, p)
 		if err != nil {
 			return err
 		}
@@ -545,7 +560,7 @@ func LiveArtifactDigests() (map[string]bool, error) {
 		if path == "" {
 			continue // known but unbound on this machine — nothing local to read
 		}
-		units, err := ReadUnits(path)
+		units, err := readUnitsFn(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue // no lock yet — provably zero artifact units, safe to skip
@@ -638,7 +653,7 @@ func GCOrphanedArtifactStore(agentsHome, family string, liveDigests map[string]b
 			continue // H11 — provably still referenced by some project's lock
 		}
 		target := ArtifactStorePath(agentsHome, family, digest)
-		if err := assertUnderCASRoot(agentsHome, family, target); err != nil {
+		if err := assertUnderCASRootFn(agentsHome, family, target); err != nil {
 			return removed, fmt.Errorf("gc: %w", err)
 		}
 		if err := fsops.RemoveAll(target); err != nil {
