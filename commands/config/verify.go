@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/AGOrcha/dot-agents/commands/workflow"
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
@@ -280,14 +281,37 @@ func verifyLayerLocks(cwd string) []VerifyCheck {
 //     flip the report's OK.
 //   - warn  — the lock/manifest could not be read (the manifest check above owns
 //     the hard failure; a lock read error here is reported but not fatal).
+//   - FAIL  — unit-digest-mismatch ONLY (package-artifact-install spec H7): a
+//     `kind:artifact` unit whose installed CAS content no longer matches its
+//     locked digest — a post-install store tamper, not a benign local-scope
+//     edit — surfaces here as a hard failure so `config verify` cannot report
+//     OK while the installed content is not what the lock says it is.
+//
+// H7 wires cfg.Staleness's UnitDigestFunc to the production artifact-store
+// integrity resolver (previously nil here, per the spec's own gap callout),
+// so this offline/no-refetch check can detect a tamper it previously had no
+// way to see.
 func verifyStaleness(cwd string) []VerifyCheck {
 	const name = "config-staleness"
-	res, err := cfg.Staleness(cwd, "", nil)
+	res, err := cfg.Staleness(cwd, "", lifecycle.PackagesArtifactDigestResolver(cwd))
 	if err != nil {
 		return []VerifyCheck{{name, verifyWarn, "could not compute staleness: " + err.Error()}}
 	}
 	if res.Fresh {
 		return []VerifyCheck{{name, verifyPass, "local config in sync (inputs_digest " + abbrevSHA(res.ExpectedInputsDigest) + ")"}}
+	}
+	// A unit-digest mismatch is ALWAYS a hard failure (review #1): a tampered
+	// store must FAIL verify regardless of whether ordinary local-scope drift
+	// (inputs/declared-set) is ALSO present. Requiring the reasons list to be
+	// EXACTLY [ReasonUnitDigest] let tamper-plus-any-drift downgrade to a warn
+	// with OK=true — an integrity bypass. Report the co-occurring drift in the
+	// detail, but the check is a failure.
+	if reasonsContainUnitDigest(res.Reasons) {
+		detail := "an installed packages artifact no longer matches its locked digest (possible store tamper) — run `da install` to re-verify/re-materialize"
+		if len(res.Reasons) > 1 {
+			detail += " (local config scopes also drifted; re-resolve after re-verifying the store)"
+		}
+		return []VerifyCheck{{name, verifyFail, detail}}
 	}
 
 	recorded := recordedInputsDigest(cwd)
@@ -297,6 +321,21 @@ func verifyStaleness(cwd string) []VerifyCheck {
 	return []VerifyCheck{{name, verifyWarn, fmt.Sprintf(
 		"local config changed since last resolve (lock %s, now %s) — run `da config sync`",
 		abbrevSHA(recorded), abbrevSHA(res.ExpectedInputsDigest))}}
+}
+
+// reasonsContainUnitDigest reports whether a unit-digest mismatch is among the
+// staleness reasons. A store-integrity failure is a hard FAIL whether or not it
+// co-occurs with ordinary local-scope drift (inputs-digest / declared-set) —
+// requiring it to be the SOLE reason was an integrity bypass (review #1): a
+// tampered store that also had any config edit downgraded to a recoverable
+// warn with OK=true.
+func reasonsContainUnitDigest(reasons []cfg.StalenessReason) bool {
+	for _, r := range reasons {
+		if r == cfg.ReasonUnitDigest {
+			return true
+		}
+	}
+	return false
 }
 
 // recordedInputsDigest reads the inputs_digest the lockfile currently pins, or

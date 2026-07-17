@@ -61,6 +61,18 @@ func (f *ociLayerFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir
 	if err != nil {
 		return FetchedLayer{}, err
 	}
+	// Seed the shared content-addressed packages cache with an OCI-layer type
+	// sidecar (round-3 item 2) so a later digest-pinned OCI `extends` ref can be
+	// served from pullOCIContent's fast path WITH OCI provenance — and, crucially,
+	// so that path trusts ONLY blobs an OCI-layer pull actually validated. This is
+	// best-effort: the SHA-addressed config-layer cache below is the source of
+	// truth for offline layer serves, so a failure here only forgoes the fast-path
+	// optimization, never correctness. Skipped on a cache hit (the entry, and its
+	// sidecar, already exist and must not be rewritten with stale metadata).
+	if !pulled.CacheHit {
+		_ = writeCachedArtifact(pulled.Digest, pulled.Data)
+		_ = writeOCITypeSidecar(pulled.Digest, "", ociLayerMediaType)
+	}
 	// Persist under the SHA-addressed config layer cache so the resolver's offline
 	// serve and lockfile round-trip work like any other layer source.
 	if err := writeCachedLayer(cacheDir, pulled.Digest, pulled.Data); err != nil {

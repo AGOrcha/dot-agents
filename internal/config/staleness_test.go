@@ -375,6 +375,30 @@ func TestDeclaredSetChanged_PackagesCounted(t *testing.T) {
 	}
 }
 
+// TestDeclaredSetChanged_IgnoresDerivedUnits is the regression guard for the H9
+// frozen-no-op break: the resolver folds DERIVED units (kind:profile stage
+// profiles, project-set, descriptor) into the lock's units section, but those
+// are never declared in the manifest's extends/packages. Counting them in the
+// declared-set comparison made declaredSetChanged fire on every run — forcing a
+// re-resolve that re-stamped fetched_at/last_checked_at and churned the lock on a
+// lock-clean re-install. Only kind:layer and kind:artifact units are declared, so
+// derived units must not trip the comparison.
+func TestDeclaredSetChanged_IgnoresDerivedUnits(t *testing.T) {
+	rc := AgentsRC{Packages: []PackageRef{{Ref: "da-agc:skill/x@main"}}}
+	units := map[string]LockedUnit{
+		"da-agc:skill/x@main":             {Kind: UnitKindArtifact},
+		"user-local:stage-profile:review": {Kind: "profile"},
+	}
+	if declaredSetChanged(rc, units) {
+		t.Error("a kind:profile unit folded into the lock must not trip declared-set-changed")
+	}
+	// Removing the actually-declared artifact still registers as changed.
+	delete(units, "da-agc:skill/x@main")
+	if !declaredSetChanged(rc, units) {
+		t.Error("expected declared-set change when the declared package is absent from the lock")
+	}
+}
+
 func TestDeclaredRefOf(t *testing.T) {
 	cases := map[string]string{
 		"acme:org/base@a1":  "acme:org/base",

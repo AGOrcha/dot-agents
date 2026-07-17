@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-t1-bundle-fetch-1784087692
+mode: delegated
+parent_plan_id: package-artifact-install
+parent_task_id: t1-bundle-fetch
+title: Normalize artifact fetch to a bundle (tree subtree + tarball)
+summary: Delegated from plan Package artifact install (fetch → materialize → project resource content from a da source)
+write_scope:
+    - internal/config/fetcher_git_artifact.go
+    - internal/config/fetcher_local_artifact.go
+    - internal/config/fetcher_oci.go
+    - internal/config/fetcher_http.go
+    - internal/config/bundle_safety.go
+    - internal/config/bundle_safety_test.go
+    - internal/config/fetcher_test.go
+    - internal/config/fetcher_oci_layer_test.go
+success_criteria: Normalize fetch to an in-memory bundle (git subtree walk + tarball untar). H1 — route every bundle through a fail-closed normalizer (canonical relative slash paths only; reject empty/dot/dotdot/absolute/drive/UNC/duplicate/case-collide and all symlink/hardlink/device entries; cap file count + expanded bytes). H8 — content-addressed cache publishes via same-dir temp+rename and re-verifies every cache hit against its digest. Adversarial tree+tar tests are a done-criterion. Keep the media-type envelope; no new kinds.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t1-bundle-fetch
+status: completed
+created_at: "2026-07-15T03:54:52Z"
+updated_at: "2026-07-15T05:51:55Z"

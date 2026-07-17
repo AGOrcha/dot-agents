@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
@@ -1535,5 +1536,79 @@ func TestEnsureManagedGitignoreForRefresh_DryRunAndError(t *testing.T) {
 	}
 	if !ensureManagedGitignoreForRefresh(errDir, nil) {
 		t.Error("expected failure when .gitignore cannot be read (it is a directory)")
+	}
+}
+
+// TestRunRefresh_PackageFetchFailureLeavesExistingLinksIntact is the review #2
+// HIGH fix: a packages hydration failure on refresh (e.g. a transient fetch
+// error) must NOT run an exact projection with an empty package set — whose
+// forced one-to-zero prune would delete the project's already-installed package
+// links. A momentary fetch failure must leave installed packages intact.
+func TestRunRefresh_PackageFetchFailureLeavesExistingLinksIntact(t *testing.T) {
+	home := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(home, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A local package source tree + a project declaring a package ref.
+	srcRoot := filepath.Join(home, "src")
+	skillDir := filepath.Join(srcRoot, "skill", "demo")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projPath := filepath.Join(home, "proj")
+	if err := os.MkdirAll(projPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rc := &config.AgentsRC{
+		Version:  1,
+		Project:  "proj",
+		Sources:  []config.Source{{Type: "local", ID: "da-agc", Path: srcRoot}},
+		Packages: []config.PackageRef{{Ref: "da-agc:skill/demo@1"}},
+	}
+	if err := rc.Save(projPath); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	// Install the package from projPath (materialize + project the link).
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(prev) })
+	if err := os.Chdir(projPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := lifecycle.RunInstall(false, lifecycle.StdInstallDeps{}); err != nil {
+		t.Fatalf("RunInstall: %v", err)
+	}
+	os.Chdir(prev)
+
+	projected := filepath.Join(projPath, ".claude", "skills", "demo")
+	if _, err := os.Lstat(projected); err != nil {
+		t.Fatalf("expected the package link installed at %s: %v", projected, err)
+	}
+
+	// Break the source so the next hydrate (pinned to the locked digest) fails.
+	if err := os.RemoveAll(srcRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	// Refresh: hydration fails. The prior package link MUST survive (no
+	// destructive empty-set prune).
+	_ = runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
+
+	if _, err := os.Lstat(projected); err != nil {
+		t.Fatalf("a transient package fetch failure on refresh destroyed the installed link at %s: %v", projected, err)
 	}
 }

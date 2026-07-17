@@ -9,7 +9,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/go-git/go-git/v6"
 	gitconfig "github.com/go-git/go-git/v6/config"
 )
@@ -340,6 +342,11 @@ func TestEmitPreservesCallerTSAndCwdRepo(t *testing.T) {
 }
 
 func TestEmitConcurrentNoTornLines(t *testing.T) {
+	// 40 goroutines contend on the journal's agentslock. Under -race on a loaded
+	// CI runner a single legitimate hold can outlast the 5s production acquire
+	// budget (observed as a flaky "acquire ... timed out" on windows-latest);
+	// widen it for this contention test. Production keeps 5s.
+	defer agentslock.SetAcquireTimeout(60 * time.Second)()
 	repo := newJournalRepo(t)
 	const n = 40
 	var wg sync.WaitGroup

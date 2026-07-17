@@ -1,0 +1,8 @@
+schema_version: 1
+id: bakaus-unskippable-weakest-model
+plan_id: loop-discipline-stop-hooks
+task_id: ""
+observation: 'Bakaus Dark-Arts #9 — ''if the gate can be skipped, it will be; make it un-skippable'' reinforces the stop-hook gates. Adopt the design and test for the weakest model discipline — baseline worker and lens prompts on the weakest model they will run on (Haiku) so gates hold under context compression. Source research/articles/pbakaus-dark-arts-skill-engineering.md'
+classification: small
+routed_to: plan_summary:loop-discipline-stop-hooks
+created_at: "2026-07-15T03:45:21Z"

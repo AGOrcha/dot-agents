@@ -69,7 +69,7 @@ func reasonForStatus(status int) ImportFailReason {
 // readCachedPinnedArtifact returns a cache-hit FetchedArtifact when the version
 // spec is digest-pinned and the blob is already cached. ok is false when the
 // caller must fall through to a network fetch.
-func (f *httpArtifactFetcher) readCachedPinnedArtifact(posture SigningPosture, pinned string, isPinned bool) (FetchedArtifact, bool, error) {
+func (f *httpArtifactFetcher) readCachedPinnedArtifact(posture SigningPosture, pinned string, isPinned bool, parts PackageRefParts) (FetchedArtifact, bool, error) {
 	if !isPinned {
 		return FetchedArtifact{}, false, nil
 	}
@@ -80,10 +80,17 @@ func (f *httpArtifactFetcher) readCachedPinnedArtifact(posture SigningPosture, p
 	if err := verifySignature(posture, pinned, false); err != nil {
 		return FetchedArtifact{}, true, err
 	}
+	// A cache hit is re-decoded through the same H1 tarball-sniff as a fresh
+	// fetch (MaybeUntarBundle), so a pinned tarball artifact served from
+	// cache still carries its Bundle.
+	bundle, err := MaybeUntarBundle(cached, DefaultBundleLimits())
+	if err != nil {
+		return FetchedArtifact{}, true, newArtifactImportError(parts, ReasonContent, fmt.Errorf("cached tarball artifact %s: %w", pinned, err))
+	}
 	// A digest-pinned cache hit served without contacting the registry has no
 	// fresh validators; the pinned digest is the content key (§7A.4 http default
 	// falls back to the content digest when no ETag/Last-Modified is observed).
-	return FetchedArtifact{Data: cached, Digest: pinned, CacheHit: true, Posture: posture, KeyInputs: CacheKeyInputs{ContentDigest: pinned}}, true, nil
+	return FetchedArtifact{Data: cached, Digest: pinned, CacheHit: true, Posture: posture, KeyInputs: CacheKeyInputs{ContentDigest: pinned}, Bundle: bundle}, true, nil
 }
 
 // doRequest issues the authenticated GET and maps any transport or status-code
@@ -124,7 +131,7 @@ func (f *httpArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (
 	// A digest-pinned version is content-addressed, so the cache is checked
 	// before any request (offline fast path, spec §8).
 	pinned, isPinned := digestFromVersionSpec(parts.VersionSpec)
-	if art, ok, err := f.readCachedPinnedArtifact(posture, pinned, isPinned); ok {
+	if art, ok, err := f.readCachedPinnedArtifact(posture, pinned, isPinned, parts); ok {
 		return art, err
 	}
 
@@ -145,6 +152,14 @@ func (f *httpArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (
 	if err := verifySignature(posture, digest, false); err != nil {
 		return FetchedArtifact{}, err
 	}
+	// Tarball layout (spec D3: "http / digest-pinned"): a gzip-magic-prefixed
+	// body is decoded through the H1 fail-closed normalizer into a Bundle.
+	// Data/Digest still address the fetched (compressed) bytes exactly as
+	// before — the Bundle is an additional, derived view, not a replacement.
+	bundle, err := MaybeUntarBundle(data, DefaultBundleLimits())
+	if err != nil {
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("tarball artifact %s: %w", url, err))
+	}
 	if err := writeCachedArtifact(digest, data); err != nil {
 		return FetchedArtifact{}, err
 	}
@@ -157,5 +172,5 @@ func (f *httpArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (
 		LastModified:  resp.Header.Get("Last-Modified"),
 		ContentDigest: digest,
 	}
-	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture, KeyInputs: keyInputs}, nil
+	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture, KeyInputs: keyInputs, Bundle: bundle}, nil
 }

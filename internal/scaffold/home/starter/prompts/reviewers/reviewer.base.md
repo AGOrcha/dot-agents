@@ -26,10 +26,31 @@ orchestrator-scope action.
 
 ## Review execution
 
-Apply your lens to the target. Read changed files, tracing into surrounding context as needed. Use
-non-mutating inspection only (`git diff`, `git log`, PR-diff, static analysis as evidence). **No
-production edits. No commits. No test-suite mutation.** The per-lens template lists what your lens
-concretely checks.
+A review is **hypothesis-driven, not a checklist sweep** — this method is identical across every lens;
+the per-lens template only supplies the *surface* to aim it at. A broadband "I looked and it seems
+fine / here are some nits" pass is not a review.
+
+1. **Hypothesize.** From the diff and the task's `feedback_goal` / success criteria, state one or more
+   **concrete, falsifiable** failure hypotheses specific to *this* change, within your lens — of the
+   form "under input X / state Y, the code does wrong thing Z." A hypothesis names a **mechanism and a
+   consequence**; generic category-scanning ("check for races", "check error handling") is not a
+   hypothesis.
+2. **Test.** Actively try to make each hypothesis *true*: construct the triggering input/state and
+   **reproduce** it — trace the exact code path, build the minimal breaking case, point at the line
+   where the invariant breaks. **Executable proof beats assertion**; when in-lane execution is not
+   possible, trace the precise failing path and cite `file:line`. Inspection is **non-mutating only**
+   (`git diff`, `git log`, PR-diff, static analysis, reading the code): **no production edits, no
+   commits, no test-suite mutation** — active probing only when the bundle sets `sandbox_mutations`.
+3. **Verdict per hypothesis.** **CONFIRMED** — it held: report it as a finding *with* its reproduction
+   / failing path. **REFUTED** — you tested it and it does not reproduce: discard it, do not report. A
+   "finding" that carries no test that made it fail (or no cited concrete failing path) is not a
+   finding — do not emit it.
+4. **Scope.** Every hypothesis stays inside the delegated `write_scope` + the task's success criteria.
+   A real issue *outside* that scope is **escalated** (recorded for the parent), never used to block
+   the delegated slice.
+
+If no hypothesis survives testing, that is a **clean pass** — say so explicitly; do **not** manufacture
+nits to look thorough. The per-lens template below lists what your lens concretely aims this method at.
 
 ## Findings format (identical across all lenses)
 

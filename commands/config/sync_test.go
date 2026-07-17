@@ -331,34 +331,29 @@ func TestSyncCmd_RunE_DryRunThreadsThroughDeps(t *testing.T) {
 	}
 }
 
-func TestRunSync_ReResolvesAndUpdatesLockTimestamps(t *testing.T) {
+func TestRunSync_ReResolvesAndPopulatesLockSHA(t *testing.T) {
 	project := withTwoLocalLayers(t)
 
 	t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	if err := runSync(syncOptions(project, "", false, t1), testDeps()); err != nil {
 		t.Fatalf("first sync: %v", err)
 	}
-	ts1, sha1 := readLockFetchedAt(t, project, "acme:org/base.json")
-	if ts1 == "" || sha1 == "" {
-		t.Fatalf("expected lock entry populated after first sync, got ts=%q sha=%q", ts1, sha1)
-	}
-	if want := t1.Format(time.RFC3339); ts1 != want {
-		t.Errorf("fetched_at = %q, want %q", ts1, want)
+	_, sha1 := readLockFetchedAt(t, project, "acme:org/base.json")
+	if sha1 == "" {
+		t.Fatalf("expected lock SHA populated after first sync, got empty")
 	}
 
-	// A second sync with a LATER clock must rewrite the lock — the timestamp
-	// advances and the SHA re-resolves (same content => same SHA, proving the
-	// re-resolve actually ran and re-derived it rather than leaving it stale).
+	// The units lock is content-addressed and timestamp-free: a second sync under a
+	// LATER clock over identical content re-resolves to the SAME SHA and rewrites a
+	// byte-identical units entry — no wall-clock churn (the H9 frozen-no-op property
+	// that a re-stamped fetched_at used to break).
 	t2 := t1.Add(48 * time.Hour)
 	if err := runSync(syncOptions(project, "", false, t2), testDeps()); err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
 	ts2, sha2 := readLockFetchedAt(t, project, "acme:org/base.json")
-	if ts2 == ts1 {
-		t.Errorf("fetched_at did not advance: still %q after second sync", ts2)
-	}
-	if want := t2.Format(time.RFC3339); ts2 != want {
-		t.Errorf("second fetched_at = %q, want %q", ts2, want)
+	if ts2 != "" {
+		t.Errorf("units lock must carry no fetched_at timestamp, got %q", ts2)
 	}
 	if sha2 != sha1 {
 		t.Errorf("resolved sha changed for identical content: %q -> %q", sha1, sha2)
@@ -424,8 +419,12 @@ func TestRunSync_ReportListsAllLayers(t *testing.T) {
 		if !l.Targeted {
 			t.Errorf("layer %q should be targeted when --layer is empty", l.Ref)
 		}
-		if l.SHA == "" || l.FetchedAt == "" {
-			t.Errorf("layer %q missing sha/fetched_at: %+v", l.Ref, l)
+		// Content-addressed lock: the SHA is the identity; no fetched_at timestamp.
+		if l.SHA == "" {
+			t.Errorf("layer %q missing sha: %+v", l.Ref, l)
+		}
+		if l.FetchedAt != "" {
+			t.Errorf("layer %q must carry no fetched_at (content-addressed lock): %+v", l.Ref, l)
 		}
 	}
 }

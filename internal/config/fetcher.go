@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -274,12 +275,33 @@ func readCachedLayer(cacheDir, sha string) ([]byte, bool) {
 // SHA segment is mapped through digestDir (see cachedLayerPath) so an OCI
 // "sha256:<hex>" digest never embeds a colon in a path segment (illegal on
 // Windows); the read path uses the same mapping.
+//
+// Perf (package-artifact-install t9): the target path is content-addressed by
+// sha, which the caller derives from data itself — so a resolve that re-fetches
+// an UNCHANGED layer (the common steady-state case: every `da config sync` /
+// `da status` / `da install` on an unmodified manifest, across every extends
+// layer) writes byte-identical content to the same path every single time.
+// Profiling a 100-layer local-extends chain showed writeCachedLayer's
+// unconditional MkdirAll+WriteFile pair as ~79% of total resolve CPU time
+// (README: docs/PERF_BUDGET.md), almost entirely redundant I/O. A full
+// read-back + byte-compare fast path — NOT a bare existence/size check —
+// avoids silently trusting a possibly-corrupt cache entry (e.g. left by a
+// prior interrupted process): only a verified byte-identical match skips the
+// write, so a stale/corrupt entry at the right path is still self-healed by
+// falling through to a real (now atomic, temp+rename) write.
 func writeCachedLayer(cacheDir, sha string, data []byte) error {
+	target := cachedLayerPath(cacheDir, sha)
+	if existing, err := os.ReadFile(target); err == nil && bytes.Equal(existing, data) {
+		return nil
+	}
 	dir := filepath.Join(cacheDir, digestDir(sha))
 	if err := fsops.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating layer cache dir: %w", err)
 	}
-	return fsops.WriteFile(filepath.Join(dir, "layer.json"), data, 0o644)
+	if err := fsops.WriteFileAtomic(target, data); err != nil {
+		return fmt.Errorf("writing cached layer: %w", err)
+	}
+	return nil
 }
 
 // --- git fetcher -----------------------------------------------------------

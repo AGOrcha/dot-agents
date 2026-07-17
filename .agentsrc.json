@@ -45,7 +45,21 @@
   "sources": [
     {
       "type": "local"
+    },
+    {
+      "type": "git",
+      "id": "da-agc",
+      "url": "git@github.com:AGOrcha/da-agc.git",
+      "ref": "main"
     }
+  ],
+  "extends": [
+    "da-agc:dot-agents/base.json"
+  ],
+  "packages": [
+    "da-agc:skill/release-docs-refresh@main",
+    "da-agc:agent/platform-dirs-change-analyst@main",
+    "da-agc:agent/promise-gap-analyst@main"
   ],
   "execution_profile": {
     "by_app_type": {

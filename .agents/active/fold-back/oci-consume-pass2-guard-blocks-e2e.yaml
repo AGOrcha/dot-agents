@@ -1,0 +1,8 @@
+schema_version: 1
+id: oci-consume-pass2-guard-blocks-e2e
+plan_id: package-artifact-install
+task_id: t6-oci-consume
+observation: 't6 write_scope (fetcher_oci.go/resolver.go/oci_resolve.go) fixed the CRITICAL Bundle-population gap plus H5/H6, all proven by unit + a full materialize+project e2e test in internal/config, but commands/internal/lifecycle/packages_pass2.go:246-248 still hard-rejects src.Type == oci before ever calling FetchArtifact (a stale t3 review #5 stopgap, out of t6 write_scope). Real da install/refresh against an OCI source will still fail with the old deferred-to-t6 message until that 3-line guard is deleted; every other OCI consume behavior (H1 Bundle, H5 digest, H6 media-type) is ready and tested.'
+classification: small
+routed_to: task_note:package-artifact-install/t6-oci-consume
+created_at: "2026-07-16T01:49:57Z"

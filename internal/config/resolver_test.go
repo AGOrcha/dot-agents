@@ -12,6 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-git/go-billy/v6"
+	"github.com/go-git/go-billy/v6/memfs"
+	gogit "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/go-git/go-git/v6/storage/memory"
+
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
 )
 
@@ -790,8 +797,11 @@ func TestLayeredResolverUnitsLockDropsClockTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := locked["acme:org/base.json"]
-	if got.FetchedAt != "2026-04-19T14:00:00Z" {
-		t.Errorf("fetched_at = %q", got.FetchedAt)
+	// The units lock is content-addressed and clock-free: neither the demoted TTL
+	// NOR a per-unit fetched_at is recorded (a re-stamped timestamp churned the
+	// lock on every run — the H9 frozen-no-op break this drop fixes).
+	if got.FetchedAt != "" {
+		t.Errorf("fetched_at = %q, want empty (units lock is timestamp-free)", got.FetchedAt)
 	}
 	if got.TTLExpiresAt != "" {
 		t.Errorf("ttl_expires_at = %q, want empty (units lock drops the clock TTL)", got.TTLExpiresAt)
@@ -1348,6 +1358,236 @@ func TestCacheKeyStaleForLayer(t *testing.T) {
 	edited := Source{ID: "acme", Type: "git", CacheKeys: &CacheKeys{Env: []string{"SOME_TOKEN"}}}
 	if !NewLayeredResolver().CacheKeyStaleForLayer(edited, locked) {
 		t.Error("a cache_keys override edit should be detected as stale")
+	}
+}
+
+// --- t5: da-agc-shaped multi-resource tree end-to-end (package-artifact-install DOGFOOD) ---
+//
+// dot-agents' own .agentsrc.json wires a real "da-agc" git source
+// (git@github.com:AGOrcha/da-agc.git) declaring three packages[] refs — one
+// skill ("release-docs-refresh") and two agents ("platform-dirs-change-analyst",
+// "promise-gap-analyst") — laid out exactly as external-agent-sources §3's
+// tree content layout: "skill/<name>/" and "agent/<name>/" resource
+// directories (confirmed against the live repo's tree). These tests drive the
+// REAL gitArtifactFetcher + MaterializeToStore + VerifyStoreContentDigest
+// chain (t1/t2/H7) against an in-memory git fixture shaped identically to
+// that live tree, so the dogfood wiring is proven mechanically without any
+// network dependency in CI (spec DC1/DC2, t5 write_scope).
+
+// gitTreeFixtureClonerMultiRoot is fetcher_test.go's gitTreeFixtureCloner
+// generalized to more than one top-level artifact root. FetchArtifact's
+// initial Lstat classification needs EACH artifact path's directory present
+// in the worktree fs (content underneath is irrelevant — fetchTreeBundle
+// reads the committed tree, not the worktree); every existing fixture pulls
+// exactly one root, but the da-agc dogfood pulls three DIFFERENT artifact
+// paths (one skill + two agents) from the SAME source.
+func gitTreeFixtureClonerMultiRoot(t *testing.T, files map[string][]byte, artifactRoots []string) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	st := memory.NewStorage()
+	rootHash := buildCommittedTree(t, st, files, nil)
+
+	sig := object.Signature{Name: "t5-dogfood", Email: "t5-dogfood@example"}
+	commit := &object.Commit{Author: sig, Committer: sig, Message: "da-agc mirror fixture", TreeHash: rootHash}
+	commitObj := st.NewEncodedObject()
+	if err := commit.Encode(commitObj); err != nil {
+		t.Fatal(err)
+	}
+	commitHash, err := st.SetEncodedObject(commitObj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewHashReference("refs/heads/main", commitHash)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
+		t.Fatal(err)
+	}
+
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		wfs := memfs.New()
+		for _, root := range artifactRoots {
+			if err := wfs.MkdirAll(root, 0o755); err != nil {
+				return nil, nil, err
+			}
+		}
+		repo, err := gogit.Open(st, wfs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, wfs, nil
+	}
+}
+
+// daAgcMirrorRefs is the exact {artifact-path, bucket, marker-file, body}
+// set dot-agents' own .agentsrc.json packages[] declares against the live
+// da-agc source (confirmed via `gh api repos/AGOrcha/da-agc/git/trees/main`
+// at authoring time: skill/release-docs-refresh/SKILL.md,
+// agent/platform-dirs-change-analyst/AGENT.md, agent/promise-gap-analyst/AGENT.md).
+type daAgcMirrorRef struct {
+	artifactPath string
+	bucket       string // resource-plan bucket (packageFamilyBuckets in packages_pass2.go)
+	marker       string
+	body         string
+}
+
+var daAgcMirrorRefs = []daAgcMirrorRef{
+	{"skill/release-docs-refresh", "skills", "SKILL.md", "# release-docs-refresh\n"},
+	{"agent/platform-dirs-change-analyst", "agents", "AGENT.md", "# platform-dirs-change-analyst\n"},
+	{"agent/promise-gap-analyst", "agents", "AGENT.md", "# promise-gap-analyst\n"},
+}
+
+// daAgcMirrorFixtureCloner builds the in-memory git fixture for daAgcMirrorRefs.
+func daAgcMirrorFixtureCloner(t *testing.T) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	files := make(map[string][]byte, len(daAgcMirrorRefs))
+	roots := make([]string, len(daAgcMirrorRefs))
+	for i, ref := range daAgcMirrorRefs {
+		files[ref.artifactPath+"/"+ref.marker] = []byte(ref.body)
+		roots[i] = ref.artifactPath
+	}
+	return gitTreeFixtureClonerMultiRoot(t, files, roots)
+}
+
+// TestGitArtifactFetcher_DaAgcMirror_MaterializesAllThreeRefsAndVerifies is
+// the package-artifact-install t5 DOGFOOD proof at the unit level: a git
+// source shaped exactly like the live AGorcha/da-agc tree fetches each of the
+// three real dot-agents packages[] refs, materializes each into the H2
+// content-addressed store, and the offline H7 primitive
+// (VerifyStoreContentDigest) confirms every materialized entry — the same
+// check `da config verify` runs — reports present+matching. A second
+// materialize of the SAME bundle is the R4 no-op: installed=false, the store
+// path and digest are unchanged, and no byte is rewritten.
+func TestGitArtifactFetcher_DaAgcMirror_MaterializesAllThreeRefsAndVerifies(t *testing.T) {
+	withPackagesCache(t)
+	agentsHome := AgentsHome()
+	src := Source{Type: "git", ID: "da-agc", URL: "file:///da-agc", Ref: "main"}
+
+	for _, ref := range daAgcMirrorRefs {
+		t.Run(ref.artifactPath, func(t *testing.T) {
+			storePath, digest := ref.fetchMaterializeVerify(t, src, agentsHome)
+			ref.assertSecondMaterializeNoop(t, src, agentsHome, storePath, digest)
+		})
+	}
+}
+
+// fetchMaterializeVerify fetches ref, materializes it into the store (asserting
+// a fresh install), confirms the marker content, and verifies the store
+// content digest. It returns the resulting store path and digest.
+func (ref daAgcMirrorRef) fetchMaterializeVerify(t *testing.T, src Source, agentsHome string) (storePath, digest string) {
+	t.Helper()
+	f := &gitArtifactFetcher{cloner: daAgcMirrorFixtureCloner(t)}
+	fetched, err := f.FetchArtifact(src, PackageRefParts{SourceID: "da-agc", ArtifactPath: ref.artifactPath, VersionSpec: "main"})
+	if err != nil {
+		t.Fatalf("FetchArtifact(%s): %v", ref.artifactPath, err)
+	}
+	if fetched.Bundle == nil {
+		t.Fatalf("expected a tree Bundle for %s", ref.artifactPath)
+	}
+
+	storePath, digest, installed, err := MaterializeToStore(agentsHome, ref.bucket, *fetched.Bundle)
+	if err != nil {
+		t.Fatalf("MaterializeToStore(%s): %v", ref.artifactPath, err)
+	}
+	if !installed {
+		t.Fatalf("expected the first materialize of %s to install", ref.artifactPath)
+	}
+	data, err := os.ReadFile(filepath.Join(storePath, ref.marker))
+	if err != nil || string(data) != ref.body {
+		t.Fatalf("materialized %s content = %q, err=%v, want %q", ref.marker, data, err, ref.body)
+	}
+
+	content := BundleContentDigest(*fetched.Bundle)
+	present, matches := VerifyStoreContentDigest(agentsHome, ref.bucket, digest, content)
+	if !present || !matches {
+		t.Fatalf("VerifyStoreContentDigest(%s) = present=%v matches=%v, want true/true", ref.artifactPath, present, matches)
+	}
+	return storePath, digest
+}
+
+// assertSecondMaterializeNoop is the R4 no-op check: a second fetch+materialize
+// of the byte-identical upstream must not rewrite anything — installed=false
+// with the same store path and digest.
+func (ref daAgcMirrorRef) assertSecondMaterializeNoop(t *testing.T, src Source, agentsHome, storePath, digest string) {
+	t.Helper()
+	f2 := &gitArtifactFetcher{cloner: daAgcMirrorFixtureCloner(t)}
+	fetched2, err := f2.FetchArtifact(src, PackageRefParts{SourceID: "da-agc", ArtifactPath: ref.artifactPath, VersionSpec: "main"})
+	if err != nil {
+		t.Fatalf("second FetchArtifact(%s): %v", ref.artifactPath, err)
+	}
+	storePath2, digest2, installed2, err := MaterializeToStore(agentsHome, ref.bucket, *fetched2.Bundle)
+	if err != nil {
+		t.Fatalf("second MaterializeToStore(%s): %v", ref.artifactPath, err)
+	}
+	if installed2 {
+		t.Fatalf("expected the second materialize of %s to be a no-op (installed=false)", ref.artifactPath)
+	}
+	if storePath2 != storePath || digest2 != digest {
+		t.Fatalf("second materialize of %s diverged: storePath %q->%q digest %q->%q", ref.artifactPath, storePath, storePath2, digest, digest2)
+	}
+}
+
+// TestVerifyStoreContentDigest_DaAgcMirror_DetectsCASTamper is the t5
+// adversarial requirement ("tamper a projected ref's CAS content and confirm
+// verify fails"): after a clean materialize of a real da-agc-shaped ref, a
+// direct on-disk edit of the published CAS bytes (simulating a post-install
+// tamper, bypassing the read-only bit exactly as a privileged attacker would)
+// must flip VerifyStoreContentDigest from matches=true to matches=false —
+// present stays true throughout (the entry still exists; its content no
+// longer verifies). A SIBLING, untouched ref must be unaffected, proving the
+// digest-keyed store isolates one tampered entry from the others.
+func TestVerifyStoreContentDigest_DaAgcMirror_DetectsCASTamper(t *testing.T) {
+	withPackagesCache(t)
+	agentsHome := AgentsHome()
+	src := Source{Type: "git", ID: "da-agc", URL: "file:///da-agc", Ref: "main"}
+
+	skillRef := daAgcMirrorRefs[0]
+	agentRef := daAgcMirrorRefs[1]
+
+	materialize := func(ref daAgcMirrorRef) (storePath, digest, content string) {
+		f := &gitArtifactFetcher{cloner: daAgcMirrorFixtureCloner(t)}
+		fetched, err := f.FetchArtifact(src, PackageRefParts{SourceID: "da-agc", ArtifactPath: ref.artifactPath, VersionSpec: "main"})
+		if err != nil {
+			t.Fatalf("FetchArtifact(%s): %v", ref.artifactPath, err)
+		}
+		sp, d, _, err := MaterializeToStore(agentsHome, ref.bucket, *fetched.Bundle)
+		if err != nil {
+			t.Fatalf("MaterializeToStore(%s): %v", ref.artifactPath, err)
+		}
+		return sp, d, BundleContentDigest(*fetched.Bundle)
+	}
+
+	skillStorePath, skillDigest, skillContent := materialize(skillRef)
+	_, agentDigest, agentContent := materialize(agentRef)
+
+	// Clean: both verify.
+	if present, matches := VerifyStoreContentDigest(agentsHome, skillRef.bucket, skillDigest, skillContent); !present || !matches {
+		t.Fatalf("pre-tamper skill verify = present=%v matches=%v, want true/true", present, matches)
+	}
+	if present, matches := VerifyStoreContentDigest(agentsHome, agentRef.bucket, agentDigest, agentContent); !present || !matches {
+		t.Fatalf("pre-tamper agent verify = present=%v matches=%v, want true/true", present, matches)
+	}
+
+	// Tamper ONLY the skill's published CAS file (restore the write bit t3's
+	// read-only hardening drops, exactly as a privileged tamperer must).
+	markerPath := filepath.Join(skillStorePath, skillRef.marker)
+	if err := os.Chmod(markerPath, 0o644); err != nil {
+		t.Fatalf("restore write bit: %v", err)
+	}
+	if err := os.WriteFile(markerPath, []byte("TAMPERED"), 0o644); err != nil {
+		t.Fatalf("tamper CAS file: %v", err)
+	}
+
+	present, matches := VerifyStoreContentDigest(agentsHome, skillRef.bucket, skillDigest, skillContent)
+	if !present {
+		t.Fatal("expected the tampered entry to still be present (tamper is a content edit, not a deletion)")
+	}
+	if matches {
+		t.Fatal("expected VerifyStoreContentDigest to fail closed on a tampered CAS file")
+	}
+
+	// The sibling agent ref, never touched, must still verify clean.
+	if present, matches := VerifyStoreContentDigest(agentsHome, agentRef.bucket, agentDigest, agentContent); !present || !matches {
+		t.Fatalf("post-tamper sibling agent verify = present=%v matches=%v, want true/true (tamper must not cross entries)", present, matches)
 	}
 }
 
