@@ -252,6 +252,41 @@ type AgentsRCKG struct {
 	Bridge AgentsRCKGBridge `json:"bridge"`
 }
 
+// WorkTracking read_from values (work-tracking-storage-abstraction §9 read-from-master shim).
+const (
+	// WorkTrackingReadFromWorktree reads coordination state (TASKS.yaml /
+	// PLAN.yaml) from the per-worktree working copy — today's behaviour and the
+	// default when work_tracking.read_from is unset.
+	WorkTrackingReadFromWorktree = "worktree"
+	// WorkTrackingReadFromMaster reads coordination state from the canonical ref
+	// (origin/<default-branch>) via `git show`, so worktree isolation cannot make
+	// the orchestrator/scout see a stale status and re-dispatch in-flight work.
+	// Writes are unchanged — they still land in the working copy.
+	WorkTrackingReadFromMaster = "master"
+)
+
+// AgentsRCWorkTracking is the work_tracking configuration block in
+// agentsrc.json — the coordination-state storage plane
+// (work-tracking-storage-abstraction spec, D8 scope ladder). Only the
+// read-from-master shim (§9) is wired today; backend selection lands with the
+// git-ref WorkStore backend.
+type AgentsRCWorkTracking struct {
+	// ReadFrom selects where coordination state is READ from:
+	//   "worktree" (default / empty) — the per-worktree working copy (today's behaviour)
+	//   "master"                     — the canonical ref (origin/<default-branch>) via `git show`
+	// The write side is unchanged regardless of this value (read-side-only shim).
+	ReadFrom string `json:"read_from,omitempty"`
+}
+
+// ReadFromMaster reports whether coordination state (TASKS.yaml / PLAN.yaml)
+// should be READ from the canonical ref (origin/<default-branch>) rather than
+// the per-worktree working copy — i.e. work_tracking.read_from == "master".
+// A nil receiver or absent/blank/"worktree" config yields false, preserving
+// today's byte-for-byte worktree read behaviour by default.
+func (a *AgentsRC) ReadFromMaster() bool {
+	return a != nil && a.WorkTracking != nil && a.WorkTracking.ReadFrom == WorkTrackingReadFromMaster
+}
+
 // AgentsRC represents the .agentsrc.json manifest committed to a project repo.
 //
 // Schema versions:
@@ -304,6 +339,12 @@ type AgentsRC struct {
 	// event.pr.* events with no per-platform Go. `gh` is the zero-config default;
 	// an org layer can override the default via the config-v2 scope layers.
 	PRSource *AgentsRCPRSource `json:"pr_source,omitempty"`
+
+	// WorkTracking is the coordination-state storage plane config
+	// (work-tracking-storage-abstraction spec). Today it carries the §9
+	// read-from-master shim (read_from); backend selection lands with the
+	// git-ref WorkStore backend. Scope-mergeable like execution_profile (D8).
+	WorkTracking *AgentsRCWorkTracking `json:"work_tracking,omitempty"`
 
 	// StageProfiles are named per-stage prompt-composition profiles, keyed by
 	// stage (executor | verifier | reviewer | orchestrator) then by slug. Each
@@ -715,6 +756,8 @@ var agentsRCKnown = map[string]bool{
 	"execution_profile": true,
 	// pr_source: config-driven PR event producer (pr-event-source design)
 	"pr_source": true,
+	// work_tracking: coordination-state storage plane (read-from-master shim §9)
+	"work_tracking": true,
 	// stage_profiles: unified per-stage named prompt-composition primitive
 	// (config-v2 Q1; supersedes verifier_profiles/reviewer_profiles)
 	"stage_profiles": true,
@@ -753,12 +796,13 @@ type agentsRCCore struct {
 	KG       *AgentsRCKG   `json:"kg,omitempty"`
 
 	// v2 additive fields (config-distribution-model §3)
-	RepoID           string            `json:"repo_id,omitempty"`
-	Extends          []LayerRef        `json:"extends,omitempty"`
-	Packages         []PackageRef      `json:"packages,omitempty"`
-	Features         map[string]string `json:"features,omitempty"`
-	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
-	PRSource         *AgentsRCPRSource `json:"pr_source,omitempty"`
+	RepoID           string                `json:"repo_id,omitempty"`
+	Extends          []LayerRef            `json:"extends,omitempty"`
+	Packages         []PackageRef          `json:"packages,omitempty"`
+	Features         map[string]string     `json:"features,omitempty"`
+	ExecutionProfile *ExecutionProfile     `json:"execution_profile,omitempty"`
+	PRSource         *AgentsRCPRSource     `json:"pr_source,omitempty"`
+	WorkTracking     *AgentsRCWorkTracking `json:"work_tracking,omitempty"`
 
 	StageProfiles        map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
 	PreconditionPolicies map[string]PreconditionPolicySpec  `json:"precondition_policies,omitempty"`
@@ -791,6 +835,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Features = core.Features
 	a.ExecutionProfile = core.ExecutionProfile
 	a.PRSource = core.PRSource
+	a.WorkTracking = core.WorkTracking
 	a.StageProfiles = core.StageProfiles
 	a.PreconditionPolicies = core.PreconditionPolicies
 	a.Locks = core.Locks
@@ -861,6 +906,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Features:             a.Features,
 		ExecutionProfile:     a.ExecutionProfile,
 		PRSource:             a.PRSource,
+		WorkTracking:         a.WorkTracking,
 		StageProfiles:        a.StageProfiles,
 		PreconditionPolicies: a.PreconditionPolicies,
 		Locks:                a.Locks,

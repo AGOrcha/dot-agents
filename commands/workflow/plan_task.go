@@ -481,9 +481,92 @@ func appendScopeRequiredReads(ev *ScopeEvidence, results []GraphBridgeResult) {
 	}
 }
 
+// readCanonicalStateFile reads a coordination-state file (TASKS.yaml /
+// PLAN.yaml) for the project, honoring work_tracking.read_from
+// (work-tracking-storage-abstraction spec §9 read-from-master shim).
+//
+// Default / "worktree" mode: this is EXACTLY os.ReadFile(absPath) — the read
+// path is byte-for-byte unchanged (same content, same *os.PathError so
+// os.IsNotExist callers keep working), so the running loop is untouched unless
+// read_from is explicitly set to "master".
+//
+// "master" mode: the file is resolved from the canonical ref
+// (origin/<default-branch>) via `git show <ref>:<repo-rel-path>` so worktree
+// isolation cannot make the orchestrator/scout read a stale status and
+// re-dispatch in-flight work. The read gracefully falls back to the worktree
+// copy when the ref (no origin remote / origin/HEAD unset) or the file within
+// it (a plan not yet on the default branch) cannot be resolved — a
+// misconfigured ref is therefore never worse than today. Writes are unaffected.
+func readCanonicalStateFile(projectPath, absPath string) ([]byte, error) {
+	if canonicalReadFromMaster(projectPath) {
+		if content, ok := readFileFromCanonicalRef(projectPath, absPath); ok {
+			return content, nil
+		}
+	}
+	return os.ReadFile(absPath)
+}
+
+// canonicalReadFromMaster reports whether coordination-state reads for
+// projectPath resolve from the canonical ref rather than the worktree copy —
+// work_tracking.read_from == "master". Any config-load failure or absent
+// config yields false so the default (worktree) read path is unchanged.
+func canonicalReadFromMaster(projectPath string) bool {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		return false
+	}
+	return rc.ReadFromMaster()
+}
+
+// canonicalStateRef returns the ref coordination-state is read from in master
+// mode: origin/<default-branch>. Empty when the default branch cannot be
+// resolved (no origin remote / origin/HEAD unset), signalling the caller to
+// fall back to the worktree copy.
+func canonicalStateRef(projectPath string) string {
+	branch := originDefaultBranch(projectPath)
+	if branch == "" {
+		return ""
+	}
+	return "origin/" + branch
+}
+
+// originDefaultBranch resolves the remote default branch name (e.g. "main")
+// from origin/HEAD — never hardcoding "master". Empty when origin/HEAD is
+// unset (bare `git remote add` without a fetch, or no origin at all).
+func originDefaultBranch(projectPath string) string {
+	if out := strings.TrimSpace(gitOutput(projectPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")); out != "" {
+		return strings.TrimPrefix(out, "origin/")
+	}
+	if out := strings.TrimSpace(gitOutput(projectPath, "rev-parse", "--abbrev-ref", "origin/HEAD")); out != "" && out != "origin/HEAD" {
+		return strings.TrimPrefix(out, "origin/")
+	}
+	return ""
+}
+
+// readFileFromCanonicalRef returns the contents of absPath as recorded on the
+// canonical ref (origin/<default-branch>), via `git show <ref>:<repo-rel-path>`.
+// The second result is false — signalling the caller to fall back to the
+// worktree copy — when the ref cannot be resolved, absPath is not under
+// projectPath, or the file does not exist on that ref.
+func readFileFromCanonicalRef(projectPath, absPath string) ([]byte, bool) {
+	ref := canonicalStateRef(projectPath)
+	if ref == "" {
+		return nil, false
+	}
+	rel, err := filepath.Rel(projectPath, absPath)
+	if err != nil {
+		return nil, false
+	}
+	out, err := execabs.Command("git", "-C", projectPath, "show", ref+":"+filepath.ToSlash(rel)).Output()
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
 func loadCanonicalPlan(projectPath, planID string) (*CanonicalPlan, error) {
 	path := filepath.Join(plansBaseDir(projectPath), planID, workflowPlanFileName)
-	content, err := os.ReadFile(path)
+	content, err := readCanonicalStateFile(projectPath, path)
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +591,7 @@ func saveCanonicalPlan(projectPath string, plan *CanonicalPlan) error {
 
 func loadCanonicalTasks(projectPath, planID string) (*CanonicalTaskFile, error) {
 	path := filepath.Join(plansBaseDir(projectPath), planID, workflowTasksFileName)
-	content, err := os.ReadFile(path)
+	content, err := readCanonicalStateFile(projectPath, path)
 	if err != nil {
 		return nil, err
 	}

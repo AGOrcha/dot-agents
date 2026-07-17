@@ -309,6 +309,18 @@
           "description": "Producer poll cadence in seconds."
         }
       }
+    },
+    "work_tracking": {
+      "type": "object",
+      "description": "Coordination-state storage plane (work-tracking-storage-abstraction spec). read_from is the §9 read-from-master shim: 'master' resolves TASKS.yaml/PLAN.yaml from the canonical ref (origin/<default-branch>) via git show so worktree isolation cannot make the orchestrator/scout re-dispatch in-flight work; 'worktree' (default) reads the per-worktree working copy. Writes are unchanged either way. NOTE: additionalProperties is intentionally left open — the git-ref WorkStore backend later adds `backend` to this same object.",
+      "properties": {
+        "read_from": {
+          "type": "string",
+          "enum": ["worktree", "master"],
+          "default": "worktree",
+          "description": "Where coordination state is READ from: 'worktree' (default) — the per-worktree working copy (today's behaviour); 'master' — the canonical ref (origin/<default-branch>) via git show. Read-side only; writes land in the working copy regardless."
+        }
+      }
     }
   },
   "$defs": {
