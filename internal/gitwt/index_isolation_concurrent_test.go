@@ -161,28 +161,35 @@ func assertConcurrentBranchTips(t *testing.T, f *fixture, cases []concurrentCase
 func assertConcurrentTreeIsolation(t *testing.T, f *fixture, cases []concurrentCase, hashes []plumbing.Hash) {
 	t.Helper()
 	for i, c := range cases {
-		commit, err := f.repo.CommitObject(hashes[i])
-		if err != nil {
-			t.Fatalf("commit object %s: %v", c.branch, err)
+		assertOneCommitTreeIsolated(t, f, c, hashes[i], cases)
+	}
+}
+
+// assertOneCommitTreeIsolated verifies one case's committed tree holds its own
+// file and none of the other worktrees' files (no index cross-staging).
+func assertOneCommitTreeIsolated(t *testing.T, f *fixture, c concurrentCase, hash plumbing.Hash, cases []concurrentCase) {
+	t.Helper()
+	commit, err := f.repo.CommitObject(hash)
+	if err != nil {
+		t.Fatalf("commit object %s: %v", c.branch, err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		t.Fatalf("tree for %s: %v", c.branch, err)
+	}
+	names := make(map[string]bool, len(tree.Entries))
+	for _, e := range tree.Entries {
+		names[e.Name] = true
+	}
+	if !names[c.file] {
+		t.Fatalf("%s tree missing its own %s", c.branch, c.file)
+	}
+	for _, other := range cases {
+		if other.file == c.file {
+			continue
 		}
-		tree, err := commit.Tree()
-		if err != nil {
-			t.Fatalf("tree for %s: %v", c.branch, err)
-		}
-		names := make(map[string]bool, len(tree.Entries))
-		for _, e := range tree.Entries {
-			names[e.Name] = true
-		}
-		if !names[c.file] {
-			t.Fatalf("%s tree missing its own %s", c.branch, c.file)
-		}
-		for _, other := range cases {
-			if other.file == c.file {
-				continue
-			}
-			if names[other.file] {
-				t.Fatalf("%s tree leaked %s from another worktree", c.branch, other.file)
-			}
+		if names[other.file] {
+			t.Fatalf("%s tree leaked %s from another worktree", c.branch, other.file)
 		}
 	}
 }
@@ -193,23 +200,30 @@ func assertConcurrentTreeIsolation(t *testing.T, f *fixture, cases []concurrentC
 func assertConcurrentWorktreeIsolation(t *testing.T, cases []concurrentCase, wts []Worktree) {
 	t.Helper()
 	for i, c := range cases {
-		st, err := wts[i].Status()
-		if err != nil {
-			t.Fatalf("status %s: %v", c.branch, err)
+		assertOneWorktreeIsolated(t, c, wts[i], cases)
+	}
+}
+
+// assertOneWorktreeIsolated verifies one worktree is clean after its own commit
+// and never saw another goroutine's file in its status or working dir.
+func assertOneWorktreeIsolated(t *testing.T, c concurrentCase, wt Worktree, cases []concurrentCase) {
+	t.Helper()
+	st, err := wt.Status()
+	if err != nil {
+		t.Fatalf("status %s: %v", c.branch, err)
+	}
+	if !st.IsClean() {
+		t.Fatalf("%s should be clean after committing its own file, got %v", c.branch, st)
+	}
+	for _, other := range cases {
+		if _, tracked := st[other.file]; tracked {
+			t.Fatalf("%s status contains %s from another worktree", c.branch, other.file)
 		}
-		if !st.IsClean() {
-			t.Fatalf("%s should be clean after committing its own file, got %v", c.branch, st)
+		if other.file == c.file {
+			continue
 		}
-		for _, other := range cases {
-			if _, tracked := st[other.file]; tracked {
-				t.Fatalf("%s status contains %s from another worktree", c.branch, other.file)
-			}
-			if other.file == c.file {
-				continue
-			}
-			if _, statErr := os.Stat(filepath.Join(c.path, other.file)); !os.IsNotExist(statErr) {
-				t.Fatalf("%s working dir leaked %s (stat err=%v)", c.branch, other.file, statErr)
-			}
+		if _, statErr := os.Stat(filepath.Join(c.path, other.file)); !os.IsNotExist(statErr) {
+			t.Fatalf("%s working dir leaked %s (stat err=%v)", c.branch, other.file, statErr)
 		}
 	}
 }
