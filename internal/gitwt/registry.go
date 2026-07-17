@@ -8,7 +8,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/go-git/go-billy/v6"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
@@ -459,8 +458,10 @@ func (r *Registry) removeFromRoster(name string) error {
 	return r.writeRoster(set)
 }
 
-// gitDir returns the repository's git directory as an OS path, mirroring the
-// filesystem access adminDir uses so the roster sits beside the worktrees dir.
+// gitDir returns the SHARED git directory (the main worktree's .git) as an OS
+// path, so the roster sits beside the worktrees admin dir and stays readable
+// from the main checkout even when this manager was opened from a linked
+// worktree (commonGitDir resolves the per-worktree `commondir` pointer).
 func (m *manager) gitDir() string {
-	return m.repo.Storer.(interface{ Filesystem() billy.Filesystem }).Filesystem().Root()
+	return m.commonGitDir()
 }
