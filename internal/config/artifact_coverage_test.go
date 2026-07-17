@@ -19,6 +19,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -94,6 +95,9 @@ func TestArtCovMaterializeStatErrorOnNonDirParent(t *testing.T) {
 // failure branch: a non-directory store entry in a read-only parent cannot be
 // renamed aside, so the function surfaces the failure (fail-closed).
 func TestArtCovVerifyOrQuarantineQuarantineFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only-directory rename enforcement is POSIX-specific; the error path runs on unix legs")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("read-only-parent rename failure is not enforced for root")
 	}
@@ -263,6 +267,9 @@ func TestArtCovGCReadDirAndNonDirEntry(t *testing.T) {
 	t.Parallel()
 	t.Run("read-error-root-is-file", func(t *testing.T) {
 		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("os.ReadDir on a regular file does not surface an ENOTDIR-style error on Windows; the branch runs on unix legs")
+		}
 		home := t.TempDir()
 		root := ArtifactStoreRoot(home, "skills")
 		if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
@@ -340,6 +347,9 @@ func TestArtCovCheckEntryKindAndTarType(t *testing.T) {
 // unreadable store file, and GC's RemoveAll of an orphan under a read-only
 // root. These are skipped for root, which bypasses DAC permission checks.
 func TestArtCovMaterializePermissionErrors(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based permission enforcement is POSIX-specific; the error paths run on unix legs")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("permission-denied branches are not enforced for root")
 	}
