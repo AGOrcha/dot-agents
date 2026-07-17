@@ -518,6 +518,9 @@ func canonicalReadFromMaster(projectPath string) bool {
 	return rc.ReadFromMaster()
 }
 
+// originRefPrefix is the remote-tracking ref prefix for the origin remote.
+const originRefPrefix = "origin/"
+
 // canonicalStateRef returns the ref coordination-state is read from in master
 // mode: origin/<default-branch>. Empty when the default branch cannot be
 // resolved (no origin remote / origin/HEAD unset), signalling the caller to
@@ -527,7 +530,7 @@ func canonicalStateRef(projectPath string) string {
 	if branch == "" {
 		return ""
 	}
-	return "origin/" + branch
+	return originRefPrefix + branch
 }
 
 // originDefaultBranch resolves the remote default branch name (e.g. "main")
@@ -535,10 +538,10 @@ func canonicalStateRef(projectPath string) string {
 // unset (bare `git remote add` without a fetch, or no origin at all).
 func originDefaultBranch(projectPath string) string {
 	if out := strings.TrimSpace(gitOutput(projectPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")); out != "" {
-		return strings.TrimPrefix(out, "origin/")
+		return strings.TrimPrefix(out, originRefPrefix)
 	}
 	if out := strings.TrimSpace(gitOutput(projectPath, "rev-parse", "--abbrev-ref", "origin/HEAD")); out != "" && out != "origin/HEAD" {
-		return strings.TrimPrefix(out, "origin/")
+		return strings.TrimPrefix(out, originRefPrefix)
 	}
 	return ""
 }
