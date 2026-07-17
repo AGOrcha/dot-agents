@@ -352,6 +352,12 @@ func readCommittedBlob(s storer.EncodedObjectStorer, name string, hash plumbing.
 	return readCommittedBlobFile(name, object.NewFile(name, filemode.Regular, blob), limits)
 }
 
+// committedBlobReader opens the committed blob's content stream. It is a test
+// seam (matching the renameLockDirFn style) over object.File.Reader, whose only
+// error legs — the reader open and the subsequent content read — cannot be
+// provoked from an in-memory blob, so they are exercised by overriding this var.
+var committedBlobReader = func(f *object.File) (io.ReadCloser, error) { return f.Reader() }
+
 // readCommittedBlobFile reads f's content from the committed object graph.
 // Like the tar and local paths, it rejects a declared size over the per-file
 // cap BEFORE Reader() is ever called (f.Size is populated from the object's
@@ -364,7 +370,7 @@ func readCommittedBlobFile(name string, f *object.File, limits BundleLimits) ([]
 	if f.Size > limits.MaxFileBytes {
 		return nil, fmt.Errorf("git tree file %q: size %d exceeds per-file cap of %d bytes", name, f.Size, limits.MaxFileBytes)
 	}
-	r, err := f.Reader()
+	r, err := committedBlobReader(f)
 	if err != nil {
 		return nil, fmt.Errorf("git tree file %q: opening blob reader: %w", name, err)
 	}

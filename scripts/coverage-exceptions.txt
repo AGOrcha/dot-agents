@@ -127,7 +127,6 @@ internal/config/cache_keys.go                                # [100-target-basel
 internal/config/config.go                                    # [100-target-baseline] 95.76% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
 internal/config/fetcher.go                                   # [100-target-baseline] 96.88% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
 internal/config/fetcher_http.go                              # [100-target-baseline] 96.61% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
-internal/config/fetcher_local_artifact.go                    # [defensive-guards] 93.75%; residual lines are TOCTOU/fd-error guards with no non-flaky test path — os.Root read after classify fstat/ReadAll/ReadDir failures, and the file-vanish/grow-between-classify-and-read size checks (readRootFile, openConfinedDir, streamConfinedDir). All behavior-driven paths (single-file, tree, symlink/socket/oversize rejection, posture, path errors) are covered.
 internal/config/lockstatus.go                                # [100-target-baseline] 95.16% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
 internal/config/manifest.go                                  # [100-target-baseline] 99.18% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
 internal/config/migrate.go                                   # [100-target-baseline] 97.96% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%

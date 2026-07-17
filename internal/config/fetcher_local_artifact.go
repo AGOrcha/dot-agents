@@ -11,6 +11,28 @@ import (
 	"strings"
 )
 
+// statOpenFile fstats an already-open file descriptor. It is a test seam
+// (renameLockDirFn style) over (*os.File).Stat, whose error leg — an fstat
+// failure on a descriptor that opened cleanly — is not reproducible with a real
+// file, so it is exercised by overriding this var. Shared by openConfinedDir
+// and readRootFile.
+var statOpenFile = func(fh *os.File) (fs.FileInfo, error) { return fh.Stat() }
+
+// readDirBatch reads up to n directory entries from an open directory handle. It
+// is a test seam over (*os.File).ReadDir so streamConfinedDir's non-EOF error
+// leg and its defensive len(batch)==0 termination (which a real *os.File never
+// takes — it always signals exhaustion via io.EOF) can be exercised.
+var readDirBatch = func(fh *os.File, n int) ([]os.DirEntry, error) { return fh.ReadDir(n) }
+
+// readCappedFile reads rel's already-open descriptor bounded to limit bytes. It
+// is a test seam over io.ReadAll(io.LimitReader(...)) so readRootFile's
+// read-error leg and its post-read size-divergence legs (content grown past the
+// cap, or a byte count that no longer matches the fstat size) can be exercised
+// deterministically without racing a concurrent writer.
+var readCappedFile = func(fh *os.File, limit int64) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(fh, limit))
+}
+
 // This file adds the local source type to the tier-2 (packages/artifacts) path.
 // Per config-distribution-model §4 (relaxed) / §7A.1-2 / §15 D3+D8, any source
 // type may serve any artifact kind; the kind governs merge/trust, not which
@@ -256,7 +278,7 @@ func streamConfinedDir(root *os.Root, rel string, expected fs.FileInfo, visit fu
 	}
 	defer func() { _ = fh.Close() }()
 	for {
-		batch, err := fh.ReadDir(dirReadBatchSize)
+		batch, err := readDirBatch(fh, dirReadBatchSize)
 		if verr := visitDirBatch(batch, visit); verr != nil {
 			return verr
 		}
@@ -281,7 +303,7 @@ func openConfinedDir(root *os.Root, rel string, expected fs.FileInfo) (*os.File,
 	if err != nil {
 		return nil, err
 	}
-	info, err := fh.Stat()
+	info, err := statOpenFile(fh)
 	if err != nil {
 		_ = fh.Close()
 		return nil, err
@@ -331,7 +353,7 @@ func readRootFile(root *os.Root, rel string, expected fs.FileInfo, limits Bundle
 		return 0, 0, nil, err
 	}
 	defer func() { _ = fh.Close() }()
-	info, err := fh.Stat()
+	info, err := statOpenFile(fh)
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -345,7 +367,7 @@ func readRootFile(root *os.Root, rel string, expected fs.FileInfo, limits Bundle
 	if size > limits.MaxFileBytes {
 		return 0, 0, nil, fmt.Errorf("local tree file %q: size %d exceeds per-file cap of %d bytes", rel, size, limits.MaxFileBytes)
 	}
-	data, err := io.ReadAll(io.LimitReader(fh, limits.MaxFileBytes+1))
+	data, err := readCappedFile(fh, limits.MaxFileBytes+1)
 	if err != nil {
 		return 0, 0, nil, err
 	}
