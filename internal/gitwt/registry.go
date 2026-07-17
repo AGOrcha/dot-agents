@@ -46,6 +46,15 @@ var (
 	ErrMetadataNotRecorded = errors.New("gitwt: worktree metadata not recorded")
 )
 
+// marshalYAML is the seam for YAML marshaling in writeSidecar/writeRoster. It
+// defaults to yaml.Marshal and is overridable only in same-package tests. The
+// marshal-error return in each writer is otherwise unreachable — the concrete
+// Metadata and roster types (plain scalars, times and string slices) marshal
+// cleanly for every value — so this seam lets those defensive branches stay
+// exercised without a production behavior change. Mirrors the now/driftHook
+// (gitwt) and createTemp/renameFunc (fsops) test seams already in the tree.
+var marshalYAML = yaml.Marshal
+
 // Metadata is the semantic, per-worktree record the registry persists next to
 // wt1's base-ref file. It is keyed by worktree name so it reconciles 1:1 with
 // Manager.List(). Base-ref storage is NOT duplicated here — that stays wt1's
@@ -371,7 +380,7 @@ func (r *Registry) writeSidecar(name string, meta Metadata) error {
 	if err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(&meta)
+	data, err := marshalYAML(&meta)
 	if err != nil {
 		return fmt.Errorf("gitwt: marshal metadata for %q: %w", name, err)
 	}
@@ -414,7 +423,7 @@ func (r *Registry) writeRoster(set map[string]bool) error {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	data, err := yaml.Marshal(&roster{SchemaVersion: registrySchemaVersion, Names: names})
+	data, err := marshalYAML(&roster{SchemaVersion: registrySchemaVersion, Names: names})
 	if err != nil {
 		return fmt.Errorf("gitwt: marshal worktree roster: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
 // newCoordinator binds a Coordinator to the fixture manager + a registry.
@@ -270,4 +271,245 @@ func TestMergeBackRequiresParentBranch(t *testing.T) {
 	if _, err := coord.MergeBack(MergeBackOptions{Name: "sub"}); err == nil {
 		t.Fatal("MergeBack without a parent branch succeeded, want error")
 	}
+}
+
+// --- error-path coverage ---------------------------------------------------
+
+// buildCommit stores a commit object (reusing the fixture base's tree) with the
+// given parents and returns its hash. With no parents it is an orphan root that
+// does NOT descend from the base; with a bogus parent its ancestry walk cannot
+// complete.
+func buildCommit(t *testing.T, f *fixture, parents []plumbing.Hash, msg string) plumbing.Hash {
+	t.Helper()
+	baseCommit, err := f.repo.CommitObject(f.base)
+	if err != nil {
+		t.Fatalf("load base commit: %v", err)
+	}
+	sig := object.Signature{Name: "T", Email: "t@x", When: time.Now()}
+	c := &object.Commit{
+		Author:       sig,
+		Committer:    sig,
+		Message:      msg,
+		TreeHash:     baseCommit.TreeHash,
+		ParentHashes: parents,
+	}
+	obj := f.repo.Storer.NewEncodedObject()
+	if err := c.Encode(obj); err != nil {
+		t.Fatalf("encode commit: %v", err)
+	}
+	h, err := f.repo.Storer.SetEncodedObject(obj)
+	if err != nil {
+		t.Fatalf("store commit: %v", err)
+	}
+	return h
+}
+
+// TestCreateSubBranchBadBaseBranch proves an unresolvable base branch fails
+// create before any worktree is made.
+func TestCreateSubBranchBadBaseBranch(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	if _, err := coord.CreateSubBranch(CreateOptions{
+		Name: "sub", Path: f.wtPath("sub"), BaseBranch: "ghost",
+	}); err == nil {
+		t.Fatal("CreateSubBranch with an unknown base branch succeeded, want error")
+	}
+}
+
+// TestCreateSubBranchAddBranchFails proves a duplicate worktree name fails the
+// AddBranch step.
+func TestCreateSubBranchAddBranchFails(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	createSub(t, f, coord, "sub")
+	if _, err := coord.CreateSubBranch(CreateOptions{
+		Name: "sub", Path: f.wtPath("sub"), BaseBranch: "parent",
+	}); err == nil {
+		t.Fatal("CreateSubBranch with a duplicate name succeeded, want error")
+	}
+}
+
+// TestCreateSubBranchRegistryCreateFails proves that when the worktree+branch
+// are created but registry metadata cannot be recorded, CreateSubBranch fails
+// and leaves the worktree recoverable via Reconcile (per the doc contract).
+func TestCreateSubBranchRegistryCreateFails(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	setBranch(t, f, "parent", f.base)
+	// Make the roster path a directory so reg.Create's addToRoster fails AFTER
+	// AddBranch has already created the worktree.
+	if err := os.Mkdir(coord.reg.rosterPath(), 0o755); err != nil {
+		t.Fatalf("mkdir roster: %v", err)
+	}
+	if _, err := coord.CreateSubBranch(CreateOptions{
+		Name: "sub", Path: f.wtPath("sub"), BaseBranch: "parent",
+	}); err == nil {
+		t.Fatal("CreateSubBranch succeeded despite a registry Create failure, want error")
+	}
+	names, err := f.mgr.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if !contains(names, "sub") {
+		t.Fatalf("List=%v, want sub present (worktree created before metadata failed)", names)
+	}
+}
+
+// TestMergeBackParentBranchUnresolvable proves an unknown parent branch fails
+// merge-back at the parent-tip resolution step.
+func TestMergeBackParentBranchUnresolvable(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	createSub(t, f, coord, "sub")
+	if _, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "ghost"}); err == nil {
+		t.Fatal("MergeBack with an unknown parent branch succeeded, want error")
+	}
+}
+
+// TestMergeBackSubBranchUnresolvable proves a registered worktree whose branch
+// ref was deleted fails at the sub-tip resolution step (after the stale guard).
+func TestMergeBackSubBranchUnresolvable(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	createSub(t, f, coord, "sub")
+	// Delete the sub-branch ref while base + parent stay put so the stale guard
+	// passes and it is the sub-tip resolution that fails.
+	if err := f.repo.Storer.RemoveReference(plumbing.NewBranchReferenceName("sub")); err != nil {
+		t.Fatalf("remove sub ref: %v", err)
+	}
+	if _, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "parent"}); err == nil {
+		t.Fatal("MergeBack succeeded despite a missing sub-branch ref, want error")
+	}
+}
+
+// TestMergeBackSubTipInvalidCommit proves a sub tip that is not a valid commit
+// object surfaces the ancestry-check load error (not ErrBaseNotAncestor).
+func TestMergeBackSubTipInvalidCommit(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	createSub(t, f, coord, "sub")
+	bogus := plumbing.NewHash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	setBranch(t, f, "sub", bogus)
+	_, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "parent"})
+	if err == nil {
+		t.Fatal("MergeBack succeeded despite an invalid sub tip, want error")
+	}
+	if errors.Is(err, ErrBaseNotAncestor) {
+		t.Fatalf("an unreadable sub tip should be a load error, not ErrBaseNotAncestor: %v", err)
+	}
+}
+
+// TestMergeBackBaseNotAncestor proves that when the recorded base is not an
+// ancestor of the sub tip, merge-back refuses with ErrBaseNotAncestor rather
+// than performing a history-orphaning non-fast-forward.
+func TestMergeBackBaseNotAncestor(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	createSub(t, f, coord, "sub")
+	// Point the sub-branch at an orphan commit that does NOT descend from the
+	// recorded base, so base is unreachable from the sub tip.
+	orphan := buildCommit(t, f, nil, "orphan")
+	setBranch(t, f, "sub", orphan)
+	if _, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "parent"}); !errors.Is(err, ErrBaseNotAncestor) {
+		t.Fatalf("want ErrBaseNotAncestor, got %v", err)
+	}
+}
+
+// TestMergeBackAncestryWalkError proves a sub tip whose parent object is missing
+// surfaces the ancestry-walk error (the tip itself loads, but the walk cannot).
+func TestMergeBackAncestryWalkError(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	createSub(t, f, coord, "sub")
+	broken := buildCommit(t, f, []plumbing.Hash{plumbing.NewHash("cccccccccccccccccccccccccccccccccccccccc")}, "broken-parent")
+	setBranch(t, f, "sub", broken)
+	_, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "parent"})
+	if err == nil {
+		t.Fatal("MergeBack succeeded despite a broken ancestry walk, want error")
+	}
+	if errors.Is(err, ErrBaseNotAncestor) {
+		t.Fatalf("a walk load error should not be ErrBaseNotAncestor: %v", err)
+	}
+}
+
+// TestMergeBackNoNewWork proves merging back a sub with no commits past base is
+// a valid no-op fast-forward (the base == sub-tip ancestry leg).
+func TestMergeBackNoNewWork(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	createSub(t, f, coord, "sub") // no advanceHead: sub tip == recorded base
+	res, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "parent"})
+	if err != nil {
+		t.Fatalf("MergeBack: %v", err)
+	}
+	if res.SubHead != f.base || res.ParentTip != f.base {
+		t.Fatalf("result subHead=%s parentTip=%s, want base %s", res.SubHead, res.ParentTip, f.base)
+	}
+	if got := branchHash(t, f, "parent"); got != f.base {
+		t.Fatalf("parent tip=%s, want base %s", got, f.base)
+	}
+}
+
+// TestMergeBackSetReferenceFails proves a failure fast-forwarding the parent ref
+// surfaces from merge-back. The parent loose ref is replaced by a directory via
+// the drift-hook seam AFTER the parent tip was read but BEFORE the ref write.
+func TestMergeBackSetReferenceFails(t *testing.T) {
+	f := newFixture(t)
+	coord := newCoordinator(t, f)
+	createSub(t, f, coord, "sub")
+	advanceHead(t, f, "sub")
+	parentRefPath := filepath.Join(f.mgr.(*manager).gitDir(), "refs", "heads", "parent")
+	coord.driftHook = func() {
+		_ = os.Remove(parentRefPath)
+		_ = os.Mkdir(parentRefPath, 0o755)
+	}
+	if _, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "parent"}); err == nil {
+		t.Fatal("MergeBack succeeded despite a parent-ref write failure, want error")
+	}
+}
+
+// TestMergeBackVerifyBranchHeadErrors drives the three post-integration
+// verification error legs: the sub worktree becomes unresolvable / unopenable /
+// its HEAD unreadable AFTER the fast-forward, so merge-back reports the
+// verification failure rather than assuming the integrated tip is current. Each
+// corruption is injected via the drift-hook seam (after the ref write).
+func TestMergeBackVerifyBranchHeadErrors(t *testing.T) {
+	t.Run("worktree dir unresolvable", func(t *testing.T) {
+		f := newFixture(t)
+		coord := newCoordinator(t, f)
+		createSub(t, f, coord, "sub")
+		advanceHead(t, f, "sub")
+		dir, _ := f.mgr.(*manager).adminDir("sub")
+		coord.driftHook = func() { _ = os.Remove(filepath.Join(dir, "gitdir")) }
+		if _, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "parent"}); err == nil {
+			t.Fatal("MergeBack succeeded despite an unresolvable worktree dir, want error")
+		}
+	})
+
+	t.Run("worktree unopenable", func(t *testing.T) {
+		f := newFixture(t)
+		coord := newCoordinator(t, f)
+		createSub(t, f, coord, "sub")
+		advanceHead(t, f, "sub")
+		coord.driftHook = func() {
+			_ = os.WriteFile(filepath.Join(f.wtPath("sub"), ".git"), []byte("garbage"), 0o644)
+		}
+		if _, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "parent"}); err == nil {
+			t.Fatal("MergeBack succeeded despite an unopenable worktree, want error")
+		}
+	})
+
+	t.Run("worktree head unreadable", func(t *testing.T) {
+		f := newFixture(t)
+		coord := newCoordinator(t, f)
+		createSub(t, f, coord, "sub")
+		advanceHead(t, f, "sub")
+		dir, _ := f.mgr.(*manager).adminDir("sub")
+		coord.driftHook = func() {
+			_ = os.WriteFile(filepath.Join(dir, "HEAD"), []byte("ref: refs/heads/does-not-exist\n"), 0o644)
+		}
+		if _, err := coord.MergeBack(MergeBackOptions{Name: "sub", ParentBranch: "parent"}); err == nil {
+			t.Fatal("MergeBack succeeded despite an unreadable worktree HEAD, want error")
+		}
+	})
 }

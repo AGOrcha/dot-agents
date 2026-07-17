@@ -29,6 +29,16 @@ import (
 // Registry constructor.
 const registryIdleTTL = 24 * time.Hour
 
+// getwd and newManager are test seams: they default to the real
+// implementations and are overridden only in _test.go to drive the git/worktree
+// bootstrap error legs that valid inputs cannot reach from here — a working
+// directory that no longer resolves, and a Manager construction that fails or
+// yields a non-go-git Manager the Registry rejects.
+var (
+	getwd      = os.Getwd
+	newManager = gitwt.NewManager
+)
+
 // NewCmd builds the `da worktree` command tree.
 func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -76,11 +86,7 @@ func newCreateCmd() *cobra.Command {
 			"worktree.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			coord, err := openCoordinator()
-			if err != nil {
-				return err
-			}
-			root, err := repoRoot()
+			coord, root, err := openCoordinator()
 			if err != nil {
 				return err
 			}
@@ -135,7 +141,7 @@ func newMergeBackCmd() *cobra.Command {
 			"after integration it verifies the sub-branch HEAD did not drift underneath.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			coord, err := openCoordinator()
+			coord, _, err := openCoordinator()
 			if err != nil {
 				return err
 			}
@@ -156,28 +162,30 @@ func newMergeBackCmd() *cobra.Command {
 }
 
 // openCoordinator resolves the git repository from the current directory and
-// builds a Coordinator over its Manager + Registry.
-func openCoordinator() (*gitwt.Coordinator, error) {
+// builds a Coordinator over its Manager + Registry, also returning the resolved
+// main worktree root so callers need not re-resolve it.
+func openCoordinator() (*gitwt.Coordinator, string, error) {
 	root, err := repoRoot()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	mgr, err := gitwt.NewManager(root)
+	mgr, err := newManager(root)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	reg, err := gitwt.NewRegistry(mgr, registryIdleTTL)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return gitwt.NewCoordinator(mgr, reg)
+	coord, err := gitwt.NewCoordinator(mgr, reg)
+	return coord, root, err
 }
 
 // repoRoot resolves the main worktree root at or above the current directory.
 // DetectDotGit lets an invocation from a subdirectory still resolve the
 // enclosing repo, matching the git CLI's behaviour.
 func repoRoot() (string, error) {
-	cwd, err := os.Getwd()
+	cwd, err := getwd()
 	if err != nil {
 		return "", fmt.Errorf("worktree: resolve working directory: %w", err)
 	}
@@ -185,6 +193,13 @@ func repoRoot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("worktree: open git repository at %s: %w", cwd, err)
 	}
+	return worktreeRoot(repo)
+}
+
+// worktreeRoot returns repo's main worktree root. It is split from repoRoot so
+// its bare-repository error leg — unreachable once DetectDotGit has resolved a
+// working tree — is testable with an explicit bare repository handle.
+func worktreeRoot(repo *git.Repository) (string, error) {
 	wt, err := repo.Worktree()
 	if err != nil {
 		return "", fmt.Errorf("worktree: resolve worktree root: %w", err)

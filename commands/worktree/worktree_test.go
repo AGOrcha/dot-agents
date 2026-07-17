@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -478,6 +479,234 @@ func TestRenderCreateSurfacesAgentConfig(t *testing.T) {
 	}
 }
 
+// TestRepoRootOutsideRepoErrors: repoRoot fails when the working directory is
+// not inside any git repository (the PlainOpenWithOptions error leg).
+func TestRepoRootOutsideRepoErrors(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	t.Chdir(dir)
+	if root, err := repoRoot(); err == nil {
+		t.Fatalf("repoRoot outside a repo returned root=%q, want an error", root)
+	}
+}
+
+// TestOpenCoordinatorOutsideRepoErrors: openCoordinator surfaces the repoRoot
+// error when the working directory is not a git repository.
+func TestOpenCoordinatorOutsideRepoErrors(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	t.Chdir(dir)
+	if _, _, err := openCoordinator(); err == nil {
+		t.Fatal("openCoordinator outside a repo succeeded, want an error")
+	}
+}
+
+// TestCreateOutsideRepoErrors: `create` fails (does not panic or silently
+// succeed) when run outside a git repository — the RunE openCoordinator leg.
+func TestCreateOutsideRepoErrors(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	t.Chdir(dir)
+	_, runErr := execWorktreeErr(t, "create", "--name", "sub",
+		"--path", filepath.Join(dir, "wt"), "--base-branch", "main")
+	if runErr == nil {
+		t.Fatal("create outside a repo succeeded, want an error")
+	}
+}
+
+// TestMergeBackOutsideRepoErrors: `merge-back` fails when run outside a git
+// repository — the RunE openCoordinator leg.
+func TestMergeBackOutsideRepoErrors(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	t.Chdir(dir)
+	_, runErr := execWorktreeErr(t, "merge-back", "--name", "sub", "--onto", "main")
+	if runErr == nil {
+		t.Fatal("merge-back outside a repo succeeded, want an error")
+	}
+}
+
+// TestCreateBadBaseBranchErrors: a create whose --base-branch does not exist
+// reaches CreateSubBranch and fails there (the create-wrap error leg), with the
+// error wrapped under the "worktree create" prefix.
+func TestCreateBadBaseBranchErrors(t *testing.T) {
+	repoDir, _ := initRepo(t)
+	t.Chdir(repoDir)
+	wtParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve wt parent: %v", err)
+	}
+	out, runErr := execWorktreeErr(t, "create", "--name", "sub",
+		"--path", filepath.Join(wtParent, "sub"), "--base-branch", "no-such-branch")
+	if runErr == nil {
+		t.Fatalf("create with a missing base branch succeeded, want an error (out=%q)", out)
+	}
+	if !strings.Contains(runErr.Error(), "worktree create") {
+		t.Fatalf("error=%q, want it wrapped under 'worktree create'", runErr)
+	}
+}
+
+// TestLoadAppTypeProfileOutsideRepo: loadAppTypeProfile reports ok=false (never
+// errors) when the repo cannot be resolved — the repoRoot error leg.
+func TestLoadAppTypeProfileOutsideRepo(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	t.Chdir(dir)
+	if _, ok := loadAppTypeProfile("go-cli"); ok {
+		t.Fatal("loadAppTypeProfile outside a repo returned ok=true, want false")
+	}
+}
+
+// TestLoadAppTypeProfileNoAgentsRC: a repo with no .agentsrc.json makes
+// LoadAgentsRC fail, so loadAppTypeProfile reports ok=false — the rc-load error
+// leg (distinct from a present-but-unmatched by_app_type entry).
+func TestLoadAppTypeProfileNoAgentsRC(t *testing.T) {
+	repoDir, _ := initRepo(t)
+	t.Chdir(repoDir)
+	if _, ok := loadAppTypeProfile("go-cli"); ok {
+		t.Fatal("loadAppTypeProfile with no .agentsrc.json returned ok=true, want false")
+	}
+}
+
+// TestRenderMergeBack covers both render branches: the JSON encoding and the
+// human one-liner.
+func TestRenderMergeBack(t *testing.T) {
+	res := gitwt.MergeBackResult{
+		Base:         plumbing.ZeroHash,
+		SubHead:      plumbing.ZeroHash,
+		ParentBranch: "parent",
+		ParentTip:    plumbing.ZeroHash,
+	}
+	var human bytes.Buffer
+	if err := renderMergeBack(&human, false, res); err != nil {
+		t.Fatalf("renderMergeBack human: %v", err)
+	}
+	if !strings.Contains(human.String(), "fast-forwarded") || !strings.Contains(human.String(), "parent") {
+		t.Fatalf("human render=%q, want fast-forwarded parent line", human.String())
+	}
+	var js bytes.Buffer
+	if err := renderMergeBack(&js, true, res); err != nil {
+		t.Fatalf("renderMergeBack json: %v", err)
+	}
+	for _, want := range []string{`"base"`, `"sub_head"`, `"parent_branch": "parent"`, `"parent_tip"`} {
+		if !strings.Contains(js.String(), want) {
+			t.Errorf("json render missing %q: %s", want, js.String())
+		}
+	}
+}
+
+// TestMustMarkRequiredPanicsOnUnknownFlag: mustMarkRequired panics when asked to
+// mark a flag that was never registered — the programmer-error guard. Production
+// only ever passes real flag names, so this is exercised directly.
+func TestMustMarkRequiredPanicsOnUnknownFlag(t *testing.T) {
+	cmd := &cobra.Command{Use: "x"}
+	cmd.Flags().String("real", "", "")
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("mustMarkRequired with an unknown flag did not panic, want a panic")
+		}
+		if msg, ok := r.(string); !ok || !strings.Contains(msg, "no-such-flag") {
+			t.Fatalf("panic=%v, want it to name the misspelled flag", r)
+		}
+	}()
+	mustMarkRequired(cmd, "real", "no-such-flag")
+}
+
+// errSeamBoom is the sentinel an overridden seam returns to drive an error leg.
+var errSeamBoom = errors.New("seam boom")
+
+// fakeManager implements gitwt.Manager but is NOT the go-git *manager, so
+// gitwt.NewRegistry rejects it via its type guard. Used to drive
+// openCoordinator's registry-construction error leg.
+type fakeManager struct{}
+
+func (fakeManager) AddBranch(string, string, plumbing.Hash) error   { return nil }
+func (fakeManager) AddDetached(string, string, plumbing.Hash) error { return nil }
+func (fakeManager) Remove(string, string) error                     { return nil }
+func (fakeManager) List() ([]string, error)                         { return nil, nil }
+func (fakeManager) Prune() ([]string, error)                        { return nil, nil }
+func (fakeManager) Open(string) (gitwt.Worktree, error)             { return nil, nil }
+func (fakeManager) RecordBaseRef(string, plumbing.Hash) error       { return nil }
+func (fakeManager) BaseRef(string) (plumbing.Hash, error)           { return plumbing.ZeroHash, nil }
+
+// TestRepoRootGetwdErrors: repoRoot wraps a working-directory resolution
+// failure (the os.Getwd leg — a real failure mode when the cwd no longer
+// resolves, driven deterministically here via the getwd seam).
+func TestRepoRootGetwdErrors(t *testing.T) {
+	orig := getwd
+	getwd = func() (string, error) { return "", errSeamBoom }
+	defer func() { getwd = orig }()
+	if root, err := repoRoot(); err == nil {
+		t.Fatalf("repoRoot with a failing Getwd returned root=%q, want an error", root)
+	} else if !strings.Contains(err.Error(), "resolve working directory") {
+		t.Fatalf("error=%q, want it wrapped as a working-directory failure", err)
+	}
+}
+
+// TestOpenCoordinatorManagerErrors: openCoordinator surfaces a Manager
+// construction failure (the NewManager leg — a real fallible repo-open
+// contract, unreachable once repoRoot has resolved a valid worktree root).
+func TestOpenCoordinatorManagerErrors(t *testing.T) {
+	repoDir, _ := initRepo(t)
+	t.Chdir(repoDir)
+	orig := newManager
+	newManager = func(string) (gitwt.Manager, error) { return nil, errSeamBoom }
+	defer func() { newManager = orig }()
+	if _, _, err := openCoordinator(); err == nil || !strings.Contains(err.Error(), "seam boom") {
+		t.Fatalf("openCoordinator with a failing NewManager err=%v, want the manager error surfaced", err)
+	}
+}
+
+// TestOpenCoordinatorRegistryRejectsNonGoGitManager: openCoordinator surfaces
+// gitwt.NewRegistry's error when handed a Manager that is not the go-git
+// implementation (the NewRegistry leg), proving the diagnostic propagates.
+func TestOpenCoordinatorRegistryRejectsNonGoGitManager(t *testing.T) {
+	repoDir, _ := initRepo(t)
+	t.Chdir(repoDir)
+	orig := newManager
+	newManager = func(string) (gitwt.Manager, error) { return fakeManager{}, nil }
+	defer func() { newManager = orig }()
+	_, _, err := openCoordinator()
+	if err == nil {
+		t.Fatal("openCoordinator with a non-go-git Manager succeeded, want a registry error")
+	}
+	if !strings.Contains(err.Error(), "registry requires the go-git Manager") {
+		t.Fatalf("error=%q, want gitwt's registry type-guard message", err)
+	}
+}
+
+// TestWorktreeRootBareRepoErrors: worktreeRoot fails on a bare repository (the
+// Worktree() leg). repoRoot's DetectDotGit open never yields a bare repo, so
+// this real error contract is exercised directly with a real bare repo.
+func TestWorktreeRootBareRepoErrors(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	bareDir := filepath.Join(dir, "bare.git")
+	if _, err := git.PlainInit(bareDir, true); err != nil {
+		t.Fatalf("init bare repo: %v", err)
+	}
+	repo, err := git.PlainOpen(bareDir)
+	if err != nil {
+		t.Fatalf("open bare repo: %v", err)
+	}
+	if root, err := worktreeRoot(repo); err == nil {
+		t.Fatalf("worktreeRoot on a bare repo returned root=%q, want an error", root)
+	}
+}
+
 // --- helpers ---
 
 func initRepo(t *testing.T) (string, plumbing.Hash) {
@@ -591,6 +820,19 @@ func execWorktree(t *testing.T, args ...string) string {
 		t.Fatalf("execute %v: %v (out=%q)", args, err, buf.String())
 	}
 	return buf.String()
+}
+
+// execWorktreeErr runs the worktree command tree expecting a RunE failure,
+// returning the combined out/err buffer and the error for assertion.
+func execWorktreeErr(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return buf.String(), err
 }
 
 func writeAgentsRC(t *testing.T, repoDir, content string) {

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v6/plumbing"
+
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // newRegistry binds a Registry to the fixture manager with a fixed clock so
@@ -362,3 +364,397 @@ func (stubManager) Prune() ([]string, error)                        { return nil
 func (stubManager) Open(string) (Worktree, error)                   { return nil, nil }
 func (stubManager) RecordBaseRef(string, plumbing.Hash) error       { return nil }
 func (stubManager) BaseRef(string) (plumbing.Hash, error)           { return plumbing.ZeroHash, nil }
+
+// --- error-path coverage ---------------------------------------------------
+
+// TestCreateWriteSidecarFails proves Create surfaces a sidecar-write failure:
+// with the admin dir write-denied, the metadata record cannot be persisted.
+func TestCreateWriteSidecarFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "feat")
+	dir, err := f.mgr.(*manager).adminDir("feat")
+	if err != nil {
+		t.Fatalf("adminDir: %v", err)
+	}
+	testutil.MakeDirWriteDenied(t, dir)
+	if _, err := reg.Create("feat", Metadata{Purpose: "x"}); err == nil {
+		t.Fatal("Create succeeded despite an unwritable admin dir, want error")
+	}
+}
+
+// TestCreateAddToRosterFails proves Create aborts when, after the sidecar is
+// written, the roster cannot be read (its path is a directory).
+func TestCreateAddToRosterFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "feat")
+	if err := os.Mkdir(reg.rosterPath(), 0o755); err != nil {
+		t.Fatalf("mkdir roster: %v", err)
+	}
+	if _, err := reg.Create("feat", Metadata{}); err == nil {
+		t.Fatal("Create succeeded despite an unreadable roster, want error")
+	}
+}
+
+// TestUpdateWriteSidecarFails proves Update surfaces a sidecar-write failure
+// after a successful read.
+func TestUpdateWriteSidecarFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "feat")
+	if _, err := reg.Create("feat", Metadata{Purpose: "x"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	dir, err := f.mgr.(*manager).adminDir("feat")
+	if err != nil {
+		t.Fatalf("adminDir: %v", err)
+	}
+	testutil.MakeDirWriteDenied(t, dir)
+	if _, err := reg.Update("feat", func(m *Metadata) { m.Purpose = "y" }); err == nil {
+		t.Fatal("Update succeeded despite an unwritable admin dir, want error")
+	}
+}
+
+// TestDeregisterRemoveFails proves a non-not-found os.Remove failure on the
+// sidecar (its path is a non-empty directory) surfaces from Deregister.
+func TestDeregisterRemoveFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "feat")
+	dir, err := f.mgr.(*manager).adminDir("feat")
+	if err != nil {
+		t.Fatalf("adminDir: %v", err)
+	}
+	// A NON-EMPTY directory at the sidecar path makes os.Remove fail with
+	// ENOTEMPTY (a real error, not os.ErrNotExist).
+	sidecar := filepath.Join(dir, registryFile)
+	if err := os.Mkdir(sidecar, 0o755); err != nil {
+		t.Fatalf("mkdir sidecar: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sidecar, "block"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write block: %v", err)
+	}
+	if err := reg.Deregister("feat"); err == nil {
+		t.Fatal("Deregister succeeded despite an unremovable sidecar, want error")
+	}
+}
+
+// TestDeregisterAdminDirRealError proves a real (non-not-found) admin-dir stat
+// failure surfaces from Deregister rather than being folded into not-found.
+func TestDeregisterAdminDirRealError(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "feat")
+	testutil.MakeDirUnreadable(t, dotgitWorktreesDir(f.repoPath))
+	err := reg.Deregister("feat")
+	if err == nil {
+		t.Fatal("Deregister succeeded despite a real admin-dir stat failure, want error")
+	}
+	if errors.Is(err, ErrWorktreeNotFound) {
+		t.Errorf("a real stat error must not be folded into ErrWorktreeNotFound: %v", err)
+	}
+}
+
+// TestReconcileReadRosterFails proves Reconcile surfaces a roster read failure.
+func TestReconcileReadRosterFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	if err := os.Mkdir(reg.rosterPath(), 0o755); err != nil {
+		t.Fatalf("mkdir roster: %v", err)
+	}
+	if _, err := reg.Reconcile(); err == nil {
+		t.Fatal("Reconcile succeeded despite an unreadable roster, want error")
+	}
+}
+
+// TestReconcileReadRosterParseError proves a malformed roster YAML surfaces a
+// parse error from Reconcile.
+func TestReconcileReadRosterParseError(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	if err := os.WriteFile(reg.rosterPath(), []byte("names: [unterminated"), 0o644); err != nil {
+		t.Fatalf("write bad roster: %v", err)
+	}
+	if _, err := reg.Reconcile(); err == nil {
+		t.Fatal("Reconcile succeeded despite malformed roster YAML, want parse error")
+	}
+}
+
+// TestReconcileListFails proves a Manager.List failure propagates from Reconcile.
+func TestReconcileListFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	corruptWorktreesDir(t, f)
+	if _, err := reg.Reconcile(); err == nil {
+		t.Fatal("Reconcile succeeded despite a List failure, want error")
+	}
+}
+
+// TestReconcileWriteRosterFails proves that when an orphan is detected but the
+// roster cannot be rewritten (git dir write-denied), Reconcile surfaces the
+// write error instead of silently dropping the orphan cleanup.
+func TestReconcileWriteRosterFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "gone")
+	if _, err := reg.Create("gone", Metadata{}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Remove the admin dir so List() no longer returns "gone": it becomes an
+	// orphan Reconcile wants to drop from the roster.
+	adminDir, err := f.mgr.(*manager).adminDir("gone")
+	if err != nil {
+		t.Fatalf("adminDir: %v", err)
+	}
+	if err := os.RemoveAll(adminDir); err != nil {
+		t.Fatalf("rm admin dir: %v", err)
+	}
+	// Deny writes on the git dir so the roster rewrite (atomic temp create)
+	// fails while its read side stays open.
+	testutil.MakeDirWriteDenied(t, f.mgr.(*manager).gitDir())
+	if _, err := reg.Reconcile(); err == nil {
+		t.Fatal("Reconcile succeeded despite a roster-rewrite failure, want error")
+	}
+}
+
+// TestPruneScanReadRosterFails proves PruneScan surfaces a roster read failure.
+func TestPruneScanReadRosterFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	if err := os.Mkdir(reg.rosterPath(), 0o755); err != nil {
+		t.Fatalf("mkdir roster: %v", err)
+	}
+	if _, err := reg.PruneScan(); err == nil {
+		t.Fatal("PruneScan succeeded despite an unreadable roster, want error")
+	}
+}
+
+// TestPruneScanListFails proves a Manager.List failure propagates from PruneScan.
+func TestPruneScanListFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	corruptWorktreesDir(t, f)
+	if _, err := reg.PruneScan(); err == nil {
+		t.Fatal("PruneScan succeeded despite a List failure, want error")
+	}
+}
+
+// TestPruneScanUnchangedSinceBaseIndeterminate drives the three indeterminate
+// legs of unchangedSinceBase (worktree dir unresolvable, worktree unopenable,
+// worktree HEAD unreadable): each keeps the worktree rather than auto-pruning
+// on data it cannot read. The base ref stays recorded so the check gets past
+// the base lookup into the tip resolution that fails.
+func TestPruneScanUnchangedSinceBaseIndeterminate(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	expired := now.Add(-2 * time.Hour)
+
+	t.Run("worktree dir unresolvable", func(t *testing.T) {
+		f := newFixture(t)
+		reg := newRegistry(t, f, time.Hour, now)
+		addBranch(t, f, "wd")
+		if _, err := reg.Create("wd", Metadata{CreatedAt: expired, LastUsed: expired}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		dir, _ := f.mgr.(*manager).adminDir("wd")
+		if err := os.Remove(filepath.Join(dir, "gitdir")); err != nil {
+			t.Fatalf("rm gitdir: %v", err)
+		}
+		scan, err := reg.PruneScan()
+		if err != nil {
+			t.Fatalf("PruneScan: %v", err)
+		}
+		if !contains(scan.Kept, "wd") || contains(scan.Eligible, "wd") {
+			t.Fatalf("scan=%+v, want wd kept (indeterminate worktree dir)", scan)
+		}
+	})
+
+	t.Run("worktree unopenable", func(t *testing.T) {
+		f := newFixture(t)
+		reg := newRegistry(t, f, time.Hour, now)
+		addBranch(t, f, "op")
+		if _, err := reg.Create("op", Metadata{CreatedAt: expired, LastUsed: expired}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		// Corrupt the worktree's .git pointer so Open fails while the admin
+		// gitdir pointer (worktreeDir) still resolves.
+		if err := os.WriteFile(filepath.Join(f.wtPath("op"), ".git"), []byte("garbage"), 0o644); err != nil {
+			t.Fatalf("corrupt .git: %v", err)
+		}
+		scan, err := reg.PruneScan()
+		if err != nil {
+			t.Fatalf("PruneScan: %v", err)
+		}
+		if !contains(scan.Kept, "op") || contains(scan.Eligible, "op") {
+			t.Fatalf("scan=%+v, want op kept (indeterminate: unopenable)", scan)
+		}
+	})
+
+	t.Run("worktree head unreadable", func(t *testing.T) {
+		f := newFixture(t)
+		reg := newRegistry(t, f, time.Hour, now)
+		addBranch(t, f, "hd")
+		if _, err := reg.Create("hd", Metadata{CreatedAt: expired, LastUsed: expired}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		// Point the worktree HEAD at a dangling ref so Open succeeds but Head
+		// resolution fails.
+		dir, _ := f.mgr.(*manager).adminDir("hd")
+		if err := os.WriteFile(filepath.Join(dir, "HEAD"), []byte("ref: refs/heads/does-not-exist\n"), 0o644); err != nil {
+			t.Fatalf("corrupt HEAD: %v", err)
+		}
+		scan, err := reg.PruneScan()
+		if err != nil {
+			t.Fatalf("PruneScan: %v", err)
+		}
+		if !contains(scan.Kept, "hd") || contains(scan.Eligible, "hd") {
+			t.Fatalf("scan=%+v, want hd kept (indeterminate: HEAD unreadable)", scan)
+		}
+	})
+}
+
+// TestGetReadSidecarRealError proves a real (non-not-found) sidecar read error
+// is not folded into ErrMetadataNotRecorded.
+func TestGetReadSidecarRealError(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "feat")
+	dir, _ := f.mgr.(*manager).adminDir("feat")
+	if err := os.Mkdir(filepath.Join(dir, registryFile), 0o755); err != nil {
+		t.Fatalf("mkdir sidecar: %v", err)
+	}
+	_, err := reg.Get("feat")
+	if err == nil {
+		t.Fatal("Get succeeded despite an unreadable sidecar, want error")
+	}
+	if errors.Is(err, ErrMetadataNotRecorded) {
+		t.Errorf("a real read error must not be folded into ErrMetadataNotRecorded: %v", err)
+	}
+}
+
+// TestGetReadSidecarParseError proves a malformed sidecar YAML surfaces a parse
+// error from Get.
+func TestGetReadSidecarParseError(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "feat")
+	dir, _ := f.mgr.(*manager).adminDir("feat")
+	if err := os.WriteFile(filepath.Join(dir, registryFile), []byte("name: [unterminated"), 0o644); err != nil {
+		t.Fatalf("write bad sidecar: %v", err)
+	}
+	if _, err := reg.Get("feat"); err == nil {
+		t.Fatal("Get succeeded despite malformed sidecar YAML, want parse error")
+	}
+}
+
+// TestWriteSidecarUnknownWorktree proves writeSidecar surfaces sidecarPath's
+// unknown-worktree error before attempting any write.
+func TestWriteSidecarUnknownWorktree(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	if err := reg.writeSidecar("ghost", Metadata{}); !errors.Is(err, ErrWorktreeNotFound) {
+		t.Fatalf("writeSidecar unknown worktree = %v, want ErrWorktreeNotFound", err)
+	}
+}
+
+// TestAddToRosterIdempotent proves re-adding a name already in the roster is a
+// no-op that leaves the set unchanged.
+func TestAddToRosterIdempotent(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	if err := reg.addToRoster("dup"); err != nil {
+		t.Fatalf("addToRoster: %v", err)
+	}
+	if err := reg.addToRoster("dup"); err != nil {
+		t.Fatalf("addToRoster (repeat): %v", err)
+	}
+	set, err := reg.readRoster()
+	if err != nil {
+		t.Fatalf("readRoster: %v", err)
+	}
+	if len(set) != 1 || !set["dup"] {
+		t.Fatalf("roster=%v, want exactly {dup}", set)
+	}
+}
+
+// TestDeregisterRemoveFromRosterReadFails proves Deregister surfaces a
+// roster-read failure from removeFromRoster after the sidecar is removed.
+func TestDeregisterRemoveFromRosterReadFails(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "feat")
+	if _, err := reg.Create("feat", Metadata{}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Replace the roster file with a directory so removeFromRoster's readRoster
+	// fails (the sidecar removal still succeeds first).
+	if err := os.Remove(reg.rosterPath()); err != nil {
+		t.Fatalf("rm roster: %v", err)
+	}
+	if err := os.Mkdir(reg.rosterPath(), 0o755); err != nil {
+		t.Fatalf("mkdir roster: %v", err)
+	}
+	if err := reg.Deregister("feat"); err == nil {
+		t.Fatal("Deregister succeeded despite a roster-read failure, want error")
+	}
+}
+
+// corruptWorktreesDir replaces .git/worktrees with a regular file so
+// Manager.List (and thus Reconcile/PruneScan) fails on read.
+func corruptWorktreesDir(t *testing.T, f *fixture) {
+	t.Helper()
+	wtDir := dotgitWorktreesDir(f.repoPath)
+	if err := os.RemoveAll(wtDir); err != nil {
+		t.Fatalf("rm worktrees dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(wtDir), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(wtDir, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("write worktrees file: %v", err)
+	}
+}
+
+// TestWriteSidecarMarshalError proves writeSidecar surfaces (wrapped) a YAML
+// marshal failure and does not persist a partial record. The marshal step is
+// unreachable for the concrete Metadata type, so the marshalYAML seam injects
+// the failure — the assertion is on the real error contract, not a line touch.
+func TestWriteSidecarMarshalError(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+	addBranch(t, f, "feat")
+
+	boom := errors.New("boom-marshal")
+	orig := marshalYAML
+	t.Cleanup(func() { marshalYAML = orig })
+	marshalYAML = func(any) ([]byte, error) { return nil, boom }
+
+	err := reg.writeSidecar("feat", Metadata{Purpose: "x"})
+	if !errors.Is(err, boom) {
+		t.Fatalf("writeSidecar err = %v, want it to wrap the marshal error", err)
+	}
+	// No partial sidecar was written: the record is still absent.
+	marshalYAML = orig
+	if _, gErr := reg.Get("feat"); !errors.Is(gErr, ErrMetadataNotRecorded) {
+		t.Fatalf("Get after failed writeSidecar = %v, want ErrMetadataNotRecorded (nothing persisted)", gErr)
+	}
+}
+
+// TestWriteRosterMarshalError proves writeRoster surfaces (wrapped) a YAML
+// marshal failure. The roster type also marshals cleanly for every value, so
+// the failure is injected through the marshalYAML seam and the assertion checks
+// the wrapped error contract.
+func TestWriteRosterMarshalError(t *testing.T) {
+	f := newFixture(t)
+	reg := newRegistry(t, f, time.Hour, time.Now())
+
+	boom := errors.New("boom-roster-marshal")
+	orig := marshalYAML
+	t.Cleanup(func() { marshalYAML = orig })
+	marshalYAML = func(any) ([]byte, error) { return nil, boom }
+
+	err := reg.writeRoster(map[string]bool{"feat": true})
+	if !errors.Is(err, boom) {
+		t.Fatalf("writeRoster err = %v, want it to wrap the marshal error", err)
+	}
+}
