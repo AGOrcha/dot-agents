@@ -17,6 +17,26 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
+// Test seams. Each defaults to the real stdlib/os operation; they exist so the
+// defensive TOCTOU / never-fail legs of the confined cache readers and writers
+// (a stat/read/write/close on an already-validated healthy fd, an os.Root Lstat
+// of a just-created dir, a json.Marshal of a fixed struct, a crypto/rand read)
+// can be fault-injected from a test. They are overridden ONLY by non-parallel
+// *_cov100_test.go cases and restored via defer, matching the seam pattern this
+// repo already uses in internal/agentslock (renameLockDirFn) and internal/review
+// (marshal / randReader). Production behavior is identical to calling the wrapped
+// function directly. rootLstatFn / fileStatFn / fileWriteFn / fileCloseFn are
+// shared with artifact_bundle.go (same package).
+var (
+	jsonMarshal = json.Marshal
+	randRead    = rand.Read
+	rootLstatFn = (*os.Root).Lstat
+	fileStatFn  = (*os.File).Stat
+	fileWriteFn = (*os.File).Write
+	fileCloseFn = (*os.File).Close
+	readAllFn   = io.ReadAll
+)
+
 // This file adds the OCI registry source-type plumbing: the shared blob pull
 // (manifest + blob fetch, token auth, digest/posture/cache) plus the artifact
 // (packages) fetcher built on it. Per config-distribution-model §15 D8+D13 any
@@ -308,14 +328,14 @@ func readConfinedCacheBlob(root *os.Root, rel string, maxBytes int64) ([]byte, b
 		return nil, false
 	}
 	defer func() { _ = fh.Close() }()
-	fi, err := fh.Stat()
+	fi, err := fileStatFn(fh)
 	if err != nil {
 		return nil, false
 	}
 	if !fi.Mode().IsRegular() || !os.SameFile(li, fi) || fi.Size() > maxBytes {
 		return nil, false
 	}
-	data, err := io.ReadAll(io.LimitReader(fh, maxBytes+1))
+	data, err := readAllFn(io.LimitReader(fh, maxBytes+1))
 	if err != nil {
 		return nil, false
 	}
@@ -416,7 +436,7 @@ func writeOCITypeSidecar(digest, artifactType, mediaType string) error {
 	if !looksLikeSha256Digest(digest) {
 		return fmt.Errorf("refusing to cache oci type metadata under malformed digest %q", digest)
 	}
-	payload, err := json.Marshal(ociTypeSidecar{SchemaVersion: ociTypeSidecarSchemaVersion, ArtifactType: artifactType, MediaType: mediaType})
+	payload, err := jsonMarshal(ociTypeSidecar{SchemaVersion: ociTypeSidecarSchemaVersion, ArtifactType: artifactType, MediaType: mediaType})
 	if err != nil {
 		return fmt.Errorf("marshaling oci type sidecar: %w", err)
 	}
@@ -488,7 +508,7 @@ func writeConfinedPackagesCacheFile(relDir, name string, data []byte) error {
 	if err := root.MkdirAll(relDir, 0o755); err != nil {
 		return fmt.Errorf("creating package cache dir: %w", err)
 	}
-	if li, err := root.Lstat(relDir); err != nil {
+	if li, err := rootLstatFn(root, relDir); err != nil {
 		return fmt.Errorf("stat package cache dir: %w", err)
 	} else if li.Mode()&fs.ModeSymlink != 0 {
 		return fmt.Errorf("refusing to write through a symlinked package cache dir %q", relDir)
@@ -502,12 +522,12 @@ func writeConfinedPackagesCacheFile(relDir, name string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("creating package cache temp: %w", err)
 	}
-	if _, err := fh.Write(data); err != nil {
+	if _, err := fileWriteFn(fh, data); err != nil {
 		_ = fh.Close()
 		_ = root.Remove(tmpRel)
 		return fmt.Errorf("writing package cache temp: %w", err)
 	}
-	if err := fh.Close(); err != nil {
+	if err := fileCloseFn(fh); err != nil {
 		_ = root.Remove(tmpRel)
 		return fmt.Errorf("closing package cache temp: %w", err)
 	}
@@ -523,7 +543,7 @@ func writeConfinedPackagesCacheFile(relDir, name string, data []byte) error {
 // on a shared temp path.
 func randomTempName(base string) (string, error) {
 	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	if _, err := randRead(b[:]); err != nil {
 		return "", fmt.Errorf("generating package cache temp name: %w", err)
 	}
 	return "." + base + ".tmp-" + hex.EncodeToString(b[:]), nil

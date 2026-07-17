@@ -68,7 +68,7 @@ func PackTree(dirPath string, limits BundleLimits) (Bundle, []byte, error) {
 		return Bundle{}, nil, fmt.Errorf("opening resource tree %s: %w", dirPath, err)
 	}
 	defer func() { _ = root.Close() }()
-	rootInfo, err := root.Lstat(".")
+	rootInfo, err := rootLstatFn(root, ".")
 	if err != nil {
 		return Bundle{}, nil, fmt.Errorf("stat resource tree %s: %w", dirPath, err)
 	}
@@ -89,6 +89,33 @@ func PackTree(dirPath string, limits BundleLimits) (Bundle, []byte, error) {
 	return bundle, blob, nil
 }
 
+// tarGzWriter / tarGzGzip are the minimal tar/gzip writer surfaces tarGzBundle
+// uses, extracted behind seams so a test can inject a writer whose WriteHeader/
+// Write/Close (or the gzip constructor/Close) fails — the serialization error
+// legs a bytes.Buffer-backed real writer never triggers. *tar.Writer and
+// *gzip.Writer satisfy them; production behavior is unchanged.
+type tarGzWriter interface {
+	WriteHeader(*tar.Header) error
+	Write([]byte) (int, error)
+	Close() error
+}
+
+type tarGzGzip interface {
+	io.Writer
+	Close() error
+}
+
+var (
+	newGzipWriter = func(w io.Writer) (tarGzGzip, error) {
+		return gzip.NewWriterLevel(w, gzip.BestCompression)
+	}
+	newTarWriter = func(w io.Writer) tarGzWriter { return tar.NewWriter(w) }
+	// appendDigestQuery is a seam only so ociPushBlob's "resolved location fails
+	// to re-parse" leg is reachable; a URL produced by resolveOCILocation always
+	// re-parses, so the real implementation never errors on that path.
+	appendDigestQuery = appendDigestQueryImpl
+)
+
 // tarGzBundle serializes a normalized Bundle (already H1-validated, already
 // path-sorted by NormalizeBundle) into a deterministic `+tar+gzip` blob: a
 // fixed ModTime/Uid/Gid on every header and Entries' stable sort order mean
@@ -97,11 +124,11 @@ func PackTree(dirPath string, limits BundleLimits) (Bundle, []byte, error) {
 // timestamps.
 func tarGzBundle(b Bundle) ([]byte, error) {
 	var buf bytes.Buffer
-	gz, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	gz, err := newGzipWriter(&buf)
 	if err != nil {
 		return nil, fmt.Errorf("creating gzip writer: %w", err)
 	}
-	tw := tar.NewWriter(gz)
+	tw := newTarWriter(gz)
 	for _, e := range b.Entries {
 		hdr := &tar.Header{
 			Name: e.Path,
@@ -404,7 +431,7 @@ func ociOriginString(u *url.URL) string {
 // appendDigestQuery adds/overwrites the "digest" query parameter on rawURL,
 // preserving any existing query parameters (a blob-upload session's Location
 // commonly already carries a "_state" token).
-func appendDigestQuery(rawURL, digest string) (string, error) {
+func appendDigestQueryImpl(rawURL, digest string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return "", fmt.Errorf("parsing url %q: %w", rawURL, err)
@@ -494,7 +521,7 @@ func ociPushLive(ctx context.Context, ref ociRef, auth json.RawMessage, layerDat
 		Config:        ociManifestDescriptor{MediaType: ociEmptyConfigMediaType, Digest: configDigest, Size: int64(len(emptyConfig))},
 		Layers:        []ociManifestDescriptor{{MediaType: layerMediaType, Digest: layerDigest, Size: int64(len(layerData))}},
 	}
-	manifestBytes, err := json.Marshal(manifest)
+	manifestBytes, err := jsonMarshal(manifest)
 	if err != nil {
 		return ociPushed{}, fmt.Errorf("encoding manifest: %w", err)
 	}

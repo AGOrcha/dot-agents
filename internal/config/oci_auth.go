@@ -160,6 +160,18 @@ type credentialHelperResponse struct {
 // invocation without asserting on a real PATH lookup.
 var ociCredentialHelperRunner = runOCICredentialHelper
 
+// httpNewRequest and ociResolveCredentialHelper are test seams (defaulting to
+// the real stdlib / resolver). httpNewRequest exists only so exchangeBearerToken's
+// request-build error leg is reachable — http.NewRequestWithContext never fails
+// on the already-validated https realm URL. ociResolveCredentialHelper exists
+// only so resolveOCIAuthorizationHeader's "resolver returned an empty/partial
+// credential" defensive leg is reachable — the real resolvers always return a
+// token, a full username+secret pair, or an error, never a partial.
+var (
+	httpNewRequest             = http.NewRequestWithContext
+	ociResolveCredentialHelper = resolveCredentialHelperCredential
+)
+
 // resolveCredentialHelperCredential resolves the credential-helper
 // provider's secret by invoking cfg.Helper with the request JSON on stdin
 // and parsing its stdout as JSON. Both the argv (only "get", never the
@@ -173,7 +185,7 @@ func resolveCredentialHelperCredential(ctx context.Context, cfg ociAuthConfig, r
 	if cfg.Helper == "" {
 		return resolvedOCICredential{}, fmt.Errorf("oci credential-helper auth: helper is not set")
 	}
-	reqBody, err := json.Marshal(credentialHelperRequest{Registry: registry, Repository: repository})
+	reqBody, err := jsonMarshal(credentialHelperRequest{Registry: registry, Repository: repository})
 	if err != nil {
 		return resolvedOCICredential{}, fmt.Errorf("oci credential-helper auth: encoding request: %w", err)
 	}
@@ -460,7 +472,7 @@ func exchangeBearerToken(ctx context.Context, challenge ociAuthChallenge, cred r
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := httpNewRequest(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return "", fmt.Errorf("oci auth: building token endpoint request: %w", err)
 	}
@@ -528,7 +540,7 @@ func resolveOCIAuthorizationHeader(ctx context.Context, auth json.RawMessage, re
 	case ociAuthProviderBearer:
 		cred, err = resolveBearerCredential(cfg)
 	case ociAuthProviderCredentialHelper:
-		cred, err = resolveCredentialHelperCredential(ctx, cfg, registry, repository)
+		cred, err = ociResolveCredentialHelper(ctx, cfg, registry, repository)
 	default:
 		return "", fmt.Errorf("oci auth: unsupported provider %q (bearer/credential-helper only; oauth2/mtls are external-agent-sources)", cfg.Provider)
 	}
