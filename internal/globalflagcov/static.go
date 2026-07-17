@@ -70,6 +70,7 @@ func loadCommandPackages(absDir string) ([]*packages.Package, error) {
 		"./commands/internal/rules",
 		"./commands/internal/settings",
 		"./commands/workflow",
+		"./commands/worktree",
 	)
 	if err != nil {
 		return nil, err

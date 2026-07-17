@@ -12,6 +12,7 @@ import (
 	"github.com/AGOrcha/dot-agents/commands/internal/mcp"
 	"github.com/AGOrcha/dot-agents/commands/internal/rules"
 	"github.com/AGOrcha/dot-agents/commands/internal/settings"
+	"github.com/AGOrcha/dot-agents/commands/worktree"
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -220,6 +221,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewScoreCmd())
 	root.AddCommand(rootEvalCmd())
 	root.AddCommand(NewRunCmd())
+	root.AddCommand(worktree.NewCmd())
 
 	root.SetErr(os.Stderr)
 	root.SetOut(os.Stdout)
