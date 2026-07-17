@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -150,6 +151,333 @@ func TestMergeBackStaleBaseE2E(t *testing.T) {
 	}
 }
 
+// goCliAgentsRC is a minimal .agentsrc.json whose execution_profile routes the
+// go-cli app_type to a full execution shape (topology + lenses + graph backend).
+const goCliAgentsRC = `{
+  "execution_profile": {
+    "by_app_type": {
+      "go-cli": {
+        "topology": { "verifier_sequence": ["unit", "cli-runner"] },
+        "lenses": { "lens_set": ["architecture-standards", "adversarial"], "lens_concurrency": "gated" },
+        "graph_backend": "dotagents-builtin:graph/none@^1.0"
+      }
+    }
+  }
+}`
+
+// docsGoCliAgentsRC routes both go-cli and docs to distinct execution shapes so
+// a test can prove which app_type won resolution by the shape recorded.
+const docsGoCliAgentsRC = `{
+  "execution_profile": {
+    "by_app_type": {
+      "go-cli": {
+        "topology": { "verifier_sequence": ["unit", "cli-runner"] },
+        "lenses": { "lens_set": ["architecture-standards", "adversarial"], "lens_concurrency": "gated" },
+        "graph_backend": "dotagents-builtin:graph/none@^1.0"
+      },
+      "docs": {
+        "topology": { "verifier_sequence": ["docs-build"] },
+        "lenses": { "lens_set": ["doc-quality"], "lens_concurrency": "serial" },
+        "graph_backend": "dotagents-builtin:graph/none@^1.0"
+      }
+    }
+  }
+}`
+
+// tasksGoCliYAML is a canonical TASKS.yaml with a decoy task (docs) ahead of the
+// target (go-cli) so resolution must select by id, not by position.
+const tasksGoCliYAML = `schema_version: 1
+plan_id: plan-wt
+tasks:
+  - id: task-other
+    title: Other slice
+    app_type: docs
+  - id: task-go
+    title: Go slice
+    app_type: go-cli
+`
+
+// planGoCliYAML is a canonical PLAN.yaml whose default_app_type is go-cli.
+const planGoCliYAML = `id: plan-wt
+title: WT plan
+default_app_type: go-cli
+`
+
+// TestCreateResolvesAgentConfigE2E proves create loads the project's AgentsRC,
+// resolves the app_type's execution shape, and records it (plus app_type +
+// profile) onto the worktree's registry metadata, round-tripping via Get.
+func TestCreateResolvesAgentConfigE2E(t *testing.T) {
+	repoDir, base := initRepo(t)
+	setBranchRef(t, repoDir, "parent", base)
+	writeAgentsRC(t, repoDir, goCliAgentsRC)
+	t.Chdir(repoDir)
+
+	wtParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve wt parent: %v", err)
+	}
+	wtDir := filepath.Join(wtParent, "sub")
+
+	out := execWorktree(t, "create", "--name", "sub", "--path", wtDir,
+		"--base-branch", "parent", "--app-type", "go-cli", "--profile", "loop-worker")
+	for _, want := range []string{"go-cli", "loop-worker", "cli-runner", "gated"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("create output=%q, want to surface %q", out, want)
+		}
+	}
+
+	meta := getMetadata(t, repoDir, "sub")
+	if meta.AppType != "go-cli" || meta.Profile != "loop-worker" {
+		t.Fatalf("app_type/profile=%q/%q, want go-cli/loop-worker", meta.AppType, meta.Profile)
+	}
+	if !reflect.DeepEqual(meta.VerifierSequence, []string{"unit", "cli-runner"}) {
+		t.Fatalf("verifier_sequence=%v, want [unit cli-runner]", meta.VerifierSequence)
+	}
+	if !reflect.DeepEqual(meta.LensSet, []string{"architecture-standards", "adversarial"}) {
+		t.Fatalf("lens_set=%v, want [architecture-standards adversarial]", meta.LensSet)
+	}
+	if meta.LensConcurrency != "gated" {
+		t.Fatalf("lens_concurrency=%q, want gated", meta.LensConcurrency)
+	}
+	if meta.GraphBackend != "dotagents-builtin:graph/none@^1.0" {
+		t.Fatalf("graph_backend=%q, want dotagents-builtin:graph/none@^1.0", meta.GraphBackend)
+	}
+}
+
+// TestCreateUnknownAppTypeWarnsE2E proves an app_type with no execution_profile
+// entry warns loudly (a typo invoked directly must be visible) yet still records
+// app_type/profile with empty resolved fields and never errors.
+func TestCreateUnknownAppTypeWarnsE2E(t *testing.T) {
+	repoDir, base := initRepo(t)
+	setBranchRef(t, repoDir, "parent", base)
+	writeAgentsRC(t, repoDir, goCliAgentsRC) // execution_profile present, but not for this app_type
+	t.Chdir(repoDir)
+
+	wtParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve wt parent: %v", err)
+	}
+	wtDir := filepath.Join(wtParent, "sub")
+
+	out := execWorktree(t, "create", "--name", "sub", "--path", wtDir,
+		"--base-branch", "parent", "--app-type", "typo-cli", "--profile", "loop-worker")
+	if !strings.Contains(out, `warning: no execution_profile entry for app_type "typo-cli"`) {
+		t.Fatalf("create output=%q, want unknown-app_type warning", out)
+	}
+
+	meta := getMetadata(t, repoDir, "sub")
+	if meta.AppType != "typo-cli" || meta.Profile != "loop-worker" {
+		t.Fatalf("app_type/profile=%q/%q, want typo-cli/loop-worker recorded", meta.AppType, meta.Profile)
+	}
+	if len(meta.VerifierSequence) != 0 || len(meta.LensSet) != 0 || meta.LensConcurrency != "" || meta.GraphBackend != "" {
+		t.Fatalf("resolved fields should be empty for unknown app_type, got %+v", meta)
+	}
+}
+
+// TestCreateResolvesTaskAppTypeE2E covers acceptance: --plan P --task T where
+// TASKS.yaml task T has app_type=go-cli resolves go-cli and records the go-cli
+// execution shape (verifier_sequence/lens_set/graph_backend) into Metadata.
+// Profile defaults to loop-worker (no --profile passed).
+func TestCreateResolvesTaskAppTypeE2E(t *testing.T) {
+	repoDir, base := initRepo(t)
+	setBranchRef(t, repoDir, "parent", base)
+	writeAgentsRC(t, repoDir, goCliAgentsRC)
+	writeTasksYAML(t, repoDir, "plan-wt", tasksGoCliYAML)
+	t.Chdir(repoDir)
+
+	wtParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve wt parent: %v", err)
+	}
+	wtDir := filepath.Join(wtParent, "sub")
+
+	out := execWorktree(t, "create", "--name", "sub", "--path", wtDir,
+		"--base-branch", "parent", "--plan", "plan-wt", "--task", "task-go")
+	for _, want := range []string{"go-cli", "cli-runner", "gated"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("create output=%q, want to surface %q", out, want)
+		}
+	}
+
+	meta := getMetadata(t, repoDir, "sub")
+	if meta.AppType != "go-cli" {
+		t.Fatalf("app_type=%q, want go-cli resolved from task", meta.AppType)
+	}
+	if meta.Profile != "loop-worker" {
+		t.Fatalf("profile=%q, want loop-worker default", meta.Profile)
+	}
+	if !reflect.DeepEqual(meta.VerifierSequence, []string{"unit", "cli-runner"}) {
+		t.Fatalf("verifier_sequence=%v, want [unit cli-runner]", meta.VerifierSequence)
+	}
+	if !reflect.DeepEqual(meta.LensSet, []string{"architecture-standards", "adversarial"}) {
+		t.Fatalf("lens_set=%v, want [architecture-standards adversarial]", meta.LensSet)
+	}
+	if meta.LensConcurrency != "gated" {
+		t.Fatalf("lens_concurrency=%q, want gated", meta.LensConcurrency)
+	}
+	if meta.GraphBackend != "dotagents-builtin:graph/none@^1.0" {
+		t.Fatalf("graph_backend=%q, want dotagents-builtin:graph/none@^1.0", meta.GraphBackend)
+	}
+}
+
+// TestCreateAppTypeFlagOverridesTaskE2E covers acceptance: an explicit
+// --app-type wins over the --task's app_type. Task says go-cli, flag says docs,
+// so the docs execution shape is what gets recorded.
+func TestCreateAppTypeFlagOverridesTaskE2E(t *testing.T) {
+	repoDir, base := initRepo(t)
+	setBranchRef(t, repoDir, "parent", base)
+	writeAgentsRC(t, repoDir, docsGoCliAgentsRC)
+	writeTasksYAML(t, repoDir, "plan-wt", tasksGoCliYAML)
+	t.Chdir(repoDir)
+
+	wtParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve wt parent: %v", err)
+	}
+	wtDir := filepath.Join(wtParent, "sub")
+
+	execWorktree(t, "create", "--name", "sub", "--path", wtDir,
+		"--base-branch", "parent", "--app-type", "docs", "--plan", "plan-wt", "--task", "task-go")
+
+	meta := getMetadata(t, repoDir, "sub")
+	if meta.AppType != "docs" {
+		t.Fatalf("app_type=%q, want docs (explicit --app-type flag wins over task)", meta.AppType)
+	}
+	if !reflect.DeepEqual(meta.VerifierSequence, []string{"docs-build"}) {
+		t.Fatalf("verifier_sequence=%v, want [docs-build] (docs shape, not go-cli's)", meta.VerifierSequence)
+	}
+}
+
+// TestCreateResolvesPlanDefaultAppTypeE2E covers acceptance: --plan P with no
+// --task resolves app_type from PLAN.yaml default_app_type.
+func TestCreateResolvesPlanDefaultAppTypeE2E(t *testing.T) {
+	repoDir, base := initRepo(t)
+	setBranchRef(t, repoDir, "parent", base)
+	writeAgentsRC(t, repoDir, goCliAgentsRC)
+	writePlanYAML(t, repoDir, "plan-wt", planGoCliYAML)
+	t.Chdir(repoDir)
+
+	wtParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve wt parent: %v", err)
+	}
+	wtDir := filepath.Join(wtParent, "sub")
+
+	execWorktree(t, "create", "--name", "sub", "--path", wtDir,
+		"--base-branch", "parent", "--plan", "plan-wt")
+
+	meta := getMetadata(t, repoDir, "sub")
+	if meta.AppType != "go-cli" {
+		t.Fatalf("app_type=%q, want go-cli resolved from plan default_app_type", meta.AppType)
+	}
+	if !reflect.DeepEqual(meta.VerifierSequence, []string{"unit", "cli-runner"}) {
+		t.Fatalf("verifier_sequence=%v, want [unit cli-runner]", meta.VerifierSequence)
+	}
+}
+
+// TestCreateTaskWithoutPlanWarnsE2E covers acceptance: --task without --plan
+// cannot locate a TASKS.yaml, so it warns clearly that --plan is required and
+// proceeds with an empty resolved app_type (the no-app_type-resolved warning
+// then also fires). An explicit --profile override is recorded.
+func TestCreateTaskWithoutPlanWarnsE2E(t *testing.T) {
+	repoDir, base := initRepo(t)
+	setBranchRef(t, repoDir, "parent", base)
+	writeAgentsRC(t, repoDir, goCliAgentsRC)
+	t.Chdir(repoDir)
+
+	wtParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve wt parent: %v", err)
+	}
+	wtDir := filepath.Join(wtParent, "sub")
+
+	out := execWorktree(t, "create", "--name", "sub", "--path", wtDir,
+		"--base-branch", "parent", "--task", "task-go", "--profile", "my-worker")
+	if !strings.Contains(out, "--task") || !strings.Contains(out, "needs --plan") {
+		t.Fatalf("create output=%q, want a clear --plan-required warning", out)
+	}
+	if !strings.Contains(out, "warning: no app_type resolved") {
+		t.Fatalf("create output=%q, want no-app_type-resolved warning after fall-through", out)
+	}
+
+	meta := getMetadata(t, repoDir, "sub")
+	if meta.AppType != "" {
+		t.Fatalf("app_type=%q, want empty (task unresolvable without plan)", meta.AppType)
+	}
+	if meta.Profile != "my-worker" {
+		t.Fatalf("profile=%q, want my-worker (explicit --profile override)", meta.Profile)
+	}
+}
+
+// TestCreateNoAppTypeResolvedWarnsE2E covers acceptance: with no
+// --app-type/--plan/--task nothing resolves, the "no app_type resolved" warning
+// fires, the resolved agent-config fields stay empty (no error), and --profile
+// defaults to loop-worker.
+func TestCreateNoAppTypeResolvedWarnsE2E(t *testing.T) {
+	repoDir, base := initRepo(t)
+	setBranchRef(t, repoDir, "parent", base)
+	writeAgentsRC(t, repoDir, goCliAgentsRC)
+	t.Chdir(repoDir)
+
+	wtParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve wt parent: %v", err)
+	}
+	wtDir := filepath.Join(wtParent, "sub")
+
+	out := execWorktree(t, "create", "--name", "sub", "--path", wtDir, "--base-branch", "parent")
+	if !strings.Contains(out, "warning: no app_type resolved") {
+		t.Fatalf("create output=%q, want no-app_type-resolved warning", out)
+	}
+
+	meta := getMetadata(t, repoDir, "sub")
+	if meta.AppType != "" {
+		t.Fatalf("app_type=%q, want empty (nothing resolved)", meta.AppType)
+	}
+	if meta.Profile != "loop-worker" {
+		t.Fatalf("profile=%q, want loop-worker default", meta.Profile)
+	}
+	if len(meta.VerifierSequence) != 0 || len(meta.LensSet) != 0 || meta.LensConcurrency != "" || meta.GraphBackend != "" {
+		t.Fatalf("resolved fields should be empty, got %+v", meta)
+	}
+}
+
+// TestRenderCreateSurfacesAgentConfig covers requirement 4: the resolved config
+// appears in both the human render and the --json output.
+func TestRenderCreateSurfacesAgentConfig(t *testing.T) {
+	res := gitwt.CreateResult{
+		Base: plumbing.ZeroHash,
+		Metadata: gitwt.Metadata{
+			Name:             "sub",
+			AppType:          "go-cli",
+			Profile:          "loop-worker",
+			VerifierSequence: []string{"unit", "cli-runner"},
+			LensSet:          []string{"architecture-standards"},
+			LensConcurrency:  "gated",
+			GraphBackend:     "dotagents-builtin:graph/none@^1.0",
+		},
+	}
+	var human bytes.Buffer
+	if err := renderCreate(&human, false, res); err != nil {
+		t.Fatalf("renderCreate human: %v", err)
+	}
+	for _, want := range []string{"go-cli", "loop-worker", "cli-runner", "gated"} {
+		if !strings.Contains(human.String(), want) {
+			t.Errorf("human render missing %q: %s", want, human.String())
+		}
+	}
+	var js bytes.Buffer
+	if err := renderCreate(&js, true, res); err != nil {
+		t.Fatalf("renderCreate json: %v", err)
+	}
+	for _, want := range []string{`"app_type": "go-cli"`, `"profile": "loop-worker"`,
+		`"verifier_sequence"`, `"lens_concurrency": "gated"`, `"graph_backend"`} {
+		if !strings.Contains(js.String(), want) {
+			t.Errorf("json render missing %q: %s", want, js.String())
+		}
+	}
+}
+
 // --- helpers ---
 
 func initRepo(t *testing.T) (string, plumbing.Hash) {
@@ -263,4 +591,49 @@ func execWorktree(t *testing.T, args ...string) string {
 		t.Fatalf("execute %v: %v (out=%q)", args, err, buf.String())
 	}
 	return buf.String()
+}
+
+func writeAgentsRC(t *testing.T, repoDir, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repoDir, ".agentsrc.json"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write .agentsrc.json: %v", err)
+	}
+}
+
+func writeTasksYAML(t *testing.T, repoDir, plan, body string) {
+	t.Helper()
+	writePlanFile(t, repoDir, plan, "TASKS.yaml", body)
+}
+
+func writePlanYAML(t *testing.T, repoDir, plan, body string) {
+	t.Helper()
+	writePlanFile(t, repoDir, plan, "PLAN.yaml", body)
+}
+
+func writePlanFile(t *testing.T, repoDir, plan, name, body string) {
+	t.Helper()
+	dir := filepath.Join(repoDir, ".agents", "workflow", "plans", plan)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir plan dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+func getMetadata(t *testing.T, repoDir, name string) gitwt.Metadata {
+	t.Helper()
+	mgr, err := gitwt.NewManager(repoDir)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	reg, err := gitwt.NewRegistry(mgr, registryIdleTTL)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	meta, err := reg.Get(name)
+	if err != nil {
+		t.Fatalf("registry Get %q: %v", name, err)
+	}
+	return meta
 }

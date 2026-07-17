@@ -65,6 +65,26 @@ type Metadata struct {
 	// LastUsed drives the auto-prune-if-unchanged idle check; Touch re-stamps
 	// it whenever the worktree is worked in.
 	LastUsed time.Time `yaml:"last_used"`
+	// AppType is the app_type this worktree's delegated task runs under, as
+	// requested at create time. It is the routing key the resolved execution
+	// shape below was loaded from (empty when the worktree carries no app_type).
+	AppType string `yaml:"app_type,omitempty"`
+	// Profile is the free-form execution profile the task runs under (e.g.
+	// "loop-worker"), recorded verbatim from create.
+	Profile string `yaml:"profile,omitempty"`
+	// VerifierSequence is the app_type-routed ordered verifier-profile ids
+	// resolved from the project's execution_profile.by_app_type[AppType]
+	// topology. Empty when no profile entry resolved.
+	VerifierSequence []string `yaml:"verifier_sequence,omitempty"`
+	// LensSet is the resolved review-lens set for the app_type (from the
+	// profile's lenses facet). Empty when unresolved.
+	LensSet []string `yaml:"lens_set,omitempty"`
+	// LensConcurrency is how the lens set runs ("parallel"/"gated"/"tiered"),
+	// resolved from the profile's lenses facet. Empty when unresolved.
+	LensConcurrency string `yaml:"lens_concurrency,omitempty"`
+	// GraphBackend is the graph-backend adapter-ref the app_type profile
+	// selects. Empty when unresolved.
+	GraphBackend string `yaml:"graph_backend,omitempty"`
 }
 
 // roster is the on-disk shape of rosterFile: the set of worktree names the

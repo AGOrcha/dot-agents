@@ -19,6 +19,7 @@ import (
 	"github.com/go-git/go-git/v6"
 	"github.com/spf13/cobra"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/gitwt"
 )
 
@@ -56,6 +57,10 @@ func newCreateCmd() *cobra.Command {
 		baseBranch string
 		purpose    string
 		parentPR   int
+		appType    string
+		profile    string
+		plan       string
+		task       string
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -63,20 +68,40 @@ func newCreateCmd() *cobra.Command {
 		Long: "Forks a new branch+worktree named --name from --base-branch, records the\n" +
 			"base-branch tip as the worktree's immutable base ref, and registers the\n" +
 			"worktree metadata (purpose, parent PR). The recorded base is what\n" +
-			"`merge-back` reads later — it is never re-derived.",
+			"`merge-back` reads later — it is never re-derived.\n\n" +
+			"The recorded app_type is resolved task/plan-first: --app-type overrides,\n" +
+			"else --task's app_type (from the plan's TASKS.yaml), else --plan's\n" +
+			"default_app_type (from PLAN.yaml). The resolved app_type drives the\n" +
+			"execution_profile shape loaded from .agentsrc.json and recorded on the\n" +
+			"worktree.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			coord, err := openCoordinator()
 			if err != nil {
 				return err
 			}
-			res, err := coord.CreateSubBranch(gitwt.CreateOptions{
+			root, err := repoRoot()
+			if err != nil {
+				return err
+			}
+			resolvedAppType := resolveEffectiveAppType(cmd.ErrOrStderr(), root, appType, plan, task)
+			if resolvedAppType == "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning: no app_type resolved (pass --app-type, or --plan/--task with an app_type set) — recording worktree with no resolved agent config")
+			}
+			if profile == "" {
+				profile = "loop-worker"
+			}
+			opts := gitwt.CreateOptions{
 				Name:       name,
 				Path:       path,
 				BaseBranch: baseBranch,
 				Purpose:    purpose,
 				ParentPR:   parentPR,
-			})
+				AppType:    resolvedAppType,
+				Profile:    profile,
+			}
+			resolveAgentConfig(cmd.ErrOrStderr(), &opts)
+			res, err := coord.CreateSubBranch(opts)
 			if err != nil {
 				return fmt.Errorf("worktree create: %w", err)
 			}
@@ -88,6 +113,10 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&baseBranch, "base-branch", "", "Parent branch whose current tip is recorded as the base")
 	cmd.Flags().StringVar(&purpose, "purpose", "", "Free-form registry note (task/slice this worktree serves)")
 	cmd.Flags().IntVar(&parentPR, "parent-pr", 0, "Pull-request number this work feeds into")
+	cmd.Flags().StringVar(&appType, "app-type", "", "app_type whose execution_profile shape is loaded + recorded. If unset, resolved from --task's app_type then --plan's default_app_type. Pass this flag to override or set a specific one.")
+	cmd.Flags().StringVar(&plan, "plan", "", "resolve app_type (and record identity) from this canonical plan/task's metadata")
+	cmd.Flags().StringVar(&task, "task", "", "resolve app_type (and record identity) from this canonical plan/task's metadata")
+	cmd.Flags().StringVar(&profile, "profile", "", "delegate profile to record (default loop-worker); not a task/plan field")
 	mustMarkRequired(cmd, "name", "path", "base-branch")
 	return cmd
 }
@@ -163,17 +192,69 @@ func repoRoot() (string, error) {
 	return wt.Filesystem().Root(), nil
 }
 
+// resolveAgentConfig loads the project's AgentsRC and records the app_type's
+// execution shape onto opts so the worktree self-describes what it runs under.
+// It reuses internal/config's resolution wholesale and is deliberately graceful:
+//
+//   - A truly-empty AppType is a silent no-op (execution_profile is optional).
+//   - Any other failure to resolve — rc load error, nil ExecutionProfile, or no
+//     by_app_type entry for AppType — leaves the resolved fields empty and emits
+//     a warning to warn, so a typo'd app_type invoked directly (not via the
+//     validating fanout orchestrator) is visible rather than a silent empty
+//     config. AppType/Profile are still recorded either way.
+func resolveAgentConfig(warn io.Writer, opts *gitwt.CreateOptions) {
+	if opts.AppType == "" {
+		return
+	}
+	prof, ok := loadAppTypeProfile(opts.AppType)
+	if !ok {
+		fmt.Fprintf(warn, "warning: no execution_profile entry for app_type %q — recording worktree with no resolved agent config\n", opts.AppType)
+		return
+	}
+	opts.VerifierSequence = prof.Topology.VerifierSequence
+	opts.LensSet = prof.Lenses.LensSet
+	opts.LensConcurrency = prof.Lenses.LensConcurrency
+	opts.GraphBackend = prof.GraphBackendRef()
+}
+
+// loadAppTypeProfile resolves the project's execution_profile.by_app_type entry
+// for appType, reporting ok=false when the repo, AgentsRC, or a by_app_type
+// entry cannot be resolved. It never errors: an unconfigured profile is normal.
+func loadAppTypeProfile(appType string) (config.AppTypeProfile, bool) {
+	root, err := repoRoot()
+	if err != nil {
+		return config.AppTypeProfile{}, false
+	}
+	rc, err := config.LoadAgentsRC(root)
+	if err != nil || rc.ExecutionProfile == nil || rc.ExecutionProfile.ByAppType == nil {
+		return config.AppTypeProfile{}, false
+	}
+	prof, ok := rc.ExecutionProfile.ByAppType[appType]
+	return prof, ok
+}
+
 // renderCreate writes the create outcome as human text or JSON.
 func renderCreate(out io.Writer, asJSON bool, res gitwt.CreateResult) error {
 	if asJSON {
 		return writeJSON(out, map[string]any{
-			"name":      res.Metadata.Name,
-			"base":      res.Base.String(),
-			"purpose":   res.Metadata.Purpose,
-			"parent_pr": res.Metadata.ParentPR,
+			"name":              res.Metadata.Name,
+			"base":              res.Base.String(),
+			"purpose":           res.Metadata.Purpose,
+			"parent_pr":         res.Metadata.ParentPR,
+			"app_type":          res.Metadata.AppType,
+			"profile":           res.Metadata.Profile,
+			"verifier_sequence": res.Metadata.VerifierSequence,
+			"lens_set":          res.Metadata.LensSet,
+			"lens_concurrency":  res.Metadata.LensConcurrency,
+			"graph_backend":     res.Metadata.GraphBackend,
 		})
 	}
 	fmt.Fprintf(out, "worktree create: %q created on recorded base %s\n", res.Metadata.Name, res.Base)
+	if res.Metadata.AppType != "" {
+		fmt.Fprintf(out, "  agent config: app_type=%s profile=%s verifier_sequence=%v lens_set=%v lens_concurrency=%s graph_backend=%s\n",
+			res.Metadata.AppType, res.Metadata.Profile, res.Metadata.VerifierSequence,
+			res.Metadata.LensSet, res.Metadata.LensConcurrency, res.Metadata.GraphBackend)
+	}
 	return nil
 }
 
