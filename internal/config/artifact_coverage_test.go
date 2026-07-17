@@ -147,48 +147,50 @@ func TestArtCovWriteBundleTreeErrors(t *testing.T) {
 	})
 }
 
-// TestArtCovPublishStagedEntry drives publishStagedEntry directly for the two
-// rename-failure branches: a concurrent store entry that fails verification is
-// a hard error, and any other rename failure is surfaced.
-func TestArtCovPublishStagedEntry(t *testing.T) {
+// artCovMkdirWrite creates dir (with parents) and writes name inside it, failing
+// the test on any setup error — collapsing the repetitive MkdirAll/WriteFile guard
+// pairs so a test body carries only its assertion logic.
+func artCovMkdirWrite(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestArtCovPublishStagedEntry_ConcurrentEntryFailsVerification: a concurrent
+// store entry that fails verification is a hard error (hit=false).
+func TestArtCovPublishStagedEntry_ConcurrentEntryFailsVerification(t *testing.T) {
 	t.Parallel()
-	t.Run("concurrent-entry-fails-verification", func(t *testing.T) {
-		t.Parallel()
-		home := t.TempDir()
-		storePath := filepath.Join(home, "store")
-		if err := os.MkdirAll(storePath, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(storePath, "f"), []byte("wrong"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		staging := filepath.Join(home, "staging")
-		if err := os.MkdirAll(staging, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(staging, "f"), []byte("right"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		hit, err := publishStagedEntry(staging, storePath, "sha256:"+strings.Repeat("0", 64))
-		if err == nil {
-			t.Fatal("expected a hard error when a concurrent entry fails verification")
-		}
-		if hit {
-			t.Fatal("expected hit=false on a verification failure")
-		}
-	})
-	t.Run("rename-failure-no-existing-entry", func(t *testing.T) {
-		t.Parallel()
-		home := t.TempDir()
-		target := filepath.Join(home, "missing-parent", "target")
-		hit, err := publishStagedEntry(filepath.Join(home, "no-such-staging"), target, "sha256:x")
-		if err == nil {
-			t.Fatal("expected a publish error when staging rename fails and no entry exists")
-		}
-		if hit {
-			t.Fatal("expected hit=false on a plain rename failure")
-		}
-	})
+	home := t.TempDir()
+	storePath := filepath.Join(home, "store")
+	artCovMkdirWrite(t, storePath, "f", "wrong")
+	staging := filepath.Join(home, "staging")
+	artCovMkdirWrite(t, staging, "f", "right")
+	hit, err := publishStagedEntry(staging, storePath, "sha256:"+strings.Repeat("0", 64))
+	if err == nil {
+		t.Fatal("expected a hard error when a concurrent entry fails verification")
+	}
+	if hit {
+		t.Fatal("expected hit=false on a verification failure")
+	}
+}
+
+// TestArtCovPublishStagedEntry_RenameFailureNoEntry: a plain rename failure with
+// no pre-existing store entry is surfaced (hit=false).
+func TestArtCovPublishStagedEntry_RenameFailureNoEntry(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	target := filepath.Join(home, "missing-parent", "target")
+	hit, err := publishStagedEntry(filepath.Join(home, "no-such-staging"), target, "sha256:x")
+	if err == nil {
+		t.Fatal("expected a publish error when staging rename fails and no entry exists")
+	}
+	if hit {
+		t.Fatal("expected hit=false on a plain rename failure")
+	}
 }
 
 // TestArtCovStoreContentDigestWalkError covers the exported StoreContentDigest
@@ -263,46 +265,44 @@ func TestArtCovLiveArtifactDigestsUnboundProject(t *testing.T) {
 
 // TestArtCovGCReadDirAndNonDirEntry covers GCOrphanedArtifactStore's read error
 // (store root is a regular file) and its non-directory-entry skip.
-func TestArtCovGCReadDirAndNonDirEntry(t *testing.T) {
+func TestArtCovGCReadDirError_RootIsFile(t *testing.T) {
 	t.Parallel()
-	t.Run("read-error-root-is-file", func(t *testing.T) {
-		t.Parallel()
-		if runtime.GOOS == "windows" {
-			t.Skip("os.ReadDir on a regular file does not surface an ENOTDIR-style error on Windows; the branch runs on unix legs")
-		}
-		home := t.TempDir()
-		root := ArtifactStoreRoot(home, "skills")
-		if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(root, []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := GCOrphanedArtifactStore(home, "skills", map[string]bool{}); err == nil {
-			t.Fatal("expected a read error when the store root is a regular file")
-		}
-	})
-	t.Run("non-directory-entry-skipped", func(t *testing.T) {
-		t.Parallel()
-		home := t.TempDir()
-		root := ArtifactStoreRoot(home, "skills")
-		if err := os.MkdirAll(root, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(root, "stray-file"), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		removed, err := GCOrphanedArtifactStore(home, "skills", map[string]bool{})
-		if err != nil {
-			t.Fatalf("GC: %v", err)
-		}
-		if len(removed) != 0 {
-			t.Fatalf("expected nothing removed (only a stray file present), got %v", removed)
-		}
-		if _, err := os.Stat(filepath.Join(root, "stray-file")); err != nil {
-			t.Fatalf("expected the stray file to survive GC, got %v", err)
-		}
-	})
+	if runtime.GOOS == "windows" {
+		t.Skip("os.ReadDir on a regular file does not surface an ENOTDIR-style error on Windows; the branch runs on unix legs")
+	}
+	home := t.TempDir()
+	root := ArtifactStoreRoot(home, "skills")
+	if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GCOrphanedArtifactStore(home, "skills", map[string]bool{}); err == nil {
+		t.Fatal("expected a read error when the store root is a regular file")
+	}
+}
+
+func TestArtCovGCNonDirEntrySkipped(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	root := ArtifactStoreRoot(home, "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "stray-file"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := GCOrphanedArtifactStore(home, "skills", map[string]bool{})
+	if err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("expected nothing removed (only a stray file present), got %v", removed)
+	}
+	if _, err := os.Stat(filepath.Join(root, "stray-file")); err != nil {
+		t.Fatalf("expected the stray file to survive GC, got %v", err)
+	}
 }
 
 // artCovRawBundle assembles a Bundle from explicit raw entries (bypassing
@@ -346,75 +346,82 @@ func TestArtCovCheckEntryKindAndTarType(t *testing.T) {
 // WriteFile into a read-only staged dir, storeContentDigest's ReadFile of an
 // unreadable store file, and GC's RemoveAll of an orphan under a read-only
 // root. These are skipped for root, which bypasses DAC permission checks.
-func TestArtCovMaterializePermissionErrors(t *testing.T) {
+// artCovSkipWithoutPosixPerms skips a test whose fault injection relies on DAC
+// permission enforcement — unavailable on Windows (chmod is advisory) and bypassed
+// for root. The error paths these tests reach run on the non-root unix CI legs, so
+// merged coverage still counts them.
+func artCovSkipWithoutPosixPerms(t *testing.T) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based permission enforcement is POSIX-specific; the error paths run on unix legs")
 	}
 	if os.Geteuid() == 0 {
 		t.Skip("permission-denied branches are not enforced for root")
 	}
+}
 
-	t.Run("mkdir-store-root", func(t *testing.T) {
-		home := t.TempDir()
-		artifacts := filepath.Join(home, "cache", "artifacts")
-		if err := os.MkdirAll(artifacts, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chmod(artifacts, 0o500); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(artifacts, 0o755) })
-		bundle := testBundle(t, map[string]string{"SKILL.md": "x\n"})
-		if _, _, _, err := MaterializeToStore(home, "skills", bundle); err == nil {
-			t.Fatal("expected MkdirAll of the store root to fail under a read-only parent")
-		}
-	})
+// artCovChmodRestore chmods path to mode and restores it to 0o755 on cleanup.
+func artCovChmodRestore(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o755) })
+}
 
-	t.Run("writefile-into-readonly-staged-dir", func(t *testing.T) {
-		home := t.TempDir()
-		// A dir entry with no write bit, then a file nested under it: staging the
-		// file's WriteFile is refused by the read-only staged directory.
-		bundle := artCovRawBundle(t,
-			RawBundleEntry{Path: "d", Kind: rawKindDir, Mode: 0o500},
-			RawBundleEntry{Path: "d/f", Kind: rawKindFile, Mode: 0o644, Size: 1, Data: []byte("x")},
-		)
-		if _, _, _, err := MaterializeToStore(home, "skills", bundle); err == nil {
-			t.Fatal("expected WriteFile into a read-only staged dir to fail")
-		}
-	})
+func TestArtCovMaterializePermissionErrors_MkdirStoreRoot(t *testing.T) {
+	artCovSkipWithoutPosixPerms(t)
+	home := t.TempDir()
+	artifacts := filepath.Join(home, "cache", "artifacts")
+	if err := os.MkdirAll(artifacts, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	artCovChmodRestore(t, artifacts, 0o500)
+	bundle := testBundle(t, map[string]string{"SKILL.md": "x\n"})
+	if _, _, _, err := MaterializeToStore(home, "skills", bundle); err == nil {
+		t.Fatal("expected MkdirAll of the store root to fail under a read-only parent")
+	}
+}
 
-	t.Run("storecontentdigest-unreadable-file", func(t *testing.T) {
-		home := t.TempDir()
-		bundle := testBundle(t, map[string]string{"SKILL.md": "x\n"})
-		storePath, _, _, err := MaterializeToStore(home, "skills", bundle)
-		if err != nil {
-			t.Fatalf("materialize: %v", err)
-		}
-		unreadable := filepath.Join(storePath, "SKILL.md")
-		if err := os.Chmod(unreadable, 0o000); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(unreadable, 0o644) })
-		if _, err := StoreContentDigest(storePath); err == nil {
-			t.Fatal("expected a ReadFile error walking an unreadable store file")
-		}
-	})
+func TestArtCovMaterializePermissionErrors_WriteFileReadonlyStagedDir(t *testing.T) {
+	artCovSkipWithoutPosixPerms(t)
+	home := t.TempDir()
+	// A dir entry with no write bit, then a file nested under it: staging the
+	// file's WriteFile is refused by the read-only staged directory.
+	bundle := artCovRawBundle(t,
+		RawBundleEntry{Path: "d", Kind: rawKindDir, Mode: 0o500},
+		RawBundleEntry{Path: "d/f", Kind: rawKindFile, Mode: 0o644, Size: 1, Data: []byte("x")},
+	)
+	if _, _, _, err := MaterializeToStore(home, "skills", bundle); err == nil {
+		t.Fatal("expected WriteFile into a read-only staged dir to fail")
+	}
+}
 
-	t.Run("gc-removeall-under-readonly-root", func(t *testing.T) {
-		home := t.TempDir()
-		bundle := testBundle(t, map[string]string{"SKILL.md": "orphan\n"})
-		if _, _, _, err := MaterializeToStore(home, "skills", bundle); err != nil {
-			t.Fatalf("materialize orphan: %v", err)
-		}
-		root := ArtifactStoreRoot(home, "skills")
-		if err := os.Chmod(root, 0o500); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
-		if _, err := GCOrphanedArtifactStore(home, "skills", map[string]bool{}); err == nil {
-			t.Fatal("expected RemoveAll of an orphan under a read-only root to fail")
-		}
-	})
+func TestArtCovMaterializePermissionErrors_StoreContentDigestUnreadableFile(t *testing.T) {
+	artCovSkipWithoutPosixPerms(t)
+	home := t.TempDir()
+	bundle := testBundle(t, map[string]string{"SKILL.md": "x\n"})
+	storePath, _, _, err := MaterializeToStore(home, "skills", bundle)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	artCovChmodRestore(t, filepath.Join(storePath, "SKILL.md"), 0o000)
+	if _, err := StoreContentDigest(storePath); err == nil {
+		t.Fatal("expected a ReadFile error walking an unreadable store file")
+	}
+}
+
+func TestArtCovMaterializePermissionErrors_GCRemoveAllReadonlyRoot(t *testing.T) {
+	artCovSkipWithoutPosixPerms(t)
+	home := t.TempDir()
+	bundle := testBundle(t, map[string]string{"SKILL.md": "orphan\n"})
+	if _, _, _, err := MaterializeToStore(home, "skills", bundle); err != nil {
+		t.Fatalf("materialize orphan: %v", err)
+	}
+	artCovChmodRestore(t, ArtifactStoreRoot(home, "skills"), 0o500)
+	if _, err := GCOrphanedArtifactStore(home, "skills", map[string]bool{}); err == nil {
+		t.Fatal("expected RemoveAll of an orphan under a read-only root to fail")
+	}
 }
 
 // TestArtCovLocalTreeRequiredPostureFails covers fetchTreeBundle's signing-

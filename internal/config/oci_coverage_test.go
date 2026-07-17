@@ -269,52 +269,62 @@ func (r *ociCovFaultRegistry) handle(w http.ResponseWriter, req *http.Request) {
 	path := strings.TrimPrefix(req.URL.Path, "/v2/")
 	switch {
 	case strings.HasSuffix(path, "/blobs/uploads/") && req.Method == http.MethodPost:
-		r.uploads++
-		if r.postStatus != 0 {
-			w.WriteHeader(r.postStatus)
-			return
-		}
-		if !r.omitLocation {
-			w.Header().Set("Location", fmt.Sprintf("/v2/%suploads/sess-%d", strings.TrimSuffix(path, "uploads/"), r.uploads))
-		}
-		w.WriteHeader(http.StatusAccepted)
+		r.handleUploadPost(w, path)
 	case strings.Contains(path, "/blobs/uploads/") && req.Method == http.MethodPut:
-		r.blobPutCount++
-		if r.hijackBlobPut {
-			ociCovResetConn(w)
-			return
-		}
-		if r.blobPutStatus != 0 || (r.failSecondBlobPut && r.blobPutCount == 2) {
-			st := r.blobPutStatus
-			if st == 0 {
-				st = http.StatusInternalServerError
-			}
-			w.WriteHeader(st)
-			return
-		}
-		digest := req.URL.Query().Get("digest")
-		body := ociCovReadAll(req)
-		r.blobs[digest] = body
-		w.WriteHeader(http.StatusCreated)
+		r.handleBlobPut(w, req)
 	case strings.Contains(path, "/blobs/") && req.Method == http.MethodGet:
 		r.handleBlobGet(w, path)
 	case strings.Contains(path, "/manifests/") && req.Method == http.MethodPut:
-		if r.hijackManifestPut {
-			ociCovResetConn(w)
-			return
-		}
-		if r.manifestPutStatus != 0 {
-			w.WriteHeader(r.manifestPutStatus)
-			return
-		}
-		ref := path[strings.LastIndex(path, "/manifests/")+len("/manifests/"):]
-		r.manifests[ref] = ociCovReadAll(req)
-		w.WriteHeader(http.StatusCreated)
+		r.handleManifestPut(w, req, path)
 	case strings.Contains(path, "/manifests/") && req.Method == http.MethodGet:
 		r.handleManifestGet(w)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+func (r *ociCovFaultRegistry) handleUploadPost(w http.ResponseWriter, path string) {
+	r.uploads++
+	if r.postStatus != 0 {
+		w.WriteHeader(r.postStatus)
+		return
+	}
+	if !r.omitLocation {
+		w.Header().Set("Location", fmt.Sprintf("/v2/%suploads/sess-%d", strings.TrimSuffix(path, "uploads/"), r.uploads))
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (r *ociCovFaultRegistry) handleBlobPut(w http.ResponseWriter, req *http.Request) {
+	r.blobPutCount++
+	if r.hijackBlobPut {
+		ociCovResetConn(w)
+		return
+	}
+	if r.blobPutStatus != 0 || (r.failSecondBlobPut && r.blobPutCount == 2) {
+		st := r.blobPutStatus
+		if st == 0 {
+			st = http.StatusInternalServerError
+		}
+		w.WriteHeader(st)
+		return
+	}
+	r.blobs[req.URL.Query().Get("digest")] = ociCovReadAll(req)
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (r *ociCovFaultRegistry) handleManifestPut(w http.ResponseWriter, req *http.Request, path string) {
+	if r.hijackManifestPut {
+		ociCovResetConn(w)
+		return
+	}
+	if r.manifestPutStatus != 0 {
+		w.WriteHeader(r.manifestPutStatus)
+		return
+	}
+	ref := path[strings.LastIndex(path, "/manifests/")+len("/manifests/"):]
+	r.manifests[ref] = ociCovReadAll(req)
+	w.WriteHeader(http.StatusCreated)
 }
 
 func (r *ociCovFaultRegistry) handleManifestGet(w http.ResponseWriter) {
