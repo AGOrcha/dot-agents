@@ -27,6 +27,30 @@ current bundle schema until native named stage references are materialized;
 it is not permission for a typed stage to load the legacy loop-worker
 instructions.
 
+## Isolated worktree per delegated slice
+
+Each delegated slice runs in its own managed git worktree so concurrent
+workers never cross-stage through a shared index and every slice records the
+exact parent tip it forked from. Provision it with `da worktree` — never raw
+`git worktree add` / `git branch`, and never re-derive the fork point with
+`git merge-base` (the recorded base is authoritative):
+
+```bash
+da worktree create \
+  --name <slice-name> \                    # [a-zA-Z0-9-]+ — derive from the task-id
+  --path .agents/worktrees/<slice-name> \  # directory for the new linked worktree
+  --base-branch <parent-branch> \          # its CURRENT tip is recorded as the base
+  --purpose "<plan-id>/<task-id>" \        # free-form registry note
+  --parent-pr <n>                          # optional: PR this slice feeds into
+```
+
+`create` forks `<slice-name>` off `<parent-branch>`, checks it out at `--path`
+with its own isolated index, and records the parent tip as the slice's
+immutable base ref. Pass that path to the worker (in the `--prompt` below and
+the TASKS.yaml `notes`) so it implements inside the isolated worktree; the
+parent's `da worktree merge-back` step (see `staged-runtime.md` § Parent gate)
+later reads that recorded base, so no manual branch/base bookkeeping is needed.
+
 ## Fanout command
 
 ```bash

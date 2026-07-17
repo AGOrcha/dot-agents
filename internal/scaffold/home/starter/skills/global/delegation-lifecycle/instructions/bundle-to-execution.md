@@ -31,11 +31,28 @@ Before touching code, validate the bundle's assumptions against current HEAD —
 
 3. **Premise check:** if the bundle's `feedback_goal` rests on a premise (e.g. "dedup these duplicates"), confirm the premise still holds. If not, escalate; do not silently expand scope.
 
-## Multi-worktree discipline
+## Isolated worktree per delegated slice
 
-If the bundle directs you to work in a worktree (or your project uses `.agents/worktrees/<name>` / `.claude/worktrees/<name>`), **never `cd` to the worktree** for git commands. Always use `git -C /absolute/path/to/worktree <subcommand>`. A single `cd` persists `pwd` across subsequent Bash calls and silently lands branches, commits, and pushes in the wrong worktree.
+The orchestrator provisions each delegated slice as its own managed worktree
+with `da worktree create` — never raw `git worktree add` / `git branch`, and
+never `git merge-base`:
 
-For build/test commands that genuinely need cwd inside a worktree, use a subshell: `(cd "$WORKTREE" && go test ./...)` — the parentheses prevent pwd leak.
+```bash
+da worktree create \
+  --name <slice-name> \                    # [a-zA-Z0-9-]+ — derive from the task-id
+  --path .agents/worktrees/<slice-name> \  # directory for the new linked worktree
+  --base-branch <parent-branch> \          # its CURRENT tip is recorded as the base
+  --purpose "<plan-id>/<task-id>"          # free-form registry note (optional --parent-pr <n>)
+```
+
+This forks the slice branch, checks it out at `--path` with an **isolated
+index**, and records the parent tip as the slice's immutable base — so
+concurrent workers cannot cross-stage and the merge-back boundary is fixed at
+create time, not re-derived later. The worker's cwd is that worktree, so
+`git status` / commits already scope to the slice branch. If a single session
+ever touches more than one worktree, use `git -C /abs/path <cmd>` and run
+build/test in a subshell (`(cd "$WORKTREE" && go test ./...)`) so a stray `cd`
+never leaks `pwd` into a sibling worktree.
 
 ## Execution checklist (worker)
 
@@ -47,6 +64,11 @@ For build/test commands that genuinely need cwd inside a worktree, use a subshel
    - `da workflow verify record` (outcome + summary)
    - `da workflow checkpoint` (iteration message + verification status)
    - `da workflow merge-back --task <task-id> --summary "..." --verification-status pass --commit-state`
+   Because you are inside the isolated worktree, any workflow-state commit uses
+   `da workflow commit` (deterministic scoped path set — never `git add -A`);
+   once `commit-2-cli-scoped-mode` ships this becomes `da workflow commit
+   --scope task`. You never merge the slice branch yourself — the parent does
+   that via `da worktree merge-back` after closeout review.
    Do **not** run `workflow advance` yourself — that is parent-only for direct work. Delegated work gets advanced by `workflow delegation closeout` on the parent's side.
 
 ## Worker self-gate (before push / merge-back)
@@ -107,7 +129,13 @@ If no verifier_profile is registered (fallback mode), the worker owns the readin
 
 ## Parent (after merge-back)
 
-The parent reviews the merge-back artifact, optionally runs `workflow delegation gate` for an evidence-based recommendation, then runs `workflow delegation closeout --decision accept|reject|escalate`. Closeout auto-advances task status — the parent does NOT also call `workflow advance` for delegated work.
+The parent reviews the merge-back artifact, optionally runs `workflow delegation gate` for an evidence-based recommendation, then integrates the slice branch into its parent using the recorded base — never raw `git merge` / `git merge-base`:
+
+```bash
+da worktree merge-back --name <slice-name> --onto <parent-branch>
+```
+
+`merge-back` reads the base recorded at `create` time and fails loudly (`ErrStaleBase`) if the parent advanced or was force-pushed, then verifies the slice HEAD did not drift underneath. After a clean integration the parent runs `workflow delegation closeout --decision accept|reject|escalate`. Closeout auto-advances task status — the parent does NOT also call `workflow advance` for delegated work.
 
 See `instructions/workflow.md` for full command examples.
 

@@ -13,6 +13,12 @@ when one is configured.
 - Load `.agents/prompts/impl-agent.project.md`.
 - Run as a dedicated subagent session (cheaper agent).
 - Implement only inside bundle `write_scope` unless the bundle explicitly widens scope.
+- The slice runs inside the `da worktree create`-provisioned linked worktree
+  (see `fanout.md` § Isolated worktree per delegated slice): its cwd is that
+  worktree, with an isolated index, so its commits land only on the slice
+  branch. Commit workflow-state with `da workflow commit` (deterministic scoped
+  path set — never `git add -A`); once `commit-2-cli-scoped-mode` ships, this
+  becomes `da workflow commit --scope task`.
 - Write `.agents/active/verification/<task_id>/impl-handoff.yaml` with:
   - `task_id`, `commit_sha`, `write_scope_touched`, `ready_for_verification`
   - `tests_unchanged_justified` when applicable
@@ -37,13 +43,24 @@ when one is configured.
 - `cross-harness-adversarial-reviewer` is not like the other three: still spawn it on every host, but it degrades to a documented non-blocking skip (its own AGENT.md `## Graceful skip` section) when no alternate agent harness — codex/cursor/opencode/copilot — is installed, returning `verdict: pass ... [SKIPPED: no alternate harness]` instead of a real cross-engine pass. Record that verdict as evidence for the lens, not as a missing lens.
 - Distinguish two different "skip" reasons; do not conflate them. (a) **Not wired up**: `da workflow resolve-prompt --kind reviewer --slug <lens>` reports `matched: false` (no `stage_profiles.reviewer.<lens>` entry in the effective config) — a fanout-configuration gap, not a reviewer verdict; do not spawn that lens, fix the missing profile entry instead of proceeding. (b) **Wired up, nothing to route to**: the profile is `matched: true` but `cross-harness-adversarial-reviewer`'s own alternate-harness probe finds nothing — spawn it as normal and accept the `[SKIPPED: no alternate harness]` verdict (previous bullet) as that lens's result.
 - Persist decision: `da workflow verify record --kind review`.
-- Write merge-back: `da workflow merge-back ...`
+- Write the workflow merge-back artifact: `da workflow merge-back ...` (this
+  records the merge-back doc + delegation state; it does NOT integrate git —
+  the parent's `da worktree merge-back` below does that).
 - Produce `accept`, `reject`, or `escalate`, then stop.
 
 ## Parent gate
 
 - Read review decision, verifier artifacts, and merge-back.
 - If evidence is not acceptable, fail the gate before closeout.
+- On accept, integrate the slice branch into its parent using the recorded
+  base — never raw `git merge` / `git merge-base`:
+  ```bash
+  da worktree merge-back --name <slice-name> --onto <parent-branch>
+  ```
+  `merge-back` reads the recorded base and fails loudly (`ErrStaleBase`) if the
+  parent advanced or was force-pushed since `create`, then verifies the slice
+  HEAD did not drift underneath — so a stale-base merge is caught, not silently
+  rebased onto the wrong commit.
 - Run: `da workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept|reject` — Accepted delegation closeout completes the delegated task by setting the canonical task to `completed` (see `commands/workflow/delegation.go` `applyCloseoutDecisionToTasks`); do not also call `workflow advance`. Advancement remains for direct, non-delegated work.
 - After acceptance: archival, cleanup, and continuation logic.
 - If review exposes unresolved planning/architecture questions, pause and do not auto-continue.

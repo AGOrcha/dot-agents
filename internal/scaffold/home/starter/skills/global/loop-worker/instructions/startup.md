@@ -41,6 +41,15 @@ If the task is already `completed`, stop — do not implement a completed task.
 git status --short
 ```
 
+Your cwd is the isolated worktree the orchestrator provisioned with
+`da worktree create` (managed sub-branch + recorded base, its own index), so
+`git status` already scopes to your slice branch. Do NOT create or merge
+worktrees/branches yourself (no `git worktree` / `git branch` / `git merge-base`):
+the parent integrates your slice with `da worktree merge-back` after reviewing
+your merge-back artifact. Commit workflow-state with `da workflow commit`
+(scoped path set, never `git add -A`; becomes `da workflow commit --scope task`
+once `commit-2-cli-scoped-mode` ships).
+
 If uncommitted changes from a prior iteration exist:
 - If they belong to your write_scope: review, stage, and commit them before starting
 - If they belong outside your write_scope: do not touch them; note in your iteration log
