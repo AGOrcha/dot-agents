@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -114,6 +115,42 @@ func TestRegistryRoundTrip(t *testing.T) {
 	}
 	if reread, _ := reg.Get("feat"); !reread.LastUsed.Equal(later) {
 		t.Fatalf("persisted last-used = %s, want %s", reread.LastUsed, later)
+	}
+}
+
+// TestRegistryRoundTripAgentConfig proves the resolved agent-config fields
+// (app_type, profile, and the app_type-routed execution shape) persist through
+// Create and reproduce exactly on Get.
+func TestRegistryRoundTripAgentConfig(t *testing.T) {
+	f := newFixture(t)
+	created := time.Date(2026, 7, 16, 9, 0, 0, 0, time.UTC)
+	reg := newRegistry(t, f, time.Hour, created)
+	addBranch(t, f, "feat")
+
+	in := Metadata{
+		Purpose:          "impl slice",
+		AppType:          "go-cli",
+		Profile:          "loop-worker",
+		VerifierSequence: []string{"unit", "cli-runner"},
+		LensSet:          []string{"architecture-standards", "adversarial"},
+		LensConcurrency:  "gated",
+		GraphBackend:     "dotagents-builtin:graph/none@^1.0",
+	}
+	if _, err := reg.Create("feat", in); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := reg.Get("feat")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.AppType != in.AppType || got.Profile != in.Profile ||
+		got.LensConcurrency != in.LensConcurrency || got.GraphBackend != in.GraphBackend {
+		t.Fatalf("scalar agent-config fields did not round-trip: got %+v", got)
+	}
+	if !reflect.DeepEqual(got.VerifierSequence, in.VerifierSequence) ||
+		!reflect.DeepEqual(got.LensSet, in.LensSet) {
+		t.Fatalf("slice agent-config fields did not round-trip: got %+v", got)
 	}
 }
 

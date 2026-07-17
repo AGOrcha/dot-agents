@@ -94,6 +94,22 @@ type CreateOptions struct {
 	Purpose string
 	// ParentPR is the pull-request number the work feeds into (0 when none).
 	ParentPR int
+	// AppType is the app_type the delegated task runs under; it is recorded on
+	// the worktree metadata and is the routing key the resolved execution shape
+	// below was loaded from. Empty when the caller supplies no app_type.
+	AppType string
+	// Profile is the free-form execution profile (e.g. "loop-worker") recorded
+	// verbatim on the worktree metadata.
+	Profile string
+	// VerifierSequence / LensSet / LensConcurrency / GraphBackend are the
+	// app_type-routed execution shape the caller already resolved from the
+	// project's execution_profile.by_app_type[AppType]. They are recorded as-is
+	// so the worktree self-describes its execution shape; all are empty when no
+	// profile entry resolved.
+	VerifierSequence []string
+	LensSet          []string
+	LensConcurrency  string
+	GraphBackend     string
 }
 
 // CreateResult reports the outcome of a successful CreateSubBranch.
@@ -129,8 +145,14 @@ func (c *Coordinator) CreateSubBranch(opts CreateOptions) (CreateResult, error) 
 		return CreateResult{}, err
 	}
 	meta, err := c.reg.Create(opts.Name, Metadata{
-		Purpose:  opts.Purpose,
-		ParentPR: opts.ParentPR,
+		Purpose:          opts.Purpose,
+		ParentPR:         opts.ParentPR,
+		AppType:          opts.AppType,
+		Profile:          opts.Profile,
+		VerifierSequence: opts.VerifierSequence,
+		LensSet:          opts.LensSet,
+		LensConcurrency:  opts.LensConcurrency,
+		GraphBackend:     opts.GraphBackend,
 	})
 	if err != nil {
 		return CreateResult{}, err
