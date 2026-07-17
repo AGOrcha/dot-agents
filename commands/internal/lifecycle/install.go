@@ -177,7 +177,8 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	fmt.Fprintf(os.Stdout, "Project: %s\n", ui.BoldText(projectName))
 	fmt.Fprintf(os.Stdout, "Path:    %s\n", ui.DimText(config.DisplayPath(projectPath)))
 
-	if err := ensureInstallResolved(projectPath); err != nil {
+	ensureRes, err := ensureInstallResolved(projectPath)
+	if err != nil {
 		return err
 	}
 	resolvedSources, err := resolveInstallSources(rc.Sources, strict, deps)
@@ -194,7 +195,12 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 		return err
 	}
 
-	if err := createInstallPlatformLinks(projectName, projectPath, opts); err != nil {
+	packagesUnits, packagesParticipated, err := hydrateInstallPackages(projectPath, projectName, ensureRes)
+	if err != nil {
+		return err
+	}
+
+	if err := createInstallPlatformLinks(projectName, projectPath, opts, packagesUnits, packagesParticipated); err != nil {
 		return err
 	}
 	if err := finalizeInstall(projectName, projectPath, opts); err != nil {
@@ -209,17 +215,62 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	return nil
 }
 
-func ensureInstallResolved(projectPath string) error {
+// ensureInstallResolved runs the §7A.5 lock half and returns the EnsureResult
+// so the caller (hydrateInstallPackages) can tell whether pass-1 actually
+// rewrote the lock this call (H9: pass-2 mirrors that same write/no-write
+// decision rather than deciding independently). nil under dry-run — install
+// performs no real resolution or packages hydration in that mode.
+//
+// UnitDigest is the H7 production artifact-store integrity resolver
+// (PackagesArtifactDigestResolver): a `kind:artifact` unit whose CAS content
+// no longer matches what a locally-cached, digest-pinned re-fetch verifies
+// registers as unit-digest-mismatch staleness, so a post-install store tamper
+// is caught here — the same seam `da config verify` uses — instead of being
+// silently trusted.
+func ensureInstallResolved(projectPath string) (*config.EnsureResult, error) {
 	ui.Section("Resolving config")
 	if Flags.DryRun {
 		ui.DryRun("ensure config lock is current")
-		return nil
+		return nil, nil
 	}
-	if _, err := config.EnsureResolved(projectPath, config.EnsureOpts{}); err != nil {
-		return fmt.Errorf("ensuring resolved config: %w", err)
+	res, err := config.EnsureResolved(projectPath, config.EnsureOpts{
+		UnitDigest: PackagesArtifactDigestResolver(projectPath),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ensuring resolved config: %w", err)
 	}
 	ui.Bullet("ok", "Config lock current")
-	return nil
+	return res, nil
+}
+
+// hydrateInstallPackages runs pass 2 (H9/H13) after pass-1 config resolution
+// and before any platform projection reads the store. Skipped under dry-run
+// (ensureRes is nil). Returns the resolved unit set plus `participated` — true
+// whenever pass-2 ran (packages declared OR artifact units still locked from a
+// prior install), which the caller uses to decide whether projection must go
+// through the CAS-aware one-to-zero-prune path even for an empty set (review
+// #4). Only false when the project has never used packages (D6 no-op).
+func hydrateInstallPackages(projectPath, projectName string, ensureRes *config.EnsureResult) ([]platform.ResolvedUnit, bool, error) {
+	if ensureRes == nil {
+		if Flags.DryRun {
+			ui.DryRun("materialize and lock resolved packages[] artifacts")
+		}
+		return nil, false, nil
+	}
+	units, participated, err := HydratePackagesUnits(projectPath, projectName, ensureRes)
+	if err != nil {
+		return nil, false, fmt.Errorf("resolving packages: %w", err)
+	}
+	if !participated {
+		return nil, false, nil
+	}
+	ui.Section("Resolving packages")
+	if len(units) == 0 {
+		ui.Bullet("ok", "no packages artifacts declared — pruning any stale projected links")
+	} else {
+		ui.Bullet("ok", fmt.Sprintf("%d packages artifact(s) materialized", len(units)))
+	}
+	return units, true, nil
 }
 
 func loadInstallManifest(projectPath string) (*config.AgentsRC, error) {
@@ -334,15 +385,15 @@ func RegisterInstallProject(projectName, projectPath string, deps InstallDeps) e
 	return nil
 }
 
-func createInstallPlatformLinks(projectName, projectPath string, opts installOptions) error {
-	return createInstallPlatformLinksFor(projectName, projectPath, platform.All(), opts)
+func createInstallPlatformLinks(projectName, projectPath string, opts installOptions, units []platform.ResolvedUnit, packagesParticipated bool) error {
+	return createInstallPlatformLinksFor(projectName, projectPath, platform.All(), opts, units, packagesParticipated)
 }
 
-func createInstallPlatformLinksFor(projectName, projectPath string, platforms []platform.Platform, opts installOptions) error {
+func createInstallPlatformLinksFor(projectName, projectPath string, platforms []platform.Platform, opts installOptions, units []platform.ResolvedUnit, packagesParticipated bool) error {
 	ui.Section("Creating platform links")
 	config.SetWindowsMirrorContext(projectPath)
 
-	if err := runInstallSharedTargetsFor(projectName, projectPath, platforms, opts); err != nil {
+	if err := runInstallSharedTargetsFor(projectName, projectPath, platforms, opts, units, packagesParticipated); err != nil {
 		return err
 	}
 
@@ -357,17 +408,33 @@ func createInstallPlatformLinksFor(projectName, projectPath string, platforms []
 // runInstallSharedTargets runs the shared-target projection across all
 // installed platforms and surfaces the resulting plan or warning lines.
 func runInstallSharedTargets(projectName, projectPath string, opts installOptions) error {
-	return runInstallSharedTargetsFor(projectName, projectPath, platform.All(), opts)
+	return runInstallSharedTargetsFor(projectName, projectPath, platform.All(), opts, nil, false)
 }
 
-func runInstallSharedTargetsFor(projectName, projectPath string, platforms []platform.Platform, opts installOptions) error {
+// runInstallSharedTargetsFor projects the local-authored shared-target set
+// plus, when pass-2 participated, the caller-resolved packages units (H13) —
+// each linking DIRECTLY to its immutable CAS digest path — through ONE merged
+// plan (platform.ProjectResolvedUnits), never a parallel linker (D4).
+//
+// packagesParticipated (not len(units)) selects the path: it stays true even
+// when units is EMPTY (the last package was just removed), so the CAS-aware
+// ProjectResolvedUnits still runs and its one-to-zero prune removes the final
+// orphaned CAS link (review #4). Only a project that never used packages takes
+// the plain RunSharedTargetProjectionExact path (R6 byte-parity).
+func runInstallSharedTargetsFor(projectName, projectPath string, platforms []platform.Platform, opts installOptions, units []platform.ResolvedUnit, packagesParticipated bool) error {
 	var installed []platform.Platform
 	for _, p := range platforms {
 		if p.IsInstalled() {
 			installed = append(installed, p)
 		}
 	}
-	lines, err := platform.RunSharedTargetProjectionExact(projectName, projectPath, installed, Flags.DryRun, !opts.inexact)
+	var lines []string
+	var err error
+	if packagesParticipated {
+		lines, err = platform.ProjectResolvedUnits(projectName, projectPath, units, installed, Flags.DryRun, !opts.inexact, projectName)
+	} else {
+		lines, err = platform.RunSharedTargetProjectionExact(projectName, projectPath, installed, Flags.DryRun, !opts.inexact)
+	}
 	if err != nil {
 		return fmt.Errorf("shared targets: %w", err)
 	}

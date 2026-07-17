@@ -2399,6 +2399,36 @@ func TestIsManagedImportSource_ProjectScope(t *testing.T) {
 	}
 }
 
+// TestIsManagedImportSource_CodexManagedTomlSkipped is the t2c guard:
+// dot-agents' OWN rendered `.codex/agents/*.toml` (marker present) must be
+// recognized as managed and skipped from the generic import scan, so
+// `da import`/`da refresh` never archives dot-agents' own output into
+// ~/.agents/agents/<project>/ as if it were foreign content.
+func TestIsManagedImportSource_CodexManagedTomlSkipped(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, ".codex", "agents", "reviewer.toml")
+	writeFile(t, src, []byte("# dot-agents:managed-render v1 (generated from AGENT.md; local edits are overwritten on refresh)\nname = \"reviewer\"\n"))
+	c := importCandidate{project: "proj", sourceRoot: projRoot, sourcePath: src}
+	if !isManagedImportSource(c, agentsHome) {
+		t.Error("expected a dot-agents managed codex toml render to be skipped as an import source")
+	}
+}
+
+// TestIsManagedImportSource_UnmarkedCodexTomlNotSkipped is the complement:
+// an unmarked `.codex/agents/*.toml` (foreign or pre-marker-upgrade content)
+// is NOT treated as managed here — it still flows through the normal import
+// candidate path (platform.writeCodexAgentTomlFile resolves any render-time
+// collision separately).
+func TestIsManagedImportSource_UnmarkedCodexTomlNotSkipped(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, ".codex", "agents", "reviewer.toml")
+	writeFile(t, src, []byte("name = \"hand-authored\"\n"))
+	c := importCandidate{project: "proj", sourceRoot: projRoot, sourcePath: src}
+	if isManagedImportSource(c, agentsHome) {
+		t.Error("expected an unmarked codex toml to NOT be skipped as an import source")
+	}
+}
+
 // ---------- importMissingCandidate (real copy path) ----------
 
 func TestImportMissingCandidate_RealCopy(t *testing.T) {

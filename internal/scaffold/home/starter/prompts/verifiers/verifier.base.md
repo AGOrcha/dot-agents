@@ -16,6 +16,19 @@ artifact (and, if asked, captured logs).
 Do not run mutating commands against shared state, do not commit, do not edit production code, do not
 open or edit PRs. Use read/inspect commands and the project's test/build tooling only.
 
+## Verification goal — a specific, falsifiable claim
+
+Your bundle carries a `feedback_goal`: the one question this verification must answer. Treat it as a
+**specific, falsifiable claim about the delegated change** — not "do the tests pass."
+
+- **Restate** the goal as concrete pass/fail assertions tied to the task's success criteria: the exact
+  inputs/outputs, the state that must hold after, the error that must surface. If you cannot state the
+  claim concretely, the goal is too vague — say so and record `unknown`, do not launder a generic
+  green into a `pass`.
+- **Try to break it.** Run the assertions that would *disprove* the claim — the boundary / negative /
+  error path a happy-path suite skips — not only the default green run. A `pass` means "I aimed at the
+  scoped claim, tried to make it fail, and could not," not "the suite was green."
+
 ## Cold-start
 
 You start cold. Everything you need is on disk:

@@ -208,6 +208,212 @@ func TestAsImportError(t *testing.T) {
 	}
 }
 
+// --- H12 central error redaction --------------------------------------------
+
+// TestRedactSecretsScrubsRegisteredSecret plants a sentinel secret via
+// registerSecret and asserts redactSecrets removes every occurrence from an
+// arbitrary string, leaving non-secret text untouched.
+func TestRedactSecretsScrubsRegisteredSecret(t *testing.T) {
+	sentinel := "sentinel-secret-tHiS-iS-tOp-sEcReT-9f8e7d"
+	registerSecret(sentinel)
+
+	in := "request failed: token=" + sentinel + " (status 401)"
+	got := redactSecrets(in)
+	if strings.Contains(got, sentinel) {
+		t.Fatalf("redactSecrets left the sentinel in place: %q", got)
+	}
+	want := "request failed: token=[REDACTED] (status 401)"
+	if got != want {
+		t.Errorf("redactSecrets = %q, want %q", got, want)
+	}
+
+	// Text with no registered secret is returned unchanged.
+	if got := redactSecrets("nothing sensitive here"); got != "nothing sensitive here" {
+		t.Errorf("redactSecrets mutated a clean string: %q", got)
+	}
+}
+
+// TestRedactSecretsLongestFirstNoFragment is the HIGH-#2 regression: a
+// shorter secret registered BEFORE a longer one that contains it must not
+// fragment the longer one. Registering "abc" then "abcdef" and redacting a
+// string containing "abcdef" must leave NO fragment of "abcdef" behind —
+// order-dependent replacement would have produced "[REDACTED]def", leaking
+// the "def" tail of the real credential.
+func TestRedactSecretsLongestFirstNoFragment(t *testing.T) {
+	short := "sfrag-abc-" + "u1"
+	long := short + "-longer-tail-secret"
+	registerSecret(short) // shorter, registered first
+	registerSecret(long)  // longer, contains short as a prefix
+
+	got := redactSecrets("prefix " + long + " suffix")
+	if strings.Contains(got, "longer-tail-secret") {
+		t.Fatalf("redactSecrets left a fragment of the longer secret: %q", got)
+	}
+	if strings.Contains(got, short) {
+		t.Fatalf("redactSecrets left the shorter secret verbatim: %q", got)
+	}
+	if got != "prefix [REDACTED] suffix" {
+		t.Errorf("redactSecrets = %q, want %q", got, "prefix [REDACTED] suffix")
+	}
+}
+
+// TestRedactSecretsEqualLengthOverlapNoFragment is the round-3 HIGH-#2
+// regression: descending-length sort (the round-2 fix) closes strict
+// CONTAINMENT but not EQUAL-LENGTH partial overlap, where neither secret
+// contains the other but their occurrences share characters. Registering
+// "sekrit-AAAA-1" and "AAAA-1-sekrit" (both 13 chars, live repro) and
+// redacting "sekrit-AAAA-1-sekrit" must leave no fragment of either secret —
+// the sequential-ReplaceAll implementation produced "[REDACTED]-sekrit",
+// leaking the 7-char "-sekrit" tail verbatim. The strict-containment case
+// from the round-2 test is re-asserted alongside it so both overlap shapes
+// stay covered by the single merged-interval implementation.
+func TestRedactSecretsEqualLengthOverlapNoFragment(t *testing.T) {
+	secretA := "sekrit-AAAA-1"
+	secretB := "AAAA-1-sekrit"
+	if len(secretA) != len(secretB) {
+		t.Fatalf("test fixture broken: secrets must be equal length, got %d and %d", len(secretA), len(secretB))
+	}
+	registerSecret(secretA)
+	registerSecret(secretB)
+
+	got := redactSecrets("sekrit-AAAA-1-sekrit")
+	for _, frag := range []string{secretA, secretB, "-sekrit", "sekrit-", "AAAA-1"} {
+		if strings.Contains(got, frag) {
+			t.Fatalf("redactSecrets left a fragment %q of an overlapping secret: %q", frag, got)
+		}
+	}
+	if got != "[REDACTED]" {
+		t.Errorf("redactSecrets = %q, want %q", got, "[REDACTED]")
+	}
+
+	// Strict containment (round-2 case) stays closed under the same
+	// merged-interval implementation.
+	short := "sfrag-eqlen-abc-u1"
+	long := short + "-longer-tail-secret"
+	registerSecret(short)
+	registerSecret(long)
+	got = redactSecrets("prefix " + long + " suffix")
+	if strings.Contains(got, "longer-tail-secret") || strings.Contains(got, short) {
+		t.Fatalf("redactSecrets left a fragment of the containment case: %q", got)
+	}
+	if got != "prefix [REDACTED] suffix" {
+		t.Errorf("redactSecrets = %q, want %q", got, "prefix [REDACTED] suffix")
+	}
+}
+
+// TestRegisterSecretDeduplicates confirms registering the same secret value
+// twice does not grow the registry (bounding its process-lifetime size when
+// a credential is re-resolved across repeated fetches).
+func TestRegisterSecretDeduplicates(t *testing.T) {
+	sentinel := "sentinel-dedupe-check-0a1b2c"
+	registerSecret(sentinel)
+	before := len(registeredSecrets)
+	registerSecret(sentinel)
+	if len(registeredSecrets) != before {
+		t.Fatalf("registerSecret grew the registry on a duplicate: %d -> %d", before, len(registeredSecrets))
+	}
+}
+
+// TestRedactSecretsEmptyStringNoOp confirms registerSecret("") never
+// registers a wildcard that would scrub every string to empty.
+func TestRedactSecretsEmptyStringNoOp(t *testing.T) {
+	before := len(registeredSecrets)
+	registerSecret("")
+	if len(registeredSecrets) != before {
+		t.Fatalf("registerSecret(\"\") grew the registry: %d -> %d", before, len(registeredSecrets))
+	}
+	if got := redactSecrets("some text"); got != "some text" {
+		t.Errorf("redactSecrets corrupted unrelated text: %q", got)
+	}
+}
+
+// TestNewRedactedErrorScrubsErrorString is the HIGH-#3 error-boundary test:
+// a cause whose message embeds a registered secret must render scrubbed via
+// the wrapper's Error().
+func TestNewRedactedErrorScrubsErrorString(t *testing.T) {
+	sentinel := "sentinel-boundary-err-1c2d3e"
+	registerSecret(sentinel)
+
+	cause := &ImportError{Ref: "acme:x@1", Reason: ReasonTransport, Err: errors.New("sent Bearer " + sentinel)}
+	wrapped := newRedactedError(cause)
+	if strings.Contains(wrapped.Error(), sentinel) {
+		t.Fatalf("redactedError leaked the sentinel in its rendered string: %q", wrapped.Error())
+	}
+	if !strings.Contains(wrapped.Error(), "[REDACTED]") {
+		t.Errorf("redactedError did not redact the sentinel: %q", wrapped.Error())
+	}
+	// A nil cause wraps to nil so callers can wrap unconditionally.
+	if newRedactedError(nil) != nil {
+		t.Error("newRedactedError(nil) should be nil")
+	}
+}
+
+// TestNewRedactedErrorUnwrapCannotRecoverSecret is the round-3 MEDIUM
+// regression: redactedError must not expose the raw, unredacted cause via
+// errors.Unwrap/errors.As. errors.As previously reached the underlying
+// *ImportError, and calling ITS .Error() bypassed redaction entirely — the
+// exact leak this test proves is now closed: nothing reachable by walking
+// the wrapped error's chain (errors.Unwrap, errors.As) ever renders the raw
+// secret.
+func TestNewRedactedErrorUnwrapCannotRecoverSecret(t *testing.T) {
+	sentinel := "sentinel-unwrap-leak-4d5e6f"
+	registerSecret(sentinel)
+
+	cause := &ImportError{Ref: "acme:x@1", Reason: ReasonTransport, Err: errors.New("sent Bearer " + sentinel)}
+	wrapped := newRedactedError(cause)
+
+	// errors.Unwrap must not hand back a value at all: redactedError
+	// implements neither Unwrap() error nor Unwrap() []error.
+	if u := errors.Unwrap(wrapped); u != nil {
+		t.Fatalf("errors.Unwrap(wrapped) = %v, want nil (Unwrap must not be implemented)", u)
+	}
+
+	// errors.As must not be able to recover the concrete *ImportError cause
+	// (which would let the caller call ie.Error() directly, bypassing
+	// redaction and leaking the sentinel verbatim).
+	var ie *ImportError
+	if errors.As(wrapped, &ie) {
+		t.Fatalf("errors.As reached the raw cause %v; its Error() (%q) is not redaction-scrubbed", ie, ie.Error())
+	}
+
+	// errors.Is against the wrapped cause's sentinel still works (Is is
+	// implemented deliberately, unlike Unwrap/As) without exposing it.
+	if !errors.Is(wrapped, cause) {
+		t.Error("errors.Is(wrapped, cause) = false, want true (Is passthrough should still work)")
+	}
+
+	// Belt-and-suspenders: no reachable value in the chain renders the raw
+	// sentinel when .Error() is called on it.
+	if strings.Contains(wrapped.Error(), sentinel) {
+		t.Fatalf("wrapped.Error() leaked the sentinel: %q", wrapped.Error())
+	}
+}
+
+// TestImportFailedEventRedactsSentinelInDetail is the H12 sentinel-leak test
+// named directly by the spec: audit.go's importFailedEvent used to log
+// ie.Err.Error() raw. A sentinel secret embedded in a wrapped error (as a
+// naive implementation elsewhere in the auth path might do) must never reach
+// the emitted audit event's Fields["detail"].
+func TestImportFailedEventRedactsSentinelInDetail(t *testing.T) {
+	sentinel := "sentinel-audit-leak-4b2c1a"
+	registerSecret(sentinel)
+
+	ie := &ImportError{
+		Ref:      "acme-pkgs:skill/x@1.0",
+		SourceID: "acme-pkgs",
+		Reason:   ReasonAuth,
+		Err:      errors.New("oci token exchange failed for token " + sentinel),
+	}
+	ev := importFailedEvent(ie, false)
+	detail, _ := ev.Fields["detail"].(string)
+	if strings.Contains(detail, sentinel) {
+		t.Fatalf("importFailedEvent leaked the sentinel into the audit detail field: %q", detail)
+	}
+	if !strings.Contains(detail, "[REDACTED]") {
+		t.Errorf("importFailedEvent did not redact the sentinel: %q", detail)
+	}
+}
+
 // --- end-to-end emission through the resolver ------------------------------
 
 func TestResolveEmitsLayerAndSourceAndEffectiveEvents(t *testing.T) {

@@ -117,6 +117,31 @@ sys.exit(0 if (${pyexpr}) else 1)" 2>/dev/null; then
   return 0
 }
 
+# retry_test DESC CMD — test_command that RETRIES CMD (up to ~60s, 200ms apart)
+# until it exits 0. A read that immediately follows an install/materialize can
+# transiently fail on the windows-latest runner: a filesystem filter driver
+# (Windows Defender) briefly holds a file `da` just atomically re-wrote
+# (temp + MOVEFILE_REPLACE_EXISTING), so the very next open raises a sharing
+# violation even though the content is correct and settled (proven byte-identical
+# via diagnostics). Retrying the READ closes that window. A genuinely wrong state
+# still fails after the budget. Effectively one-shot on POSIX (first try succeeds).
+retry_test() {
+  local name="$1" cmd="$2" i last
+  echo -n "  Testing $name... "
+  for i in $(seq 1 300); do
+    if last="$(eval "$cmd" 2>&1)"; then
+      echo -e "${GREEN}✓${NC}"
+      passed=$((passed + 1))
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo -e "${RED}✗${NC}"
+  echo "    retry_test exhausted (~60s); last output: ${last}" >&2
+  failed=$((failed + 1))
+  return 0
+}
+
 echo -e "${BOLD}Basic Commands${NC}"
 test_command "--version" "$DOT_AGENTS --version"
 test_command "--help" "$DOT_AGENTS --help"
@@ -154,6 +179,7 @@ test_command "config explain --help" "$DOT_AGENTS config explain --help"
 test_command "config sync --help" "$DOT_AGENTS config sync --help"
 test_command "config lint --help" "$DOT_AGENTS config lint --help"
 test_command "config verify --help" "$DOT_AGENTS config verify --help"
+test_command "config publish --help" "$DOT_AGENTS config publish --help"
 
 echo ""
 echo -e "${BOLD}Config-v2 + Mutations (isolated managed home)${NC}"
@@ -169,6 +195,33 @@ export HOME="${SMOKE_ROOT}/home"
 export AGENTS_HOME="${SMOKE_ROOT}/home/.agents"
 export KG_HOME="${SMOKE_ROOT}/home/.kg"
 mkdir -p "${HOME}"
+
+# Deterministic platform DETECTION for the projection assertions. A platform's
+# link tree (.claude/skills/... etc.) is only written when that platform is
+# detected as installed (platform.IsInstalled → `claude` on PATH) AND enabled.
+# On a bare CI runner NO agent CLI is installed, so a fresh managed home lands
+# every platform disabled and install projects nothing — which silently defeats
+# any assertion that reads a projected file (a `cat` of a missing path emits an
+# error containing the path, so a substring `assert_contains` false-passes; only
+# the package block's `cp`/`diff` of the real file exposes it). Put a minimal
+# `claude` shim on PATH BEFORE `da init` so init detects+enables Claude and the
+# projection paths (H13 package projection especially) run identically on a dev
+# box and a bare runner. The shim only needs to answer the version probe.
+mkdir -p "${SMOKE_ROOT}/fakebin"
+# POSIX shim (Linux/macOS: exec.LookPath finds the extensionless executable).
+cat > "${SMOKE_ROOT}/fakebin/claude" <<'SHIM'
+#!/bin/sh
+echo "2.1.0 (Claude Code)"
+SHIM
+chmod +x "${SMOKE_ROOT}/fakebin/claude"
+# Windows shim: Go's exec.LookPath resolves via PATHEXT (.CMD/.BAT/.EXE), so an
+# extensionless script is invisible there — a sibling claude.cmd makes
+# IsInstalled (a LookPath probe) succeed on the windows-latest leg too.
+cat > "${SMOKE_ROOT}/fakebin/claude.cmd" <<'SHIM'
+@echo 2.1.0 (Claude Code)
+SHIM
+export PATH="${SMOKE_ROOT}/fakebin:${PATH}"
+
 PROJ="${SMOKE_ROOT}/proj"
 mkdir -p "${PROJ}/layers"
 
@@ -358,6 +411,137 @@ test_command "git-source: second explain (cache warm) succeeds" \
   "(cd '${GS_PROJ}' && $DOT_AGENTS_ABS config explain --all)"
 test_command "git-source: sidecar dir-lock released (not leaked)" \
   "test ! -e '${GS_PROJ}/.agentsrc.lock.lock'"
+
+# ── GIT-SOURCE CONTENT-INSTALL smoke — packages materialize+lock+project (t5 dogfood, DC2) ─
+# package-artifact-install spec DC2 extends the git-source-smoke fixture above
+# from LAYER-only to CONTENT install: a bare-repo "tree" source (the same
+# file:// clone path a network remote takes) ships a skill + two agents laid
+# out exactly like the live AGorcha/da-agc source dot-agents' own
+# .agentsrc.json now declares as packages[] (skill/<name>/, agent/<name>/).
+# This proves the REAL end-to-end mechanism — fetch -> materialize -> lock
+# (kind:artifact + the artifact-content integrity anchor, H10) -> project
+# (H13) -> offline verify (H7) — hermetically and offline, no network
+# dependency in CI.
+PKG_WORK="${SMOKE_ROOT}/pkg-source-work"
+PKG_BARE="${SMOKE_ROOT}/pkg-source-layer.git"
+PKG_PROJ="${SMOKE_ROOT}/pkgsrc-proj"
+mkdir -p "${PKG_WORK}/skill/release-docs-refresh" "${PKG_WORK}/agent/platform-dirs-change-analyst" "${PKG_WORK}/agent/promise-gap-analyst"
+echo '# release-docs-refresh' > "${PKG_WORK}/skill/release-docs-refresh/SKILL.md"
+echo '# platform-dirs-change-analyst' > "${PKG_WORK}/agent/platform-dirs-change-analyst/AGENT.md"
+echo '# promise-gap-analyst' > "${PKG_WORK}/agent/promise-gap-analyst/AGENT.md"
+git init -q "${PKG_WORK}"
+git -C "${PKG_WORK}" symbolic-ref HEAD refs/heads/main
+git -C "${PKG_WORK}" add skill agent
+git -C "${PKG_WORK}" -c user.name=smoke -c user.email=smoke@local commit -q -m "da-agc mirror fixture"
+git clone -q --bare "${PKG_WORK}" "${PKG_BARE}"
+PKG_URL_PATH="${PKG_BARE}"
+if command -v cygpath >/dev/null 2>&1; then
+  PKG_URL_PATH="$(cygpath -m "${PKG_BARE}")"
+fi
+mkdir -p "${PKG_PROJ}"
+cat > "${PKG_PROJ}/.agentsrc.json" <<JSON
+{
+  "version": 1,
+  "project": "pkgsrc-project",
+  "sources": [ { "type": "git", "id": "da-agc", "url": "file://${PKG_URL_PATH}", "ref": "main" } ],
+  "packages": [
+    "da-agc:skill/release-docs-refresh@main",
+    "da-agc:agent/platform-dirs-change-analyst@main",
+    "da-agc:agent/promise-gap-analyst@main"
+  ]
+}
+JSON
+
+# FIRST-RUN: no lock, cold CAS.
+test_command "git-source content-install: lock absent before first run" "test ! -e '${PKG_PROJ}/.agentsrc.lock'"
+test_command "git-source content-install: install --yes (first run)" "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+
+# (a) the skill materialized + projected + present at its invocable path.
+SKILL_PROJECTED="${PKG_PROJ}/.claude/skills/release-docs-refresh/SKILL.md"
+assert_contains "git-source content-install: skill projected+invocable" \
+  "cat '${SKILL_PROJECTED}'" "release-docs-refresh"
+
+# (b) both agents present.
+assert_contains "git-source content-install: agent 1 projected" \
+  "cat '${PKG_PROJ}/.claude/agents/platform-dirs-change-analyst/AGENT.md'" "platform-dirs-change-analyst"
+assert_contains "git-source content-install: agent 2 projected" \
+  "cat '${PKG_PROJ}/.claude/agents/promise-gap-analyst/AGENT.md'" "promise-gap-analyst"
+
+# (c) the artifact-content lock section recorded with the content digest, plus
+# a kind:artifact units entry per ref (H10).
+assert_contains "git-source content-install: lock has artifact-content section" \
+  "cat '${PKG_PROJ}/.agentsrc.lock'" "artifact-content"
+assert_contains "git-source content-install: lock has the skill artifact unit" \
+  "cat '${PKG_PROJ}/.agentsrc.lock'" "da-agc:skill/release-docs-refresh@main"
+assert_json_field "git-source content-install: artifact-content anchors all 3 refs" \
+  "cat '${PKG_PROJ}/.agentsrc.lock'" \
+  "set(d['artifact-content'].keys()) == {'da-agc:skill/release-docs-refresh@main', 'da-agc:agent/platform-dirs-change-analyst@main', 'da-agc:agent/promise-gap-analyst@main'} and all(v.startswith('sha256:') for v in d['artifact-content'].values())"
+
+# (e) the offline H7 primitive (VerifyStoreContentDigest, wired into `config
+# verify`) passes over every projected ref.
+assert_contains "git-source content-install: config verify -> OK" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify)" "OK"
+
+# (d) a SECOND run with the lock present is a no-op: the units + artifact-
+# content sections are byte-unchanged (only the install-stamp timestamp
+# moves), and the projected files are byte-identical (H9 frozen = no rewrite).
+# Snapshot the pre-2nd-install lock + projected skill. The source lock was just
+# touched by `config verify`; on windows-latest a filter driver can briefly hold it,
+# so a bare cp would silently fail and leave the snapshot missing (every later read
+# of it then throws FileNotFoundError). Retry the cp until the source is readable.
+for _i in $(seq 1 300); do cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json" 2>/dev/null && break; sleep 0.2; done
+for _i in $(seq 1 300); do cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md" 2>/dev/null && break; sleep 0.2; done
+test_command "git-source content-install: install --yes (second run, frozen no-op)" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+# The python compare reads both locks via bash — env var + stdin redirect — never
+# python open('/tmp/..'): on windows-latest python3 is the NATIVE Windows
+# interpreter and cannot resolve a Git-Bash MSYS /tmp path, so an open() there is a
+# deterministic FileNotFoundError, not the transient filter-driver race the retry
+# guards. bash IS MSYS-aware, so it opens the files; python only ever sees bytes.
+retry_test "git-source content-install: units+artifact-content unchanged across the no-op re-run" \
+  "LOCK_BEFORE=\"\$(cat '${SMOKE_ROOT}/pkg-lock-before.json')\" python3 -c \"import json,os,sys; a=json.loads(os.environ['LOCK_BEFORE']); b=json.load(sys.stdin); sys.exit(0 if (a['units']==b['units'] and a['artifact-content']==b['artifact-content']) else 1)\" < '${PKG_PROJ}/.agentsrc.lock'"
+test_command "git-source content-install: projected skill byte-identical after the no-op re-run" \
+  "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
+
+# ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
+# self-heals it (H16 quarantine + re-extract) ─────────────────────────────
+# Read the skill digest via stdin redirect (bash opens the MSYS path; native
+# Windows python3 cannot open a /tmp/.. path). An empty digest would malform the
+# CAS path below (skills//SKILL.md), so require the sha256: prefix; the loop also
+# absorbs any genuine transient hold.
+PKG_SKILL_DIGEST=""
+for _i in $(seq 1 300); do
+  PKG_SKILL_DIGEST="$(python3 -c "import json,sys; print(json.load(sys.stdin)['units']['da-agc:skill/release-docs-refresh@main']['digest'])" < "${PKG_PROJ}/.agentsrc.lock" 2>/dev/null)"
+  case "${PKG_SKILL_DIGEST}" in sha256:*) break ;; *) ;; esac
+  sleep 0.2
+done
+PKG_CAS_FILE="${AGENTS_HOME}/cache/artifacts/skills/${PKG_SKILL_DIGEST#sha256:}/SKILL.md"
+# retry_test: same windows read-after-write race on the CAS entry probe.
+retry_test "git-source content-install: skill CAS entry exists before tamper" "test -f '${PKG_CAS_FILE}'"
+chmod +w "${PKG_CAS_FILE}"
+echo 'TAMPERED' > "${PKG_CAS_FILE}"
+# retry_test: `config verify` reads the CAS entry we just wrote — same windows
+# read-after-write race. Retry until verify observes the tamper (emits FAIL). Use
+# command substitution so the exit code reflects the grep MATCH, not verify's own
+# non-zero exit on FAIL (which pipefail would otherwise propagate).
+retry_test "git-source content-install: tampered CAS fails config verify" \
+  "test -n \"\$( (cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify 2>&1) | grep FAIL)\""
+test_command "git-source content-install: re-install self-heals the tampered CAS entry" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+retry_test "git-source content-install: config verify -> OK after self-heal" \
+  "test -n \"\$( (cd '${PKG_PROJ}' && $DOT_AGENTS_ABS config verify 2>&1) | grep 'OK')\""
+assert_contains "git-source content-install: self-healed skill content restored" \
+  "cat '${SKILL_PROJECTED}'" "release-docs-refresh"
+
+# ── Adversarial: deleting the lock forces a re-fetch on the next install ────
+rm -f "${PKG_PROJ}/.agentsrc.lock"
+test_command "git-source content-install: lock absent after deletion" "test ! -e '${PKG_PROJ}/.agentsrc.lock'"
+test_command "git-source content-install: install --yes re-fetches after lock deletion" \
+  "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+assert_contains "git-source content-install: re-fetched lock re-anchors the skill" \
+  "cat '${PKG_PROJ}/.agentsrc.lock'" "da-agc:skill/release-docs-refresh@main"
+assert_contains "git-source content-install: re-fetched projection still invocable" \
+  "cat '${SKILL_PROJECTED}'" "release-docs-refresh"
 
 # ── Layer resolution + provenance combinations ───────────────────────────────
 # Valid rc lints clean.

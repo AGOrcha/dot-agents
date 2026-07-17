@@ -35,19 +35,30 @@ const (
 
 // LockedUnit is one entry in the lockfile's "units" section (§7A.3). The map key
 // is the fully-resolved ref "source:path@resolved-version"; the entry records
-// the kind plus content-hash and timestamps. Staleness is content-hash driven
-// (digest mismatch), never clock-driven — LastCheckedAt is a review-nudge basis
-// only and never auto-invalidates.
+// the kind plus the content hash. Staleness is content-hash driven (digest
+// mismatch), never clock-driven.
+//
+// The lock is content-addressed (uv-style): it carries NO wall-clock timestamps.
+// A frozen no-op re-install must therefore produce a byte-identical units section
+// — re-stamping a per-unit fetched_at/last_checked_at on every run churned the
+// lock and, on a slow filesystem (windows CI), opened a transient inconsistent-read
+// window between install and the very next read. The FetchedAt/LastCheckedAt
+// fields are retained ONLY to decode legacy locks that still carry them; they are
+// never written. Any "last re-checked N ago" refresh timestamping belongs in the
+// machine-local config (the id→absolute-path binding table), NOT in the portable,
+// content-addressed lock.
 type LockedUnit struct {
 	// Kind is UnitKindLayer or UnitKindArtifact.
 	Kind string `json:"kind"`
 	// Digest is the content hash recorded at fetch time ("sha256:…").
 	Digest string `json:"digest"`
-	// FetchedAt is the RFC3339 timestamp the unit was fetched.
-	FetchedAt string `json:"fetched_at"`
-	// LastCheckedAt is the RFC3339 timestamp of the last explicit upstream
-	// re-check; it powers a doctor/explain review-nudge and never drives
-	// auto-invalidation (§7A.3). Empty when never re-checked since fetch.
+	// FetchedAt is legacy-decode only (see the type comment): read from a v1 lock
+	// that carried it, never written by the current resolver. omitempty so a
+	// re-serialized unit drops it.
+	FetchedAt string `json:"fetched_at,omitempty"`
+	// LastCheckedAt is legacy-decode only (see the type comment): the review-nudge
+	// basis a v1 lock carried. Never written now; the refresh-timestamp home is the
+	// machine-local config. omitempty so a re-serialized unit drops it.
 	LastCheckedAt string `json:"last_checked_at,omitempty"`
 	// CacheKey is the effective content cache key the unit resolved at
 	// (config-distribution-model §7A.4). It is the cache-key staleness axis —
@@ -172,11 +183,9 @@ func mergeLegacySection(lf *agentslock.Lockfile, section, kind string, units map
 	}
 	for ref, l := range legacy {
 		units[ref] = LockedUnit{
-			Kind:          kind,
-			Digest:        l.ResolvedSHA,
-			FetchedAt:     l.FetchedAt,
-			LastCheckedAt: l.FetchedAt,
-			CacheKey:      l.CacheKey,
+			Kind:     kind,
+			Digest:   l.ResolvedSHA,
+			CacheKey: l.CacheKey,
 		}
 	}
 	return nil

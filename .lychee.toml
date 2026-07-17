@@ -31,6 +31,11 @@ exclude = [
   # Excluded so it can't fail the gate; the prose in PLATFORM_DIRS_DOCS.md is
   # tracked for a content refresh via the platform-docs-refresh skill.
   "^https://opencode\\.ai/docs/modes/?$",
+  # Claude Code docs: code.claude.com returns 404 to the lychee CI checker
+  # (datacenter-IP bot protection) even though the pages are live and correct —
+  # 200 from a normal client for every UA, verified. Same "cannot be resolved from
+  # CI" class as the hosts above; the links are right, so exclude rather than rewrite.
+  "^https://code\\.claude\\.com/docs/",
 ]
 
 # mailto: links are not checked (include_mail defaults to false; left explicit).

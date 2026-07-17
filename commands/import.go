@@ -498,6 +498,10 @@ func isManagedImportSource(c importCandidate, agentsHome string) bool {
 	}
 	rel = filepath.ToSlash(rel)
 
+	if isManagedCodexAgentTomlImportSource(rel, c.sourcePath) {
+		return true
+	}
+
 	if c.project == "global" {
 		destRel := mapGlobalRelToDest(rel)
 		if destRel == "" {
@@ -508,6 +512,29 @@ func isManagedImportSource(c importCandidate, agentsHome string) bool {
 	}
 
 	return isManagedProjectOutput(c.project, c.sourceRoot, c.sourcePath, agentsHome)
+}
+
+// isManagedCodexAgentTomlImportSource reports whether rel/sourcePath is a
+// dot-agents managed rendered codex agent `.toml` under `.codex/agents/`
+// (t2c). The project-scope scan already walks `.codex/agents/`
+// (projectImportWalkDirs) as an ordinary import candidate; without this
+// check every dot-agents render would be re-"imported" into
+// ~/.agents/agents/<project>/ as archival noise on every `da import`/
+// `da refresh` — a marked render is dot-agents' own output, never foreign
+// content to import. A genuinely unmarked (foreign or pre-marker-upgrade)
+// `.codex/agents/*.toml` is unaffected and still flows through the normal
+// candidate path below: platform.writeCodexAgentTomlFile resolves any
+// render-time collision (byte-identical adopt, or diverged
+// preserve-plus-review-note) at projection time, and a preserved sibling
+// this check does not recognize (it lacks the marker) is then swept up by
+// that SAME normal candidate path on the next import/refresh pass — the
+// existing import-to-scope machinery, not a parallel one.
+func isManagedCodexAgentTomlImportSource(rel, sourcePath string) bool {
+	if !strings.HasPrefix(rel, relCodexAgentsDir) || !strings.HasSuffix(rel, ".toml") {
+		return false
+	}
+	managed, err := platform.IsManagedCodexAgentTomlFile(sourcePath)
+	return err == nil && managed
 }
 
 func importMissingCandidate(c importCandidate, dest, timestamp string) importResult {

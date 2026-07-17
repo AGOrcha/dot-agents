@@ -1,0 +1,8 @@
+schema_version: 1
+id: bakaus-path-keyed-memory
+plan_id: r2-observability-dashboard
+task_id: ""
+observation: 'Bakaus Dark-Arts #4 — path-keyed memory. Derive the snapshot and score slug from the resolved file path not the request phrasing, so a teammate pointing at the same target inherits the score trend across sessions. Check the scoring and journal keying uses resolved-path identity. Source research/articles/pbakaus-dark-arts-skill-engineering.md'
+classification: small
+routed_to: plan_summary:r2-observability-dashboard
+created_at: "2026-07-15T03:45:21Z"

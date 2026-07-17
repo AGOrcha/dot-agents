@@ -133,27 +133,9 @@ func newServer(cfg Config, mb mountBuilder) (*Server, error) {
 	}
 	roots := append([]string(nil), cfg.IterLogDirs...)
 
-	// The store↔broker cycle (store reports the live subscriber count; the
-	// broker evicts the store's cache) is broken with a late-bound closure:
-	// the counter is only read when a health request lands, by which point
-	// broker is assigned.
-	var broker *events.Broker
-	disk := store.New(roots,
-		store.WithLogger(logger),
-		store.WithSubscriberCounter(func() int {
-			return broker.SubscriberCount()
-		}),
-	)
-	broker = events.New(events.Options{Evictor: disk})
-	recStore := store.NewRecompute(disk, repoDir, cfg.TranscriptDirs...)
-
-	mount, err := mb.build(handlers.Deps{
-		Store:  recStore,
-		Logger: logger,
-		Broker: broker,
-	})
+	broker, recStore, mount, err := dashboardCore(roots, repoDir, cfg.TranscriptDirs, logger, mb.build)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard/server: build handlers: %w", err)
+		return nil, err
 	}
 
 	s := &Server{
@@ -172,6 +154,38 @@ func newServer(cfg Config, mb mountBuilder) (*Server, error) {
 	}
 	s.httpSrv = &http.Server{Handler: handler}
 	return s, nil
+}
+
+// dashboardCore composes the dashboard's shared read-side collaborators — the
+// disk store decorated with recompute-on-miss, the SSE broker wired to evict
+// that store, and the REST/SSE handlers mount built via build — for both the
+// standalone Server (newServer) and the R3-mounted Mount. The store↔broker
+// cycle (store reports the live subscriber count; the broker evicts the store's
+// cache) is broken with a late-bound closure over the broker var assigned here,
+// so the counter is read only when a health request lands, by which point
+// broker is set. On a build failure it returns the broker it created WITHOUT
+// closing it, leaving teardown policy to the caller (newServer returns the
+// wrapped error as-is; Mount closes the broker first).
+func dashboardCore(roots []string, repoDir string, transcriptDirs []string, logger *slog.Logger, build func(handlers.Deps) (*handlers.Mount, error)) (*events.Broker, *store.RecomputeStore, *handlers.Mount, error) {
+	var broker *events.Broker
+	disk := store.New(roots,
+		store.WithLogger(logger),
+		store.WithSubscriberCounter(func() int {
+			return broker.SubscriberCount()
+		}),
+	)
+	broker = events.New(events.Options{Evictor: disk})
+	recStore := store.NewRecompute(disk, repoDir, transcriptDirs...)
+
+	mount, err := build(handlers.Deps{
+		Store:  recStore,
+		Logger: logger,
+		Broker: broker,
+	})
+	if err != nil {
+		return broker, nil, nil, fmt.Errorf("dashboard/server: build handlers: %w", err)
+	}
+	return broker, recStore, mount, nil
 }
 
 // composeHandler builds the root mux: the liveness route, the handlers mount

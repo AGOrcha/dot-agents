@@ -1,0 +1,8 @@
+schema_version: 1
+id: bakaus-compile-vs-symlink
+plan_id: config-v2-migration
+task_id: ""
+observation: 'Bakaus Dark-Arts #8 challenges ''symlink .claude to .agents'' as too-good-to-be-true because behavioral (not cosmetic) harness differences bite and per-model overfitting regresses shared skills — prescribes a per-harness AND per-model build step. Confirm dot-agents internal/platform/* projection is a genuine build-step and evaluate whether it compiles per-model behavioral patches + command-syntax (slash vs dollar, AskUserQuestion vs input-tool). Parked — trigger next multi-harness or config-v2 wave. Source research/articles/pbakaus-dark-arts-skill-engineering.md'
+classification: proposal
+routed_to: proposal:obs-bakaus-compile-vs-symlink.md
+created_at: "2026-07-15T03:45:21Z"

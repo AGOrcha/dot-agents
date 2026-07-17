@@ -2210,13 +2210,23 @@ func archiveCloseoutArtifacts(projectPath, taskID, planID, decision string, cont
 		}
 	}
 
-	_ = os.Remove(mergeBackSrc)
-	_ = os.Remove(delegationSrc)
+	removeArchivedActiveSource(mergeBackSrc, "merge-back", "remove it manually so the delegation reads as resolved")
+	removeArchivedActiveSource(delegationSrc, "delegation contract", "the next fanout for this task will report an active contract until it is removed")
 	bundlePath := filepath.Join(delegationBundlesDir(projectPath), contract.ID+".yaml")
-	if _, err := os.Stat(bundlePath); err == nil {
-		_ = os.Remove(bundlePath)
-	}
+	removeArchivedActiveSource(bundlePath, "delegation bundle", "remove it manually")
 	return archiveDir, dateStr, nil
+}
+
+// removeArchivedActiveSource removes a now-archived active closeout source. The
+// archive is durable, so a failed remove (a Windows sharing violation /
+// delete-pending is the real trigger; POSIX rarely hits it) is surfaced loudly
+// rather than swallowed — a silently un-removed contract leaves the delegation
+// looking active and breaks the next fanout. consequence states the concrete
+// fallout so the warning is actionable.
+func removeArchivedActiveSource(path, kind, consequence string) {
+	if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+		ui.Warn(fmt.Sprintf("closeout archived but could not remove active %s %s (%s): %v", kind, path, consequence, rmErr))
+	}
 }
 
 func applyCloseoutDecisionToTasks(projectPath, planID, taskID string, closeout workflowDelegationCloseoutRecord) error {

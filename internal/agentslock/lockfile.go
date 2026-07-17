@@ -75,6 +75,23 @@ const inputsDigestKey = "inputs_digest"
 // signal. Production always uses 5s.
 var lockAcquireTimeout = 5 * time.Second
 
+// SetAcquireTimeout overrides the acquire budget and returns a restore function.
+// It is the cross-package seam for a concurrent-CONTENTION test that induces many
+// real, slow, LIVE holds: under the race detector the runtime stretches every
+// timing 10-20x, so on a loaded CI runner (the windows-latest leg especially,
+// where -race runs alongside coverage) a single legitimate hold can outlast the
+// 5s production budget even though the polling primitive is correct — no wakeup
+// is ever lost, only latency added. Such a test widens the budget here to stay
+// deterministic; production binaries (never built with -race) keep the 5s bound.
+// The override MUST stay BELOW lockStaleTTL for a test that expects a timeout,
+// else the held lock crosses the stale threshold and is reclaimed instead. Not
+// for parallel tests — it mutates a process-global (callers here run serially).
+func SetAcquireTimeout(d time.Duration) (restore func()) {
+	prev := lockAcquireTimeout
+	lockAcquireTimeout = d
+	return func() { lockAcquireTimeout = prev }
+}
+
 const (
 	lockRetryInterval = 10 * time.Millisecond
 	// lockStaleTTL bounds how long an unreleased lock is tolerated before a
@@ -296,14 +313,29 @@ func (lf *Lockfile) SetSection(name string, v any) error {
 // Flush writes the whole document to path atomically, preserving every section.
 // It is callable more than once (e.g. persist config before a slow adapter
 // activation, then flush adapters after). The parent directory must exist.
+//
+// Flush is NOT a serialized read-modify-write: it acquires the advisory lock
+// only for the write. A caller that must READ a shared section, compute a new
+// value from it, and WRITE it back atomically — with no concurrent writer
+// slipping in between the read and the write (the classic lost-update on a
+// section BOTH processes write, e.g. the config/packages "units" section) —
+// must use Update instead, which holds the lock across the whole cycle.
 func (lf *Lockfile) Flush() error {
-	lf.mu.Lock()
-	defer lf.mu.Unlock()
 	unlock, err := acquireFileLock(lf.path)
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	return lf.writeLocked()
+}
+
+// writeLocked merges the latest on-disk document with this Lockfile's staged
+// keys and writes atomically. The caller MUST already hold the advisory file
+// lock (Flush and Update both do). Split out of Flush so Update can perform a
+// read-open + mutate + write entirely inside ONE lock hold.
+func (lf *Lockfile) writeLocked() error {
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
 	if err := lf.mergeDiskLocked(); err != nil {
 		return err
 	}
@@ -316,6 +348,37 @@ func (lf *Lockfile) Flush() error {
 		return fmt.Errorf("agentslock: write %s: %w", lf.path, err)
 	}
 	return nil
+}
+
+// Update runs a serialized read-modify-write against the lockfile at path: it
+// acquires the advisory file lock, opens the CURRENT on-disk document UNDER
+// that lock, invokes fn to stage changes (SetSection / SetInputsDigest against
+// the just-read state), then writes atomically and releases — all inside one
+// lock hold. This closes the lost-update window that an unsynchronized
+// Open→read→…→Flush leaves: when two processes both read-modify-write the SAME
+// shared section (the config/packages "units" section), a plain Flush reapplies
+// each process's stale whole-section snapshot and silently drops the other's
+// keys. Update makes the read happen under the same lock as the write, so each
+// writer observes the other's committed keys and preserves them.
+//
+// fn returns a non-nil error to ABORT with no write (the lock is released and
+// the document is left untouched). fn must not call Flush/Update on the same
+// Lockfile (the lock is not reentrant); it only stages via SetSection /
+// SetInputsDigest and reads via Section.
+func Update(path string, fn func(*Lockfile) error) error {
+	unlock, err := acquireFileLock(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	lf, err := Open(path)
+	if err != nil {
+		return err
+	}
+	if err := fn(lf); err != nil {
+		return err
+	}
+	return lf.writeLocked()
 }
 
 func (lf *Lockfile) mergeDiskLocked() error {

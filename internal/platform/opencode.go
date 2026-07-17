@@ -258,6 +258,35 @@ func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error)
 	return append(append(skills, plugins...), agents...), nil
 }
 
+// DirMirrorRoots implements DirMirrorRootsProvider (resource_plan.go):
+// opencode's skills and plugins buckets are dir-mirror shaped; its agents
+// bucket is FILE-shaped (symlinked `.md` per entry, see
+// SourcedAgentFileIntents) and is deliberately absent here.
+func (o *opencode) DirMirrorRoots() map[string][]string {
+	return map[string][]string{
+		"skills":  {filepath.Join(opencodeAgentsDir, "skills")},
+		"plugins": {filepath.Join(opencodeDir, "plugins")},
+	}
+}
+
+// SourcedAgentFileIntents implements SourcedAgentFileProjector
+// (resource_plan.go, t2b): opencode's agents bucket symlinks a single
+// `.md` file per entry (mirroring BuildSharedAgentFileSymlinkIntents'
+// local-authored shape), so a sourced "agents"-family unit reuses the
+// generic CAS-direct file-symlink builder — the same H17 atomic swap the
+// dir-mirror CAS intents use, just DirectFile instead of DirectDir.
+func (o *opencode) SourcedAgentFileIntents(project string, units []ResolvedUnit) []ResourceIntent {
+	return buildCASAgentFileIntents(project, units, filepath.Join(opencodeDir, "agent"), ".md", "sourced-agent-file-symlink")
+}
+
+// SourcedAgentFilePruneRoot implements SourcedAgentFilePruneRoot
+// (resource_plan.go, t2b one-to-zero prune): SourcedAgentFileIntents' target
+// directory, so a fully-removed sourced agent's `.md` symlink is pruned even
+// when this call's unit set no longer names it.
+func (o *opencode) SourcedAgentFilePruneRoot() string {
+	return filepath.Join(opencodeDir, "agent")
+}
+
 // CountLinks implements LinkCounter for the opencode platform: returns the
 // (ok, broken) tally of managed links under the project's repo. Mirrors the
 // per-platform inline counter that previously lived in status.go's

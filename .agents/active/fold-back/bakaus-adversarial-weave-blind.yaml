@@ -1,0 +1,8 @@
+schema_version: 1
+id: bakaus-adversarial-weave-blind
+plan_id: full-loop-orchestration-runtime
+task_id: ""
+observation: 'Bakaus Dark-Arts #1 — adversarial review parent should WEAVE lens findings not concatenate, and lenses stay blind to each other (feeding one lens output into another skews both ways). Add a Codex fallback — if a lens cannot spawn a sub-agent (Codex without parallel permission) STOP and ask the user. Sharpens the cross-harness-adversarial gate + reviewer.base parent-synthesis. Source research/articles/pbakaus-dark-arts-skill-engineering.md'
+classification: small
+routed_to: plan_summary:full-loop-orchestration-runtime
+created_at: "2026-07-15T03:45:21Z"
