@@ -33,6 +33,19 @@ const (
 	codexAgentMDFile    = "AGENT.md"
 )
 
+// Seams for codex.go. Each defaults to the real operation and exists purely so
+// error-propagation branches that cannot fail on a healthy filesystem (an
+// atomic rename of a freshly-written same-dir temp file, a yaml.Marshal of a
+// fixed struct) or the now-inert CreateLinks sub-steps can be forced
+// deterministically in tests. Production behavior is identical to calling the
+// wrapped function directly.
+var (
+	codexCreateAgentsLinks = (*codex).createAgentsLinks
+	codexCreateSkillsLinks = (*codex).createSkillsLinks
+	codexRenameFn          = fsops.Rename
+	codexYAMLMarshal       = yaml.Marshal
+)
+
 // codexManagedTomlMarker is the durable provenance header written as the FIRST
 // line of every dot-agents-rendered codex agent `.toml`. It is a TOML comment
 // (codex ignores it) that lets the projection layer PROVE ownership before it
@@ -189,12 +202,12 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	}
 
 	// Project agents → .codex/agents/*.toml (rendered by CollectAndExecuteSharedTargetPlan)
-	if err := c.createAgentsLinks(project, repoPath, agentsHome); err != nil {
+	if err := codexCreateAgentsLinks(c, project, repoPath, agentsHome); err != nil {
 		return err
 	}
 
 	// Project skills → .agents/skills/
-	if err := c.createSkillsLinks(project, repoPath, agentsHome); err != nil {
+	if err := codexCreateSkillsLinks(c, project, repoPath, agentsHome); err != nil {
 		return err
 	}
 
@@ -562,7 +575,7 @@ func writeCodexAgentTomlFile(io platformIO, dst, agentMD string) error {
 	if err := io.WriteFile(tmp, managed, 0644); err != nil {
 		return err
 	}
-	if err := fsops.Rename(tmp, dst); err != nil {
+	if err := codexRenameFn(tmp, dst); err != nil {
 		_ = io.Remove(tmp)
 		return fmt.Errorf("codex toml: atomic rename %s: %w", dst, err)
 	}
@@ -748,7 +761,7 @@ func writeCodexImportConflictReviewNote(dst, altPath string) error {
 		},
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	data, err := yaml.Marshal(&note)
+	data, err := codexYAMLMarshal(&note)
 	if err != nil {
 		return err
 	}

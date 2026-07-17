@@ -45,6 +45,16 @@ var (
 	executeResourcePlan  = func(p ResourcePlan, repoPath, agentsHome string) error {
 		return p.Execute(repoPath, agentsHome)
 	}
+	buildResourcePlan = BuildResourcePlan
+	// symlinkFn / swapRenameFn / swapRemoveFn back the CAS-direct atomic
+	// managed-link swap (H17). They default to the real syscalls and exist so
+	// the fail-closed defensive branches — a concurrent projector winning the
+	// create race, a superseded-link unlink failing, a reverse-exchange failing
+	// after a racing user write — can be forced deterministically without a
+	// process-global clamp. Production behavior is identical to the wrapped call.
+	symlinkFn    = os.Symlink
+	swapRenameFn = atomicSwapRename
+	swapRemoveFn = fsops.Remove
 )
 
 func BuildResourcePlan(intents []ResourceIntent) (ResourcePlan, error) {
@@ -968,7 +978,7 @@ func (p ResourcePlan) RemoveSharedTargets(repoPath, agentsHome string) error {
 // symlinks/junctions, so the hard-link path only applies to the file shape.
 func removeDirectSymlinkTarget(intent ResourceIntent, target, agentsHome string) error {
 	var errs []error
-	if err := links.RemoveIfSymlinkUnder(target, agentsHome); err != nil && !os.IsNotExist(err) {
+	if err := removeIfSymlinkUnder(target, agentsHome); err != nil && !os.IsNotExist(err) {
 		errs = append(errs, fmt.Errorf("remove managed symlink %s: %w", target, err))
 	}
 	if intent.Shape == ResourceShapeDirectFile {
@@ -1059,7 +1069,7 @@ func ExecuteSharedSkillMirrorPlan(project, repoPath string, targetRoots ...strin
 	if err != nil {
 		return err
 	}
-	plan, err := BuildResourcePlan(intents)
+	plan, err := buildResourcePlan(intents)
 	if err != nil {
 		return err
 	}
@@ -1624,7 +1634,7 @@ func atomicManagedSymlinkSwap(src, target string) error {
 	}
 	// CREATE path: os.Symlink is an atomic no-clobber create (EEXIST if
 	// occupied). Success means target was absent and now points at src.
-	if err := os.Symlink(src, target); err == nil {
+	if err := symlinkFn(src, target); err == nil {
 		return nil
 	} else if !os.IsExist(err) {
 		// Not "already occupied" — e.g. symlinks unsupported/unprivileged.
@@ -1670,7 +1680,7 @@ func atomicSwapReplaceManagedLink(src, target, artifactsRoot string) error {
 	if err := os.Symlink(src, tmp); err != nil {
 		return fmt.Errorf("H17 atomic swap: cannot stage temp symlink for %s: %w", target, err)
 	}
-	if err := atomicSwapRename(tmp, target); err != nil {
+	if err := swapRenameFn(tmp, target); err != nil {
 		_ = fsops.Remove(tmp)
 		if errors.Is(err, errSwapUnsupported) {
 			return fmt.Errorf("refusing to repoint occupied managed link %s: atomic exchange unavailable on this OS (fail closed) — %w", target, err)
@@ -1680,7 +1690,7 @@ func atomicSwapReplaceManagedLink(src, target, artifactsRoot string) error {
 	// Post-exchange: target = our new symlink; tmp = the former occupant, now
 	// at a name only we hold (race-free to inspect).
 	if links.IsManagedLinkUnder(tmp, artifactsRoot) {
-		if err := fsops.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		if err := swapRemoveFn(tmp); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("H17 atomic swap: removing superseded managed link (now at %s): %w", tmp, err)
 		}
 		return nil
@@ -1688,7 +1698,7 @@ func atomicSwapReplaceManagedLink(src, target, artifactsRoot string) error {
 	// The former occupant is NOT our managed link — a racer's user file landed
 	// in target after our provenance check. Reverse the exchange to restore it,
 	// then fail closed. The user file is returned to target untouched.
-	if err := atomicSwapRename(tmp, target); err != nil {
+	if err := swapRenameFn(tmp, target); err != nil {
 		return fmt.Errorf("H17 atomic swap: CRITICAL — could not restore user content to %s after a racing write (it is currently at %s): %w", target, tmp, err)
 	}
 	_ = fsops.Remove(tmp)
