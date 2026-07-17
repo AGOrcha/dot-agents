@@ -42,5 +42,5 @@ Common failure points:
 
 ## Worktree Discipline
 
-- Sessions touching multiple worktrees should always use `git -C /abs/path <cmd>` — never `cd` to a worktree. `cd` persists `pwd` across subsequent Bash calls and silently lands commits, branches, and pushes in the wrong worktree.
-- For build/test commands that require cwd inside a worktree, use a subshell: `(cd "$WT" && go test ./...)`.
+- Provision delegated slices with `da worktree create` (managed sub-branch + recorded base), never raw `git worktree add` / `git branch`; integrate with `da worktree merge-back --onto <parent>`, never a hand-run `git merge` / `git merge-base`. The recorded base is authoritative — `merge-back` catches a parent that advanced/force-pushed (`ErrStaleBase`) instead of silently rebasing onto the wrong commit.
+- Each `da worktree create` slice has its OWN isolated index, so a worker's commits land only on its slice branch. If a single session nonetheless touches multiple worktrees, use `git -C /abs/path <cmd>` — never `cd` to a worktree (`cd` persists `pwd` across subsequent Bash calls and silently lands commits/branches/pushes in the wrong one). For build/test that needs cwd inside a worktree, use a subshell: `(cd "$WT" && go test ./...)`.
