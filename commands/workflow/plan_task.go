@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -565,6 +566,223 @@ func readFileFromCanonicalRef(projectPath, absPath string) ([]byte, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+// ── git-ref state backend: CAS write path (work-tracking-storage-abstraction §9 D9/D10) ──
+
+// stateRefName is the dedicated git ref coordination-state transitions are
+// mirrored to under the git-ref backend (design §9 D9). It is ORTHOGONAL to the
+// code branch — worktrees on any feature branch or detached HEAD resolve status
+// against this one ref — and is NEVER merged into the default branch (D10): a
+// parallel lineage like refs/notes/*.
+const stateRefName = "refs/agents/state"
+
+// zeroOID is git's all-zeros object id. As `git update-ref <ref> <new> <old>`'s
+// <old> argument it asserts the ref does NOT yet exist, making the very first
+// write race-safe (create-only) under the same compare-and-swap as every update.
+const zeroOID = "0000000000000000000000000000000000000000"
+
+// stateRefCASAttempts bounds the compare-and-swap retry loop: when a concurrent
+// process advances refs/agents/state between our read of <old> and our
+// update-ref, git rejects the swap and we re-read, rebuild, and retry up to this
+// many times before surfacing the contention as an error.
+const stateRefCASAttempts = 16
+
+// stateRefCommitMessage is the fixed message on each state-ref commit. The ref
+// is machine-owned coordination state, not human-authored history.
+const stateRefCommitMessage = "da: coordination-state transition"
+
+// mirrorTransitionToStateRef ADDITIONALLY writes planID's changed
+// coordination-state files to refs/agents/state via atomic compare-and-swap,
+// but ONLY when the git-ref write backend is active
+// (work_tracking.write_to == "state-ref"). It is purely additive: the
+// working-copy write (saveCanonicalTasks/saveCanonicalPlan — the §3B agent-
+// facing projection) has already happened and is never replaced or altered.
+//
+// When the backend is inactive (default / unset config) this is a no-op that
+// touches no git ref, so the default write path is byte-for-byte identical to
+// today — the git-ref mechanism ships here but the default flip is reserved for
+// a later task (document-and-default-git-ref).
+func mirrorTransitionToStateRef(projectPath, planID string) error {
+	if !canonicalWriteToStateRef(projectPath) {
+		return nil
+	}
+	files, err := collectPlanStateFiles(projectPath, planID)
+	if err != nil {
+		return fmt.Errorf("collect state files for %s: %w", stateRefName, err)
+	}
+	return writeStateRefCAS(projectPath, files)
+}
+
+// canonicalWriteToStateRef reports whether transitions for projectPath ALSO
+// mirror to the state ref — work_tracking.write_to == "state-ref". Any
+// config-load failure or absent config yields false so the default
+// (working-copy-only) write path is unchanged.
+func canonicalWriteToStateRef(projectPath string) bool {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		return false
+	}
+	return rc.WriteToStateRef()
+}
+
+// stateRefFile is one coordination-state file staged into a state-ref commit:
+// its repo-relative (slash-separated) path and the exact bytes on disk.
+type stateRefFile struct {
+	relPath string
+	content []byte
+}
+
+// collectPlanStateFiles reads planID's canonical state files (TASKS.yaml,
+// PLAN.yaml) back from the working copy so the ref mirrors byte-for-byte what
+// the §3B projection just wrote. A file that does not exist is skipped (not
+// every transition touches both); any other read error is surfaced.
+func collectPlanStateFiles(projectPath, planID string) ([]stateRefFile, error) {
+	dir := filepath.Join(plansBaseDir(projectPath), planID)
+	files := make([]stateRefFile, 0, 2)
+	for _, name := range []string{workflowTasksFileName, workflowPlanFileName} {
+		abs := filepath.Join(dir, name)
+		content, err := os.ReadFile(abs)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		rel, err := filepath.Rel(projectPath, abs)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, stateRefFile{relPath: filepath.ToSlash(rel), content: content})
+	}
+	return files, nil
+}
+
+// writeStateRefCAS commits files to refs/agents/state under an atomic
+// compare-and-swap retry loop: read the ref's current commit (<old>), build a
+// new commit whose tree is <old>'s tree with files overlaid, then
+// `git update-ref refs/agents/state <new> <old>`. update-ref applies the swap
+// only if the ref still points at <old>; a concurrent writer that moved it
+// makes the swap fail, and we re-read <old> and rebuild — the interprocess-safe
+// read-modify-write the file lock alone cannot provide across worktrees. Bails
+// after stateRefCASAttempts with the last contention error.
+func writeStateRefCAS(projectPath string, files []stateRefFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	var lastErr error
+	for range stateRefCASAttempts {
+		old := stateRefHead(projectPath)
+		commit, err := buildStateRefCommit(projectPath, old, files)
+		if err != nil {
+			return err
+		}
+		if err := casSwapFn(projectPath, commit, old); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("update %s: compare-and-swap lost after %d attempts: %w", stateRefName, stateRefCASAttempts, lastErr)
+}
+
+// stateRefHead returns the commit refs/agents/state currently points at, or ""
+// when the ref does not yet exist (the first write). Uses gitOutput, which
+// yields "" on the expected non-zero exit for an absent ref.
+func stateRefHead(projectPath string) string {
+	return strings.TrimSpace(gitOutput(projectPath, "rev-parse", "--verify", "--quiet", stateRefName+"^{commit}"))
+}
+
+// buildStateRefCommit builds (but does not install) a commit that carries files
+// on top of parent's tree, using a throwaway temp index so the caller's working
+// tree, index, and HEAD are never touched — the ref is written entirely via
+// plumbing. parent "" produces a root commit (first write). Returns the new
+// commit's object id.
+func buildStateRefCommit(projectPath, parent string, files []stateRefFile) (string, error) {
+	tmpDir, err := os.MkdirTemp("", "da-state-ref-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmpDir)
+	env := []string{"GIT_INDEX_FILE=" + filepath.Join(tmpDir, "index")}
+	if parent != "" {
+		if _, err := gitStateExec(projectPath, env, nil, "read-tree", parent); err != nil {
+			return "", err
+		}
+	}
+	for _, f := range files {
+		blob, err := gitStateExec(projectPath, env, f.content, "hash-object", "-w", "--stdin")
+		if err != nil {
+			return "", err
+		}
+		if _, err := gitStateExec(projectPath, env, nil, "update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(blob)+","+f.relPath); err != nil {
+			return "", err
+		}
+	}
+	tree, err := gitStateExec(projectPath, env, nil, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	args := []string{"commit-tree", strings.TrimSpace(tree), "-m", stateRefCommitMessage}
+	if parent != "" {
+		args = []string{"commit-tree", strings.TrimSpace(tree), "-p", parent, "-m", stateRefCommitMessage}
+	}
+	commit, err := gitStateExec(projectPath, stateRefCommitEnv(env), nil, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(commit), nil
+}
+
+// compareAndSwapStateRef performs the atomic swap: update refs/agents/state to
+// newCommit only if it still points at old. An empty old is sent as zeroOID so
+// the first write succeeds only if the ref is still absent (create-only). A
+// non-nil error means the swap was rejected (the ref moved) — the caller's
+// retry signal.
+func compareAndSwapStateRef(projectPath, newCommit, old string) error {
+	oldArg := old
+	if oldArg == "" {
+		oldArg = zeroOID
+	}
+	_, err := gitStateExec(projectPath, nil, nil, "update-ref", stateRefName, newCommit, oldArg)
+	return err
+}
+
+// casSwapFn is the compare-and-swap seam. Production points it at
+// compareAndSwapStateRef; the bounded-retry-exhaustion test overrides it with a
+// perpetual-conflict stub to prove writeStateRefCAS gives up (with a wrapped
+// error) after stateRefCASAttempts instead of spinning forever.
+var casSwapFn = compareAndSwapStateRef
+
+// stateRefCommitEnv appends a deterministic, hermetic author/committer identity
+// so commit-tree never depends on ambient user.name/user.email config (the ref
+// is machine-owned).
+func stateRefCommitEnv(base []string) []string {
+	return append(append([]string{}, base...),
+		"GIT_AUTHOR_NAME=dot-agents", "GIT_AUTHOR_EMAIL=dot-agents@localhost",
+		"GIT_COMMITTER_NAME=dot-agents", "GIT_COMMITTER_EMAIL=dot-agents@localhost",
+	)
+}
+
+// gitStateExec runs a git command in projectPath for the state-ref CAS path,
+// with optional extra environment (e.g. GIT_INDEX_FILE) and stdin. Unlike
+// gitOutput it RETURNS the error and stderr, so the CAS loop can tell a rejected
+// compare-and-swap (ref moved) apart from a successful update.
+func gitStateExec(projectPath string, extraEnv []string, stdin []byte, args ...string) (string, error) {
+	cmd := execabs.Command("git", append([]string{"-C", projectPath}, args...)...)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
 }
 
 func loadCanonicalPlan(projectPath, planID string) (*CanonicalPlan, error) {
@@ -2171,6 +2389,9 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 		plan.CurrentFocusTask = effectivePlanFocusTask(tf.Tasks)
 	}
 	if err := saveCanonicalPlan(project.Path, plan); err != nil {
+		return err
+	}
+	if err := mirrorTransitionToStateRef(project.Path, planID); err != nil {
 		return err
 	}
 	ok = true

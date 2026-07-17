@@ -265,6 +265,24 @@ const (
 	WorkTrackingReadFromMaster = "master"
 )
 
+// WorkTracking write_to values (work-tracking-storage-abstraction §9 D9
+// git-ref backend CAS write path). ADDITIVE: the per-worktree working copy is
+// ALWAYS written; write_to only selects whether the transition is ALSO
+// mirrored to the shared state ref.
+const (
+	// WorkTrackingWriteToWorktree writes coordination state ONLY to the
+	// per-worktree working copy — today's behaviour and the default when
+	// work_tracking.write_to is unset. No git ref is written.
+	WorkTrackingWriteToWorktree = "worktree"
+	// WorkTrackingWriteToStateRef ADDITIONALLY mirrors each status transition
+	// to refs/agents/state via atomic compare-and-swap (git update-ref
+	// <new> <old>, retry-on-mismatch) — the git-ref shared SOT (D9). The
+	// working copy is still written; the ref is an ADDITIONAL source of truth,
+	// orthogonal to the code branch and never merged into the default branch
+	// (D10).
+	WorkTrackingWriteToStateRef = "state-ref"
+)
+
 // AgentsRCWorkTracking is the work_tracking configuration block in
 // agentsrc.json — the coordination-state storage plane
 // (work-tracking-storage-abstraction spec, D8 scope ladder). Only the
@@ -276,6 +294,13 @@ type AgentsRCWorkTracking struct {
 	//   "master"                     — the canonical ref (origin/<default-branch>) via `git show`
 	// The write side is unchanged regardless of this value (read-side-only shim).
 	ReadFrom string `json:"read_from,omitempty"`
+	// WriteTo selects where a status transition is WRITTEN:
+	//   "worktree" (default / empty) — only the per-worktree working copy (today's behaviour)
+	//   "state-ref"                  — ALSO mirror the transition to refs/agents/state via CAS (additive)
+	// The working-copy write happens regardless of this value; "state-ref"
+	// only adds the git-ref mirror. Backend selection via the D8 scope ladder
+	// (work_tracking.backend) supersedes this focused gate in a later task.
+	WriteTo string `json:"write_to,omitempty"`
 }
 
 // ReadFromMaster reports whether coordination state (TASKS.yaml / PLAN.yaml)
@@ -285,6 +310,15 @@ type AgentsRCWorkTracking struct {
 // today's byte-for-byte worktree read behaviour by default.
 func (a *AgentsRC) ReadFromMaster() bool {
 	return a != nil && a.WorkTracking != nil && a.WorkTracking.ReadFrom == WorkTrackingReadFromMaster
+}
+
+// WriteToStateRef reports whether a status transition should ALSO be mirrored
+// to the git-ref shared SOT (refs/agents/state) via compare-and-swap — i.e.
+// work_tracking.write_to == "state-ref". A nil receiver or absent/blank/
+// "worktree" config yields false, preserving today's byte-for-byte
+// working-copy-only write behaviour by default (no ref is written).
+func (a *AgentsRC) WriteToStateRef() bool {
+	return a != nil && a.WorkTracking != nil && a.WorkTracking.WriteTo == WorkTrackingWriteToStateRef
 }
 
 // AgentsRC represents the .agentsrc.json manifest committed to a project repo.
