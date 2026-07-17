@@ -244,7 +244,7 @@ func TestMergeBackBranchDrift(t *testing.T) {
 	}
 	// The integrated commit was the captured (pre-drift) tip, but the worktree
 	// HEAD no longer matches it — proving detection, not assumption.
-	if got := branchHash(t, f, "sub"); got == subHead {
+	if branchHash(t, f, "sub") == subHead {
 		t.Fatal("drift hook did not move the sub-branch; test is not exercising drift")
 	}
 }
