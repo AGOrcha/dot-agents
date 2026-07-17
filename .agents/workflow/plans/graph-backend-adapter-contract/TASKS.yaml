@@ -422,7 +422,7 @@ tasks:
       app_type: go-cli
     - id: t6a-parity-surfaces
       title: CRG native parity surfaces for flows communities and postprocess
-      status: pending
+      status: completed
       depends_on:
         - t4-crg-dual-read
       blocks:
@@ -451,7 +451,7 @@ tasks:
       app_type: go-cli
     - id: t6c-consumer-audit
       title: Audit bridge consumers and cutover readiness
-      status: pending
+      status: completed
       depends_on:
         - t4-crg-dual-read
       blocks:
