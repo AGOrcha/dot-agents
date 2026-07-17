@@ -444,7 +444,7 @@ tasks:
         - t6d-final-bridge-deletion
       owner: dot-agents
       write_scope:
-        - .github/workflows/ci.yml
+        - .github/workflows/test.yml
         - testdata/crg-parity/
       verification_required: true
       notes: 'Wire corrected parity matrix + behavior-preservation harness into CI so the decommission soak clock can start. Starts the evidence clock; does NOT claim the multi-week gate satisfied. Anti-scope: no bridge deletion; do not mark soak complete in the same change that introduces the gate.'
