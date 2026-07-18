@@ -4,7 +4,7 @@ order: 4
 task:
     id: decouple-coordination-commits
     title: Stop staging .agents/workflow/** into code-branch commits (fold commit-scope)
-    status: pending
+    status: completed
     depends_on:
         - git-ref-state-ref-write
     blocks: []
