@@ -555,7 +555,7 @@ func TestStateRefResidentPlanIDs_RefWithoutPlansTree(t *testing.T) {
 	if err := writeStateRefCAS(repo, []stateRefFile{{relPath: "marker.txt", content: []byte("x")}}); err != nil {
 		t.Fatalf("seed marker ref: %v", err)
 	}
-	if head := stateRefHead(repo); head == "" {
+	if stateRefHead(repo) == "" {
 		t.Fatal("precondition: ref must exist")
 	}
 	ids, err := stateRefResidentPlanIDs(repo)
