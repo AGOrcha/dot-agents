@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 8
+task:
+    id: p2-lessons
+    title: 'P2: capture the 3 un-captured lessons'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/lessons/
+    verification_required: false
+    notes: |-
+        New lessons: pin-release-toolchain-and-make-releases-retryable (no lesson exists for the biggest churn
+        cluster); hermetic-home-for-state-resolving-tests (the flaky-test root; generalizes the keychain lesson — any
+        test resolving $HOME/graph-home/keychain must t.Setenv an isolated temp env); gates-must-be-locally-reproducible.
+        Update .agents/lessons/index.md.
+
+        Landed: merged to master via PR #125 (was stale `pending` from the #126 sync; lessons are on master) (wave-2 state sync).
+    app_type: docs

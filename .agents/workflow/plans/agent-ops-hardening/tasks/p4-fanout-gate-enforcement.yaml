@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 12
+task:
+    id: p4-fanout-gate-enforcement
+    title: 'P4: mechanical refuse-check in da workflow fanout for out-of-scope asserting test callers'
+    status: completed
+    depends_on:
+        - p1-delegation-brief-hardening-skill
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/
+        - internal/
+    verification_required: true
+    notes: |-
+        Add a mechanical refuse-check to `da workflow fanout` — reject a bundle whose
+        asserting *_test.go callers of changed/deleted symbols fall outside write_scope
+        (expand-only-if-same-package, else refuse). The skill prose is now mandatory
+        (PR #134); this is the code enforcement. Future: drive the symbol/caller lineage
+        from the graph (scoped-KG derivation), not just grep.
+    app_type: go-cli

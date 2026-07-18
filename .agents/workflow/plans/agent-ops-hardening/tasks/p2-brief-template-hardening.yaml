@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 9
+task:
+    id: p2-brief-template-hardening
+    title: 'P2: harden the delegation brief/bundle template'
+    status: awaiting_owner_review
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+    verification_required: false
+    notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored).
+
+        Bake into the standard delegation bundle/brief: (1) keep functions under Sonar cognitive-complexity 15
+        (extract helpers; gocognit != Sonar); (2) write_scope MUST include the tests a change breaks; (3) front-load a
+        read-only boundary for plan/review tasks; (4) a skipped/tagged cross-platform test is UNVERIFIED until its CI
+        shard is green; (5) sanitize FS paths for Windows (no : * ? etc.); (6) never --no-verify (fix/isolate the test).
+
+        Impl done; delivered with PR #134 (orchestrator agent-type + consolidated pre-fanout gate), open, awaiting owner merge.
+    app_type: docs

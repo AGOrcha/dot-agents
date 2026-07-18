@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 7
+task:
+    id: p1-helper-skills
+    title: 'P1: helper scripts / verifier-profile content (NOT skills)'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - scripts/
+        - .agents/prompts/verifiers/
+        - docs/
+    verification_required: false
+    notes: |-
+        None of these is a skill. (1) pr-gate-wait duplicates the verifier-owns-ci-watch-shift-left lesson / pr-ci
+        verifier profile -> fold there (or a thin CLI wrapper); replaces the 283 ad-hoc poll loops. (2)
+        locate-and-tail-claude-session -> ops script under scripts/, coupled to the move-repo script (the ~/.claude path
+        encoding changes on repo move); replaces the unbounded find ~/.claude. (3) sonar-issue-fetch -> a paragraph in
+        the pr-ci / CI-debugging guidance: use mcp__sonarqube, NOT curl (kills the curl/DNS loop).
+
+        Landed: merged to master via PR #130 (pr-gate-wait + find-claude-session helpers + CI debugging note) (wave-2 state sync).
+    app_type: docs

@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 3
+task:
+    id: p1-safe-push-skill
+    title: 'P1: extend precommit-mandate.sh + safe-push lesson (SSH keepalive + ref-land verify)'
+    status: completed
+    depends_on:
+        - p0-sonar-scanner-exclusions
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - scripts/
+        - .agents/lessons/
+    verification_required: true
+    notes: |-
+        No new skill — the cleanup/retry already lives in scripts/precommit-mandate.sh (≈line 95: cleans .scannerwork,
+        retries Sonar CE flakes, prefers the native scanner -> parallel-push safer). Net-new bits only: add SSH-keepalive
+        (GIT_SSH_COMMAND ServerAliveInterval) + post-push ref-land verification, sourced from the existing ssh-keepalive
+        lesson. Extend the script + capture/extend a safe-push lesson. Removes the most expensive recurring loop.
+
+        Landed: merged to master via PR #131 (safe-push wrapper) (wave-2 state sync).
+    app_type: config

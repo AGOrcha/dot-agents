@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 13
+task:
+    id: p5-routing-doc-cross-harness-evidence
+    title: Update AGENT_TOOL_ROUTING.md with cross-harness wave evidence + blocking-gate policy
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/AGENT_TOOL_ROUTING.md
+    verification_required: true
+    notes: '2026-06-25 graph-chain wave produced fresh Claude-vs-Codex data: Codex adversarial review caught a BLOCKER or HIGH in every Claude impl PR (tautological parity, papered lifecycle, unwired gate) AND caught incomplete fixes on re-review; same-model Claude review missed them. Codex impl was clean but could not self-publish/run per-file gate (sandbox tax) — Claude rescued. Update the routing doc: codex=review (recommend BLOCKING gate on substantive work), claude=impl + publish/gate-running; document the rescue patterns and the per-file/cross-OS gate-repro friction.'
+    app_type: docs

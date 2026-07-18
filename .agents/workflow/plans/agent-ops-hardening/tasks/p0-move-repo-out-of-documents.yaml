@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 2
+task:
+    id: p0-move-repo-out-of-documents
+    title: 'P0: migration to move repo out of ~/Documents (preserve primary-agent history)'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - scripts/
+    verification_required: false
+    notes: |-
+        The ~/Documents TCC lock cost 190 hits (primary agent) + the review-agent worktree-escape/reconstruction. Only protected
+        folders are Documents/Desktop/Downloads/iCloud, so a repo at ~/dot-agents needs no FDA at all (brew-cdhash
+        grants are upgrade-fragile; a detached tmux server is its own responsible process). Provide a migration script
+        that: mv the repo; move ~/.claude/projects/<old-encoded>/ -> <new-encoded> (carries transcripts + memory/);
+        merge the ~/.claude.json projects["<old abs path>"] entry into the new key; backup first. MAINTAINER runs it.
+
+        Landed: merged to master via PR #129 (migrate-project.sh) (wave-2 state sync).
+    app_type: ops

@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 5
+task:
+    id: p1-release-cut-skill
+    title: 'P1 skill (the one new standalone skill): release-cut-monitor-retry + split-out pin-toolchain CI step'
+    status: awaiting_owner_review
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/release-cut/
+        - .github/workflows/
+    verification_required: true
+    notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored). The release-cut skill dir does NOT exist yet under internal/scaffold/home/starter/skills/global/ — it must be CREATED there.
+
+        KEEP as a real new skill (app_type: skill) — multi-step branching judgment justifies it. The 0.4.0 release
+        burned 4 PRs + multiple failed runs on latent infra (unpinned dotnet sign -> kernel32 Linux crash; non-retryable
+        workflow; stale-tag-on-retry; jsign tsmode). Skill: preflight pin-check the signing toolchain on Linux -> cut ->
+        monitor auto-release.yml -> on infra failure clean the stale tag + workflow_dispatch re-drive -> classify known
+        failures (kernel32, DLSequence cast). SPLIT the "fail-if-toolchain-installs-unpinned" half OUT as a plain CI step
+        under .github/workflows/ (not part of the skill). release-patch-train is a standing plan, so this pays off every
+        release.
+
+        Impl done; PR #135 (release-cut skill + pin-toolchain CI guard) open, awaiting owner merge.
+    app_type: skill

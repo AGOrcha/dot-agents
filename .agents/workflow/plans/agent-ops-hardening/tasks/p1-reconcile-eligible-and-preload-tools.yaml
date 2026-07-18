@@ -1,0 +1,26 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 6
+task:
+    id: p1-reconcile-eligible-and-preload-tools
+    title: 'P1: fold reconcile bullet into orchestrator-session-start preflight (guarded git fetch) + preload toolset via tools: frontmatter'
+    status: awaiting_owner_review
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+        - .agents/active/orchestrator.loop.md
+    verification_required: true
+    notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored).
+
+        Not a new skill. Reconcile is ALREADY in orchestrator-session-start preflight §3 (merged-task sweep); only
+        missing a GUARDED `git fetch origin master` bullet (note: a bare fetch in a skill is too side-effectful — guard
+        it / make it explicit/opt-in) so the eligible set is never derived off the divergent local branch. Stale-queue
+        re-discovery cost 483 "already done" hits + wasted spawns. Preload-tools = declare the deferred orchestrator
+        toolset (SendMessage/TaskStop/Monitor/PushNotification/sonarqube gate-status) in the orchestrator agent's
+        `tools:` frontmatter / profile (config, zero procedure) so they aren't ToolSearch-refetched (~70 calls/run).
+
+        Impl done; delivered with PR #134 (orchestrator agent-type + consolidated pre-fanout gate), open, awaiting owner merge.
+    app_type: config

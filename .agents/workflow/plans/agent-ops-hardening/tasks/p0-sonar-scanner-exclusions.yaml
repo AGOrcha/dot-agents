@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 1
+task:
+    id: p0-sonar-scanner-exclusions
+    title: 'P0: exclude dist/ + .scannerwork from sonar-scanner (stop pre-push flake)'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - sonar-project.properties
+    verification_required: true
+    notes: |-
+        The sonar pre-push gate walked dist/ + .scannerwork created mid-session -> 1562 scannerwork hits -> 461
+        --no-verify reaches. Add dist/ and .scannerwork to sonar.exclusions (and confirm the pre-push scanner config).
+        Removes the root reason workers bypass the local gate.
+        Landed: merged to master via PR #121 (wave-2 state sync).
+    app_type: config

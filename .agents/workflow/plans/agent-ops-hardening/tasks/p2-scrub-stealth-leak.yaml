@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 10
+task:
+    id: p2-scrub-stealth-leak
+    title: 'P2: scrub agent-tool session-author leak in worktree handoffs'
+    status: cancelled
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/
+    verification_required: false
+    notes: 'Cancelled: project policy relaxed to allow factual AI references; harness/model/created_by are legitimate operational metadata. PR #122 closed unmerged.'
+    app_type: docs

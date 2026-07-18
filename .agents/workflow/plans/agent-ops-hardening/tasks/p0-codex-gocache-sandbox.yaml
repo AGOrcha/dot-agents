@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 0
+task:
+    id: p0-codex-gocache-sandbox
+    title: 'P0: pre-set GOCACHE/GOTMPDIR/TMPDIR + da-write perms in the review-agent sandbox'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .codex/
+    verification_required: true
+    notes: |-
+        DONE: granted the EXISTING go cache (~/Library/Caches/go-build + ~/go/pkg/mod) as writable_roots in
+        [sandbox_workspace_write] in ~/.codex/config.toml (no /tmp redirect). Kills the biggest tax (1,222 GOCACHE=/tmp
+        workarounds across 159 secondary review-agent sessions); legitimate da refresh / KG / git writes stop
+        triggering per-command escalation.
+    app_type: config

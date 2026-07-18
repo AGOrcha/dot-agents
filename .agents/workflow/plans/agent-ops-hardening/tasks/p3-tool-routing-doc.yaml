@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+order: 11
+task:
+    id: p3-tool-routing-doc
+    title: 'P3: document primary-agent vs secondary-review-agent work routing'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/
+    verification_required: false
+    notes: |-
+        Per the cross-tool analysis: route to the secondary review agent = adversarial/second-opinion review
+        (read-only, cited), cross-tool resume of rate-limited primary-agent sessions, bounded staged delegation (its
+        native spawn/wait/close); keep on the primary agent = heavy iterative Go build-test loops (until P0 env taxes
+        fixed, after which either). Short routing doc/reference.
+
+        Landed: merged to master via PR #137 (Claude-vs-Codex tool routing doc) (wave-2 state sync).
+    app_type: docs
