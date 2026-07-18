@@ -437,7 +437,7 @@ tasks:
       app_type: go-cli
     - id: t6b-gate-automation
       title: Promote CRG parity matrix and behavior harness into CI
-      status: in_progress
+      status: completed
       depends_on:
         - t6a-parity-surfaces
       blocks:
