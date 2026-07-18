@@ -1,28 +1,26 @@
-# Workflow-state ref backend — cutover ROLLED BACK (dot-agents)
+# Workflow-state ref backend — CUTOVER COMPLETE (dot-agents)
 
-**Status (2026-07-18):** additive opt-in `write_to=state-ref` ACTIVE; the `backend=git-ref` READ cutover was attempted, validated for status reads, then **rolled back** after dogfooding exposed a structural-write clobber bug. Re-cutover is blocked on the choke-point mirror fix below.
+**Status (2026-07-18):** `git-ref` is the ACTIVE work-tracking backend for this repo. The cutover is done, re-validated with structural writes, and user-authorized. The earlier rollback (structural-write clobber) is fixed.
 
 ## Active configuration
 
-`.agentsrc.json`:
+`.agentsrc.json`: `"work_tracking": { "backend": "git-ref" }`
 
-```json
-"work_tracking": { "write_to": "state-ref" }
-```
+- **Reads** project canonical `TASKS.yaml`/`PLAN.yaml` from `refs/agents/state` (per-task blobs); graceful fallback to the working copy for any plan not on the ref. Reading the LOCAL ref is read-your-writes safe.
+- **Writes**: every canonical write — status transitions AND structural writes (`task add`/`update`, plan-create/update, merge-back) — mirrors to the ref at the `saveCanonicalTasks`/`saveCanonicalPlan` choke point (#434). The working copy is still written (additive) for projection fidelity + rollback.
+- **Commits**: `da workflow commit` does not stage `.agents/workflow/**` plan-state into code-branch commits (it lives on the ref); `.agents/history/**` + explicit `--include` still stage.
+- **Surfacing**: `da workflow status` → `backend: git-ref` + `coordination SOT: refs/agents/state (live)`.
 
-- Reads resolve from the **working copy** (read-your-writes safe for all ops).
-- Writes: each status transition additively mirrors to `refs/agents/state` (CAS); working copy always written.
-- `read_from: master` is NOT used (clobbers sequential same-checkout writes — `.agents/lessons/read-from-master-clobbers-sequential-writes/`).
+## How the cutover was made safe
+1. **#434 choke-point mirror** — structural writes now mirror (fixed the clobber that forced the first rollback).
+2. **`da workflow state-ref reconcile`** (#435) — seeded ALL 38 plans onto the ref (0 stale) so no plan reads a partial subset.
+3. **Re-validated**: two sequential structural `task update`s under git-ref both survive (no clobber); projection == working copy; rollback (set `backend=local`) returns to working-copy reads with no data loss.
 
-## Why the git-ref read cutover was rolled back
-
-`backend=git-ref` READS canonical state from the ref, but the mirror only fires on **status transitions** — structural writes (`task add`/`update`, plan-create, merge-back) go through `saveCanonicalTasks`/`saveCanonicalPlan` and write only the working copy, NOT the ref. So the ref goes stale for non-transition writes and sequential structural writes clobber each other via the stale-ref read (same read-your-writes class as `read_from=master`). See `.agents/lessons/git-ref-backend-structural-writes-must-mirror/`.
-
-## Re-cutover gate (in addition to the original migration gate)
-
-1. `git-ref-work-backend/ref-back-managed-artifacts` (or a dedicated fix) makes the **canonical-write choke point** (`saveCanonicalTasks`/`saveCanonicalPlan`) trigger the ref mirror under git-ref, so EVERY canonical write is immediately ref-visible.
-2. Cutover validation re-run MUST exercise STRUCTURAL writes (add/update) under git-ref, not just status-transition reads.
-3. Then flip `work_tracking.backend=git-ref` again; rollback stays a config revert to `write_to=state-ref`.
+## Rollback
+Set `work_tracking.backend` back to `local` (or unset). Reads return to the always-current working copy; the ref remains a durable audit trail. No data migration.
 
 ## Coordination
-`refs/agents/state` is SHARED with a co-located session (`active/coordination/`). Always CAS; never force-update.
+`refs/agents/state` is SHARED with a co-located session (`active/coordination/`). Always CAS; never force-update. The reconcile + #434 keep every session's writes ref-consistent.
+
+## Follow-on
+`ref-back-managed-artifacts` (mirror `.agents/active` delegation/merge-back/verification/review artifacts to the ref) + `proposal-scope-flag` (Proposal scope field routing into diff-scopes/sources) extend coverage beyond plan coordination state.

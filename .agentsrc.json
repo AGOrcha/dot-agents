@@ -38,7 +38,7 @@
   ],
   "hooks": true,
   "work_tracking": {
-    "write_to": "state-ref"
+    "backend": "git-ref"
   },
   "mcp": [
     "code-review-graph",
