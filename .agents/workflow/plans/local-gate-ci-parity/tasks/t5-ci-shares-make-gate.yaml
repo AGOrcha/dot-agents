@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: local-gate-ci-parity
+order: 4
+task:
+    id: t5-ci-shares-make-gate
+    title: CI invokes make gate / gate-cross (shared definition, no drift)
+    status: pending
+    depends_on:
+        - t1-make-gate-single-source
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .github/workflows/
+        - scripts/
+    verification_required: true
+    notes: D1+req3+OQ4. CI Coverage-gate job runs the same make target / underlying scripts; CI feeds its real Windows-matrix coverage into the multi-OS merge instead of ssh. Grep-assert no divergent coverage-mode constant between hook and CI.
+    app_type: go-cli

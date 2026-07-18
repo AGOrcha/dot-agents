@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: local-gate-ci-parity
+order: 2
+task:
+    id: t3-gate-cross-windows
+    title: 'make gate-cross: Windows-ssh tests for changed packages + merged multi-OS coverage'
+    status: completed
+    depends_on:
+        - t1-make-gate-single-source
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - scripts/
+        - Makefile
+    verification_required: true
+    notes: D2+D5+OQ3. make gate-cross ssh-runs changed-package tests on pap-h@pap-home.local and merges local+Windows coverage into the true multi-OS per-file profile. Define sync (rsync/git), Go cache on box, BatchMode key-only ssh, and unreachable-box semantics (loud-skip vs hard-fail).
+    app_type: go-cli

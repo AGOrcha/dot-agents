@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: local-gate-ci-parity
+order: 5
+task:
+    id: t6-worker-contract
+    title: Worker brief/loop-worker self-gate references make gate; forbid --no-verify
+    status: pending
+    depends_on:
+        - t1-make-gate-single-source
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/
+    verification_required: true
+    notes: 'req7. Add ''run make gate before push'' to the loop-worker self-gate/brief template; document --no-verify as forbidden (hook is reliable). Dogfoods lesson-loading: attach gates-must-be-locally-reproducible + tests-must-drive-the-production-path.'
+    app_type: docs

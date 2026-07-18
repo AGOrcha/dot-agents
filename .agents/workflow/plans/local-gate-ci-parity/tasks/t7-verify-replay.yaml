@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: local-gate-ci-parity
+order: 6
+task:
+    id: t7-verify-replay
+    title: 'Regression: replay #173/#174 pre-fix must fail make gate + determinism check'
+    status: pending
+    depends_on:
+        - t1-make-gate-single-source
+        - t2-fast-proxies
+        - t3-gate-cross-windows
+        - t4-native-sonar-deterministic
+        - t5-ci-shares-make-gate
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - scripts/
+    verification_required: true
+    notes: 'Done criteria. Prove a change failing CI per-file coverage / Windows tests / sonar-new-issues also fails make gate*/locally (replay #173 5-file + #174 windows pre-fix states). Assert make gate twice = identical PASS, no tree mutation.'
+    app_type: go-cli

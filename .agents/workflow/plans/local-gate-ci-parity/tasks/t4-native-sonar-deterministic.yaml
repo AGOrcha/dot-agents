@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: local-gate-ci-parity
+order: 3
+task:
+    id: t4-native-sonar-deterministic
+    title: Full native sonar in gate-cross; pristine-tree + .scannerwork/dist ignore+exclude
+    status: pending
+    depends_on:
+        - t3-gate-cross-windows
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - scripts/precommit-mandate.sh
+        - .gitignore
+        - sonar-project.properties
+    verification_required: true
+    notes: 'D3 backstop + R3. Run full native sonar-scanner in gate-cross (not every push). Extend the #147 pristine-tree fix; gitignore + scanner-exclude .scannerwork and dist so prek never sees a hook-modified file.'
+    app_type: go-cli

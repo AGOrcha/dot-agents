@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: local-gate-ci-parity
+order: 1
+task:
+    id: t2-fast-proxies
+    title: Fast-tier offline sonar proxies (gocognit S3776 + dup-literal S1192)
+    status: pending
+    depends_on:
+        - t1-make-gate-single-source
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - scripts/
+        - Makefile
+    verification_required: true
+    notes: D3 fast tier. In make gate, run gocognit -over 15 (S3776) + a duplicated-literal scan (S1192) over changed Go files. Define the dup-literal threshold to match Sonar (same non-trivial literal repeated >=N). Instant, offline, deterministic.
+    app_type: go-cli

@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: local-gate-ci-parity
+order: 0
+task:
+    id: t1-make-gate-single-source
+    title: make gate target + prek hook calls it + per-file coverage on changed files
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - Makefile
+        - scripts/precommit-mandate.sh
+        - .pre-commit-config.yaml
+        - scripts/
+    verification_required: true
+    notes: D1+D4+R1. Add make gate as single source of truth; prek pre-push hook invokes make gate (remove parallel gate logic from precommit-mandate.sh). Switch the coverage step from per-package to per-file enforce (COVERAGE_FILE_MODE=enforce) scoped to changed .go files (OQ2 diff base = merge-base origin/master HEAD). Must be deterministic.
+    app_type: go-cli
