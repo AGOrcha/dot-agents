@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 2
+task:
+    id: t3-lock-and-wire-pass2
+    title: Record kind:artifact lock unit and wire packages pass-2 into install/refresh
+    status: pending
+    depends_on:
+        - t2-materialize-store
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/resolver.go
+        - internal/config/ensure_resolved.go
+        - internal/config/unit_kinds.go
+        - commands/refresh.go
+        - commands/internal/lifecycle/install.go
+        - commands/config/verify.go
+    verification_required: true
+    notes: H9 — split pure resolve/lock-update from hydrate-from-lock; hydrate once through the real lifecycle (commands/internal/lifecycle/install.go, commands/refresh.go) BEFORE projection; never write on the frozen/locked-clean no-write contract except the explicit hydrate step. H7 — pass a production artifact-store digest resolver to BOTH EnsureResolved and config verify so post-install store tampering blocks projection. H10 — record the artifact as a kind:artifact units entry with the verified content digest; derive the install path deterministically (do NOT add install_path to LockedUnit). H13 (DRIVES the projection) — pass-2 resolves THIS project's packages into a resolved unit list of {family,name,source-id,digest,cas-path} and calls t2's caller-driven projection mechanism with exactly that set; projection is per-project CAS-direct (repo output links to ~/.agents/cache/artifacts/<family>/<digest>/ for the project's resolved digest), NEVER a global _sourced scan. commands/install.go path was stale (use commands/internal/lifecycle/install.go).
+    app_type: go-cli

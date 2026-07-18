@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 1
+task:
+    id: t2-materialize-store
+    title: Materialize a fetched bundle into the gitignored sourced-scope store
+    status: in_progress
+    depends_on:
+        - t1-bundle-fetch
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/materialize.go
+        - internal/config/local_source.go
+        - internal/links/gitignore.go
+        - internal/platform/resource_plan.go
+        - internal/platform/resources.go
+    verification_required: true
+    notes: Materialize into a content-addressed immutable store path (H2) and project it at the reserved _sourced namespace ~/.agents/<family>/_sourced/<source-id>/<name>/ (H3) — never a segment equal to a local scope (global, project name); refuse replacing any path lacking sourced provenance. H4 — the _sourced ignore is permanent, installed+verified BEFORE the tree is exposed, CAS/locked block rewrite, removed only on store deletion. Validate bundle then staging-dir + atomic rename. Reuse RunSharedTargetProjectionExact (D4), no parallel linker.
+    app_type: go-cli

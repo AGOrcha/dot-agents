@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 3
+task:
+    id: t4-author-da-agc
+    title: Populate the da-agc source (config layer + skill/agent resource trees)
+    status: pending
+    depends_on:
+        - t1-bundle-fetch
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - (external repo AGOrcha/da-agc; no in-tree files)
+    verification_required: true
+    notes: Author da-agc as a git source. Add the da-project/base config layer (execution_profile, stage_profiles, rules, skill/agent name arrays) and the tree-layout resource dirs (skill/<name>/, agent/<name>/) for the dot-agents specifics starting with release-docs-refresh and platform-dirs-change-analyst. Plain files, git-tracked in da-agc.
+    app_type: docs

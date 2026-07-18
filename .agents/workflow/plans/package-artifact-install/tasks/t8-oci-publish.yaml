@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 7
+task:
+    id: t8-oci-publish
+    title: OCI publish producer on the unified surface + round-trip byte-parity smoke
+    status: pending
+    depends_on:
+        - t2-materialize-store
+        - t6-oci-consume
+        - t7-oci-auth
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/artifact_bundle.go
+        - commands/config
+        - scripts/verify.sh
+        - internal/config/fetcher_oci_test.go
+    verification_required: true
+    notes: Publish producer on the CANONICAL UNIFIED resource CRUD surface (owner ruling 2026-07-15) — do NOT revive the retired da packages family / commands/packages. Pack a resource tree into a typed +tar+gzip artifact-bundle via the H1 normalizer, push to an OCI registry at namespace/family/name tag, emit the sha256 digest. OCI round-trip smoke — publish to a local test registry then pull via an oci source; assert materialize, H5/H6 media-type+digest validation, and RECURSIVE byte-parity of source vs materialized tree (R8). Depends on t7 for auth reuse.
+    app_type: go-cli

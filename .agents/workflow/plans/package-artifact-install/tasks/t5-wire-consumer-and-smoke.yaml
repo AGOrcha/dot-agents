@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 4
+task:
+    id: t5-wire-consumer-and-smoke
+    title: Wire dot-agents onto da-agc and add the tree content-install smoke test
+    status: pending
+    depends_on:
+        - t3-lock-and-wire-pass2
+        - t4-author-da-agc
+        - t2b-multiplatform-agent-projection
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agentsrc.json
+        - .agentsrc.lock
+        - scripts/verify.sh
+        - internal/config/resolver_test.go
+        - tests
+    verification_required: true
+    notes: Declare the da-agc git source plus extends (layer) and packages (artifacts) in dot-agents .agentsrc.json. Prove config-layer parity and that fetched skill/agent trees materialize gitignored + locked + invocable. Extend the git-source-smoke fixture from layer-only to content install (DC2).
+    app_type: go-cli

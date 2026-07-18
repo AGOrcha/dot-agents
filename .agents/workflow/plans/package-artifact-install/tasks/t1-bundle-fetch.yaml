@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 0
+task:
+    id: t1-bundle-fetch
+    title: Normalize artifact fetch to a bundle (tree subtree + tarball)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/fetcher_git_artifact.go
+        - internal/config/fetcher_local_artifact.go
+        - internal/config/fetcher_oci.go
+        - internal/config/fetcher_http.go
+        - internal/config/bundle_safety.go
+        - internal/config/bundle_safety_test.go
+        - internal/config/fetcher_test.go
+        - internal/config/fetcher_oci_layer_test.go
+    verification_required: true
+    notes: Normalize fetch to an in-memory bundle (git subtree walk + tarball untar). H1 — route every bundle through a fail-closed normalizer (canonical relative slash paths only; reject empty/dot/dotdot/absolute/drive/UNC/duplicate/case-collide and all symlink/hardlink/device entries; cap file count + expanded bytes). H8 — content-addressed cache publishes via same-dir temp+rename and re-verifies every cache hit against its digest. Adversarial tree+tar tests are a done-criterion. Keep the media-type envelope; no new kinds.
+    app_type: go-cli

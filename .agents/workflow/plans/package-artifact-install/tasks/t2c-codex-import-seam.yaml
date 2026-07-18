@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 10
+task:
+    id: t2c-codex-import-seam
+    title: Route unmarked-collision codex renders into the import-to-scope seam (replace t2b hard-refuse)
+    status: in_progress
+    depends_on:
+        - t2b-multiplatform-agent-projection
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/codex.go
+        - commands/import.go
+        - commands/refresh.go
+        - internal/platform/codex_test.go
+        - commands/import_test.go
+    verification_required: true
+    notes: Owner direction — replace t2b's fail-closed refuse of an unmarked colliding .codex/agents render with the EXISTING import mechanism (commands/import.go), importing to the scope the file physically lives at. Content-aware — an unmarked toml whose bytes match the render we would write is provably our prior output, so mark+adopt silently (write the marked-but-identical render); a content-diverged toml is imported as a user resource at its scope via importCandidate (Origin=codex) + RFC section 6 non-destructive alternate naming + an import-conflict review note at ~/.agents/review-notes/import-conflicts/. Hook via runImportFromRefresh so it runs on refresh. Do NOT touch resource_plan.go (t3b owns integrity there) — keep this to codex.go + import.go + refresh.go so it is parallel-safe. Resolves fold-back obs-codex-toml-marker-upgrade-migration. Ships in 0.5.0.

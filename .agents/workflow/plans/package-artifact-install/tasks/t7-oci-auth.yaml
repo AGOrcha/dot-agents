@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 6
+task:
+    id: t7-oci-auth
+    title: OCI registry auth (bearer + credential-helper providers)
+    status: pending
+    depends_on:
+        - t6-oci-consume
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/oci_auth.go
+        - internal/config/fetcher_oci.go
+        - internal/config/audit.go
+        - internal/gitremote
+    verification_required: true
+    notes: H12 — auth config carries secret references only; resolved env/file/helper secrets never enter Source.Auth persistence, locks, cache metadata, errors, audit events (audit.go currently logs raw Err.Error()), logs, generated files, or argv. Helper queries over stdin; tokens in headers only; central error redaction. Providers — bearer + credential-helper only (oauth2/mtls stay owned by external-agent-sources). Sentinel-secret leak tests across lock/stderr/audit.
+    app_type: go-cli

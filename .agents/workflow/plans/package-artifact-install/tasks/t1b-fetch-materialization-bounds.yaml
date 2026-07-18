@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 8
+task:
+    id: t1b-fetch-materialization-bounds
+    title: Bound raw fetch/clone materialization before normalizer caps (go-git in-memory clone + directory enumeration)
+    status: pending
+    depends_on:
+        - t1-bundle-fetch
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/fetcher_git_artifact.go
+        - internal/config/fetcher_local_artifact.go
+        - internal/config/fetcher.go
+    verification_required: true
+    notes: From the t1 final cross-harness gate — two DoS residuals live in the clone/enumeration LAYER (raw input materialized before the normalizer bounds apply), distinct from the normalizer hardening. (a) go-git gitCloneShallow downloads+checks out the whole repo into an in-memory storer before the MaxFileBytes gate runs — use a disk or quota-backed storer, or a pre-checkout blob-size check, so an oversized git blob cannot exhaust memory. (b) os.ReadDir(-1) (local) and Billy ReadDir (git) materialize a full directory listing before MaxEntries can stop a flat-entry flood — enumerate in bounded batches, and for git traverse a quota-checked committed tree instead of the all-at-once worktree API. Gate BEFORE t6-oci-consume / t5 production use (first real untrusted-remote consume). BLOCKER host-file-read + pinning + injection are already closed in t1.
+    app_type: go-cli

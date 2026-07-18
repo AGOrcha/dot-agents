@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: package-artifact-install
+order: 9
+task:
+    id: t2b-multiplatform-agent-projection
+    title: Extend CAS-aware sourced-unit projection to the file-shaped platform builders (Codex TOML, OpenCode, Copilot)
+    status: completed
+    depends_on:
+        - t2-materialize-store
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/resource_plan.go
+        - internal/platform/codex.go
+        - internal/platform/opencode.go
+        - internal/platform/copilot.go
+    verification_required: true
+    notes: From the t2 rework re-review — t2 wired CAS-aware sourced-unit projection only into the Claude dir-mirror builders (skills + agents dirs). The file-shaped agent builders (Codex .toml at resource_plan.go:472, OpenCode/Copilot agent-files at :514/:1060) still enumerate only local canonical agents, so a sourced agent (e.g. platform-dirs-change-analyst from da-agc) is ABSENT on Codex, OpenCode, and Copilot. Add CAS-aware render/file intent generation to both shape-specific builders, driven by the same caller-supplied resolved-unit set (H13), with exact-prune tests per platform. Gate BEFORE t5 (the da-agc end-to-end smoke must prove the agent projects across enabled platforms, not just Claude).
+    app_type: go-cli
