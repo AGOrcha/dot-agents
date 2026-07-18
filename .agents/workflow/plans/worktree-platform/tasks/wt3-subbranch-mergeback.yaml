@@ -1,0 +1,33 @@
+schema_version: 1
+plan_id: worktree-platform
+order: 3
+task:
+    id: wt3-subbranch-mergeback
+    title: 'da worktree create/merge-back CLI: sub-branch -> merge-back/rebase using the recorded base'
+    status: in_progress
+    depends_on:
+        - wt2-worktree-registry
+    blocks:
+        - wt5-skills-integration
+    owner: dot-agents
+    write_scope:
+        - internal/gitwt/mergeback.go
+        - commands/worktree/
+        - commands/root.go
+    verification_required: true
+    notes: |-
+        GROOMED 2026-07-10. First-class create-sub-branch (wraps
+        gitwt.AddBranch) and merge-back/rebase that read the base EXCLUSIVELY
+        from wt2's registry (via wt1's BaseRef) — never re-derive via git
+        merge-base (kills the recurring bad-boundary trap this whole plan
+        exists to fix). New `commands/worktree/` package (matches sibling
+        subsystem convention: commands/workflow/, commands/kg/,
+        commands/eval/ — each gets its own NewCmd() wired into
+        commands/root.go's root.AddCommand(...) block); no existing
+        commands/worktree/ dir today (verified: does not exist).
+        Regression test: a force-pushed parent + a deliberate stale-base
+        scenario must be caught/handled (the recurring trap this kills).
+        Also honor the `parallel-worker-branch-drift` lesson: after
+        merge-back, verify the worktree's branch HEAD still matches the
+        expected commit (a pre-commit hook stash/restore can silently land
+        a commit on a sibling worktree's branch) — fail loud, don't assume.

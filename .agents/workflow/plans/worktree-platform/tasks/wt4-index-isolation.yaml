@@ -1,0 +1,34 @@
+schema_version: 1
+plan_id: worktree-platform
+order: 4
+task:
+    id: wt4-index-isolation
+    title: Concurrent-agent index isolation proof + formal done-criterion close (residual after wt1)
+    status: in_progress
+    depends_on:
+        - wt1-typed-git-iface
+    blocks:
+        - wt5-skills-integration
+    owner: dot-agents
+    write_scope:
+        - internal/gitwt/index_isolation_concurrent_test.go
+    verification_required: true
+    notes: |-
+        GROOMED 2026-07-10 — scope shrank sharply. wt1's
+        TestIndexIsolation (gitwt_test.go) already proves the core
+        guarantee: a commit in worktree A never appears in worktree B's or
+        the main repo's status, and only A's branch advances. That test is
+        SEQUENTIAL, not concurrent. The genuine residual here is a real
+        concurrent test — N goroutines, each opening its own linked
+        worktree and writing/staging/committing in parallel — run under
+        `go test -race`, formalized as this plan's done-criterion ("per-
+        worktree index proven isolated, concurrent agents cannot
+        cross-stage"). NOT a from-scratch build.
+        Consumer correction: workflow-commit-command already shipped
+        (status: completed) WITHOUT this — it solved the shared-index race
+        with scoped path-set derivation inside the single main index, not
+        physical worktree isolation (see design.md Relationships,
+        reconciled 2026-07-10). So this no longer literally unblocks that
+        plan. Its real consumers are wt5-skills-integration and,
+        transitively, any worker-bundle-authoring commit-2-cli-scoped-mode
+        caller that ends up running inside a linked worktree.

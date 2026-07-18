@@ -1,0 +1,33 @@
+schema_version: 1
+plan_id: worktree-platform
+order: 1
+task:
+    id: wt1-typed-git-iface
+    title: Typed git/worktree interface (the contract callers bind to)
+    status: completed
+    depends_on:
+        - wt0-spike-git-mechanism
+    blocks:
+        - wt2-worktree-registry
+        - wt4-index-isolation
+    owner: dot-agents
+    write_scope:
+        - internal/gitwt/
+    verification_required: true
+    notes: |-
+        One typed Go interface: worktree create/list/remove/prune, branch
+        ops, base-ref record/read, index/status/commit. Implementation
+        behind it per the wt0 decision. Callers/skills bind to the
+        interface only (so a later mechanism swap is invisible).
+        RECONFIRMED 2026-07-10 (refresh-ideate-worktree-platform): genuinely
+        shipped, not stale-vs-reality — internal/gitwt/{gitwt.go,gogit.go}
+        exist, `go build ./internal/gitwt/...` is clean, PR #181 is a real
+        merge commit dated 2026-05-29, and gitwt_test.go carries 14 tests
+        incl. TestAddBranch/TestAddBranchErrors/TestAddDetached/TestList/
+        TestRemove/TestPrune/TestBaseRefRecordRead/TestIndexIsolation. The
+        shipped Manager already includes Prune()+RecordBaseRef()/BaseRef() —
+        richer than the design doc's original "seam for wt1" sketch — which
+        shrinks wt2's remaining scope (base-ref storage is NOT wt2's job;
+        rich metadata + staleness policy is). One live consumer exists:
+        internal/eval/sandbox (R4 eval-harness, separate plan, already
+        merged) — see wt2 notes for what to reconcile with it.

@@ -1,0 +1,39 @@
+schema_version: 1
+plan_id: worktree-platform
+order: 5
+task:
+    id: wt5-skills-integration
+    title: delegation-lifecycle / isp / loop-worker consume the platform
+    status: pending
+    depends_on:
+        - wt3-subbranch-mergeback
+        - wt4-index-isolation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+        - internal/scaffold/home/starter/skills/global/isp/
+        - internal/scaffold/home/starter/skills/global/loop-worker/
+    verification_required: true
+    notes: |-
+        GROOMED 2026-07-10 — write_scope corrected. `.agents/skills/` in
+        this repo is a set of SYMLINKS into the local AGENTS_HOME
+        (~/.agents/skills/dot-agents/<name>), not the canonical source —
+        editing there touches a generated/synced copy outside the repo, not
+        what ships. The real shippable source is
+        internal/scaffold/home/starter/skills/global/<name>/ (verified path
+        for delegation-lifecycle/isp/loop-worker); `da refresh` re-links
+        from there. Verified today: none of the three skills' instructions
+        currently mention "isolated"/"isolation" or reference gitwt/da
+        worktree — this is genuinely net-new orchestration wiring, not a
+        refactor. Orchestration skills create/track/merge-back delegated
+        slices via `da worktree` (wt3) so isolation + recorded-base are
+        automatic, not manual; no raw git in the delegation skill paths.
+        Also reconcile with worker-bundle-authoring's commit-2-cli-scoped-
+        mode (payout workspace plan, dot-agents-repo write_scope
+        commands/workflow/commit_cmd.go): once a delegated worker runs
+        inside a wt3-created linked worktree, its `da workflow commit` step
+        should call commit-2's `--scope task` mode rather than this task
+        re-inventing path scoping — depend on / consume that CLI surface
+        once it ships (land a thin scoped-commit call now that swaps onto
+        commit-2 later if wt5 goes first).

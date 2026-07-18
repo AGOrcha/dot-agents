@@ -1,0 +1,48 @@
+schema_version: 1
+plan_id: worktree-platform
+order: 2
+task:
+    id: wt2-worktree-registry
+    title: Rich worktree metadata registry + auto-prune-if-unchanged (layered on wt1's Prune/BaseRef)
+    status: in_progress
+    depends_on:
+        - wt1-typed-git-iface
+    blocks:
+        - wt3-subbranch-mergeback
+    owner: dot-agents
+    write_scope:
+        - internal/gitwt/registry.go
+        - internal/gitwt/registry_test.go
+    verification_required: true
+    notes: |-
+        GROOMED 2026-07-10. Scope shrank from the original sketch: wt1
+        already ships RecordBaseRef/BaseRef (persisted under
+        .git/worktrees/<name>/base-ref) and Prune() (admin-metadata cleanup
+        for worktrees whose dir is already gone from disk). wt2 adds ONLY:
+        (1) a per-worktree metadata sidecar — purpose, parent PR, created-at,
+        last-used — keyed by worktree name so it reconciles 1:1 with
+        Manager.List() (per wt0 Residual 3); persist it under the same
+        .git/worktrees/<name>/ admin dir as the base-ref file (visible from
+        the MAIN repo regardless of which worktree a process is currently
+        in — required by the `worktree-isolation-defeats-status-tracking`
+        lesson: a registry only the linked worktree itself can read is
+        useless to an orchestrator scanning from the main checkout).
+        (2) auto-prune-if-unchanged: a NEW staleness check — current branch
+        tip via Worktree.Head()/Branch() vs the wt1-recorded BaseRef — that
+        Prune() does not do (Prune only checks "dir gone", not "no commits
+        since base"). Policy: (no commits past base) AND (idle past a
+        last-used TTL) => eligible for prune; commits past base are NEVER
+        auto-pruned even if idle (that's abandoned work, not idle work —
+        surface it, don't delete it).
+        Reference implementations to mine (do not re-invent from scratch):
+        swarm-cd's TTL/last-used-marker scan (mined for wt0) AND
+        internal/eval/sandbox's marker.go pattern (sandbox.yaml sidecar +
+        PruneStale, merged separately, already live) — eval/sandbox
+        duplicates base-ref bookkeeping itself today because wt2 doesn't
+        exist yet; note the follow-up (separate task, NOT in this scope) to
+        move it onto this registry instead of two parallel schemes.
+        Acceptance: registry create/read/update round-trip keyed on name;
+        List()-registry reconciliation test (registry entry for a name
+        gitwt.List() no longer returns is detected, not silently kept);
+        prune-if-unchanged test matrix — (unchanged, expired) => pruned,
+        (changed, expired) => kept, (unchanged, fresh) => kept.

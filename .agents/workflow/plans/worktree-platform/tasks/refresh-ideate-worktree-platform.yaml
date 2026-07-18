@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: worktree-platform
+order: 8
+task:
+    id: refresh-ideate-worktree-platform
+    title: Refresh + re-ideate the worktree-platform spec against today's facts; groom wt2-wt6
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - .agents/workflow/specs/worktree-platform/design.md
+        - .agents/workflow/plans/worktree-platform/
+    verification_required: true
+    notes: 'Spec is ~2mo old (go-git decision 2026-05-17, alpha.4 pin 2026-05-18). Refresh against today: (1) go-git v6 version (alpha.4 -> current releases, decide bump); (2) VERIFY wt0/wt1 actual completion vs plan status (no internal/gitwt exists yet -> wt1 ''completed'' may be stale-vs-reality, like da-recipe); (3) current harness/delegation worktree usage (isolated agents, fanout bundles, the massive session cleanup + lesson dead-worker-wip-reconcile-on-pickup); (4) workflow-commit-command relationship + reconcile with NEW worker-bundle-authoring commit-1/commit-2 scoped-commit tasks (overlap); (5) swarm-cd/worktree.go reference currency. Then re-ideate stale decisions + groom wt2-wt6 to implementation-ready.'
+    app_type: ideation

@@ -1,0 +1,28 @@
+schema_version: 1
+plan_id: worktree-platform
+order: 0
+task:
+    id: wt0-spike-git-mechanism
+    title: 'Spike: VERIFY go-git v6 x/plumbing/worktree (+ mine swarm-cd)'
+    status: completed
+    depends_on: []
+    blocks:
+        - wt1-typed-git-iface
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/specs/worktree-platform/design.md
+    verification_required: true
+    notes: |-
+        DONE — MERGED via #171 (spec design.md: "VERIFIED 2026-05-28, all 4
+        residuals confirmed"). Decision A is pure go-git v6; all 4 residuals
+        confirmed PASS against the pinned version: (1) branch-mode worktree
+        create/branch creation PASS; (2) per-worktree index isolation via
+        mgr.Open(...).Worktree() PASS; (3) List support native PASS; (4)
+        version pinned go-git/v6 v6.0.0-alpha.4 (go-billy/v6 v6.0.0-alpha.1).
+        No hybrid fallback needed — pure go-git v6, zero shell-git. The
+        typed Manager seam derived from the verified API landed in wt1 (#181).
+        RECONFIRMED 2026-07-10 (refresh-ideate-worktree-platform): PR #171 is
+        a real, resolvable merge commit dated 2026-05-28; go-git v6 pin is
+        STILL current (v6.0.0-alpha.4 remains the newest v6 tag as of
+        2026-07-10, checked directly against github.com/go-git/go-git/tags —
+        no bump needed).

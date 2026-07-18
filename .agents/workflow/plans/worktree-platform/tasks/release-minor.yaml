@@ -1,0 +1,36 @@
+schema_version: 1
+plan_id: worktree-platform
+order: 7
+task:
+    id: release-minor
+    title: 'Release: bump VERSION + finalize CHANGELOG for the worktree-platform minor'
+    status: pending
+    depends_on:
+        - wt0-spike-git-mechanism
+        - wt1-typed-git-iface
+        - wt2-worktree-registry
+        - wt3-subbranch-mergeback
+        - wt4-index-isolation
+        - wt5-skills-integration
+        - wt6-verify-close
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - VERSION
+        - CHANGELOG.md
+    verification_required: true
+    notes: |-
+        Release-gated tail task (hybrid convention, MINOR path; see
+        [[release-gated-plans-convention]]). This plan delivers user-visible
+        delegated-work isolation — managed git worktrees with recorded-base
+        sub-branch/merge-back and per-worktree index isolation consumed by the
+        orchestration skills. New user-visible capability = MINOR (no public
+        surface removed or incompatibly changed).
+        Target version = next minor computed from current VERSION at ready-time
+        (do NOT hardcode). Resolve from VERSION when this task becomes ready;
+        if another minor ships first, a rebase recomputes the number.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, moving the worktree-platform entries
+        out of Unreleased, plus the required docs-accuracy pass. Merge to master
+        fires auto-release.yml (tag + publish).
+    app_type: release

@@ -1,0 +1,26 @@
+schema_version: 1
+plan_id: worktree-platform
+order: 6
+task:
+    id: wt6-verify-close
+    title: Verify done-criteria + close
+    status: pending
+    depends_on:
+        - wt5-skills-integration
+    blocks: []
+    owner: dot-agents
+    write_scope: []
+    verification_required: true
+    notes: |-
+        All spec done-criteria: stale-base catch (wt3), concurrent-agent
+        index isolation (wt4), deterministic prune-if-unchanged (wt2),
+        single typed interface (wt1), config-provisioning round-trip (wt2/
+        wt3/wt5 — parent project's registration+config provably untouched
+        after a create+remove cycle). go build/test/gate green. Before
+        closing, re-verify the go-git v6 pin is still the latest tag
+        (github.com/go-git/go-git/tags) in case a stable v6.0.0 shipped
+        during implementation. Archive plan. workflow-commit-command
+        already shipped independently (see design.md Relationships,
+        reconciled 2026-07-10) — do NOT block this close on notifying it;
+        instead confirm wt4's concurrent-isolation proof is available for
+        any future consumer that wants it.
