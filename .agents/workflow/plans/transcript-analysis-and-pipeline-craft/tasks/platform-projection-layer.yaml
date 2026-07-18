@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: transcript-analysis-and-pipeline-craft
+order: 9
+task:
+    id: platform-projection-layer
+    title: Config->materialized-pipeline transformer layer (OMP beachhead)
+    status: completed
+    depends_on:
+        - craft-extraction
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/
+        - commands/workflow/
+        - schemas/
+    verification_required: true
+    notes: Analogous to hook projection per platform; consumes omp-platform-handling proposal; swarm YAMLs become emitted projections not sources.
+    app_type: go-cli

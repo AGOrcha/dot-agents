@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: transcript-analysis-and-pipeline-craft
+order: 11
+task:
+    id: falsification-review
+    title: Falsification-first review of all substantive slices
+    status: in_progress
+    depends_on:
+        - synthesis
+        - pipeline-architect-skill
+        - platform-projection-layer
+        - cc-workflows-consumer
+        - pareto-historical
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/reviews/
+    verification_required: true
+    notes: |-
+        Per falsification-review-rubric.md; cross-family blocking gate; zero-refutation reviews returned as not-performed. Covers every substantive slice EXCEPT pareto-live-waves (user-gated; reviewed post-hoc when it runs).
+        - (fb:cross-family-reject-remediation) TERMINAL 2026-07-13 (three blind re-runs). The cross-family gate CONVERGED on all real artifact defects — H7/H9/H11/H12/H13 SURVIVED run3 (arithmetic, cache denominators, superseded-prose, 39-rule 1:1, 26-flag classification all clean). Real findings across runs, all FIXED — H6/H9/H10 (run1 hash-commitment/denominator/craft-prose), H8 VOID-labeling now closed at EVERY consumer (O3, historical x3, synthesis anchors, items.yaml claim+note+confidence, notes.md table+D-table+caveat, source-inventory-omp.md, README, rows flags, frozen-record verification_status), H2 C6-haiku illegal-not-flip across 5 artifacts, H12 craft+skill generation-share alignment. Real code observation ROUTED — H3 cross-family gate not fail-closed for specialized profiles → agent-ops-hardening fold-back cross-family-gate-not-fail-closed-specialized. Remaining refutations DEMOTED with reasons (structural; will not converge without a design change or live data) — H1 (RULE-7 open model_family is documented design, no allowlist), H2-arms (C1-C6 runtime arms are user-gated pre-execution, absent by design), H5 (row status is session-lifecycle cutoff; VOID is a distinct provenance dimension in flags/note/verification_status), H6 (the ~193 whole-row diffs are the intended R4 provenance regen; named DATA fields byte-identical, protected_diffs 0). Inconclusive H4/H10-cache need user-gated live-wave data. Re-run loop STOPPED (diverges on fresh blind hypotheses each pass); every artifact-level defect any run found is fixed or demoted. Final green requires the live-wave data at pareto-live-waves (user-gated) — this record stays OPEN on that trigger. Verdicts preserved — cross-family-review-2026-07-12-reject.json, -2026-07-13-reject-run2.json, and cross-family-review.json (run3).
+    app_type: docs

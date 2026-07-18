@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: transcript-analysis-and-pipeline-craft
+order: 3
+task:
+    id: prior-analysis-sync
+    title: Fetch + integrate prior analyses (payout/dot-agents branch, provadm/roos)
+    status: completed
+    depends_on:
+        - methodology-rubrics
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/prior/
+    verification_required: true
+    notes: git fetch origin analysis/top-level-basic-from-coordination-state (read-only); provadm-agc feature/analysis-doc toolkit is the methodology spine.
+    app_type: docs

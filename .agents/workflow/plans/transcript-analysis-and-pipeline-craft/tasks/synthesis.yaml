@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: transcript-analysis-and-pipeline-craft
+order: 4
+task:
+    id: synthesis
+    title: Synthesize local + prior evidence into actionable outcomes
+    status: completed
+    depends_on:
+        - evidence-extraction
+        - prior-analysis-sync
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/synthesis/
+    verification_required: true
+    notes: Canonical section order; convergence computed here; each actionable outcome needs >=medium confidence.
+    app_type: docs

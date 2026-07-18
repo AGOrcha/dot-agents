@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: transcript-analysis-and-pipeline-craft
+order: 10
+task:
+    id: cc-workflows-consumer
+    title: Project pipeline to Claude Code dynamic workflows
+    status: completed
+    depends_on:
+        - platform-projection-layer
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/
+        - .claude/workflows/
+    verification_required: true
+    notes: ultracode-wave-engine.mjs already mirrors da config relevance envelope = proven consumer; emit a generated workflow from the same IR.
+    app_type: go-cli

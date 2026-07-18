@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: transcript-analysis-and-pipeline-craft
+order: 0
+task:
+    id: methodology-rubrics
+    title: Author evidence, falsification-review, and Pareto rubrics + templates (gate for all analysis)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/methodology/
+    verification_required: true
+    notes: 'Hard gate: no transcript collection or scoring before these are user-approved. Artifacts: evidence-rubric.md, falsification-review-rubric.md, pareto-measurement-rubric.md, templates/.'
+    app_type: docs

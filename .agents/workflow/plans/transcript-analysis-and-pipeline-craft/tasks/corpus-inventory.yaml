@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: transcript-analysis-and-pipeline-craft
+order: 1
+task:
+    id: corpus-inventory
+    title: Inventory all local transcript corpora per evidence rubric
+    status: completed
+    depends_on:
+        - methodology-rubrics
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/inventory/
+    verification_required: true
+    notes: OMP/CC/Codex/Cursor/Copilot; rubric §1 fields; OpenCode recorded known-absent; read-only over harness dirs.
+    app_type: docs

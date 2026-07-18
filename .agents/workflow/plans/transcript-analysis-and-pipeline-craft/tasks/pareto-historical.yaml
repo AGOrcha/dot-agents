@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: transcript-analysis-and-pipeline-craft
+order: 5
+task:
+    id: pareto-historical
+    title: Score historical transcripts into Pareto cells (4-axis)
+    status: completed
+    depends_on:
+        - methodology-rubrics
+        - evidence-extraction
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/pareto/
+    verification_required: true
+    notes: Frozen accuracy proxy; rubric-version-matched; rows.jsonl re-derivable from anchors.
+    app_type: go-cli
