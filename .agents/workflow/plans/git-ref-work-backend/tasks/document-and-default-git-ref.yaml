@@ -4,7 +4,7 @@ order: 6
 task:
     id: document-and-default-git-ref
     title: 'Adoption: document + recommend git-ref, surface the active backend so consumers know to use it'
-    status: pending
+    status: completed
     depends_on:
         - workstore-git-ref-backend
     blocks: []
