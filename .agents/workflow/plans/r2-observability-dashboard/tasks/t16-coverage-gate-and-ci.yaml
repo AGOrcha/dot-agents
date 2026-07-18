@@ -4,7 +4,7 @@ order: 16
 task:
     id: t16-coverage-gate-and-ci
     title: Coverage gate + CI wiring for new dashboard packages
-    status: in_progress
+    status: completed
     depends_on:
         - t12-e2e-smoke-live-iteration
     blocks:
