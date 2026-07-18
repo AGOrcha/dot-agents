@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: extends-oci-relax
+order: 2
+task:
+    id: t3-docs-flip
+    title: 'Flip docs/comments: no source/kind asymmetry (extends accepts oci)'
+    status: completed
+    depends_on:
+        - t2-impl-extends-oci
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/
+        - README.md
+        - internal/config/fetcher.go
+    verification_required: false
+    notes: |-
+        AFTER PRs #110 + #111 merge (they set the CURRENT "extends rejects oci" framing correctly; this flips it to
+        post-D13). Update: docs/LAYERED_CONFIG_GUIDE.md source-type matrix (extends oci No -> Yes) + the callout (drop
+        "extends rejects oci"; state all sources serve all kinds, kind is set by media type); README extends-sources
+        line (add oci back); the SelectFetcher error string + the comments in fetcher.go/fetcher_oci.go/resolver.go
+        (no longer "oci cannot supply a config layer"). Verify each against the post-t2 code. Base on master AFTER
+        #110/#111 land to avoid conflicts.
+    app_type: docs

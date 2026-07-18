@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: extends-oci-relax
+order: 0
+task:
+    id: t1-spec-amend
+    title: Amend config-distribution-model §15 with D13 (extends accepts oci)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/specs/config-distribution-model/design.md
+    verification_required: false
+    notes: |-
+        Add decision D13 to §15 (extends D8): oci is valid for extends; no source/kind asymmetry remains; define the
+        OCI-layer representation (dedicated media type application/vnd.dot-agents.config-layer.v1+json; pull blob ->
+        FetchedLayer; media-type guard so kind stays meaningful). Update the §4 superseded banner (added in #111) to
+        note D13 fully removes the extends-oci carve-out. Don't rewrite §4 history — amend the banner + add D13.
+    app_type: docs

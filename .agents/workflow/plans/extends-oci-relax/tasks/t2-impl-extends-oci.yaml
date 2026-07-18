@@ -1,0 +1,31 @@
+schema_version: 1
+plan_id: extends-oci-relax
+order: 1
+task:
+    id: t2-impl-extends-oci
+    title: 'Implement: SelectFetcher accepts oci; OCI layer fetcher + media-type guard'
+    status: completed
+    depends_on:
+        - t1-spec-amend
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/fetcher.go
+        - internal/config/fetcher_oci.go
+        - internal/config/fetcher_oci_layer.go
+        - internal/config/fetcher_test.go
+        - internal/config/resolver.go
+        - schemas/agentsrc.schema.json
+    verification_required: true
+    notes: |-
+        Per D13. SelectFetcher (fetcher.go) returns an OCI LAYER fetcher for "oci" instead of the rejection. New
+        ociLayerFetcher implements the Fetcher interface (Fetch/FetchRefresh -> FetchedLayer): reuse the existing OCI
+        pull plumbing in ociFetcher.FetchArtifact (digest-addressing, auth, cache, posture/signing) — FACTOR the shared
+        pull, do not duplicate — and return the pulled blob as FetchedLayer (layer.json) rather than FetchedArtifact.
+        Media-type guard: an extends pull must carry the config-layer media type (fail clearly if it's an
+        artifact-bundle type; mirror the guard for packages). Flip TestSelectFetcherTierConstraint (was: oci rejected
+        for extends) to assert acceptance + add a test pulling an OCI-served layer -> merged by the resolver. Confirm
+        schema needs no change (enum already allows oci everywhere; only the resolve-time guard changes). Coverage
+        gate on touched files. ASSESS-FIRST: if the OCI pull can't cleanly return a layer (e.g. the blob/manifest
+        model needs a real new media-type handshake beyond pull-blob-parse), STOP and report a plan.
+    app_type: go-cli
