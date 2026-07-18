@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: seam-interface-di-migration
+order: 0
+task:
+    id: convention-doc
+    title: Document canonical interface-DI seam shape
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/lessons/
+        - docs/
+    verification_required: true
+    notes: Write the canonical interface-DI seam convention (narrow collaborator interface, prod struct impl, constructor/param injection). Reference graphstore NewHandle and commands.dirCleaner/osDirCleaner. Cross-link from lesson and the prefer-test-seam memory. Unblocks consistent conversion.

@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: seam-interface-di-migration
+order: 3
+task:
+    id: kg-pkg
+    title: Convert commands/kg/seams.go to interface-DI
+    status: completed
+    depends_on:
+        - convention-doc
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/kg/
+    verification_required: true
+    notes: 7 func-var seams. Behavior-preserving conversion, tests green, coverage gate not regressed.

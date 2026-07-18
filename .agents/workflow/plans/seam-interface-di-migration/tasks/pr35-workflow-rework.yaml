@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: seam-interface-di-migration
+order: 1
+task:
+    id: pr35-workflow-rework
+    title: Rework PR#35 commands/workflow seams to interface-DI
+    status: completed
+    depends_on:
+        - convention-doc
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/
+    verification_required: true
+    notes: 'Convert commands/workflow/seams.go func-var seams to interface-DI and rework PR#35 (cg6b-b2-workflow-schema) onto the new shape. Preserve its non-seam value (schema-compile dedupe, retiring defensive-unreachable coverage exceptions). #35 is held for rework and merges only on the new pattern.'

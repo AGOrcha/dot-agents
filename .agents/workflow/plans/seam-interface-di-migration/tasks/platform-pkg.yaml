@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: seam-interface-di-migration
+order: 6
+task:
+    id: platform-pkg
+    title: Convert internal/platform/seams.go to interface-DI
+    status: completed
+    depends_on:
+        - convention-doc
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/
+    verification_required: true
+    notes: 3 func-var seams. Behavior-preserving conversion, tests green.

@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: seam-interface-di-migration
+order: 5
+task:
+    id: agents-pkg
+    title: Convert commands/agents/seams.go to interface-DI
+    status: completed
+    depends_on:
+        - convention-doc
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/agents/
+    verification_required: true
+    notes: 1 func-var seam. Smallest leaf, fold in with a sibling if cheaper.

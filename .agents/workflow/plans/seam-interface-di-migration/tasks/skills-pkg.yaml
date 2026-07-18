@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: seam-interface-di-migration
+order: 4
+task:
+    id: skills-pkg
+    title: Convert commands/skills/seams.go to interface-DI
+    status: completed
+    depends_on:
+        - convention-doc
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/skills/
+    verification_required: true
+    notes: 4 func-var seams. Behavior-preserving conversion.

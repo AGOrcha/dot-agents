@@ -1,0 +1,17 @@
+schema_version: 1
+id: seam-interface-di-migration
+title: Migrate func-var test seams to interface-DI
+status: active
+summary: |-
+    UNBLOCKED 2026-05-26 by gcc5-verify-close-unblock: the
+    graphstore-concurrency-contract plan is archived; the Deps boundary
+    is now pinned at the graphstore.Handle contract (gcc1 + gcc3). This
+    migration can propagate the func-var -> interface-DI pattern without
+    re-litigating the graphstore seam shape — prefer the narrowest role
+    (CodeGraphReader / CodeGraphWriter / KGNoteStore) per consumer.
+created_at: "2026-05-19T05:37:54Z"
+updated_at: "2026-05-26T11:31:47Z"
+owner: dot-agents
+success_criteria: ""
+verification_strategy: ""
+current_focus_task: ""
