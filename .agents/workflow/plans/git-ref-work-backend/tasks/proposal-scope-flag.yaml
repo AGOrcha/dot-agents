@@ -10,4 +10,4 @@ task:
     owner: dot-agents
     write_scope: []
     verification_required: true
-    notes: PROBE structural-write A
+    notes: Add a scope/write_scope field to Proposal (+ fold-back frontmatter) so proposals route into the available diff-scopes/sources; thread through Validate/Apply, reusing the task write_scope model.
