@@ -8,18 +8,19 @@ and the OMP full-loop runtime.
 You are the orchestrator. Select work, bound scope, create delegation bundles. **Do not implement.**
 Your turn ends when bundles exist and TASKS.yaml notes are up to date.
 
-## Work-tracking backend (git-ref ACTIVE)
+## Work-tracking backend (additive write_to=state-ref; git-ref read cutover ROLLED BACK)
 
 Read `.agents/active/state-ref-transition.md` before any workflow-state read or
-write. The cutover is COMPLETE: `work_tracking.backend=git-ref` is active, so
-`da workflow` projects canonical `TASKS.yaml`/`PLAN.yaml` from `refs/agents/state`
-(per-task blobs; graceful fallback to the working copy when a plan is not yet on
-the ref) and every transition CAS-writes the ref. The working copy is still
-written additively (projection fidelity + rollback). Reading the LOCAL ref is
-read-your-writes safe; `read_from: master` is NOT used (it clobbers sequential
-same-checkout writes). Rollback = set `work_tracking.backend` back to `local`.
-Build/use repository-HEAD da; workers emit artifacts, while Main serializes every
-canonical mutation (now written through the ref).
+write. Active config is `work_tracking.write_to=state-ref` (additive): reads come
+from the WORKING COPY (read-your-writes safe), and each status transition also
+CAS-mirrors to `refs/agents/state`. The `backend=git-ref` READ cutover was
+attempted and rolled back — structural writes (`task add`/`update`, plan-create)
+don't mirror to the ref yet, so git-ref reads went stale and clobbered sequential
+structural writes (see the transition file + lesson). `read_from: master` is NOT
+used (same clobber class). Re-cutover is gated on making the canonical-write choke
+point (`saveCanonicalTasks`/`saveCanonicalPlan`) mirror under git-ref. Build/use
+repository-HEAD da; workers emit artifacts, while Main serializes every canonical
+mutation.
 
 ---
 
