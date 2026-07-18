@@ -43,7 +43,7 @@ tasks:
       app_type: go-cli
     - id: per-task-state-files
       title: Split coordination status into per-task state files under the ref
-      status: pending
+      status: completed
       depends_on:
         - git-ref-state-ref-write
       blocks: []
