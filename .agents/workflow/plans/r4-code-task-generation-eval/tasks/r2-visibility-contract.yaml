@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 16
+task:
+    id: r2-visibility-contract
+    title: R2 visibility contract — documented join + fixture
+    status: completed
+    depends_on:
+        - persistence
+    blocks:
+        - docs
+    owner: dot-agents
+    write_scope:
+        - docs/EVAL_HARNESS.md
+        - internal/eval/store/testdata/
+    verification_required: true
+    notes: |-
+        Documents the on-disk contract R2 consumes: how a dashboard
+        joins eval-run.yaml → iter-N.score.yaml → TaskSpec. Ships a
+        frozen fixture run R2 can build against without re-running
+        the harness. No code in R2 itself — that's R2's plan.
+    app_type: go-cli

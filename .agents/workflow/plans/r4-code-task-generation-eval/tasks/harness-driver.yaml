@@ -1,0 +1,26 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 13
+task:
+    id: harness-driver
+    title: End-to-end harness wiring (gen → sandbox → run → verify → score)
+    status: completed
+    depends_on:
+        - generator-go
+        - verifier-go
+        - sandbox-worktree
+        - agent-runner
+        - scoring-bridge
+    blocks:
+        - cli-eval
+        - persistence
+    owner: dot-agents
+    write_scope:
+        - internal/eval/harness/
+    verification_required: true
+    notes: |-
+        Single Harness.Run(ctx, opts) entry point sequencing all five
+        stages and returning an EvalRun result. Pure orchestration;
+        all heavy lifting lives in the seam packages. Integration test
+        against fakeRunner + verifier-go on a fixture KG.
+    app_type: go-cli

@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 3
+task:
+    id: difficulty-derivation
+    title: KG-derived difficulty signals + bucketing
+    status: completed
+    depends_on:
+        - kg-query-layer
+    blocks:
+        - generator-go
+    owner: dot-agents
+    write_scope:
+        - internal/eval/difficulty.go
+        - internal/eval/difficulty_test.go
+    verification_required: true
+    notes: |-
+        Pure function: neighborhood node/edge counts + cyclomatic
+        proxy → easy/medium/hard bucket + difficulty_signals map.
+        Table-driven tests pin the buckets so a future rubric change
+        is a deliberate diff. Documented as the canonical difficulty
+        contract.
+    app_type: go-cli

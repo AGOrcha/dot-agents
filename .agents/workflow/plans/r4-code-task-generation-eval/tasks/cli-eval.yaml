@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 15
+task:
+    id: cli-eval
+    title: '`da eval` CLI command tree'
+    status: completed
+    depends_on:
+        - harness-driver
+        - persistence
+    blocks:
+        - docs
+    owner: dot-agents
+    write_scope:
+        - commands/eval/
+        - commands/root.go
+    verification_required: true
+    notes: |-
+        `da eval gen --language <lang>` writes a TaskSpec; `da eval run
+        --language <lang> [--task <path>]` executes one task end-to-end
+        (generates if not given); `da eval ls` lists eval runs. Mirrors
+        the `da score` command surface idioms. The spec's verification
+        line (`da eval run --language go produces an R1-scored
+        outcome`) is the Hard Test.
+    app_type: go-cli

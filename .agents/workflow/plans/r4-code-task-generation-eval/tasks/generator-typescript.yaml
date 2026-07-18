@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 6
+task:
+    id: generator-typescript
+    title: TypeScript task generator (per-language adapter
+    status: completed
+    depends_on:
+        - kg-query-layer
+        - difficulty-derivation
+        - generator-go
+    blocks:
+        - verifier-typescript
+        - harness-driver
+    owner: dot-agents
+    write_scope:
+        - internal/eval/gen/typescript/
+    verification_required: true
+    notes: |-
+        Third required language. Adds transpile step (tsc --noEmit) and
+        node --test or vitest invocation pattern. Same template
+        surface. Closes the spec's "≥3 languages" gate.
+    app_type: go-cli

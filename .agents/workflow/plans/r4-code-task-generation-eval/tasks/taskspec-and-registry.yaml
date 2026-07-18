@@ -1,0 +1,32 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 1
+task:
+    id: taskspec-and-registry
+    title: Define versioned TaskSpec, generator interface, language registry
+    status: completed
+    depends_on:
+        - design-doc
+    blocks:
+        - kg-query-layer
+        - generator-go
+        - sandbox-worktree
+        - scoring-bridge
+    owner: dot-agents
+    write_scope:
+        - internal/eval/taskspec.go
+        - internal/eval/taskspec_test.go
+        - internal/eval/registry.go
+        - internal/eval/registry_test.go
+        - internal/eval/doc.go
+    verification_required: true
+    notes: |-
+        Foundation: typed TaskSpec (v1), Generator interface, per-
+        language registry. Pure Go data + interfaces, no I/O.
+        Difficulty enum (easy|medium|hard) + difficulty_signals map.
+        YAML round-trip.
+        SHIPPED (coherence 2026-06-25): internal/eval/{taskspec,registry,
+        doc}.go + tests landed via commit aa12da79 ("feat(eval):
+        versioned TaskSpec + generator interface + language registry").
+        Marked completed; kg-query-layer and the generators build on it.
+    app_type: go-cli

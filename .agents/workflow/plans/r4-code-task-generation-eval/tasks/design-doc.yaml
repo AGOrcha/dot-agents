@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 0
+task:
+    id: design-doc
+    title: Resolve R4 open questions (corpus, sandbox, languages) in design.md
+    status: completed
+    depends_on: []
+    blocks:
+        - taskspec-and-registry
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/r4-code-task-generation-eval/design.md
+    verification_required: false
+    notes: |-
+        Landed via R4 planner output 2026-05-25: D1 hybrid corpus
+        (synthetic-from-KG v1, benchmark-seed v2); D2 worktree sandbox
+        behind Sandbox interface; D3 Go/Python/TypeScript; D4 versioned
+        TaskSpec; D5 eval outcomes feed R1 unchanged; D6 sibling
+        sidecar persistence; D7 CLI-first.
+    app_type: research

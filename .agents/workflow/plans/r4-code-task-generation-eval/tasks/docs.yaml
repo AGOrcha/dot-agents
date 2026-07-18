@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 17
+task:
+    id: docs
+    title: docs/EVAL_HARNESS.md + rubric-cross-link
+    status: completed
+    depends_on:
+        - cli-eval
+        - r2-visibility-contract
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/EVAL_HARNESS.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+    verification_required: false
+    notes: |-
+        Full user-facing doc: TaskSpec schema, language coverage,
+        sandbox model, how to add a fourth language, how eval outcomes
+        feed R1. Cross-link from OUTCOME_SCORING_RUBRIC.md noting
+        "eval-source" iterations are scored under the same rubric.
+    app_type: go-cli

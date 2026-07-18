@@ -1,0 +1,41 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 2
+task:
+    id: kg-query-layer
+    title: KG query helpers for the task generator
+    status: completed
+    depends_on:
+        - taskspec-and-registry
+    blocks:
+        - generator-go
+        - generator-python
+        - generator-typescript
+        - difficulty-derivation
+    owner: dot-agents
+    write_scope:
+        - internal/eval/kgquery/
+    verification_required: true
+    notes: |-
+        Adapter over graphstore.CodeGraphReader (narrow role):
+        SeedSymbols(lang, limit), NeighborhoodFor(qualifiedName, depth),
+        ComplexityProxy(symbol). Pure consumer of the published Store
+        contract; no writes. Mock-backed unit tests using a tiny
+        in-memory fake (existing testutil patterns).
+        EDGE-KIND RULING (recorded 2026-07-02; reviewer-flagged
+        ambiguity, checked against the spec on master):
+        NeighborhoodFor(qualifiedName, depth) traverses ALL edge
+        kinds, NOT CALLS-only. Basis: r4 spec requirement R2 computes
+        the difficulty band from generic "node count, edge count, a
+        cyclomatic-complexity proxy" KG signals with no edge-kind
+        restriction; the plan-level TaskSpec example publishes a
+        plain difficulty_signals.edge_count; graphstore defines seven
+        edge kinds (CALLS, IMPORTS_FROM, INHERITS, IMPLEMENTS,
+        CONTAINS, TESTED_BY, DEPENDS_ON) and the spec never narrows
+        the set. The spec D4.1 "exercises real call graphs" line is
+        rationale, not a requirement. A template that wants
+        call-graph-only context filters by kind at the TEMPLATE level
+        (generator-* tasks), not inside NeighborhoodFor — so the
+        difficulty contract (difficulty-derivation) stays defined
+        over the full neighborhood and stays reproducible per R2.
+    app_type: go-cli

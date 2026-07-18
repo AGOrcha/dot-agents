@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 10
+task:
+    id: verifier-typescript
+    title: TypeScript verifier
+    status: completed
+    depends_on:
+        - sandbox-worktree
+        - generator-typescript
+        - verifier-go
+    blocks:
+        - harness-driver
+    owner: dot-agents
+    write_scope:
+        - internal/eval/verifier/typescript/
+    verification_required: true
+    notes: |-
+        tsc --noEmit + node --test / vitest. Closes the per-language
+        verifier trio.
+    app_type: go-cli

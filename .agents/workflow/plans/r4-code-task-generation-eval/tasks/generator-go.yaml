@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 4
+task:
+    id: generator-go
+    title: Go task generator (per-language adapter
+    status: completed
+    depends_on:
+        - kg-query-layer
+        - difficulty-derivation
+    blocks:
+        - verifier-go
+        - harness-driver
+    owner: dot-agents
+    write_scope:
+        - internal/eval/gen/golang/
+    verification_required: true
+    notes: |-
+        First language adapter. Templates: impl-pure-fn,
+        refactor-extract, add-test-coverage. Each template runs a KG
+        query, picks a seed symbol, synthesizes a prompt + verification
+        cmd, returns a TaskSpec. Registers in the language registry.
+        Fixture-driven tests against a tiny seed KG.
+    app_type: go-cli

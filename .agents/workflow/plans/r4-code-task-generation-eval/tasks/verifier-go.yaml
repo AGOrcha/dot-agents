@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 8
+task:
+    id: verifier-go
+    title: Go verifier (build + test) inside sandbox
+    status: completed
+    depends_on:
+        - sandbox-worktree
+        - generator-go
+    blocks:
+        - harness-driver
+    owner: dot-agents
+    write_scope:
+        - internal/eval/verifier/golang/
+    verification_required: true
+    notes: |-
+        Runs build_cmd + test_cmd from the TaskSpec inside the sandbox
+        workdir, captures pass/fail + stdout/stderr + duration, returns
+        a typed VerifyResult. Timeout enforced via context.
+    app_type: go-cli

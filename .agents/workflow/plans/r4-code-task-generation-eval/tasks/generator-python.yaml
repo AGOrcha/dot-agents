@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 5
+task:
+    id: generator-python
+    title: Python task generator (per-language adapter
+    status: completed
+    depends_on:
+        - kg-query-layer
+        - difficulty-derivation
+        - generator-go
+    blocks:
+        - verifier-python
+        - harness-driver
+    owner: dot-agents
+    write_scope:
+        - internal/eval/gen/python/
+    verification_required: true
+    notes: |-
+        Same template surface as Go; Python-specific prompt synthesis
+        + pytest/unittest verification command. Reuses the registry.
+        The "Go-first then port" sequencing means a stable interface
+        and avoids retroactive churn on the registry.
+    app_type: go-cli

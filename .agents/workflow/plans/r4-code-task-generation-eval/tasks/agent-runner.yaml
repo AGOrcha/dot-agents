@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 11
+task:
+    id: agent-runner
+    title: AgentRunner interface + claude / codex bindings
+    status: completed
+    depends_on:
+        - sandbox-worktree
+    blocks:
+        - harness-driver
+    owner: dot-agents
+    write_scope:
+        - internal/eval/runner/
+    verification_required: true
+    notes: |-
+        Abstraction over invoking a CLI agent (claude, codex, ...)
+        against a sandbox workdir with a prompt. Captures token/cache
+        usage via the existing platform-session telemetry hooks where
+        available. v1 ships a fakeRunner for tests + a clauderunner /
+        codexrunner that shells out; the per-platform binding mirrors
+        commands/agents/ conventions.
+    app_type: go-cli

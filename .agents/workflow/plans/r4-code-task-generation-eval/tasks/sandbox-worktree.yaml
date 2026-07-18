@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 7
+task:
+    id: sandbox-worktree
+    title: Worktree sandbox primitive (Sandbox interface + v1 impl)
+    status: completed
+    depends_on:
+        - taskspec-and-registry
+    blocks:
+        - harness-driver
+    owner: dot-agents
+    write_scope:
+        - internal/eval/sandbox/
+    verification_required: true
+    notes: |-
+        Define Sandbox interface (Provision(TaskSpec)(workdir, cleanup,
+        error)). Ship worktreeSandbox: scratch repo + ephemeral branch
+        + tempdir HOME. Concurrent-isolation test: two Provisions
+        cannot see each other's writes. Documented as a provider swap
+        point; DockerSandbox + worktree-platform managed-worktree
+        provider can land later without caller change.
+    app_type: go-cli

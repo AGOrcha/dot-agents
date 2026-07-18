@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 12
+task:
+    id: scoring-bridge
+    title: Emit R1-shaped iteration record + invoke scoring pipeline
+    status: completed
+    depends_on:
+        - taskspec-and-registry
+    blocks:
+        - harness-driver
+    owner: dot-agents
+    write_scope:
+        - internal/eval/scoringbridge/
+    verification_required: true
+    notes: |-
+        Translate an EvalRun (TaskSpec + VerifyResult + AgentRun
+        telemetry) into an IterationRecord + IterationObjectives
+        matching the workflow iter-log schema. Then call
+        scoring.AssembleSignalSet + Rubric.Score +
+        scoring.WriteIterationScore against an eval-namespaced
+        iter-log dir. Does NOT introduce a new rubric path or version.
+        Unit-tested via a tiny EvalRun fixture.
+    app_type: go-cli

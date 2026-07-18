@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: r4-code-task-generation-eval
+order: 9
+task:
+    id: verifier-python
+    title: Python verifier
+    status: completed
+    depends_on:
+        - sandbox-worktree
+        - generator-python
+        - verifier-go
+    blocks:
+        - harness-driver
+    owner: dot-agents
+    write_scope:
+        - internal/eval/verifier/python/
+    verification_required: true
+    notes: |-
+        Mirrors verifier-go for pytest/unittest. Sequenced after
+        verifier-go so the VerifyResult shape stabilizes first.
+    app_type: go-cli
