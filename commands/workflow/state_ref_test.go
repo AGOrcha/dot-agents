@@ -82,10 +82,16 @@ func TestRunWorkflowAdvance_MirrorsToStateRefWhenEnabled(t *testing.T) {
 	if stateRefName != "refs/agents/state" {
 		t.Fatalf("state ref name must be refs/agents/state, got %q", stateRefName)
 	}
+	// Status now lives in a PER-TASK blob (§9 D5), not the monolithic TASKS.yaml.
+	relTask := ".agents/workflow/plans/" + stateRefTestPlanID + "/tasks/t1.yaml"
+	blob := gitOut(t, repo, "show", stateRefName+":"+relTask)
+	if !strings.Contains(blob, "in_progress") {
+		t.Fatalf("per-task state ref blob missing new status; got:\n%s", blob)
+	}
+	// The monolithic TASKS.yaml is a projection, never written to the ref.
 	relTasks := ".agents/workflow/plans/" + stateRefTestPlanID + "/TASKS.yaml"
-	blob := gitOut(t, repo, "show", stateRefName+":"+relTasks)
-	if !strings.Contains(blob, "in_progress") || strings.Contains(blob, "pending") {
-		t.Fatalf("state ref TASKS.yaml missing new status; got:\n%s", blob)
+	if err := exec.Command("git", "-C", repo, "cat-file", "-e", stateRefName+":"+relTasks).Run(); err == nil {
+		t.Fatal("monolithic TASKS.yaml must NOT be written to the ref (per-task split)")
 	}
 	// PLAN.yaml is mirrored too (runWorkflowAdvance rewrites it).
 	relPlan := ".agents/workflow/plans/" + stateRefTestPlanID + "/PLAN.yaml"
@@ -261,10 +267,150 @@ func TestWriteStateRefCAS_ErrorsAfterBoundedRetries(t *testing.T) {
 // default-config repo writes no ref and returns nil.
 func TestMirrorTransitionToStateRef_DisabledIsNoop(t *testing.T) {
 	repo := seedStateRefRepo(t, "")
-	if err := mirrorTransitionToStateRef(repo, stateRefTestPlanID); err != nil {
+	if err := mirrorTransitionToStateRef(repo, stateRefTestPlanID, "t1"); err != nil {
 		t.Fatalf("disabled mirror must be a no-op, got: %v", err)
 	}
 	if head := stateRefHead(repo); head != "" {
 		t.Fatalf("disabled mirror must write no ref, got %s", head)
+	}
+}
+
+// tasksYAMLTwoPending renders a TASKS.yaml with two pending tasks (t1, t2) in a
+// deterministic order, used by the per-task split / projection tests.
+func tasksYAMLTwoPending(planID string) string {
+	return "schema_version: 1\nplan_id: \"" + planID + "\"\ntasks:\n" +
+		"  - id: \"t1\"\n    title: \"task one\"\n    status: \"pending\"\n    verification_required: true\n" +
+		"  - id: \"t2\"\n    title: \"task two\"\n    status: \"pending\"\n    verification_required: true\n"
+}
+
+// TestProjectCanonicalTaskFile_RoundTrip proves the per-task split projection is
+// byte-faithful (§3B / D1'): splitting a canonical TASKS.yaml into per-task
+// records and projecting them back regenerates the EXACT serializer output, so
+// the monolithic view is losslessly reconstructable from the split files.
+func TestProjectCanonicalTaskFile_RoundTrip(t *testing.T) {
+	tf := &CanonicalTaskFile{
+		SchemaVersion: 1,
+		PlanID:        "rt",
+		Tasks: []CanonicalTask{
+			{ID: "t1", Title: "one", Status: "in_progress", DependsOn: []string{}, Blocks: []string{}, WriteScope: []string{"a.go"}, VerificationRequired: true, Notes: "n1"},
+			{ID: "t2", Title: "two", Status: "pending", DependsOn: []string{"t1"}, Blocks: []string{}, WriteScope: []string{}, VerificationRequired: false},
+			{ID: "t3", Title: "three", Status: "completed", DependsOn: []string{}, Blocks: []string{"t2"}, WriteScope: []string{}, AppType: "go-cli"},
+		},
+	}
+	want, err := yamlMarshal(tf)
+	if err != nil {
+		t.Fatalf("marshal canonical: %v", err)
+	}
+
+	projected := projectCanonicalTaskFile(splitCanonicalTaskFile(tf))
+	got, err := yamlMarshal(projected)
+	if err != nil {
+		t.Fatalf("marshal projected: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("projection not byte-identical to canonical:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+// TestProjectCanonicalTaskFile_ReordersByOrder proves the projection restores
+// the canonical task order from the Order field regardless of the record slice
+// order (per-task blobs come back from the ref in ls-tree/alphabetical order).
+func TestProjectCanonicalTaskFile_ReordersByOrder(t *testing.T) {
+	records := []stateRefTaskRecord{
+		{SchemaVersion: 1, PlanID: "p", Order: 2, Task: CanonicalTask{ID: "c"}},
+		{SchemaVersion: 1, PlanID: "p", Order: 0, Task: CanonicalTask{ID: "a"}},
+		{SchemaVersion: 1, PlanID: "p", Order: 1, Task: CanonicalTask{ID: "b"}},
+	}
+	tf := projectCanonicalTaskFile(records)
+	if tf.SchemaVersion != 1 || tf.PlanID != "p" {
+		t.Fatalf("plan scoping lost: %+v", tf)
+	}
+	got := []string{tf.Tasks[0].ID, tf.Tasks[1].ID, tf.Tasks[2].ID}
+	if got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Fatalf("projection did not restore order: %v", got)
+	}
+}
+
+// TestWritePlanStateRefCAS_ConcurrentDifferentTasksNoLostUpdate is the core D5
+// proof: two workers transitioning DIFFERENT tasks of the SAME plan race to
+// commit to refs/agents/state. Each overwrites only its own per-task blob and
+// seeds siblings only-if-absent, so the two writes touch DISJOINT blobs and
+// BOTH survive the concurrent read-modify-write — no lost update on the
+// monolithic TASKS.yaml that the old whole-file mirror suffered. CAS-retry
+// remains the fallback for the shared PLAN.yaml blob.
+func TestWritePlanStateRefCAS_ConcurrentDifferentTasksNoLostUpdate(t *testing.T) {
+	repo := t.TempDir()
+	rel := ".agents/workflow/plans/" + stateRefTestPlanID + "/"
+	testutil.InitGitRepo(t, repo, map[string]string{
+		rel + "PLAN.yaml":  planYAMLActive(stateRefTestPlanID),
+		rel + "TASKS.yaml": tasksYAMLTwoPending(stateRefTestPlanID),
+	})
+
+	// Each worker owns a private view of TASKS.yaml (its own worktree copy):
+	// worker A saw t1 advance, worker B saw t2 advance. Neither has seen the
+	// other's transition — exactly the cross-worktree divergence D5 addresses.
+	viewA := &CanonicalTaskFile{SchemaVersion: 1, PlanID: stateRefTestPlanID, Tasks: []CanonicalTask{
+		{ID: "t1", Title: "task one", Status: "in_progress", VerificationRequired: true},
+		{ID: "t2", Title: "task two", Status: "pending", VerificationRequired: true},
+	}}
+	viewB := &CanonicalTaskFile{SchemaVersion: 1, PlanID: stateRefTestPlanID, Tasks: []CanonicalTask{
+		{ID: "t1", Title: "task one", Status: "pending", VerificationRequired: true},
+		{ID: "t2", Title: "task two", Status: "in_progress", VerificationRequired: true},
+	}}
+	planContent := []byte(planYAMLActive(stateRefTestPlanID))
+
+	writers := []struct {
+		view   *CanonicalTaskFile
+		taskID string
+	}{{viewA, "t1"}, {viewB, "t2"}}
+
+	var wg sync.WaitGroup
+	errs := make([]error, len(writers))
+	start := make(chan struct{})
+	for i := range writers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			overwrite, seed, err := buildPlanTaskStateRefWrite(repo, stateRefTestPlanID, writers[i].taskID, writers[i].view, planContent)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			<-start // release together to maximize CAS contention
+			errs[i] = writePlanStateRefCAS(repo, overwrite, seed)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("writer %d: %v", i, err)
+		}
+	}
+
+	// Disjoint blobs: t1 and t2 are separate ref paths.
+	t1 := gitOut(t, repo, "show", stateRefName+":"+rel+"tasks/t1.yaml")
+	t2 := gitOut(t, repo, "show", stateRefName+":"+rel+"tasks/t2.yaml")
+	if t1 == t2 {
+		t.Fatal("per-task blobs must be disjoint, got identical content")
+	}
+
+	// No lost update: the projection reconstructs BOTH transitions.
+	projected, err := projectPlanTasksFromStateRef(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("project from ref: %v", err)
+	}
+	byID := map[string]string{}
+	for _, task := range projected.Tasks {
+		byID[task.ID] = task.Status
+	}
+	if byID["t1"] != "in_progress" {
+		t.Fatalf("worker A's t1 transition lost: %q", byID["t1"])
+	}
+	if byID["t2"] != "in_progress" {
+		t.Fatalf("worker B's t2 transition lost: %q", byID["t2"])
+	}
+	if len(projected.Tasks) != 2 {
+		t.Fatalf("projection must carry both tasks, got %d", len(projected.Tasks))
 	}
 }

@@ -1383,8 +1383,11 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 }
 
 // advanceFanoutTaskStatusIfPending flips a freshly-fanned-out task from
-// "pending" to "in_progress" and persists it. Save failures are non-fatal —
-// the delegation contract already exists, so we only warn.
+// "pending" to "in_progress", persists it, and mirrors the transition to the
+// per-task state ref (when the git-ref backend is active) so a concurrent
+// worker fanning out a DIFFERENT task never collides on the same blob. Save /
+// mirror failures are non-fatal — the delegation contract already exists, so we
+// only warn.
 func advanceFanoutTaskStatusIfPending(projectPath string, tf *CanonicalTaskFile, targetTask *CanonicalTask) {
 	if targetTask.Status != "pending" {
 		return
@@ -1392,6 +1395,10 @@ func advanceFanoutTaskStatusIfPending(projectPath string, tf *CanonicalTaskFile,
 	targetTask.Status = "in_progress"
 	if err := saveCanonicalTasks(projectPath, tf); err != nil {
 		ui.Warn(fmt.Sprintf("delegation created but failed to advance task status: %v", err))
+		return
+	}
+	if err := mirrorTransitionToStateRef(projectPath, tf.PlanID, targetTask.ID); err != nil {
+		ui.Warn(fmt.Sprintf("delegation created but failed to mirror task status to %s: %v", stateRefName, err))
 	}
 }
 
@@ -2269,6 +2276,9 @@ func applyCloseoutDecisionToTasks(projectPath, planID, taskID string, closeout w
 	}
 	if err := saveCanonicalPlan(projectPath, plan); err != nil {
 		return fmt.Errorf("save plan: %w", err)
+	}
+	if err := mirrorTransitionToStateRef(projectPath, planID, taskID); err != nil {
+		return fmt.Errorf("mirror task status to %s: %w", stateRefName, err)
 	}
 	return nil
 }

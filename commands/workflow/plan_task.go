@@ -31,6 +31,7 @@ const (
 	errTasksForPlanNotFoundFmt = "tasks for plan %q not found: %w"
 	errParseFileFmt            = "parse %s: %w"
 	planTaskSliceIDPrefix      = "slice:"
+	gitFlagNameOnly            = "--name-only"
 )
 
 // ScopeEvidence is the Go representation of a .scope.yaml sidecar file located at
@@ -593,25 +594,29 @@ const stateRefCASAttempts = 16
 const stateRefCommitMessage = "da: coordination-state transition"
 
 // mirrorTransitionToStateRef ADDITIONALLY writes planID's changed
-// coordination-state files to refs/agents/state via atomic compare-and-swap,
-// but ONLY when the git-ref write backend is active
-// (work_tracking.write_to == "state-ref"). It is purely additive: the
-// working-copy write (saveCanonicalTasks/saveCanonicalPlan — the §3B agent-
-// facing projection) has already happened and is never replaced or altered.
+// coordination-state to refs/agents/state via atomic compare-and-swap, but ONLY
+// when the git-ref write backend is active (work_tracking.write_to ==
+// "state-ref"). Status is split into PER-TASK state blobs (§9 D5): the
+// transitioning taskID's blob and PLAN.yaml are overwritten authoritatively
+// while sibling tasks are seeded only when absent, so two workers transitioning
+// DIFFERENT tasks never touch the same ref blob (no line-level TASKS.yaml
+// conflict). It is purely additive: the working-copy write
+// (saveCanonicalTasks/saveCanonicalPlan — the §3B agent-facing projection) has
+// already happened and is never replaced or altered.
 //
 // When the backend is inactive (default / unset config) this is a no-op that
 // touches no git ref, so the default write path is byte-for-byte identical to
 // today — the git-ref mechanism ships here but the default flip is reserved for
 // a later task (document-and-default-git-ref).
-func mirrorTransitionToStateRef(projectPath, planID string) error {
+func mirrorTransitionToStateRef(projectPath, planID, taskID string) error {
 	if !canonicalWriteToStateRef(projectPath) {
 		return nil
 	}
-	files, err := collectPlanStateFiles(projectPath, planID)
+	overwrite, seed, err := collectPlanTaskStateRefWrite(projectPath, planID, taskID)
 	if err != nil {
 		return fmt.Errorf("collect state files for %s: %w", stateRefName, err)
 	}
-	return writeStateRefCAS(projectPath, files)
+	return writePlanStateRefCAS(projectPath, overwrite, seed)
 }
 
 // canonicalWriteToStateRef reports whether transitions for projectPath ALSO
@@ -633,46 +638,164 @@ type stateRefFile struct {
 	content []byte
 }
 
-// collectPlanStateFiles reads planID's canonical state files (TASKS.yaml,
-// PLAN.yaml) back from the working copy so the ref mirrors byte-for-byte what
-// the §3B projection just wrote. A file that does not exist is skipped (not
-// every transition touches both); any other read error is surfaced.
-func collectPlanStateFiles(projectPath, planID string) ([]stateRefFile, error) {
-	dir := filepath.Join(plansBaseDir(projectPath), planID)
-	files := make([]stateRefFile, 0, 2)
-	for _, name := range []string{workflowTasksFileName, workflowPlanFileName} {
-		abs := filepath.Join(dir, name)
-		content, err := os.ReadFile(abs)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, err
-		}
-		rel, err := filepath.Rel(projectPath, abs)
-		if err != nil {
-			return nil, err
-		}
-		files = append(files, stateRefFile{relPath: filepath.ToSlash(rel), content: content})
-	}
-	return files, nil
+// stateRefTasksDir is the ref-only subdirectory under a plan that holds the
+// per-task state blobs (one file per task id). Splitting status out of the
+// monolithic TASKS.yaml into these files (§9 D5) lets two workers transition
+// DIFFERENT tasks without touching the same ref blob — eliminating the
+// line-level TASKS.yaml conflict; only the benign shared-PLAN.yaml CAS-retry
+// remains.
+const stateRefTasksDir = "tasks"
+
+// stateRefTaskRecord is the on-ref serialization of one task's coordination
+// state: the CanonicalTask plus the plan-scoping and ordering metadata needed
+// to regenerate the monolithic TASKS.yaml projection with byte fidelity
+// (§3B / D1'). Each record is self-contained so per-task writes stay disjoint —
+// no shared order-manifest to contend on.
+type stateRefTaskRecord struct {
+	SchemaVersion int           `yaml:"schema_version"`
+	PlanID        string        `yaml:"plan_id"`
+	Order         int           `yaml:"order"`
+	Task          CanonicalTask `yaml:"task"`
 }
 
-// writeStateRefCAS commits files to refs/agents/state under an atomic
-// compare-and-swap retry loop: read the ref's current commit (<old>), build a
-// new commit whose tree is <old>'s tree with files overlaid, then
-// `git update-ref refs/agents/state <new> <old>`. update-ref applies the swap
-// only if the ref still points at <old>; a concurrent writer that moved it
-// makes the swap fail, and we re-read <old> and rebuild — the interprocess-safe
-// read-modify-write the file lock alone cannot provide across worktrees. Bails
-// after stateRefCASAttempts with the last contention error.
-func writeStateRefCAS(projectPath string, files []stateRefFile) error {
-	if len(files) == 0 {
-		return nil
+// splitCanonicalTaskFile decomposes a monolithic CanonicalTaskFile into one
+// self-contained per-task record each, preserving task order via the Order
+// field so projectCanonicalTaskFile can reassemble the exact original ordering.
+func splitCanonicalTaskFile(tf *CanonicalTaskFile) []stateRefTaskRecord {
+	records := make([]stateRefTaskRecord, 0, len(tf.Tasks))
+	for i := range tf.Tasks {
+		records = append(records, stateRefTaskRecord{
+			SchemaVersion: tf.SchemaVersion,
+			PlanID:        tf.PlanID,
+			Order:         i,
+			Task:          tf.Tasks[i],
+		})
 	}
+	return records
+}
+
+// projectCanonicalTaskFile regenerates the canonical TASKS.yaml view from the
+// per-task records: tasks are ordered by their Order field so the result is
+// byte-identical to what saveCanonicalTasks wrote (the §3B / D1' projection).
+// Plan scoping (schema_version, plan_id) comes from the lowest-ordered record.
+func projectCanonicalTaskFile(records []stateRefTaskRecord) *CanonicalTaskFile {
+	sorted := append([]stateRefTaskRecord{}, records...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Order < sorted[j].Order })
+	tf := &CanonicalTaskFile{}
+	if len(sorted) > 0 {
+		tf.SchemaVersion = sorted[0].SchemaVersion
+		tf.PlanID = sorted[0].PlanID
+	}
+	tf.Tasks = make([]CanonicalTask, 0, len(sorted))
+	for i := range sorted {
+		tf.Tasks = append(tf.Tasks, sorted[i].Task)
+	}
+	return tf
+}
+
+// planTaskStateRefRelPath returns the repo-relative (slash-separated) ref path
+// for taskID's per-task state blob under planID.
+func planTaskStateRefRelPath(projectPath, planID, taskID string) (string, error) {
+	abs := filepath.Join(plansBaseDir(projectPath), planID, stateRefTasksDir, taskID+".yaml")
+	rel, err := filepath.Rel(projectPath, abs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+// planStateRefRelPath returns the repo-relative (slash-separated) ref path for
+// planID's PLAN.yaml blob.
+func planStateRefRelPath(projectPath, planID string) (string, error) {
+	abs := filepath.Join(plansBaseDir(projectPath), planID, workflowPlanFileName)
+	rel, err := filepath.Rel(projectPath, abs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+// buildPlanTaskStateRefWrite computes the per-task state-ref write for a
+// transition of changedTaskID: the changed task's blob and PLAN.yaml are
+// overwritten authoritatively, while every OTHER canonical task's blob is
+// returned as a seed (written only when absent on the ref) so the projection
+// stays complete without clobbering a concurrent writer's authoritative update
+// to a different task. The task set comes from the canonical (working-copy) tf,
+// so a newly-added task is seeded on the next transition (§3B projection
+// completeness).
+func buildPlanTaskStateRefWrite(projectPath, planID, changedTaskID string, tf *CanonicalTaskFile, planContent []byte) (overwrite, seed []stateRefFile, err error) {
+	for _, rec := range splitCanonicalTaskFile(tf) {
+		content, marshalErr := yamlMarshal(rec)
+		if marshalErr != nil {
+			return nil, nil, marshalErr
+		}
+		rel, relErr := planTaskStateRefRelPath(projectPath, planID, rec.Task.ID)
+		if relErr != nil {
+			return nil, nil, relErr
+		}
+		f := stateRefFile{relPath: rel, content: content}
+		if rec.Task.ID == changedTaskID {
+			overwrite = append(overwrite, f)
+		} else {
+			seed = append(seed, f)
+		}
+	}
+	if len(planContent) > 0 {
+		rel, relErr := planStateRefRelPath(projectPath, planID)
+		if relErr != nil {
+			return nil, nil, relErr
+		}
+		overwrite = append(overwrite, stateRefFile{relPath: rel, content: planContent})
+	}
+	return overwrite, seed, nil
+}
+
+// collectPlanTaskStateRefWrite reads planID's canonical TASKS.yaml and PLAN.yaml
+// back from the working copy (NOT the read_from=master shim — the ref mirrors
+// exactly what the §3B projection just wrote) and builds the per-task state-ref
+// write for a transition of taskID. A missing TASKS.yaml yields an empty write.
+func collectPlanTaskStateRefWrite(projectPath, planID, taskID string) (overwrite, seed []stateRefFile, err error) {
+	dir := filepath.Join(plansBaseDir(projectPath), planID)
+	raw, err := os.ReadFile(filepath.Join(dir, workflowTasksFileName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	var tf CanonicalTaskFile
+	if err := yaml.Unmarshal(raw, &tf); err != nil {
+		return nil, nil, err
+	}
+	planContent, err := os.ReadFile(filepath.Join(dir, workflowPlanFileName))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, nil, err
+		}
+		planContent = nil
+	}
+	return buildPlanTaskStateRefWrite(projectPath, planID, taskID, &tf, planContent)
+}
+
+// casWriteStateRef runs the atomic compare-and-swap retry loop against
+// refs/agents/state. Each attempt re-reads the ref's current commit (<old>),
+// asks resolve for the files to overlay on <old>'s tree (letting a per-task
+// writer skip seed files already present at that <old>), builds a new commit,
+// then swaps only if the ref still points at <old>. A concurrent writer that
+// moved the ref makes the swap fail; we re-read <old> and rebuild — the
+// interprocess-safe read-modify-write the file lock alone cannot provide across
+// worktrees. Bails after stateRefCASAttempts with the last contention error.
+func casWriteStateRef(projectPath string, resolve func(old string) ([]stateRefFile, error)) error {
 	var lastErr error
 	for range stateRefCASAttempts {
 		old := stateRefHead(projectPath)
+		files, err := resolve(old)
+		if err != nil {
+			return err
+		}
+		if len(files) == 0 {
+			return nil
+		}
 		commit, err := buildStateRefCommit(projectPath, old, files)
 		if err != nil {
 			return err
@@ -684,6 +807,109 @@ func writeStateRefCAS(projectPath string, files []stateRefFile) error {
 		return nil
 	}
 	return fmt.Errorf("update %s: compare-and-swap lost after %d attempts: %w", stateRefName, stateRefCASAttempts, lastErr)
+}
+
+// writeStateRefCAS commits files to refs/agents/state, overlaying every file
+// unconditionally on the current tree. It is the generic primitive;
+// writePlanStateRefCAS layers the per-task seed-if-absent policy on top.
+func writeStateRefCAS(projectPath string, files []stateRefFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	return casWriteStateRef(projectPath, func(string) ([]stateRefFile, error) {
+		return files, nil
+	})
+}
+
+// writePlanStateRefCAS commits a per-task transition to refs/agents/state: the
+// overwrite files (the changed task's blob + PLAN.yaml) are always written,
+// while each seed file (a sibling task's blob) is written only when it is not
+// already present on the ref. Because "absent" is re-checked against the
+// current ref on every CAS attempt, two workers transitioning DIFFERENT tasks
+// each overwrite only their own blob and never seed over the other's
+// authoritative update — no lost update on disjoint tasks.
+func writePlanStateRefCAS(projectPath string, overwrite, seed []stateRefFile) error {
+	if len(overwrite) == 0 && len(seed) == 0 {
+		return nil
+	}
+	return casWriteStateRef(projectPath, func(old string) ([]stateRefFile, error) {
+		files := append([]stateRefFile{}, overwrite...)
+		for i := range seed {
+			if !stateRefPathExists(projectPath, old, seed[i].relPath) {
+				files = append(files, seed[i])
+			}
+		}
+		return files, nil
+	})
+}
+
+// stateRefPathExists reports whether relPath is present in commit's tree on the
+// state ref. An empty commit (ref absent — the first write) is always false;
+// any git error is treated as absent, matching stateRefHead's "" tolerance.
+func stateRefPathExists(projectPath, commit, relPath string) bool {
+	if commit == "" {
+		return false
+	}
+	_, err := gitStateExec(projectPath, nil, nil, "cat-file", "-e", commit+":"+relPath)
+	return err == nil
+}
+
+// readPlanTaskRecordsFromStateRef reads planID's per-task state blobs from
+// refs/agents/state and decodes them into records. A missing ref or plan tasks/
+// directory yields no records (the projection of an empty state).
+func readPlanTaskRecordsFromStateRef(projectPath, planID string) ([]stateRefTaskRecord, error) {
+	head := stateRefHead(projectPath)
+	if head == "" {
+		return nil, nil
+	}
+	dirRel, err := planTaskStateRefDirRel(projectPath, planID)
+	if err != nil {
+		return nil, err
+	}
+	treeish := head + ":" + dirRel
+	out, lsErr := gitStateExec(projectPath, nil, nil, "ls-tree", gitFlagNameOnly, treeish)
+	if lsErr != nil {
+		return nil, nil // tasks/ absent on the ref → empty projection
+	}
+	var records []stateRefTaskRecord
+	for _, name := range strings.Split(strings.TrimSpace(out), "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" || !strings.HasSuffix(name, ".yaml") {
+			continue
+		}
+		blob, showErr := gitStateExec(projectPath, nil, nil, "show", treeish+"/"+name)
+		if showErr != nil {
+			return nil, showErr
+		}
+		var rec stateRefTaskRecord
+		if err := yaml.Unmarshal([]byte(blob), &rec); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, nil
+}
+
+// planTaskStateRefDirRel returns the repo-relative (slash-separated) ref path of
+// planID's per-task blob directory.
+func planTaskStateRefDirRel(projectPath, planID string) (string, error) {
+	abs := filepath.Join(plansBaseDir(projectPath), planID, stateRefTasksDir)
+	rel, err := filepath.Rel(projectPath, abs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+// projectPlanTasksFromStateRef regenerates planID's canonical TASKS.yaml view
+// from the per-task state blobs on refs/agents/state — the §3B / D1' projection
+// that reconstructs the monolithic view from the split files with byte fidelity.
+func projectPlanTasksFromStateRef(projectPath, planID string) (*CanonicalTaskFile, error) {
+	records, err := readPlanTaskRecordsFromStateRef(projectPath, planID)
+	if err != nil {
+		return nil, err
+	}
+	return projectCanonicalTaskFile(records), nil
 }
 
 // stateRefHead returns the commit refs/agents/state currently points at, or ""
@@ -2391,7 +2617,7 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	if err := saveCanonicalPlan(project.Path, plan); err != nil {
 		return err
 	}
-	if err := mirrorTransitionToStateRef(project.Path, planID); err != nil {
+	if err := mirrorTransitionToStateRef(project.Path, planID, taskID); err != nil {
 		return err
 	}
 	ok = true
@@ -3111,13 +3337,13 @@ func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fro
 // checkScopeGitDiffFiles returns the list of files with uncommitted changes using
 // `git diff --name-only HEAD`. Returns an error on failure (used for graceful degradation).
 func checkScopeGitDiffFiles(projectPath string) ([]string, error) {
-	cmd := execabs.Command("git", "diff", "--name-only", "HEAD")
+	cmd := execabs.Command("git", "diff", gitFlagNameOnly, "HEAD")
 	cmd.Dir = projectPath
 	cmd.Env = os.Environ()
 	out, err := cmd.Output()
 	if err != nil {
 		// Also try index-only (staged but not committed).
-		cmd2 := execabs.Command("git", "diff", "--name-only", "--cached")
+		cmd2 := execabs.Command("git", "diff", gitFlagNameOnly, "--cached")
 		cmd2.Dir = projectPath
 		cmd2.Env = os.Environ()
 		out2, err2 := cmd2.Output()
