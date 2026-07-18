@@ -24,6 +24,7 @@ export const PUBLIC_PAGES = [
   { src: 'docs/DEMO_LESSONS_NARRATIVE.md', id: 'guides/demo-lessons', order: 8 },
   { src: 'docs/RESOURCE_MANAGEMENT_GUIDE.md', id: 'guides/resource-management', order: 9 },
   { src: 'docs/SCORE_GUIDE.md', id: 'guides/score', order: 10 },
+  { src: 'docs/OBSERVABILITY_DASHBOARD.md', id: 'guides/observability-dashboard', order: 11 },
   // Presenter-only material (the deck, run-of-show, talk-tracks) is kept as repo
   // files + the .pptx, NOT published on the public site:
   //   DEMO_ASDLC_DECK.md (the deck), DEMO_INDEX.md (run-of-show),
@@ -40,6 +41,7 @@ export const PUBLIC_PAGES = [
   { src: 'docs/RELEASE_VERIFICATION.md', id: 'reference/release-verification', order: 7 },
   { src: 'docs/OUTCOME_SCORING_RUBRIC.md', id: 'reference/outcome-scoring-rubric', order: 8 },
   { src: 'docs/VERIFIER_REVIEWER_TEMPLATES.md', id: 'reference/verifier-reviewer-templates', order: 9 },
+  { src: 'docs/DASHBOARD_API.md', id: 'reference/dashboard-api', order: 10 },
 
   // Concepts
   { src: 'docs/PROJECT_DIAGRAMS.md', id: 'concepts/project-diagrams', order: 1 },

@@ -53,9 +53,8 @@ go run ./cmd/da-dashboard \
 
 Browse through the Go server at <http://127.0.0.1:7300>, not directly through
 Vite. The Go server retains `/api` and reverse-proxies every non-`/api` request
-to Vite. The Vite config does not define a backend proxy. See the
-[frontend development guide](../web/dashboard/README.md) for all frontend
-commands.
+to Vite. The Vite config does not define a backend proxy. The frontend's
+`web/dashboard/README.md` lists all frontend commands.
 
 ## R3-hosted mode
 
