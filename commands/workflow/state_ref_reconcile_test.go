@@ -449,6 +449,122 @@ func TestReconcilePlanStatusLine_Branches(t *testing.T) {
 	}
 }
 
+// TestStateRefReconcile_GetwdErrorPropagates drives the currentWorkflowProject
+// failure leg via the osGetwd seam.
+func TestStateRefReconcile_GetwdErrorPropagates(t *testing.T) {
+	withGetwdError(t, errors.New("getwd boom"))
+	if err := runWorkflowStateRefReconcile(io.Discard, stateRefReconcileOpts{}); err == nil {
+		t.Fatal("getwd failure must propagate")
+	}
+}
+
+// TestStateRefReconcile_PlansPathIsFileErrors drives the working-copy plan
+// enumeration failure leg: when .agents/workflow/plans is a FILE, os.ReadDir
+// fails with a non-not-exist error that must surface (not be swallowed).
+func TestStateRefReconcile_PlansPathIsFileErrors(t *testing.T) {
+	repo := t.TempDir()
+	testutil.InitGitRepo(t, repo, map[string]string{
+		testAgentsRCName:         testAgentsRCLocal,
+		".agents/workflow/plans": "i am a file, not a directory",
+	})
+	chdirRepo(t, repo)
+
+	if err := runWorkflowStateRefReconcile(io.Discard, stateRefReconcileOpts{}); err == nil {
+		t.Fatal("a non-directory plans path must surface an error")
+	}
+}
+
+// TestStateRefReconcile_StrayFileInPlansDirIgnored proves a non-directory entry
+// directly under plans/ is skipped during enumeration.
+func TestStateRefReconcile_StrayFileInPlansDirIgnored(t *testing.T) {
+	repo := seedReconcileRepo(t, "p1", "t1")
+	chdirRepo(t, repo)
+	if err := os.WriteFile(filepath.Join(plansBaseDir(repo), "notes.txt"), []byte("stray"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := runWorkflowStateRefReconcile(&buf, stateRefReconcileOpts{}); err != nil {
+		t.Fatalf(msgReconcileErr, err)
+	}
+	if got := refTaskSet(t, repo, "p1"); !equalStrings(got, []string{"t1"}) {
+		t.Fatalf("stray file must not disturb reconcile: %v", got)
+	}
+}
+
+// TestStateRefReconcile_TasksFileIsDirErrors drives the working-copy TASKS.yaml
+// read failure leg: a TASKS.yaml that is a DIRECTORY makes os.ReadFile fail with
+// a non-not-exist error that must surface.
+func TestStateRefReconcile_TasksFileIsDirErrors(t *testing.T) {
+	repo := t.TempDir()
+	rel := ".agents/workflow/plans/p1/"
+	testutil.InitGitRepo(t, repo, map[string]string{
+		testAgentsRCName:  testAgentsRCLocal,
+		rel + "PLAN.yaml": planYAMLActive("p1"),
+	})
+	chdirRepo(t, repo)
+	if err := os.MkdirAll(filepath.Join(plansBaseDir(repo), "p1", workflowTasksFileName), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowStateRefReconcile(io.Discard, stateRefReconcileOpts{}); err == nil {
+		t.Fatal("a TASKS.yaml that is a directory must surface a read error")
+	}
+}
+
+// TestStateRefReconcile_CollectErrorPropagates drives the seed-write collection
+// failure leg via the yamlMarshal seam (working-copy read succeeds, marshal of
+// the per-task record fails).
+func TestStateRefReconcile_CollectErrorPropagates(t *testing.T) {
+	repo := seedReconcileRepo(t, "p1", "t1")
+	chdirRepo(t, repo)
+	withYAMLMarshalStub(t, yamlMarshalErrStub(errors.New("marshal boom")))
+
+	if err := runWorkflowStateRefReconcile(io.Discard, stateRefReconcileOpts{}); err == nil {
+		t.Fatal("a marshal failure during collection must surface an error")
+	}
+}
+
+// TestStateRefReconcile_MalformedRefBlobErrors drives the ref-read failure leg:
+// a malformed per-task blob on the ref makes stateRefPlanTaskIDs fail.
+func TestStateRefReconcile_MalformedRefBlobErrors(t *testing.T) {
+	repo := seedReconcileRepo(t, "p1", "t1")
+	chdirRepo(t, repo)
+	seedRefSubset(t, repo, "p1", "t1") // valid t1.yaml on the ref
+
+	rel, err := planTaskStateRefRelPath(repo, "p1", "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeStateRefCAS(repo, []stateRefFile{{relPath: rel, content: []byte("bad: : [")}}); err != nil {
+		t.Fatalf("corrupt blob write: %v", err)
+	}
+
+	if err := runWorkflowStateRefReconcile(io.Discard, stateRefReconcileOpts{}); err == nil {
+		t.Fatal("a malformed ref blob must surface an error")
+	}
+}
+
+// TestStateRefResidentPlanIDs_RefWithoutPlansTree covers the ls-tree "plans/
+// absent on the ref" leg: a ref that exists but carries no plans tree yields no
+// resident plan ids.
+func TestStateRefResidentPlanIDs_RefWithoutPlansTree(t *testing.T) {
+	repo := seedReconcileRepo(t, "p1", "t1")
+	if err := writeStateRefCAS(repo, []stateRefFile{{relPath: "marker.txt", content: []byte("x")}}); err != nil {
+		t.Fatalf("seed marker ref: %v", err)
+	}
+	if head := stateRefHead(repo); head == "" {
+		t.Fatal("precondition: ref must exist")
+	}
+	ids, err := stateRefResidentPlanIDs(repo)
+	if err != nil {
+		t.Fatalf("stateRefResidentPlanIDs: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("a ref without a plans tree must list no plans, got %v", ids)
+	}
+}
+
 var errAlwaysConflict = errors.New("simulated conflict")
 
 // writeExtraPlan adds a second active plan directory with the given task ids.
