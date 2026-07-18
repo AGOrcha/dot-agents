@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: platform-driven-diagnostics
+order: 3
+task:
+    id: p3-badge-and-countlinks
+    title: 'P3: Badge + CountLinks across 5 platforms'
+    status: completed
+    depends_on:
+        - p2-broken-links-remaining
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/cursor.go
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/copilot.go
+        - internal/platform/opencode.go
+        - internal/platform/cursor_test.go
+        - internal/platform/claude_test.go
+        - internal/platform/codex_test.go
+        - internal/platform/copilot_test.go
+        - internal/platform/opencode_test.go
+        - commands/lifecycle/status.go
+        - commands/lifecycle/doctor.go
+    verification_required: true
+    notes: Badge() + CountLinks() per platform. status's 5 *TextBadge helpers + collectProjectPlatforms become a single loop. doctor's countProjectLinks = sum across platforms.
+    app_type: go-cli

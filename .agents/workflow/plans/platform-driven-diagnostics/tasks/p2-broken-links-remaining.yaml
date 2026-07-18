@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: platform-driven-diagnostics
+order: 2
+task:
+    id: p2-broken-links-remaining
+    title: 'P2: BrokenLinkReporter for codex/copilot/opencode'
+    status: completed
+    depends_on:
+        - p1-broken-links-cursor-claude
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/codex.go
+        - internal/platform/copilot.go
+        - internal/platform/opencode.go
+        - internal/platform/codex_test.go
+        - internal/platform/copilot_test.go
+        - internal/platform/opencode_test.go
+        - commands/lifecycle/doctor.go
+    verification_required: true
+    notes: Remaining 3 platforms implement BrokenLinkReporter. collectBrokenLinks collapses to for-range over platform.All(). singleFiles table deleted from doctor.go.
+    app_type: go-cli

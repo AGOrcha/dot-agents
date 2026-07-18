@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: platform-driven-diagnostics
+order: 1
+task:
+    id: p1-broken-links-cursor-claude
+    title: 'P1: BrokenLinkReporter for cursor + claude'
+    status: completed
+    depends_on:
+        - p0-types-and-helpers
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/cursor.go
+        - internal/platform/claude.go
+        - internal/platform/claude_linkcount_unix.go
+        - internal/platform/claude_linkcount_windows.go
+        - internal/platform/cursor_test.go
+        - internal/platform/claude_test.go
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/linkcount_unix.go
+        - commands/lifecycle/linkcount_windows.go
+    verification_required: true
+    notes: cursor + claude implement BrokenLinkReporter. doctor.collectBrokenLinks delegates to p.(BrokenLinkReporter) for those two. Move HasMultipleHardLinks from commands/lifecycle/linkcount_*.go into internal/platform/claude_linkcount_*.go.
+    app_type: go-cli

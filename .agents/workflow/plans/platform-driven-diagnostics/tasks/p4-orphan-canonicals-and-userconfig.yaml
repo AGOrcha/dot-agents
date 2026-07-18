@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: platform-driven-diagnostics
+order: 4
+task:
+    id: p4-orphan-canonicals-and-userconfig
+    title: 'P4: OrphanCanonicalReporter + UserConfigReporter'
+    status: completed
+    depends_on:
+        - p3-badge-and-countlinks
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/opencode.go
+        - internal/platform/claude_test.go
+        - internal/platform/codex_test.go
+        - internal/platform/opencode_test.go
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/status.go
+    verification_required: true
+    notes: OrphanCanonicalReporter by claude+codex; UserConfigReporter by claude+codex+opencode. collectOrphanCanonicals + collectUserConfigPlatforms reduce to platform iteration.
+    app_type: go-cli

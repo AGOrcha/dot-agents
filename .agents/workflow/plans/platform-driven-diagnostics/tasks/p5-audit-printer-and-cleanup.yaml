@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: platform-driven-diagnostics
+order: 5
+task:
+    id: p5-audit-printer-and-cleanup
+    title: 'P5: AuditPrinter + delete per-platform helpers'
+    status: completed
+    depends_on:
+        - p4-orphan-canonicals-and-userconfig
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/cursor.go
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/copilot.go
+        - internal/platform/opencode.go
+        - commands/lifecycle/status.go
+        - commands/lifecycle/doctor.go
+    verification_required: true
+    notes: 'printCursorAudit/printClaudeAudit/etc. move to AuditPrinter impls. printAudit becomes loop respecting agentFilter via p.ID() + platform.Filter(all, agentFilter). All per-platform-by-name helpers deleted. Landed: merged to master via PR #132 (wave-2 state sync).'
+    app_type: go-cli

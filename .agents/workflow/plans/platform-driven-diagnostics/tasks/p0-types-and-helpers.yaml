@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: platform-driven-diagnostics
+order: 0
+task:
+    id: p0-types-and-helpers
+    title: 'P0: BrokenLink/PlatformBadge types + sister interfaces + ScanSingleFileLinks/ScanSymlinkDir helpers'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/diagnostics.go
+        - internal/platform/diagnostics_helpers.go
+        - internal/platform/diagnostics_test.go
+    verification_required: true
+    notes: 'SHIPPED via PR #118. Marker task — advance to completed immediately after creation.'
+    app_type: go-cli

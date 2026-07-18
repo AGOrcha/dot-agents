@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: platform-driven-diagnostics
+order: 6
+task:
+    id: p6-proof-of-abstraction
+    title: 'P6: Contract test + stub-platform proof'
+    status: completed
+    depends_on:
+        - p5-audit-printer-and-cleanup
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/contract_test.go
+        - internal/platform/noop_test.go
+    verification_required: true
+    notes: 'Contract test asserts every platform.All() entry implements every sister interface it advertises. Stub noopPlatform proves abstraction (single-file change surfaces in doctor + status automatically). Landed: merged to master via PR #202 (commit 8c42c028; internal/platform/contract_test.go + noop_test.go on master) (wave-2 state sync).'
+    app_type: go-cli
