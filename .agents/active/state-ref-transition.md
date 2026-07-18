@@ -2,12 +2,28 @@
 
 > Remove this file after `git-ref-work-backend/document-and-default-git-ref` is complete, controlled multi-plan validation is green, active state has been migrated, and git-ref is the documented default backend.
 
+## Additive opt-in ENABLED (user-directed, 2026-07-17)
+
+Per user direction to "use the `refs/agents/state` ref backend for the workstore," the **shipped additive opt-in** is now enabled in `.agentsrc.json`:
+
+```json
+"work_tracking": { "write_to": "state-ref" }
+```
+
+This is the ADDITIVE stopgap, **not** the canonical migration below (its gate is still CLOSED):
+
+- `write_to: state-ref` — each status transition is ALSO mirrored to `refs/agents/state` via atomic CAS (16-retry). The per-worktree working copy is STILL written every time and REMAINS canonical; the ref mirror is additive and never merged to a code branch (D10). Verified live: `da workflow advance` moved the ref 7bc27b87→d1403937, mirroring plan `TASKS.yaml`/`PLAN.yaml` while preserving the co-located session's `active/coordination/` files.
+- `read_from` is LEFT AT `worktree` (default). `read_from: master` was tried and reverted: it re-reads canonical state from stale `origin/master` on every transition, so sequential same-checkout advances **clobber each other's** working-copy edits (read-your-writes violation — see `.agents/lessons/read-from-master-clobbers-sequential-writes/`). It is a worktree-worker isolation shim, unsafe as a repo-wide default until that footgun is fixed (part of `workstore-git-ref-backend`).
+- Scope of the mirror today: a plan's `TASKS.yaml` + `PLAN.yaml` only (`collectPlanStateFiles`). It does NOT cover the rest of `.agents/active|history|workflow` — the general WorkStore backend for those is unbuilt (draft `work-tracking-storage-abstraction` spec), and is the gated work below (`workstore-git-ref-backend`).
+- `refs/agents/state` is SHARED with a co-located session (lane claims under `active/coordination/`). CAS preserves distinct paths (`TestWriteStateRefCAS_ConcurrentRMWPreservesAllWriters`) — never force-update; always CAS.
+
+
 ## Current authority
 
 Do not infer that `refs/agents/state` is the canonical workflow backend merely because the ref exists. During transition:
 
 - canonical `PLAN.yaml` / `TASKS.yaml` remain on the currently configured backend;
-- `refs/agents/state` may contain coordination and design artifacts only;
+- `refs/agents/state` carries coordination/design artifacts AND (with the opt-in above) an additive, non-canonical mirror of plan `TASKS.yaml`/`PLAN.yaml`; it is still NOT the canonical backend;
 - workers never edit a worktree copy of `TASKS.yaml` directly;
 - Main serializes canonical mutations through repository-HEAD `da workflow` commands.
 

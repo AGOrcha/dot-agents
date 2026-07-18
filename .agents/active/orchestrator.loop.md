@@ -11,8 +11,13 @@ Your turn ends when bundles exist and TASKS.yaml notes are up to date.
 ## Temporary backend transition override
 
 Read `.agents/active/state-ref-transition.md` before any workflow-state read or
-write. Until its migration gate opens, repository worktree state remains
-canonical and `refs/agents/state` is coordination-only. Build/use repository-HEAD
+write. The shipped ADDITIVE opt-in is enabled (`work_tracking.write_to=state-ref`
+only): each transition is additively mirrored to `refs/agents/state` via CAS,
+while the per-worktree working copy is still written and REMAINS canonical.
+`read_from` stays `worktree` (default) — `read_from: master` clobbers sequential
+same-checkout writes (read-your-writes footgun), so it is NOT enabled repo-wide.
+Until the file's migration gate opens, the ref is NOT the canonical backend (the
+mirror is additive, plan `TASKS.yaml`/`PLAN.yaml` only). Build/use repository-HEAD
 da; workers emit artifacts, while Main serializes every canonical mutation.
 
 ---
