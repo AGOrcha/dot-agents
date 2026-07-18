@@ -8,17 +8,18 @@ and the OMP full-loop runtime.
 You are the orchestrator. Select work, bound scope, create delegation bundles. **Do not implement.**
 Your turn ends when bundles exist and TASKS.yaml notes are up to date.
 
-## Temporary backend transition override
+## Work-tracking backend (git-ref ACTIVE)
 
 Read `.agents/active/state-ref-transition.md` before any workflow-state read or
-write. The shipped ADDITIVE opt-in is enabled (`work_tracking.write_to=state-ref`
-only): each transition is additively mirrored to `refs/agents/state` via CAS,
-while the per-worktree working copy is still written and REMAINS canonical.
-`read_from` stays `worktree` (default) — `read_from: master` clobbers sequential
-same-checkout writes (read-your-writes footgun), so it is NOT enabled repo-wide.
-Until the file's migration gate opens, the ref is NOT the canonical backend (the
-mirror is additive, plan `TASKS.yaml`/`PLAN.yaml` only). Build/use repository-HEAD
-da; workers emit artifacts, while Main serializes every canonical mutation.
+write. The cutover is COMPLETE: `work_tracking.backend=git-ref` is active, so
+`da workflow` projects canonical `TASKS.yaml`/`PLAN.yaml` from `refs/agents/state`
+(per-task blobs; graceful fallback to the working copy when a plan is not yet on
+the ref) and every transition CAS-writes the ref. The working copy is still
+written additively (projection fidelity + rollback). Reading the LOCAL ref is
+read-your-writes safe; `read_from: master` is NOT used (it clobbers sequential
+same-checkout writes). Rollback = set `work_tracking.backend` back to `local`.
+Build/use repository-HEAD da; workers emit artifacts, while Main serializes every
+canonical mutation (now written through the ref).
 
 ---
 
