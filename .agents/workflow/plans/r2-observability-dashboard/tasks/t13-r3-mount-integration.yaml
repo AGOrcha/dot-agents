@@ -4,7 +4,7 @@ order: 13
 task:
     id: t13-r3-mount-integration
     title: Replace fswatch primary with R3 publish primitive; mount handlers in R3 service
-    status: pending
+    status: completed
     depends_on:
         - t03-handlers-rest
         - t05-sse-handler

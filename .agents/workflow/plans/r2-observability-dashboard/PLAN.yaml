@@ -10,4 +10,4 @@ updated_at: "2026-07-18T03:39:37Z"
 owner: dot-agents
 success_criteria: Backend API serves telemetry + scores; React/TS UI renders live run health; real-time updates as runs progress (push-based, not polling); drill-down from aggregate view to single run's iterations and signals works end-to-end.
 verification_strategy: curl /api/runs returns JSON; UI loads + receives push event within 2s of iteration-log write; manual smoke against a live run; per-iteration drill-down test.
-current_focus_task: Replace fswatch primary with R3 publish primitive; mount handlers in R3 service
+current_focus_task: Documentation — operator guide, API reference, frontend dev guide
