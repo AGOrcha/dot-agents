@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 9
+task:
+    id: o10-obs-historical-backfill
+    title: da observability sync --full (history replay, dedup)
+    status: pending
+    depends_on:
+        - o8-da-observability-cli
+        - o5-obs-ingest-do-d1
+    blocks: []
+    owner: ""
+    write_scope:
+        - commands/observability/
+    verification_required: true
+    notes: |-
+        Proposal §5.2/§6.1. `da observability sync --full` walks .agents/history/<plan>/ +
+        obs-outbox and replays every event; server dedupes by the §5.3 idempotency key. Proves
+        local-canonical/remote-cache (§6.1): the remote can be rebuilt entirely from local.
+        Live smoke: sync --full a repo -> server {accepted:N}; re-run -> {accepted:0,
+        deduped:N}; wipe remote D1 + re-sync --full -> the run set is identical (rebuild proof).

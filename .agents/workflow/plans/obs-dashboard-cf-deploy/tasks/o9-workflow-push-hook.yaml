@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 8
+task:
+    id: o9-workflow-push-hook
+    title: Best-effort obs push on checkpoint / verify record
+    status: pending
+    depends_on:
+        - o8-da-observability-cli
+    blocks: []
+    owner: ""
+    write_scope:
+        - commands/workflow/
+    verification_required: true
+    notes: |-
+        Proposal §5.2. Wire `da workflow checkpoint` + `da workflow verify record` to POST the
+        new event when .agentsrc.json observability.enabled; BEST-EFFORT - a failed POST logs
+        a warning and queues to .agents/active/obs-outbox/, and NEVER fails the local command.
+        Add observability.push_throttle_seconds (default 0) to coalesce at high iteration rates
+        (§8). Live smoke: with obs UNREACHABLE, `da workflow checkpoint` still exits 0 and an
+        outbox file appears; with `wrangler dev` obs up, the event posts and the server receives
+        it (assert both the exit code and the server receipt).

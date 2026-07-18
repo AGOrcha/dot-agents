@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 1
+task:
+    id: o2-obs-cf-access-app
+    title: CF Access app for obs.agorcha.dev (dual-auth) via Terraform
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: ""
+    write_scope:
+        - infra/cloudflare/
+        - docs/cf-access-bootstrap.md
+    verification_required: true
+    notes: |-
+        Proposal §3.4 App2 + §2.4. Extend infra/cloudflare/ (analog of the landed App1
+        agorcha-internal-docs) with the agorcha-obs Access app on obs.agorcha.dev: an
+        obs-maintainers email policy (browser) + a non_identity Service-Auth policy admitting
+        any valid Access service token (CLI). Emit the audTag output; set the team auth domain
+        to .agorcha.dev (apex) so the cookie spans both subdomains (§8). Document in
+        docs/cf-access-bootstrap.md. Maintainer-must for `terraform apply` (needs
+        CLOUDFLARE_API_TOKEN + account/zone ids). Live smoke: `terraform init -backend=false
+        && terraform validate && terraform fmt -check` pass; after apply, `curl -o/dev/null -w
+        %{http_code}` an obs route with NO token -> 401/302-to-Access (gate active); audTag
+        output non-empty.

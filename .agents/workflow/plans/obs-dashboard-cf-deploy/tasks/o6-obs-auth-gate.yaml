@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 5
+task:
+    id: o6-obs-auth-gate
+    title: Dual-mode auth on the obs Worker (CF Access JWT + service token), fail-closed
+    status: pending
+    depends_on:
+        - o4-obs-worker-scaffold
+        - o2-obs-cf-access-app
+    blocks: []
+    owner: ""
+    write_scope:
+        - obs/
+    verification_required: true
+    notes: |-
+        Proposal §2.4/§3 + lesson cf-worker-auth-gate-fail-closed. Browser/XHR routes verify
+        the CF Access JWT (aud == audTag from o2, JWKS+iss derived from the team domain, pin
+        RS256/reject none+HS); CLI POST /api/ingest accepts the Cf-Access-Client-Id/Secret
+        service-token pair. Fail-closed: decode+normalize before classify, allowlist not
+        carve-out, HTTPS-only credentials. Live smoke (preview deploy): no creds -> 401/403;
+        valid service token -> 200; JWT with wrong aud -> reject; encoded-path variants
+        (/api%2f.., //api, /API) all gate; assert status codes for each.

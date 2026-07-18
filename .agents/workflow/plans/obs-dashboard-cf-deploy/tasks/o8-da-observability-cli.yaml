@@ -1,0 +1,26 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 7
+task:
+    id: o8-da-observability-cli
+    title: da observability login|sync|status commands
+    status: pending
+    depends_on:
+        - o3-obs-agentsrc-schema
+        - o4-obs-worker-scaffold
+    blocks: []
+    owner: ""
+    write_scope:
+        - commands/observability/
+        - commands/root.go
+    verification_required: true
+    notes: |-
+        Proposal §5.2/§5.4/§6.3. New `da observability login|sync|status`: endpoint from the
+        .agentsrc.json observability block (o3), credential from ~/.config/da/credentials.json
+        via the external-agent-sources credential-ref loader. `sync` POSTs obs-outbox +
+        (--full) history; idempotent (server dedupes). login (v1) = --from-env
+        CF_OBS_CLIENT_ID/SECRET writing the credential store. Cross-plan: external-agent-sources
+        (credential loader), dm6-da-sso-autowire (service-token provisioning). Live smoke:
+        against `wrangler dev` obs, `da observability status` reports reachable + authed;
+        `da observability sync` posts a fixture event -> server {accepted:1}; go test the
+        command wiring.

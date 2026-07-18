@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 2
+task:
+    id: o3-obs-agentsrc-schema
+    title: .agentsrc.json observability block (endpoint + credential-ref)
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: ""
+    write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/agentsrc_test.go
+        - schemas/agentsrc.schema.json
+    verification_required: true
+    notes: |-
+        Proposal §5.4/§8. Add the `observability` block ({enabled, endpoint, auth:
+        credential-ref}) reusing the external-agent-sources auth shape (auth references a
+        credential id; secret lives in ~/.config/da/credentials.json 0600 - NOT the repo).
+        Follow the schema-usage AgentsRC field lifecycle: struct + core mirror + UnmarshalJSON
+        + MarshalJSON + agentsRCKnown map + schemas/agentsrc.schema.json. Cross-plan: the auth
+        block schema is owned by external-agent-sources (pass-through here). Live smoke:
+        `go test ./internal/config/...`; a fixture .agentsrc.json with an observability block
+        round-trips (marshal->unmarshal equal) and validates against the schema; an unknown
+        field is rejected.

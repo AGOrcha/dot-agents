@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 11
+task:
+    id: o12-obs-verify-close
+    title: End-to-end live smoke + close the plan
+    status: pending
+    depends_on:
+        - o5-obs-ingest-do-d1
+        - o6-obs-auth-gate
+        - o7-obs-dashboard-frontend
+        - o9-workflow-push-hook
+        - o10-obs-historical-backfill
+        - o11-obs-cf-access-iac-hardening
+    blocks: []
+    owner: ""
+    write_scope:
+        - .agents/history/obs-dashboard-cf-deploy/
+    verification_required: true
+    notes: |-
+        End-to-end LIVE proof against the deployed (preview) obs Worker: `da observability sync`
+        through a real CF Access service token -> events land in DO+D1; the authed UI shows a
+        live WebSocket update < 2s; fail-closed auth (no token -> 401, wrong aud -> reject,
+        encoded-path variants gate); D1 dedup on re-POST; local-canonical rebuild (wipe remote +
+        sync --full reproduces the run set). Plus `go test ./...` + CI green. Then archive/close.
+        Verifies: every success_criterion is demonstrated against the shipped artifact, not a
+        test-file summary.

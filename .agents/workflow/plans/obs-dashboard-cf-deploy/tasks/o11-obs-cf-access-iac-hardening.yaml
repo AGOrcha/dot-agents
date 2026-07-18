@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 10
+task:
+    id: o11-obs-cf-access-iac-hardening
+    title: obs CF Access IaC + per-project tokens + retention knobs
+    status: pending
+    depends_on:
+        - o2-obs-cf-access-app
+    blocks: []
+    owner: ""
+    write_scope:
+        - infra/cloudflare/
+        - docs/cf-access-bootstrap.md
+    verification_required: true
+    notes: |-
+        Proposal §3.7/§6.2b/§6.3. Ensure the obs Access app + Service-Auth policy live fully in
+        Terraform (no manual-only drift); document the per-project token issuance flow (§6.3)
+        and the scope-tiered retention/pruning defaults (§6.2b, solo=keep-local-indefinitely as
+        v1 default) as observability.retention config. Live smoke: `terraform validate` +
+        `fmt -check` pass; docs/cf-access-bootstrap.md lists both apps' audTags + policies;
+        a `da observability` config with a retention block round-trips.

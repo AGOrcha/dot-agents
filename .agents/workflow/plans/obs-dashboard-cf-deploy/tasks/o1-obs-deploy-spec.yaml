@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 0
+task:
+    id: o1-obs-deploy-spec
+    title: Formalize the obs CF-Worker+DO+D1 deploy into a canonical spec
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: ""
+    write_scope:
+        - .agents/workflow/specs/obs-dashboard-cf-deploy/
+    verification_required: true
+    notes: |-
+        Promote the obs sections of the maintainer-reviewed proposal
+        (agorcha-public-vs-internal-and-obs-deploy §3.4-App2, §4 DO+D1, §5 push/sync, §6
+        local-canonical) into a canonical spec via spec-scaffold. Records the ratified
+        decisions + done criteria + the still-open §8 items as open questions. Notes the
+        coexistence with dashboard-subsystem-and-bus-security (local SSE, loopback) vs the
+        remote obs deploy (WebSocket, CF Access, multi-project) - not a conflict, a layering.
+        Verify: spec exists at write_scope with decisions tracing to the proposal; open
+        questions carry the §8 unresolved items.

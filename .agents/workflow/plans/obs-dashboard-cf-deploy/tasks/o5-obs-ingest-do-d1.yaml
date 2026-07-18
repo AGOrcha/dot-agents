@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 4
+task:
+    id: o5-obs-ingest-do-d1
+    title: Per-project DO + D1 schema + idempotent ingest write-through
+    status: pending
+    depends_on:
+        - o4-obs-worker-scaffold
+    blocks: []
+    owner: ""
+    write_scope:
+        - obs/
+    verification_required: true
+    notes: |-
+        Proposal §4.5/§6.2. DO per project (idFromName(project_id), project_id = canonical git
+        remote host/owner/repo). DO holds the live iteration buffer + WebSocket subscriber list
+        (Hibernation API). D1 single db: append-only iterations/sessions/scores/observations
+        keyed by (project_id, plan_id, task_id, iteration), project_id leading on every index.
+        Ingest writes through DO -> D1; idempotency key (project_id, plan_id, task_id, iteration,
+        schema_hash); re-POST dedupes. Live smoke (wrangler dev + miniflare D1): POST the same
+        event twice -> {accepted:1, deduped:1}; query D1 -> exactly one row; a second distinct
+        event -> accepted:1.

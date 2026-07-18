@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 6
+task:
+    id: o7-obs-dashboard-frontend
+    title: obs.agorcha.dev UI - read D1 + WebSocket live updates
+    status: pending
+    depends_on:
+        - o5-obs-ingest-do-d1
+        - o6-obs-auth-gate
+    blocks: []
+    owner: ""
+    write_scope:
+        - obs/
+        - web/dashboard/
+    verification_required: true
+    notes: |-
+        Proposal §4.1/§7 wave6. Serve the dashboard SPA at obs.agorcha.dev/ (reuse the
+        web/dashboard build), reading /api/runs + /api/iterations from D1, with a WebSocket
+        channel (DO Hibernation API) for live updates. Cross-plan: the SPA/core is
+        dashboard-subsystem-and-bus-security's shared UI - reuse, do not fork. Live smoke
+        (preview deploy, authed): load /api/runs -> the ingested runs render; open the
+        WebSocket, POST a new ingest event -> the UI/WS receives it in < 2s (assert the WS
+        frame arrives with the event).

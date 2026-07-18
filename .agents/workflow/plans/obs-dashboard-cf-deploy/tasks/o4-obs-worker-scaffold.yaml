@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 3
+task:
+    id: o4-obs-worker-scaffold
+    title: obs/ Worker scaffold - wrangler, DO+D1 bindings, ingest endpoint
+    status: pending
+    depends_on:
+        - o1-obs-deploy-spec
+        - o2-obs-cf-access-app
+    blocks: []
+    owner: ""
+    write_scope:
+        - obs/
+    verification_required: true
+    notes: |-
+        Proposal §7 wave5 + §8 (obs/ at repo root - distinct deploy target from docs/web).
+        New obs/ dir: wrangler.jsonc for obs.agorcha.dev (apex custom_domain, DO + D1 bindings),
+        Worker entry with `run_worker_first: true` fail-closed, POST /api/ingest accepting the
+        §5.3 payload and rejecting every other route. Live smoke: `wrangler dev` (miniflare)
+        -> POST /api/ingest with a fixture body -> 200 {accepted,deduped,rejected}; GET /nope
+        -> 404; then `wrangler deploy` to a PREVIEW (<name>.<acct>.workers.dev) and curl the
+        preview URL for the same. YAML/wrangler config validates.
