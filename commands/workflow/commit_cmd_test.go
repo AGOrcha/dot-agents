@@ -323,6 +323,100 @@ func TestCommitOptOutShortCircuit(t *testing.T) {
 	}
 }
 
+// --- git-ref backend: plan-state decoupling --------------------------------
+
+// Under the git-ref backend runWorkflowCommit must NOT stage plan-coordination
+// state under .agents/workflow/ (authoritative on refs/agents/state) while
+// .agents/history/ archives still commit. Drives the planStateSkipped seam to
+// true so the gate is exercised without standing up an .agentsrc.json.
+func TestCommitSkipsPlanStateUnderGitRefBackend(t *testing.T) {
+	prior := planStateSkipped
+	planStateSkipped = func() bool { return true }
+	t.Cleanup(func() { planStateSkipped = prior })
+
+	g := &fakeGit{
+		status: []StatusEntry{
+			{Path: ".agents/workflow/plans/x/PLAN.yaml", XY: ".M"},
+			{Path: ".agents/history/y/PLAN.yaml", XY: ".M"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := runWorkflowCommit(&buf, g, false, nil); err != nil {
+		t.Fatalf("runWorkflowCommit: %v", err)
+	}
+	if !reflect.DeepEqual(g.addedPaths, []string{".agents/history/y/PLAN.yaml"}) {
+		t.Errorf("git-ref backend must skip .agents/workflow/** and keep .agents/history/**: addedPaths=%v", g.addedPaths)
+	}
+}
+
+// Even under the git-ref backend an explicitly --include'd .agents/workflow/
+// path is still staged — the opt-in overrides the auto-skip, so a caller can
+// still force plan-state into a code commit when it deliberately names it.
+func TestCommitStagesExplicitWorkflowPathUnderGitRefBackend(t *testing.T) {
+	prior := planStateSkipped
+	planStateSkipped = func() bool { return true }
+	t.Cleanup(func() { planStateSkipped = prior })
+
+	g := &fakeGit{
+		status: []StatusEntry{
+			{Path: ".agents/workflow/plans/x/PLAN.yaml", XY: ".M"},     // named -> staged
+			{Path: ".agents/workflow/plans/other/PLAN.yaml", XY: ".M"}, // unnamed -> skipped
+		},
+	}
+	var buf bytes.Buffer
+	if err := runWorkflowCommit(&buf, g, false,
+		[]string{".agents/workflow/plans/x/PLAN.yaml"}); err != nil {
+		t.Fatalf("runWorkflowCommit: %v", err)
+	}
+	if !reflect.DeepEqual(g.addedPaths, []string{".agents/workflow/plans/x/PLAN.yaml"}) {
+		t.Errorf("explicit --include must still stage under git-ref backend: addedPaths=%v", g.addedPaths)
+	}
+}
+
+// planStateSkippedFromConfig (the production resolver) returns true when the
+// project's work_tracking.backend is "git-ref" — the gate that decouples plan
+// state from code commits.
+func TestPlanStateSkippedFromConfigGitRefBackend(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	writeCommitTestAgentsRC(t, repo, `{"version":1,"project":"p","sources":[{"type":"local"}],"work_tracking":{"backend":"git-ref"}}`)
+	chdirRepo(t, repo)
+	if !planStateSkippedFromConfig() {
+		t.Error("planStateSkippedFromConfig = false, want true under work_tracking.backend=git-ref")
+	}
+}
+
+// Default / unset work_tracking → planStateSkippedFromConfig is false, so the
+// local backend stays byte-identical to today.
+func TestPlanStateSkippedFromConfigDefaultFalse(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	writeCommitTestAgentsRC(t, repo, `{"version":1,"project":"p","sources":[{"type":"local"}]}`)
+	chdirRepo(t, repo)
+	if planStateSkippedFromConfig() {
+		t.Error("planStateSkippedFromConfig = true, want false with no work_tracking block")
+	}
+}
+
+// A Getwd failure → currentWorkflowProject errors → planStateSkippedFromConfig
+// fails safe to false (local backend), so a broken cwd never silently drops
+// plan-state from the commit — the safe direction.
+func TestPlanStateSkippedFromConfigNoProject(t *testing.T) {
+	withGetwdError(t, errors.New("no cwd"))
+	if planStateSkippedFromConfig() {
+		t.Error("planStateSkippedFromConfig = true, want false when the project cannot resolve")
+	}
+}
+
+// writeCommitTestAgentsRC writes a raw .agentsrc.json body into repo for the
+// planStateSkippedFromConfig production-resolver tests.
+func writeCommitTestAgentsRC(t *testing.T, repo, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // --- gogitImpl real-git tests --------------------------------------------
 
 // newGogitImpl errors clearly when cwd is not inside a git worktree —

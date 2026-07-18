@@ -59,10 +59,16 @@ type StatusEntry struct {
 //   - For rename / copy entries, stage both the new path and the original
 //     path so git captures the rename intent (R) or deletion (the index
 //     entry the old path leaves behind).
+//   - When skipPlanState is true (the git-ref WorkStore backend is active) the
+//     plan-coordination root .agents/workflow/ is NOT auto-included — that
+//     state is authoritative on refs/agents/state — while .agents/history/
+//     archives and any explicitly-named (mutation-surface / --include) path
+//     are still staged. When false the behaviour is unchanged from the local
+//     backend.
 //
 // Determinism: the output is sorted lexicographically and deduplicated, so
 // the same (status, surface) input pair always produces the same output.
-func DerivePathSet(status []StatusEntry, mutationSurface []string) []string {
+func DerivePathSet(status []StatusEntry, mutationSurface []string, skipPlanState bool) []string {
 	surface := make(map[string]struct{}, len(mutationSurface))
 	for _, p := range mutationSurface {
 		surface[p] = struct{}{}
@@ -74,7 +80,7 @@ func DerivePathSet(status []StatusEntry, mutationSurface []string) []string {
 			return
 		}
 		_, inSurface := surface[path]
-		if !inManagedRoot(path) && !inSurface {
+		if !autoManaged(path, skipPlanState) && !inSurface {
 			return
 		}
 		picked[path] = struct{}{}
@@ -97,12 +103,25 @@ func DerivePathSet(status []StatusEntry, mutationSurface []string) []string {
 	return out
 }
 
-// inManagedRoot reports whether path is under one of the workflow-managed
-// roots. Strict prefix match plus a directory boundary so a path like
-// ".agents/workflow_old/x" does not match.
-func inManagedRoot(path string) bool {
-	return strings.HasPrefix(path, managedRootPlans) ||
-		strings.HasPrefix(path, managedRootHistory)
+// autoManaged reports whether path is auto-staged by virtue of falling under a
+// workflow-managed root. Strict prefix match plus a directory boundary so a
+// path like ".agents/workflow_old/x" does not match.
+//
+// When skipPlanState is true (the git-ref WorkStore backend is active) the
+// plan-coordination root .agents/workflow/ is NOT auto-staged: that state is
+// authoritative on refs/agents/state, so folding it into code-branch commits
+// would duplicate and re-diverge it. The .agents/history/ archive root stays
+// auto-staged in both modes — archives are durable git records, not live
+// coordination. An explicitly-named path (mutation surface / --include) still
+// stages regardless, since the caller's !inSurface guard runs before this.
+func autoManaged(path string, skipPlanState bool) bool {
+	if strings.HasPrefix(path, managedRootHistory) {
+		return true
+	}
+	if skipPlanState {
+		return false
+	}
+	return strings.HasPrefix(path, managedRootPlans)
 }
 
 // ParseStatus parses `git status --porcelain=v2 -z` output into StatusEntry
