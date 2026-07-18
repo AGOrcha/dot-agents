@@ -1,0 +1,22 @@
+schema_version: 1
+id: dashboard-subsystem-and-bus-security
+title: Dashboard subsystem consolidation + event-bus security posture
+status: draft
+summary: Make the dashboard a da subsystem, seam a slim separately-deployable prod runtime, and harden the event bus per the dashboard-subsystem-and-bus-security spec.
+created_at: "2026-07-18T16:48:25Z"
+updated_at: "2026-07-18T16:48:25Z"
+owner: dot-agents
+spec_ref: .agents/workflow/specs/dashboard-subsystem-and-bus-security/design.md
+concurrency_mode: sequential
+concurrency_rationale: |-
+  Sequential. The spec carries an unresolved HARD fork (D3 boundary mechanism:
+  build-tag vs separate-module vs dedicated-entrypoint) whose answer changes the
+  slim-runtime seam task's write_scope and structure. That fork is resolved by an
+  ideation-cycle task (t3) which BLOCKS the seam implementation (t4); the seam
+  task's write_scope is finalized only by t3's ratified decision. The bus-security
+  tasks (t5-t10) are independent of the fork and could parallelize among themselves,
+  but the plan is authored sequential-by-default because t3->t4 ordering is
+  load-bearing and t8's coalescing policy still needs a rate measurement.
+success_criteria: da dashboard subsystem replaces the standalone root; runtime build-boundary guard passes; bus is default-deny/one-way/loopback/bounded with clean payloads; done-criteria in the spec are met.
+verification_strategy: go test ./...; import-guard build check; broker DoS + default-deny + loopback tests; docs link-check; CI green.
+current_focus_task: ""

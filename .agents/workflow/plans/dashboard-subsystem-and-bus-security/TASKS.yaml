@@ -1,0 +1,198 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+tasks:
+    - id: t1-dashboard-subsystem
+      title: da dashboard subsystem (serve/open/status) over the shared core
+      status: pending
+      write_scope:
+        - commands/dashboard/
+        - commands/root.go
+      depends_on: []
+      blocks:
+        - t2-retire-standalone-root
+      verification_required: true
+      notes: |-
+        Spec D1/D2. Add a first-class `da dashboard` subsystem wired into the root
+        command tree (dev: serve/open/status), running the shared dashboard core
+        in-process against local iter-log roots. Verifies spec done-criterion
+        "dashboard invocable via the da root subsystem": `da dashboard --help` lists
+        the subcommands and `go test ./commands/dashboard/...` passes.
+    - id: t2-retire-standalone-root
+      title: Retire the standalone da-dashboard separate root
+      status: pending
+      write_scope:
+        - cmd/da-dashboard/
+      depends_on:
+        - t1-dashboard-subsystem
+      blocks: []
+      verification_required: true
+      notes: |-
+        Spec D1. Retire cmd/da-dashboard as a distinct entry point; its local-serve
+        behavior is preserved by `da dashboard serve`. Verifies done-criterion "the
+        standalone separate-root entry point is no longer a supported/tested path"
+        (its tests target the subsystem/runtime composition).
+    - id: t3-boundary-mechanism-decision
+      title: Resolve D3 slim-runtime boundary mechanism (ideation-cycle)
+      status: pending
+      write_scope:
+        - .agents/workflow/specs/dashboard-subsystem-and-bus-security/
+      depends_on: []
+      blocks:
+        - t4-slim-runtime-seam
+      verification_required: true
+      notes: |-
+        Spec D3 open question. HARD fork: build-tag vs separate-module vs dedicated
+        minimal entrypoint for the slim, separately-deployable prod runtime. Resolved
+        via ideation-cycle (empirical prototype under the fidelity gate + cross-harness
+        audit) measuring binary size, import-graph/attack-surface breadth, and
+        maintenance cost against the current fat binary as negative control. Verifies:
+        a ratified decision + per-fork evidence sidecar recorded; the spec's D3 open
+        question is closed. Gates t4 (the seam's write_scope is unknowable until this
+        lands).
+    - id: t4-slim-runtime-seam
+      title: Implement the slim-runtime import/build boundary + guard
+      status: pending
+      write_scope:
+        - tools/importguard/
+      depends_on:
+        - t3-boundary-mechanism-decision
+      blocks: []
+      verification_required: true
+      notes: |-
+        Spec D3. Implement the boundary mechanism ratified by t3 so the network-facing
+        runtime builds WITHOUT the fat agent command surface, and add/extend an
+        import-guard that fails the build if the runtime target imports outside the
+        permitted set. write_scope is FINALIZED by t3's decision (build-tag files, a
+        new module dir, or a dedicated entrypoint may be added). Verifies done-criterion
+        "a build/import guard fails when the runtime target's dependency graph includes
+        the disallowed fat-command surface". Artifact/packaging remains DEFERRED (spec).
+    - id: t5-capability-writepaths
+      title: Deny-by-default capability + registered write-operation paths
+      status: pending
+      write_scope:
+        - internal/dashboard/handlers/
+        - internal/dashboard/server/
+      depends_on:
+        - t1-dashboard-subsystem
+      blocks: []
+      verification_required: true
+      notes: |-
+        Spec D5. Read-only by default; state mutates ONLY through an explicitly
+        registered, individually-justified write-operation path (no ambient write).
+        Establish the registry + default-deny gate; no concrete write paths are added
+        now. Verifies done-criterion "the bus refuses any mutation attempt that is not
+        a registered write-operation path (default-deny), covered by a test".
+    - id: t6-oneway-egress-bridge
+      title: One-way runtime->broker bridge; egress-only / GET-only
+      status: pending
+      write_scope:
+        - internal/dashboard/events/
+        - internal/dashboard/server/
+      depends_on:
+        - t1-dashboard-subsystem
+      blocks:
+        - t9-payload-hygiene
+      verification_required: true
+      notes: |-
+        Spec D4. Enforce/verify the runtime->broker bridge is strictly one-directional
+        (the dashboard cannot publish or inject upstream), SSE is egress-only, ingress
+        is GET-only, and the bus exposes no mutation endpoints. Verifies the D4
+        requirement via a test that the bridge cannot inject upstream.
+    - id: t7-loopback-failclosed
+      title: Loopback-default bind; fail-closed beyond loopback
+      status: pending
+      write_scope:
+        - internal/dashboard/server/
+      depends_on:
+        - t1-dashboard-subsystem
+      blocks:
+        - t10-multiuser-authz-gate
+      verification_required: true
+      notes: |-
+        Spec D6. The runtime binds loopback by default and never binds a public
+        interface implicitly; beyond-loopback exposure is explicit opt-in fronted by a
+        reverse proxy per the cf-worker-auth-gate-fail-closed checklist. Verifies
+        done-criterion "a test asserts no public bind occurs without the explicit opt-in".
+    - id: t8-dos-cap-coalescing
+      title: DoS governance - subscriber cap + high-freq coalescing
+      status: pending
+      write_scope:
+        - internal/dashboard/events/
+      depends_on: []
+      blocks: []
+      verification_required: true
+      notes: |-
+        Spec D7. Add a bound on concurrent subscribers and coalesce/debounce bursty
+        high-frequency source events, atop the existing bounded-buffer drop=>disconnect
+        policy. The coalescing window/count policy needs a rate measurement first
+        (spec open question) - measure expected event rates before locking the policy.
+        Verifies done-criterion "a burst/slow-client test that neither blocks the
+        publisher nor grows memory unboundedly" plus a documented subscriber cap.
+    - id: t9-payload-hygiene
+      title: Payload hygiene - no secrets in browser-bound events
+      status: pending
+      write_scope:
+        - internal/dashboard/events/
+        - internal/dashboard/handlers/
+      depends_on:
+        - t6-oneway-egress-bridge
+      blocks: []
+      verification_required: true
+      notes: |-
+        Spec D8. Events crossing to browser clients carry no secrets, tokens, or PII;
+        payloads are shaped and audited at the bridge boundary. Verifies done-criterion
+        "a payload-hygiene check verifies browser-bound events omit sensitive fields".
+    - id: t10-multiuser-authz-gate
+      title: Multi-user stream authz precondition (fail-closed gate)
+      status: pending
+      write_scope:
+        - internal/dashboard/server/
+      depends_on:
+        - t7-loopback-failclosed
+      blocks: []
+      verification_required: true
+      notes: |-
+        Spec Deferred item. Per-subscriber stream authorization is a HARD precondition
+        before any multi-user exposure; implementation is deferred to
+        r5-review-labeling-access. This task installs only the fail-closed guard so
+        multi-user exposure cannot silently ship without the authz layer. Verifies: a
+        test that multi-user exposure is refused absent the authz gate.
+    - id: t11-docs-align
+      title: Align dashboard docs with the shipped subsystem + posture
+      status: pending
+      write_scope:
+        - docs/OBSERVABILITY_DASHBOARD.md
+        - docs/DASHBOARD_API.md
+        - web/dashboard/README.md
+      depends_on:
+        - t1-dashboard-subsystem
+        - t2-retire-standalone-root
+      blocks: []
+      verification_required: false
+      notes: |-
+        Update the dashboard docs from the forward-looking spec-direction framing (the
+        r2 #423 refresh) to describe the SHIPPED `da dashboard` subsystem, the retired
+        standalone root, and the realized security posture. Verifies: docs match the
+        shipped command surface and the docs-site link-check stays green.
+    - id: t12-verify-close
+      title: Verify spec done-criteria and close the plan
+      status: pending
+      write_scope:
+        - .agents/history/dashboard-subsystem-and-bus-security/
+      depends_on:
+        - t2-retire-standalone-root
+        - t4-slim-runtime-seam
+        - t5-capability-writepaths
+        - t6-oneway-egress-bridge
+        - t7-loopback-failclosed
+        - t8-dos-cap-coalescing
+        - t9-payload-hygiene
+        - t10-multiuser-authz-gate
+        - t11-docs-align
+      blocks: []
+      verification_required: true
+      notes: |-
+        Confirm every spec done-criterion is met (subsystem invocation, import guard,
+        default-deny mutation, DoS cap+coalescing, loopback-default, payload hygiene),
+        run the full suite + CI green, and archive the plan. Verifies: all spec
+        done-criteria pass; `go test ./...` and CI are green.
