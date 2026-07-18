@@ -814,6 +814,16 @@ func casWriteStateRef(projectPath string, resolve func(old string) ([]stateRefFi
 		if err != nil {
 			return err
 		}
+		// Idempotency guard: a rebuilt tree identical to the current ref's tree
+		// changes nothing, so skip the swap — a redundant mirror (e.g. the
+		// choke-point save-mirror followed by a caller's explicit seed-mirror
+		// of the same state) then produces NO new commit. Defense-in-depth for
+		// the canonical-write choke point (#433): exactly one commit per write.
+		if old != "" {
+			if newTree := stateRefCommitTree(projectPath, commit); newTree != "" && newTree == stateRefCommitTree(projectPath, old) {
+				return nil
+			}
+		}
 		if err := casSwapFn(projectPath, commit, old); err != nil {
 			lastErr = err
 			continue
@@ -967,6 +977,14 @@ func readPlanFileFromStateRef(projectPath, planID string) ([]byte, bool) {
 // yields "" on the expected non-zero exit for an absent ref.
 func stateRefHead(projectPath string) string {
 	return strings.TrimSpace(gitOutput(projectPath, "rev-parse", "--verify", "--quiet", stateRefName+"^{commit}"))
+}
+
+// stateRefCommitTree returns the tree OID of commit, or "" when commit is absent
+// or invalid (gitOutput yields "" on the expected non-zero exit). Used by the
+// CAS idempotency guard to detect a no-op write whose tree already matches the
+// ref, so a redundant mirror produces no new commit.
+func stateRefCommitTree(projectPath, commit string) string {
+	return strings.TrimSpace(gitOutput(projectPath, "rev-parse", "--verify", "--quiet", commit+"^{tree}"))
 }
 
 // buildStateRefCommit builds (but does not install) a commit that carries files
@@ -1164,6 +1182,52 @@ func saveCanonicalTasks(projectPath string, tf *CanonicalTaskFile) error {
 		return err
 	}
 	return osWriteFile(filepath.Join(dir, workflowTasksFileName), content, 0644)
+}
+
+// saveCanonicalTasksMirrored is the canonical-write CHOKE POINT for plan tasks
+// (#433): it writes tf to the working copy (the §3B projection) and, when the
+// coordination-state backend mirrors canonical writes (canonicalWriteToStateRef),
+// ALSO mirrors the plan's per-task blobs + PLAN.yaml to refs/agents/state. Every
+// STRUCTURAL write routed through it (task add, task update, plan-create) becomes
+// immediately ref-visible, not just status transitions — closing the stale-ref
+// read-your-writes clobber the git-ref cutover hit.
+//
+// changedTaskID is the task this write authoritatively mutated: its per-task blob
+// is overwritten while siblings are seeded only-if-absent (D5 disjoint-task
+// concurrency, via mirrorTransitionToStateRef). An empty changedTaskID overwrites
+// no task blob and seeds every task (plan-create, whose task set is empty anyway).
+// Callers MUST write PLAN.yaml (saveCanonicalPlan) BEFORE this call so the single
+// mirror commit captures the fresh plan alongside the fresh tasks.
+//
+// The mirror is best-effort: the working-copy write is already durable before it
+// runs, so a ref-write failure is WARNED, never propagated — a stale ref must not
+// fail or roll back the authoritative working-copy write. The mirror only READS
+// the working copy it just wrote (no call back into save*), so there is no write
+// amplification or re-entrancy.
+func saveCanonicalTasksMirrored(projectPath string, tf *CanonicalTaskFile, changedTaskID string) error {
+	if err := saveCanonicalTasks(projectPath, tf); err != nil {
+		return err
+	}
+	if err := mirrorTransitionToStateRef(projectPath, tf.PlanID, changedTaskID); err != nil {
+		ui.Warn(fmt.Sprintf("canonical tasks saved but failed to mirror to %s: %v", stateRefName, err))
+	}
+	return nil
+}
+
+// saveCanonicalPlanMirrored is the canonical-write choke point for a plan-only
+// write (plan update): it writes PLAN.yaml to the working copy and, when the
+// backend mirrors canonical writes, overwrites PLAN.yaml on refs/agents/state
+// while seeding the plan's existing task blobs only-if-absent (changedTaskID is
+// empty — no task blob is authoritatively changed). Best-effort mirror with the
+// same warn-not-fail semantics as saveCanonicalTasksMirrored.
+func saveCanonicalPlanMirrored(projectPath string, plan *CanonicalPlan) error {
+	if err := saveCanonicalPlan(projectPath, plan); err != nil {
+		return err
+	}
+	if err := mirrorTransitionToStateRef(projectPath, plan.ID, ""); err != nil {
+		ui.Warn(fmt.Sprintf("canonical plan saved but failed to mirror to %s: %v", stateRefName, err))
+	}
+	return nil
 }
 
 // tasksLockPath returns the sidecar-lock target for planID's TASKS.yaml — the
@@ -2691,26 +2755,26 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 		if transErr != nil {
 			return transErr
 		}
-		return saveCanonicalTasks(project.Path, tf)
+		// Write PLAN.yaml first so the single choke-point mirror in
+		// saveCanonicalTasksMirrored captures the fresh plan + tasks in ONE ref
+		// commit (no double CAS). Both writes stay inside the TASKS lock.
+		plan, planErr := loadCanonicalPlan(project.Path, planID)
+		if planErr != nil {
+			return planErr
+		}
+		plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if newStatus == "in_progress" {
+			plan.CurrentFocusTask = strings.TrimSpace(taskTitle)
+		} else {
+			plan.CurrentFocusTask = effectivePlanFocusTask(tf.Tasks)
+		}
+		if err := saveCanonicalPlan(project.Path, plan); err != nil {
+			return err
+		}
+		return saveCanonicalTasksMirrored(project.Path, tf, taskID)
 	})
 	if lockErr != nil {
 		return lockErr
-	}
-	plan, err := loadCanonicalPlan(project.Path, planID)
-	if err != nil {
-		return err
-	}
-	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if newStatus == "in_progress" {
-		plan.CurrentFocusTask = strings.TrimSpace(taskTitle)
-	} else {
-		plan.CurrentFocusTask = effectivePlanFocusTask(tf.Tasks)
-	}
-	if err := saveCanonicalPlan(project.Path, plan); err != nil {
-		return err
-	}
-	if err := mirrorTransitionToStateRef(project.Path, planID, taskID); err != nil {
-		return err
 	}
 	ok = true
 	ui.Success(fmt.Sprintf("Task %q advanced to %q", taskTitle, newStatus))
@@ -2767,7 +2831,7 @@ func runWorkflowPlanCreate(planID, title, summary, owner, successCriteria, verif
 		PlanID:        planID,
 		Tasks:         []CanonicalTask{},
 	}
-	if err := saveCanonicalTasks(project.Path, tf); err != nil {
+	if err := saveCanonicalTasksMirrored(project.Path, tf, ""); err != nil {
 		return err
 	}
 	observed.FilesCreated = []string{workflowPlanFileName, workflowTasksFileName}
@@ -2943,7 +3007,7 @@ func runWorkflowPlanUpdate(planID, status, title, summary, focus, successCriteri
 	applyPlanFieldUpdate(changed, "verification_strategy", verificationStrategy, &plan.VerificationStrategy)
 	applyPlanFieldUpdate(changed, "current_focus_task", focus, &plan.CurrentFocusTask)
 	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if err := saveCanonicalPlan(project.Path, plan); err != nil {
+	if err := saveCanonicalPlanMirrored(project.Path, plan); err != nil {
 		return err
 	}
 	emitWorkflowDelta(project.Path, journal.CmdPlanUpdate, planID, "", changed)
@@ -3020,7 +3084,16 @@ func runWorkflowTaskAdd(in taskAddInputs) error {
 			WriteScope:           splitTrimmedCSV(in.WriteScope),
 		}
 		tf.Tasks = append(tf.Tasks, task)
-		return saveCanonicalTasks(project.Path, tf)
+		// Bump PLAN.yaml first so the single choke-point mirror in
+		// saveCanonicalTasksMirrored captures the fresh plan + the new task in
+		// ONE ref commit. Plan-save error is non-fatal (as before).
+		plan, planErr := loadCanonicalPlan(project.Path, in.PlanID)
+		if planErr != nil {
+			return planErr
+		}
+		plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		_ = saveCanonicalPlan(project.Path, plan)
+		return saveCanonicalTasksMirrored(project.Path, tf, in.TaskID)
 	})
 	if lockErr != nil {
 		return lockErr
@@ -3035,12 +3108,6 @@ func runWorkflowTaskAdd(in taskAddInputs) error {
 			AppType:    in.AppType,
 		},
 		&journal.TaskAddObserved{Appended: true})
-	plan, err := loadCanonicalPlan(project.Path, in.PlanID)
-	if err != nil {
-		return err
-	}
-	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	_ = saveCanonicalPlan(project.Path, plan)
 	ui.Success(fmt.Sprintf("Added task %q to plan %q", in.TaskID, in.PlanID))
 	return nil
 }
@@ -3096,18 +3163,21 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope, dependsOn, 
 		if !found {
 			return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
 		}
-		return saveCanonicalTasks(project.Path, tf)
+		// Bump PLAN.yaml first so the single choke-point mirror in
+		// saveCanonicalTasksMirrored captures the fresh plan + the updated task
+		// in ONE ref commit. Plan-save error is non-fatal (as before).
+		plan, planErr := loadCanonicalPlan(project.Path, planID)
+		if planErr != nil {
+			return planErr
+		}
+		plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		_ = saveCanonicalPlan(project.Path, plan)
+		return saveCanonicalTasksMirrored(project.Path, tf, taskID)
 	})
 	if lockErr != nil {
 		return lockErr
 	}
 	emitWorkflowDelta(project.Path, journal.CmdTaskUpdate, planID, taskID, changed)
-	plan, err := loadCanonicalPlan(project.Path, planID)
-	if err != nil {
-		return err
-	}
-	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	_ = saveCanonicalPlan(project.Path, plan)
 	ui.Success(fmt.Sprintf("Updated task %q in plan %q", taskID, planID))
 	return nil
 }

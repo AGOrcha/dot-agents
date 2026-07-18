@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1011,5 +1012,302 @@ func TestLoadCanonical_GitRefBackendMissingFileErrors(t *testing.T) {
 	}
 	if _, err := loadCanonicalPlan(repo, "ghost-plan"); err == nil {
 		t.Fatal("missing plan (absent on ref and worktree) must error from loadCanonicalPlan")
+	}
+}
+
+// ── canonical-write choke-point mirror (#433) ──────────────────────────────────
+
+// refCommitCount returns the number of commits reachable from refs/agents/state,
+// or 0 when the ref is absent. Used to assert exactly-one-commit-per-write.
+func refCommitCount(t *testing.T, repo string) int {
+	t.Helper()
+	if stateRefHead(repo) == "" {
+		return 0
+	}
+	out := gitOut(t, repo, "rev-list", "--count", stateRefName)
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		t.Fatalf("parse rev-list count %q: %v", out, err)
+	}
+	return n
+}
+
+// refHasTask reports whether taskID is present in planID's per-task projection on
+// refs/agents/state.
+func refHasTask(t *testing.T, repo, taskID string) bool {
+	t.Helper()
+	projected, err := projectPlanTasksFromStateRef(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("project from ref: %v", err)
+	}
+	for _, task := range projected.Tasks {
+		if task.ID == taskID {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRunWorkflowTaskAdd_GitRefBackendMirrorsAndReadYourWrites is THE regression
+// that would have caught #433: under backend=git-ref a STRUCTURAL task add (not a
+// status transition) must mirror to refs/agents/state at the canonical-write
+// choke point, so a fresh read (which resolves from the ref) sees it — and two
+// sequential adds both survive rather than the second clobbering the first via a
+// stale ref. The ref is pre-established (a seed transition) to reproduce the
+// exact precondition under which the clobber bit.
+func TestRunWorkflowTaskAdd_GitRefBackendMirrorsAndReadYourWrites(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	chdirRepo(t, repo)
+
+	// Establish the ref so subsequent reads resolve from it (the precondition
+	// under which the stale-ref clobber bit).
+	if err := runWorkflowAdvance(stateRefTestPlanID, "t1", "in_progress"); err != nil {
+		t.Fatalf("seed advance: %v", err)
+	}
+	// First STRUCTURAL add (not a transition): must mirror to the ref.
+	if err := runWorkflowTaskAdd(taskAddInputs{PlanID: stateRefTestPlanID, TaskID: "t2", Title: "second"}); err != nil {
+		t.Fatalf("add t2: %v", err)
+	}
+	if !refHasTask(t, repo, "t2") {
+		t.Fatal("structural add was not mirrored to the ref (stale-ref clobber bug)")
+	}
+	// Second sequential add loads from the FRESH ref (read-your-writes), so it
+	// must NOT clobber t2. Both new tasks survive alongside t1.
+	if err := runWorkflowTaskAdd(taskAddInputs{PlanID: stateRefTestPlanID, TaskID: "t3", Title: "third"}); err != nil {
+		t.Fatalf("add t3: %v", err)
+	}
+	tf, err := loadCanonicalTasks(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	got := map[string]bool{}
+	for _, task := range tf.Tasks {
+		got[task.ID] = true
+	}
+	for _, id := range []string{"t1", "t2", "t3"} {
+		if !got[id] {
+			t.Fatalf("task %q lost after two sequential adds (clobber); have %v", id, got)
+		}
+	}
+	if len(tf.Tasks) != 3 {
+		t.Fatalf("expected 3 tasks after two adds, got %d", len(tf.Tasks))
+	}
+}
+
+// TestRunWorkflowTaskUpdate_GitRefBackendMirrorsToRef proves a STRUCTURAL task
+// update (title + notes, not a transition) is mirrored to the ref so a fresh read
+// returns the updated fields — the update leg of the #433 fix.
+func TestRunWorkflowTaskUpdate_GitRefBackendMirrorsToRef(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	chdirRepo(t, repo)
+
+	if err := runWorkflowAdvance(stateRefTestPlanID, "t1", "in_progress"); err != nil {
+		t.Fatalf("seed advance: %v", err)
+	}
+	if err := runWorkflowTaskUpdate(stateRefTestPlanID, "t1", "renamed title", "fresh notes", "", "", ""); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	tf, err := loadCanonicalTasks(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	if tf.Tasks[0].Title != "renamed title" || tf.Tasks[0].Notes != "fresh notes" {
+		t.Fatalf("update not ref-visible: title=%q notes=%q", tf.Tasks[0].Title, tf.Tasks[0].Notes)
+	}
+	// The per-task blob on the ref itself carries the update.
+	relTask := ".agents/workflow/plans/" + stateRefTestPlanID + "/tasks/t1.yaml"
+	blob := gitOut(t, repo, "show", stateRefName+":"+relTask)
+	if !strings.Contains(blob, "renamed title") || !strings.Contains(blob, "fresh notes") {
+		t.Fatalf("per-task ref blob missing the update:\n%s", blob)
+	}
+}
+
+// TestRunWorkflowPlanUpdate_GitRefBackendMirrorsPlan proves a plan-only canonical
+// write (plan update) mirrors PLAN.yaml to the ref via saveCanonicalPlanMirrored.
+func TestRunWorkflowPlanUpdate_GitRefBackendMirrorsPlan(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	chdirRepo(t, repo)
+
+	if err := runWorkflowAdvance(stateRefTestPlanID, "t1", "in_progress"); err != nil {
+		t.Fatalf("seed advance: %v", err)
+	}
+	if err := runWorkflowPlanUpdate(stateRefTestPlanID, "paused", "", "", "", "", ""); err != nil {
+		t.Fatalf("plan update: %v", err)
+	}
+	plan, err := loadCanonicalPlan(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalPlan: %v", err)
+	}
+	if plan.Status != "paused" {
+		t.Fatalf("plan status update not ref-visible: %q", plan.Status)
+	}
+}
+
+// TestRunWorkflowAdvance_GitRefBackendSingleRefCommit guards the consolidation:
+// with the choke-point mirror folded into saveCanonicalTasksMirrored and the
+// old explicit mirror removed, ONE advance produces EXACTLY one new ref commit
+// (no double CAS).
+func TestRunWorkflowAdvance_GitRefBackendSingleRefCommit(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLTwoPending(stateRefTestPlanID))
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	chdirRepo(t, repo)
+
+	if err := runWorkflowAdvance(stateRefTestPlanID, "t1", "in_progress"); err != nil {
+		t.Fatalf("advance t1: %v", err)
+	}
+	after1 := refCommitCount(t, repo)
+	if after1 != 1 {
+		t.Fatalf("first advance must produce exactly 1 ref commit, got %d", after1)
+	}
+	if err := runWorkflowAdvance(stateRefTestPlanID, "t2", "in_progress"); err != nil {
+		t.Fatalf("advance t2: %v", err)
+	}
+	if delta := refCommitCount(t, repo) - after1; delta != 1 {
+		t.Fatalf("second advance must produce exactly 1 more ref commit, got delta %d", delta)
+	}
+}
+
+// TestSaveCanonicalTasksMirrored_MirrorFailureIsBestEffort proves the mirror is
+// best-effort: a forced CAS failure is warned, never propagated, and the
+// working-copy write remains durable (the ref-write failure must not fail or roll
+// back the authoritative working-copy write).
+func TestSaveCanonicalTasksMirrored_MirrorFailureIsBestEffort(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	prev := casSwapFn
+	t.Cleanup(func() { casSwapFn = prev })
+	casSwapFn = func(projectPath, newCommit, old string) error {
+		return fmt.Errorf("simulated CAS failure")
+	}
+	tf := &CanonicalTaskFile{SchemaVersion: 1, PlanID: stateRefTestPlanID, Tasks: []CanonicalTask{
+		{ID: "t1", Title: "one", Status: "in_progress", VerificationRequired: true},
+	}}
+	if err := saveCanonicalTasksMirrored(repo, tf, "t1"); err != nil {
+		t.Fatalf("mirror failure must be best-effort (non-fatal), got: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(plansBaseDir(repo), stateRefTestPlanID, workflowTasksFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "in_progress") {
+		t.Fatal("working-copy TASKS.yaml must be written even when the mirror fails")
+	}
+	if stateRefHead(repo) != "" {
+		t.Fatal("a failed mirror must leave no ref behind")
+	}
+}
+
+// TestCasWriteStateRef_IdempotentTreeIsNoop proves the tree-equality idempotency
+// guard: re-writing byte-identical content produces NO new commit (the ref does
+// not advance), so a redundant mirror across the choke point is a no-op.
+func TestCasWriteStateRef_IdempotentTreeIsNoop(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	files := []stateRefFile{{relPath: ".agents/workflow/state/a.txt", content: []byte("a\n")}}
+	if err := writeStateRefCAS(repo, files); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	first := stateRefHead(repo)
+	if first == "" {
+		t.Fatal("first write must create the ref")
+	}
+	if err := writeStateRefCAS(repo, files); err != nil {
+		t.Fatalf("idempotent re-write: %v", err)
+	}
+	if got := stateRefHead(repo); got != first {
+		t.Fatalf("identical re-write must not advance the ref: %s -> %s", first, got)
+	}
+}
+
+// TestSaveCanonicalTasksMirrored_SaveErrorPropagates proves a working-copy save
+// failure is propagated (and the mirror is never reached).
+func TestSaveCanonicalTasksMirrored_SaveErrorPropagates(t *testing.T) {
+	sentinel := errors.New("save boom")
+	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+	err := saveCanonicalTasksMirrored(t.TempDir(), &CanonicalTaskFile{PlanID: "p1"}, "t1")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("save error must propagate before the mirror, got %v", err)
+	}
+}
+
+// TestSaveCanonicalPlanMirrored_SaveErrorPropagates proves a working-copy plan
+// save failure is propagated (and the mirror is never reached).
+func TestSaveCanonicalPlanMirrored_SaveErrorPropagates(t *testing.T) {
+	sentinel := errors.New("save boom")
+	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+	err := saveCanonicalPlanMirrored(t.TempDir(), &CanonicalPlan{ID: "p1"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("save error must propagate before the mirror, got %v", err)
+	}
+}
+
+// TestSaveCanonicalPlanMirrored_MirrorFailureIsBestEffort proves the plan-only
+// mirror is best-effort: a forced CAS failure is warned, not propagated, and the
+// working-copy write stays durable.
+func TestSaveCanonicalPlanMirrored_MirrorFailureIsBestEffort(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	prev := casSwapFn
+	t.Cleanup(func() { casSwapFn = prev })
+	casSwapFn = func(projectPath, newCommit, old string) error {
+		return fmt.Errorf("simulated CAS failure")
+	}
+	plan := &CanonicalPlan{SchemaVersion: 1, ID: stateRefTestPlanID, Title: "t", Status: "paused"}
+	if err := saveCanonicalPlanMirrored(repo, plan); err != nil {
+		t.Fatalf("mirror failure must be best-effort (non-fatal), got: %v", err)
+	}
+	if stateRefHead(repo) != "" {
+		t.Fatal("a failed mirror must leave no ref behind")
+	}
+}
+
+// TestRunWorkflowTaskAdd_DefaultConfigWritesNoStateRef is the HARD gate for the
+// new choke-point path: with default / unset work_tracking config a structural
+// task add writes ONLY the working copy and NO git ref (byte-identical to today).
+func TestRunWorkflowTaskAdd_DefaultConfigWritesNoStateRef(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, "", tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	chdirRepo(t, repo)
+
+	if err := runWorkflowTaskAdd(taskAddInputs{PlanID: stateRefTestPlanID, TaskID: "t2", Title: "second"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if head := stateRefHead(repo); head != "" {
+		t.Fatalf("default config must write NO state ref, got %q", head)
+	}
+	tf, err := loadCanonicalTasks(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	if len(tf.Tasks) != 2 {
+		t.Fatalf("working copy must still carry both tasks, got %d", len(tf.Tasks))
+	}
+}
+
+// TestCanonicalWriters_PlanLoadErrorPropagates covers the plan-load error leg
+// inside each writer's lock (advance / task add / task update): a plan dir with
+// TASKS.yaml but no PLAN.yaml surfaces the load error rather than proceeding.
+func TestCanonicalWriters_PlanLoadErrorPropagates(t *testing.T) {
+	newRepoNoPlan := func() string {
+		repo := seedGitRefBackendRepo(t, "", tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+		if err := os.Remove(filepath.Join(plansBaseDir(repo), stateRefTestPlanID, workflowPlanFileName)); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("AGENTS_HOME", t.TempDir())
+		chdirRepo(t, repo)
+		return repo
+	}
+
+	newRepoNoPlan()
+	if err := runWorkflowAdvance(stateRefTestPlanID, "t1", "in_progress"); err == nil {
+		t.Fatal("advance must surface the plan-load error")
+	}
+	newRepoNoPlan()
+	if err := runWorkflowTaskAdd(taskAddInputs{PlanID: stateRefTestPlanID, TaskID: "t2", Title: "x"}); err == nil {
+		t.Fatal("task add must surface the plan-load error")
+	}
+	newRepoNoPlan()
+	if err := runWorkflowTaskUpdate(stateRefTestPlanID, "t1", "new", "", "", "", ""); err == nil {
+		t.Fatal("task update must surface the plan-load error")
 	}
 }
