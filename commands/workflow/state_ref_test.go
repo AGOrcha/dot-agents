@@ -867,7 +867,7 @@ func TestRunWorkflowAdvance_GitRefBackendImpliesMirror(t *testing.T) {
 	if err := runWorkflowAdvance(stateRefTestPlanID, "t1", "in_progress"); err != nil {
 		t.Fatalf("advance: %v", err)
 	}
-	if head := stateRefHead(repo); head == "" {
+	if stateRefHead(repo) == "" {
 		t.Fatal("backend=git-ref must imply the state-ref mirror even with write_to unset")
 	}
 	relTask := ".agents/workflow/plans/" + stateRefTestPlanID + "/tasks/t1.yaml"
@@ -988,7 +988,7 @@ func TestLoadCanonicalPlan_GitRefBackendPlanAbsentFallsBack(t *testing.T) {
 	if err := writeStateRefCAS(repo, []stateRefFile{{relPath: base + "t1.yaml", content: []byte(blob)}}); err != nil {
 		t.Fatal(err)
 	}
-	if head := stateRefHead(repo); head == "" {
+	if stateRefHead(repo) == "" {
 		t.Fatal("precondition: state ref must exist")
 	}
 	plan, err := loadCanonicalPlan(repo, stateRefTestPlanID)

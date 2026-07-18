@@ -2772,25 +2772,32 @@ func TestWorkTracking_ReservedBackendsValidateAndTreatedAsLocal(t *testing.T) {
 		WorkTrackingBackendLinear,
 	} {
 		t.Run(backend, func(t *testing.T) {
-			raw := `{"version":2,"project":"p","sources":[{"type":"local"}],"work_tracking":{"backend":"` + backend + `"}}`
-			var doc any
-			if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-				t.Fatalf("parse fixture: %v", err)
-			}
-			if err := sch.Validate(doc); err != nil {
-				t.Fatalf("reserved backend %q must validate: %v", backend, err)
-			}
-			var rc AgentsRC
-			if err := json.Unmarshal([]byte(raw), &rc); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-			if rc.WorkStoreBackend() != backend {
-				t.Fatalf("WorkStoreBackend()=%q, want %q", rc.WorkStoreBackend(), backend)
-			}
-			if rc.UseGitRefBackend() {
-				t.Fatalf("reserved backend %q must not activate the git-ref backend", backend)
-			}
+			assertReservedBackendValidatesAsLocal(t, sch, backend)
 		})
+	}
+}
+
+// assertReservedBackendValidatesAsLocal asserts a reserved ladder backend decodes
+// into the typed field, passes schema validation, and does NOT activate git-ref.
+func assertReservedBackendValidatesAsLocal(t *testing.T, sch interface{ Validate(any) error }, backend string) {
+	t.Helper()
+	raw := `{"version":2,"project":"p","sources":[{"type":"local"}],"work_tracking":{"backend":"` + backend + `"}}`
+	var doc any
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	if err := sch.Validate(doc); err != nil {
+		t.Fatalf("reserved backend %q must validate: %v", backend, err)
+	}
+	var rc AgentsRC
+	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rc.WorkStoreBackend() != backend {
+		t.Fatalf("WorkStoreBackend()=%q, want %q", rc.WorkStoreBackend(), backend)
+	}
+	if rc.UseGitRefBackend() {
+		t.Fatalf("reserved backend %q must not activate the git-ref backend", backend)
 	}
 }
 
