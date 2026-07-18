@@ -10,4 +10,4 @@ task:
     owner: dot-agents
     write_scope: []
     verification_required: true
-    notes: Mirror managed .agents/active artifacts (delegation/merge-back, verification, review) to refs/agents/state under backend=git-ref; keep working copy as fallback/projection.
+    notes: PROBE structural-write B
