@@ -283,6 +283,36 @@ const (
 	WorkTrackingWriteToStateRef = "state-ref"
 )
 
+// WorkTracking backend values (work-tracking-storage-abstraction §D7/D8/D9
+// scope ladder). backend selects the coordination-state STORAGE PLANE. Only
+// "local" (default) and "git-ref" are IMPLEMENTED; the remaining values are
+// reserved ladder rungs that validate against the schema but are treated as
+// unimplemented (fall back to local behaviour) until their backend lands.
+const (
+	// WorkTrackingBackendLocal stores coordination state in the per-worktree
+	// working copy (TASKS.yaml / PLAN.yaml). This is today's behaviour and the
+	// default when work_tracking.backend is unset/blank.
+	WorkTrackingBackendLocal = "local"
+	// WorkTrackingBackendGitRef serves coordination-state READS from the shared
+	// state ref (refs/agents/state) per-task projection and IMPLIES the state-ref
+	// write mirror (transitions CAS-update the ref even when write_to is unset).
+	// Because the ref is a LOCAL ref updated in-process, reads from it are
+	// read-your-writes safe (unlike the read_from=master remote-tracking shim).
+	WorkTrackingBackendGitRef = "git-ref"
+	// WorkTrackingBackendKG is a RESERVED ladder value (knowledge-graph backend);
+	// not implemented — treated as local.
+	WorkTrackingBackendKG = "kg"
+	// WorkTrackingBackendCloudflareDO is a RESERVED ladder value (Cloudflare
+	// Durable Objects backend); not implemented — treated as local.
+	WorkTrackingBackendCloudflareDO = "cloudflare-do"
+	// WorkTrackingBackendJira is a RESERVED ladder value (Jira backend); not
+	// implemented — treated as local.
+	WorkTrackingBackendJira = "jira"
+	// WorkTrackingBackendLinear is a RESERVED ladder value (Linear backend); not
+	// implemented — treated as local.
+	WorkTrackingBackendLinear = "linear"
+)
+
 // AgentsRCWorkTracking is the work_tracking configuration block in
 // agentsrc.json — the coordination-state storage plane
 // (work-tracking-storage-abstraction spec, D8 scope ladder). Only the
@@ -301,6 +331,16 @@ type AgentsRCWorkTracking struct {
 	// only adds the git-ref mirror. Backend selection via the D8 scope ladder
 	// (work_tracking.backend) supersedes this focused gate in a later task.
 	WriteTo string `json:"write_to,omitempty"`
+	// Backend selects the coordination-state STORAGE PLANE (D8 scope ladder):
+	//   "local" (default / empty) — the per-worktree working copy (today's behaviour)
+	//   "git-ref"                 — reads project from refs/agents/state and the
+	//                               state-ref write mirror is implied (see below)
+	// Reserved (validate but treated as local until implemented): "kg",
+	// "cloudflare-do", "jira", "linear". Under "git-ref", coordination reads
+	// resolve from the LOCAL state ref (read-your-writes safe) and take
+	// precedence over the read_from=master shim; the write mirror is implied
+	// even when write_to is unset.
+	Backend string `json:"backend,omitempty"`
 }
 
 // ReadFromMaster reports whether coordination state (TASKS.yaml / PLAN.yaml)
@@ -319,6 +359,25 @@ func (a *AgentsRC) ReadFromMaster() bool {
 // working-copy-only write behaviour by default (no ref is written).
 func (a *AgentsRC) WriteToStateRef() bool {
 	return a != nil && a.WorkTracking != nil && a.WorkTracking.WriteTo == WorkTrackingWriteToStateRef
+}
+
+// WorkStoreBackend returns the configured coordination-state backend, defaulting
+// to "local" when the receiver, work_tracking block, or backend value is
+// nil/absent/blank — so an unset config resolves to today's working-copy plane.
+func (a *AgentsRC) WorkStoreBackend() string {
+	if a == nil || a.WorkTracking == nil || a.WorkTracking.Backend == "" {
+		return WorkTrackingBackendLocal
+	}
+	return a.WorkTracking.Backend
+}
+
+// UseGitRefBackend reports whether the git-ref WorkStore backend is active —
+// work_tracking.backend == "git-ref". A nil receiver or absent/blank/"local"
+// config yields false, preserving today's byte-for-byte working-copy behaviour
+// by default. When true, coordination reads project from refs/agents/state and
+// the state-ref write mirror is implied.
+func (a *AgentsRC) UseGitRefBackend() bool {
+	return a.WorkStoreBackend() == WorkTrackingBackendGitRef
 }
 
 // AgentsRC represents the .agentsrc.json manifest committed to a project repo.

@@ -620,15 +620,29 @@ func mirrorTransitionToStateRef(projectPath, planID, taskID string) error {
 }
 
 // canonicalWriteToStateRef reports whether transitions for projectPath ALSO
-// mirror to the state ref — work_tracking.write_to == "state-ref". Any
+// mirror to the state ref. True when either work_tracking.write_to ==
+// "state-ref" (the focused write gate) OR work_tracking.backend == "git-ref"
+// (the git-ref backend IMPLIES the mirror even with write_to unset). Any
 // config-load failure or absent config yields false so the default
-// (working-copy-only) write path is unchanged.
+// (working-copy-only) write path is byte-for-byte unchanged.
 func canonicalWriteToStateRef(projectPath string) bool {
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
 		return false
 	}
-	return rc.WriteToStateRef()
+	return rc.WriteToStateRef() || rc.UseGitRefBackend()
+}
+
+// useGitRefBackend reports whether the git-ref WorkStore backend is active for
+// projectPath — work_tracking.backend == "git-ref". Any config-load failure or
+// absent config yields false so the default (working-copy) read path is
+// byte-for-byte unchanged.
+func useGitRefBackend(projectPath string) bool {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		return false
+	}
+	return rc.UseGitRefBackend()
 }
 
 // stateRefFile is one coordination-state file staged into a state-ref commit:
@@ -912,6 +926,42 @@ func projectPlanTasksFromStateRef(projectPath, planID string) (*CanonicalTaskFil
 	return projectCanonicalTaskFile(records), nil
 }
 
+// loadCanonicalTasksFromStateRef projects planID's canonical TASKS.yaml view
+// from the per-task state blobs on refs/agents/state (git-ref backend read
+// path). ok is false — signalling the caller to fall back to the per-worktree
+// working copy — when the plan has no task blobs on the ref (a ref never
+// written, or a plan not yet mirrored). A malformed blob surfaces as an error.
+func loadCanonicalTasksFromStateRef(projectPath, planID string) (tf *CanonicalTaskFile, ok bool, err error) {
+	records, err := readPlanTaskRecordsFromStateRef(projectPath, planID)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(records) == 0 {
+		return nil, false, nil
+	}
+	return projectCanonicalTaskFile(records), true, nil
+}
+
+// readPlanFileFromStateRef returns planID's PLAN.yaml bytes as recorded on
+// refs/agents/state (git-ref backend read path). ok is false — signalling the
+// caller to fall back to the per-worktree working copy — when the ref is absent
+// or PLAN.yaml has not been mirrored to it.
+func readPlanFileFromStateRef(projectPath, planID string) ([]byte, bool) {
+	head := stateRefHead(projectPath)
+	if head == "" {
+		return nil, false
+	}
+	rel, err := planStateRefRelPath(projectPath, planID)
+	if err != nil {
+		return nil, false
+	}
+	out, err := gitStateExec(projectPath, nil, nil, "show", head+":"+rel)
+	if err != nil {
+		return nil, false
+	}
+	return []byte(out), true
+}
+
 // stateRefHead returns the commit refs/agents/state currently points at, or ""
 // when the ref does not yet exist (the first write). Uses gitOutput, which
 // yields "" on the expected non-zero exit for an absent ref.
@@ -1011,10 +1061,24 @@ func gitStateExec(projectPath string, extraEnv []string, stdin []byte, args ...s
 	return stdout.String(), nil
 }
 
+// loadCanonicalPlan resolves planID's PLAN.yaml, honoring the coordination-state
+// backend. git-ref: read PLAN.yaml from refs/agents/state (a local,
+// read-your-writes-safe ref), gracefully falling back to the per-worktree
+// working copy when PLAN.yaml is absent on the ref. git-ref takes PRECEDENCE
+// over the read_from=master shim — the fallback reads the working copy directly,
+// never origin/<default-branch>. Default/local: the existing readCanonicalStateFile
+// seam (worktree, or read_from=master).
 func loadCanonicalPlan(projectPath, planID string) (*CanonicalPlan, error) {
 	path := filepath.Join(plansBaseDir(projectPath), planID, workflowPlanFileName)
-	content, err := readCanonicalStateFile(projectPath, path)
-	if err != nil {
+	var content []byte
+	var err error
+	if useGitRefBackend(projectPath) {
+		if refContent, ok := readPlanFileFromStateRef(projectPath, planID); ok {
+			content = refContent
+		} else if content, err = os.ReadFile(path); err != nil {
+			return nil, err
+		}
+	} else if content, err = readCanonicalStateFile(projectPath, path); err != nil {
 		return nil, err
 	}
 	var plan CanonicalPlan
@@ -1036,12 +1100,40 @@ func saveCanonicalPlan(projectPath string, plan *CanonicalPlan) error {
 	return osWriteFile(filepath.Join(dir, workflowPlanFileName), content, 0644)
 }
 
+// loadCanonicalTasks resolves planID's canonical TASKS.yaml view, honoring the
+// coordination-state backend. git-ref: project the view from the per-task state
+// blobs on refs/agents/state (a local, read-your-writes-safe ref), gracefully
+// falling back to the per-worktree working copy when the plan has no task blobs
+// on the ref. git-ref takes PRECEDENCE over the read_from=master shim — the
+// fallback reads the working copy directly, never origin/<default-branch>.
+// Default/local: the existing readCanonicalStateFile seam (worktree, or
+// read_from=master).
 func loadCanonicalTasks(projectPath, planID string) (*CanonicalTaskFile, error) {
 	path := filepath.Join(plansBaseDir(projectPath), planID, workflowTasksFileName)
+	if useGitRefBackend(projectPath) {
+		tf, ok, err := loadCanonicalTasksFromStateRef(projectPath, planID)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return tf, nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		return unmarshalCanonicalTaskFile(path, content)
+	}
 	content, err := readCanonicalStateFile(projectPath, path)
 	if err != nil {
 		return nil, err
 	}
+	return unmarshalCanonicalTaskFile(path, content)
+}
+
+// unmarshalCanonicalTaskFile decodes TASKS.yaml bytes into a CanonicalTaskFile,
+// wrapping a parse failure with the source path for diagnostics.
+func unmarshalCanonicalTaskFile(path string, content []byte) (*CanonicalTaskFile, error) {
 	var tf CanonicalTaskFile
 	if err := yaml.Unmarshal(content, &tf); err != nil {
 		return nil, fmt.Errorf(errParseFileFmt, path, err)
