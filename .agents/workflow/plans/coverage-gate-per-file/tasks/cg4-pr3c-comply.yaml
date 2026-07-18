@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+order: 3
+task:
+    id: cg4-pr3c-comply
+    title: 'sync_code_warm_link.go >=95% (unblock #18 / v0.3.2)'
+    status: completed
+    depends_on:
+        - cg3-phase1-land
+    blocks:
+        - cg6-ratchet-enforce
+    owner: dot-agents
+    write_scope:
+        - commands/kg/
+    verification_required: true
+    notes: |-
+        On pr3c (#18): real tests lifting commands/kg/sync_code_warm_link.go
+        from 61% to >=95% (merged-profile). NOT allowlisted (it is the
+        originating offender). Re-measure; #18 then merges -> v0.3.2.
+        Gate-before-#18 ordering: cg1-3 land first, then this.

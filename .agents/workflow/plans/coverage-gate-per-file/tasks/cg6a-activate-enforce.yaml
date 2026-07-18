@@ -1,0 +1,28 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+order: 5
+task:
+    id: cg6a-activate-enforce
+    title: Activate per-file enforce NOW via seeded ratchet allowlist
+    status: completed
+    depends_on:
+        - cg4-pr3c-comply
+        - cg5-legacy-remediation
+    blocks:
+        - cg6b-ratchet-loop
+    owner: dot-agents
+    write_scope:
+        - scripts/coverage-exceptions.txt
+        - .github/workflows/test.yml
+    verification_required: true
+    notes: |-
+        Reframed: do NOT block enforce on remediating all 44. Seed the
+        rationale'd coverage-exceptions allowlist with the exact 44
+        current sub-95 files (authoritative: e72c8583 coverage-gate run)
+        and flip COVERAGE_FILE_MODE warn->enforce. Net immediately: ~140
+        already-clean files HARD-enforced (regression-proof) + every NEW
+        file must hit 95%; only the 44 known-debt files are graced. No
+        gate code change — the cg1 rationale'd-allowlist mechanism was
+        built for exactly this. Per-package stays warn (its baseline is
+        separate). PR (no direct master commit). Verify CI coverage-gate
+        green with 44 ALLOWLISTED, 0 unlisted FAIL.

@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+order: 0
+task:
+    id: cg1-gate-rework
+    title: coverage-gate.sh -> per-file + exclusion/allowlist + warn|enforce
+    status: completed
+    depends_on: []
+    blocks:
+        - cg2-ci-merge-job
+        - cg3-phase1-land
+    owner: dot-agents
+    write_scope:
+        - scripts/coverage-gate.sh
+        - scripts/coverage-exceptions.txt
+    verification_required: true
+    notes: |-
+        Switch aggregation key package->file. Carry+extend EXCLUDE_RE
+        (ignore-tagged scripts/cov*.go, *.rb, cmd/*, storetest, testutil,
+        linktest, scaffold embeds). Add coverage-exceptions.txt: file path
+        + mandatory rationale; unlisted sub-threshold = fail. Mode via env
+        COVERAGE_GATE_MODE=warn|enforce (default warn for per-file in P1).
+        Unit-test on a synthetic merged profile that includes a
+        platform-tagged file credited from one OS only.

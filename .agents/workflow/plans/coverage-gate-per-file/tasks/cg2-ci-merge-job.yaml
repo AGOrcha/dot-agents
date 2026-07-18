@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+order: 1
+task:
+    id: cg2-ci-merge-job
+    title: 'CI: post-matrix merged-profile gate job (test.yml)'
+    status: completed
+    depends_on:
+        - cg1-gate-rework
+    blocks:
+        - cg3-phase1-land
+    owner: dot-agents
+    write_scope:
+        - .github/workflows/test.yml
+    verification_required: true
+    notes: |-
+        New job after the OS matrix: download coverage-{windows,macos,
+        ubuntu}-latest artifacts, gocovmerge (or equivalent) into one
+        profile, run coverage-gate.sh once on the union. Demote the
+        in-matrix per-OS gate to non-blocking smoke (or remove). This is
+        what makes platform files credited from their own OS run -> zero
+        platform false-positives.

@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+order: 7
+task:
+    id: cg-verify-close
+    title: Verify spec done-criteria + close
+    status: pending
+    depends_on:
+        - cg6b-ratchet-loop
+    blocks: []
+    owner: dot-agents
+    write_scope: []
+    verification_required: true
+    notes: |-
+        Prove every done criterion: zero platform false-positives,
+        offender-list accuracy, mode flags, allowlist+rationale enforced,
+        sync_code_warm_link >=95%, package gate gone. Archive plan.

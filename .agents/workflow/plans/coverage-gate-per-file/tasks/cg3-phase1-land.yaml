@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+order: 2
+task:
+    id: cg3-phase1-land
+    title: 'Phase 1: per-file=warn, package=enforce (CI green) + baseline'
+    status: completed
+    depends_on:
+        - cg1-gate-rework
+        - cg2-ci-merge-job
+    blocks:
+        - cg4-pr3c-comply
+        - cg5-legacy-remediation
+    owner: dot-agents
+    write_scope:
+        - .github/workflows/test.yml
+    verification_required: true
+    notes: |-
+        Ship the gate with per-file in WARN, package gate still ENFORCE
+        -> CI stays green on merge. Capture the merged-profile baseline
+        offender list as the P2 worklist. PR to master (no direct commit).

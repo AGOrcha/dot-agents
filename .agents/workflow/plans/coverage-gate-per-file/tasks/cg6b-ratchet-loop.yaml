@@ -1,0 +1,59 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+order: 6
+task:
+    id: cg6b-ratchet-loop
+    title: 'Maintained side-loop: shrink the allowlist file-by-file'
+    status: in_progress
+    depends_on:
+        - cg6a-activate-enforce
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - scripts/coverage-exceptions.txt
+    verification_required: true
+    notes: |-
+        Long-running maintained loop, NOT a one-shot. Each iteration:
+        pick one package-batch from coverage-exceptions.txt, raise those
+        files to >=95% with behavior-asserting tests (cg4 pattern, source-
+        mirroring test files), DELETE their allowlist entries, open a PR
+        (user gates merge). STALE-ALLOWLIST output confirms a pruned
+        entry. [platform-tag] entries: confirm-or-raise, do not assume
+        untestable. Loop runs alongside (not blocking) the worktree-
+        platform / workflow-commit-command / di-refactor design work.
+        Done when the allowlist holds only genuinely-untestable code with
+        a defensible rationale. Then cg-verify-close.
+        ---
+        Ratchet progress (PR = maintainer-merge-gated; one-PR-in-flight):
+        - B1 commands/hooks x3 -> PR #26 MERGED. 3 entries pruned.
+        - B2 commands/workflow schema group (iter_log_schema,
+          iter_log, review_decision_schema, verification_result_schema)
+          -> PR #35, all gates PASS (Sonar 0 open by PR id 35, QG OK,
+          new_coverage 100pct, CI all-green incl merged multi-OS gate),
+          maintainer-merge-ready. Option 1+2 executed (shared
+          compileEmbeddedSchema seam in seams.go, dead AddResource
+          branch seam-tested once, behavior-preserving). 4 entries
+          pruned, 0 added.
+        - B3 (authored, spawn-gate cleared 2026-05-19 when #35 merged
+          but never spawned — re-audited 2026-05-23, contract still
+          valid, all 4 targets still at pre-B3 percentages in the
+          allowlist). Queued contract:
+          .agents/active/delegation/cg6b-b3-workflow-helpers.md
+          (see sibling .AUDIT.md for re-audit findings). Targets:
+          commands/workflow/{fs,drift,health,graph}.go to >=95%,
+          plus prefs.go verify-or-raise (measure on the merged
+          multi-OS profile first, raise with real tests if genuinely
+          below 95pct, NO allowlist entry either way).
+          internal/graphstore/* stays FENCED (gcc2/gcc4 own those 3
+          entries; never a cg6b batch until gcc2->gcc3 complete).
+        ---
+        UPDATE 2026-05-26 (gcc5-verify-close-unblock): the
+        graphstore-concurrency-contract plan is archived. The
+        internal/graphstore/{crg,postgres,sqlite}.go FENCE is LIFTED —
+        these three allowlist entries are now eligible to enter a cg6b
+        batch. cg6b consumers should depend on the narrowest published
+        role (CodeGraphReader / CodeGraphWriter / KGNoteStore) per the
+        pinned contract; this is the seam pattern that makes
+        [defensive-unreachable] testable without per-backend forks.
+        See: .agents/history/graphstore-concurrency-contract/impl-results.md
+        - (fb:per-file-coverage-target-100) OPEN 2026-07-13 — PR 391 implements a retained 95 percent compatibility floor plus a 100 percent per-file target ratchet; the merged multi-OS baseline has 173 target exceptions and the gate remains green without weakening the former floor. Scope follow-up behavior-driven task batches that remove every exception; waiting on task decomposition and no current wave decision reopened

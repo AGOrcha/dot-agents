@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+order: 4
+task:
+    id: cg5-legacy-remediation
+    title: Legacy tail (~40 files) sized remediation backlog
+    status: completed
+    depends_on:
+        - cg3-phase1-land
+    blocks:
+        - cg6-ratchet-enforce
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/coverage-gate-per-file/legacy-backlog.md
+    verification_required: false
+    notes: |-
+        Enumerate every genuine sub-95 production file from the P1
+        baseline (crg.go 51%, init.go 83%, links.go 76%, import.go 92%,
+        plan_task.go 93%, doctor.go 93% ...). Per file: test-up vs
+        allowlist-with-rationale. Size + phase into sub-batches. This is
+        the large program; NOT one PR.
