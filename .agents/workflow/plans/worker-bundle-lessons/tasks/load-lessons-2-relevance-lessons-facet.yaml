@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: worker-bundle-lessons
+order: 1
+task:
+    id: load-lessons-2-relevance-lessons-facet
+    title: Extend da config relevance lessons facet (tag select, layered)
+    status: pending
+    depends_on:
+        - load-lessons-1-schema-selection-metadata
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - commands/config/relevance_lessons.go
+        - commands/config/relevance.go
+        - commands/config/relevance_lessons_test.go
+    verification_required: true
+    notes: 'relevance ALREADY has filterLessons + lessonsFacet + --path/--package (facet 5, shipped 688c9813). Extend: --lesson-tag selection, use new schema metadata for app_type+write_scope+tag matching, superseded-lesson auto-resolve (fail loud if replacement missing). CROSS-PLAN DEP: MUST read the LAYERED resolver, not loadFlatSnapshot — that migration is config-transitive-layering:layered-consumers-relevance-verify. Build on it.'

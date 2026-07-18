@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: worker-bundle-lessons
+order: 2
+task:
+    id: load-lessons-3-bundle-required-reads
+    title: Bundle generation attaches relevance-selected lessons as required_reads
+    status: pending
+    depends_on:
+        - load-lessons-2-relevance-lessons-facet
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - commands/workflow/fanout.go
+        - commands/workflow/delegation.go
+        - commands/workflow/plan_task.go
+    verification_required: true
+    notes: 'In fanout/bundle generation, run the lessons relevance query for the task (app_type+write_scope+tags) and attach matching LESSON.md as required_reads (single-source the text, not inlined). Interim/dogfood: filesystem match over .agents/lessons/. Reuse the required-read precedent (plan_task.go:40-65,460-485). This is the actual injection-into-bundles step.'

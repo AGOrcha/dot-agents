@@ -1,0 +1,11 @@
+schema_version: 1
+id: worker-bundle-lessons
+title: Lesson preload/injection into worker bundles (relevance-selected required_reads)
+status: active
+summary: The dot-agents CODE work to auto-inject relevance-selected lessons into delegation/worker bundles as required_reads. Extracted from payout:worker-bundle-authoring (load-lessons-* chain; dot-agents proposal load-lessons-into-worker-bundles-2026-06-25.md). The da loop implements it here. Ideation already completed in payout.
+created_at: "2026-07-11T12:10:30Z"
+updated_at: "2026-07-11T12:10:31Z"
+owner: NikashPrakash
+success_criteria: lesson.schema.json carries selection metadata (applies_to_app_types, touched-path globs, scope); da config relevance lessons facet selects by tag/app_type/write_scope off the LAYERED resolver with superseded auto-resolve; fanout/bundle generation attaches matching LESSON.md as required_reads (single-sourced, not inlined); KG scoped-lessons view is the end-state selector with a loud fallback when KG is unavailable.
+verification_strategy: 'Go tests: lesson.schema round-trip + selector matching; relevance_lessons facet tag/app_type/path selection + superseded resolution; a fanout bundle-generation test asserting matching required_reads attach (filesystem-match interim); JSON/bundle fallback report when KG absent.'
+current_focus_task: load-lessons-1-schema-selection-metadata

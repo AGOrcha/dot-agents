@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: worker-bundle-lessons
+order: 3
+task:
+    id: load-lessons-4-kg-scoped-view
+    title: 'Full: query scoped-lessons KG view for selection (end-state)'
+    status: pending
+    depends_on:
+        - load-lessons-3-bundle-required-reads
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - commands/config/relevance_lessons.go
+        - internal/graphstore/
+    verification_required: true
+    notes: 'End-state: replace filesystem scan with the scoped-lessons KG view (scoped-knowledge-graphs + sdd-entity-kg-schema specs) for precise scope-aware (repo/user/team/org/public) selection. When KG unavailable in full mode, REPORT fallback in JSON/bundle (don''t silently hide missing team/org lessons). Deferred until KG scoped-lessons ships.'

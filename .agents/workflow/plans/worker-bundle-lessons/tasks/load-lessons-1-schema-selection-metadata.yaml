@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: worker-bundle-lessons
+order: 0
+task:
+    id: load-lessons-1-schema-selection-metadata
+    title: Add lesson-selection metadata to lesson.schema.json + selector
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - schemas/lesson.schema.json
+        - commands/config/relevance.go
+        - commands/config/relevance_lessons.go
+    verification_required: true
+    notes: 'lesson.schema.json is frontmatter-only (name/scope/description/type/tags/superseded_by, additionalProperties:false). Add SELECTION metadata: applies_to_app_types, touched-path/subject globs (repo-relative *,? in v1), scope discriminator (repo/user/team/org/public; extends legacy global|project-local). Selector already reads app_type/path/package frontmatter. Design: payout:worker-bundle-authoring load-lessons.design.md.'
