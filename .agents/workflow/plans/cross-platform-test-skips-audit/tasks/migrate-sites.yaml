@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: cross-platform-test-skips-audit
+order: 6
+task:
+    id: migrate-sites
+    title: Migrate every shortcut-class skip to the new helpers
+    status: completed
+    depends_on:
+        - perms-dir
+        - perms-readonly
+        - symlinks
+        - exec-bit
+    blocks:
+        - cg6-prune
+    owner: dot-agents
+    write_scope: []
+    verification_required: true
+    notes: 'Apply the helpers to every site catalogued in the [shortcut-*] classes. Per-task write_scope will be filled in at fanout time (depends on the catalogue output). Acceptance: post-migration, no t.Skip log lines appear on the windows-latest runner for these tests; per-file Windows coverage rises measurably.'
+    app_type: go-cli

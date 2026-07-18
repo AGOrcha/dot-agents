@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: cross-platform-test-skips-audit
+order: 1
+task:
+    id: perms-dir
+    title: Extend testutil with MakeDirUnreadable (POSIX chmod + Windows ACL/DACL)
+    status: completed
+    depends_on:
+        - catalogue
+    blocks:
+        - migrate-sites
+    owner: dot-agents
+    write_scope:
+        - internal/testutil/perms_dir.go
+        - internal/testutil/perms_dir_unix.go
+        - internal/testutil/perms_dir_windows.go
+        - internal/testutil/perms_dir_test.go
+    verification_required: true
+    notes: 'Sibling to MakeFileUnreadable for directories — used by tests that need a "cannot stat / cannot list" assertion. POSIX path: chmod 0. Windows path: deny-DACL on the dir SID, or open with FILE_FLAG_BACKUP_SEMANTICS + share-none. Skip on root + on tmpfs/synthetic FS where DACL is not enforced. Test parity: os.ReadDir fails for the duration of the test, and cleanup restores access.'
+    app_type: go-cli

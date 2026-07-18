@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: cross-platform-test-skips-audit
+order: 4
+task:
+    id: exec-bit
+    title: Decide on exec-bit tests — POSIX-only behaviour, document deliberately
+    status: completed
+    depends_on:
+        - catalogue
+    blocks:
+        - migrate-sites
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/copy_test.go
+    verification_required: true
+    notes: 'internal/scaffold/home/copy_test.go (and any other exec-bit test) is testing the POSIX 0o755 mode bit semantics that have no Windows equivalent. This is the [genuine-posix] class — no abstraction can fix it without changing what the test asserts. Keep the skip but document why explicitly so a future reader does not try to "abstract" it. Output: the test gets a multi-line comment block linking back to this plan.'
+    app_type: go-cli

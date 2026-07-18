@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: cross-platform-test-skips-audit
+order: 2
+task:
+    id: perms-readonly
+    title: Extend testutil with MakeFileReadOnly (works on both platforms)
+    status: completed
+    depends_on:
+        - catalogue
+    blocks:
+        - migrate-sites
+    owner: dot-agents
+    write_scope:
+        - internal/testutil/perms_readonly.go
+        - internal/testutil/perms_readonly_test.go
+    verification_required: true
+    notes: 'Sibling to MakeFileUnreadable for the "write must fail" assertion. Implementation: os.Chmod(path, 0o444) on POSIX; on Windows the readonly file attribute is honoured for write operations, so a single cross-platform chmod 0o444 actually works (Go translates the W bit to FILE_ATTRIBUTE_READONLY). Verify the assertion both ways before declaring this is the cross-platform case.'
+    app_type: go-cli

@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: cross-platform-test-skips-audit
+order: 0
+task:
+    id: catalogue
+    title: Catalogue every Windows skip and classify each
+    status: completed
+    depends_on: []
+    blocks:
+        - perms-dir
+        - perms-readonly
+        - symlinks
+        - exec-bit
+        - migrate-sites
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/cross-platform-test-skips-audit/findings.md
+    verification_required: false
+    notes: 'Walk `grep -rn ''runtime.GOOS == "windows"'' --include="*_test.go"` and produce findings.md with: (file:line, test name, what the skip is for, classification). Classes: [shortcut-permission] (chmod-based unreadability that testutil.MakeFileUnreadable already solves), [shortcut-mode] (relies on POSIX mode bits for exec/RO state — needs a sibling helper), [shortcut-symlink] (uses os.Symlink without elevated-priv guard), [genuine-posix] (e.g. inode equivalence semantics that have no Windows analog). The classification drives which subsequent task picks up the site.'
+    app_type: go-cli
