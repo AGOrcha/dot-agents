@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: orchestration-companion-stop-hooks
+order: 7
+task:
+    id: t-operator-docs
+    title: Document orchestration-companion hook surface in docs/HOOKS.md and skill READMEs
+    status: pending
+    depends_on:
+        - t2-orchestrator-handoff-gate
+        - t3-delegation-closeout-gate
+        - t4-wave-picker-no-hook-assessment
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/HOOKS.md
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+    verification_required: true
+    notes: |-
+        Operator-facing: describe orchestrator-handoff-gate,
+        delegation-closeout-gate, the no-hook decision for
+        plan-wave-picker, and the sentinel discriminators
+        (fanout_handoff, existing_bundle_handoff, parent_closeout).
+        Cross-link to upstream HOOKS.md sections shipped by
+        loop-discipline p1b/p1c/p1d. Does not duplicate
+        loop-discipline-owned hook docs.
+    app_type: research

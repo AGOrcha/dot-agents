@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: orchestration-companion-stop-hooks
+order: 4
+task:
+    id: t4-wave-picker-no-hook-assessment
+    title: Persist plan-wave-picker no-hook decision and future receipt boundary
+    status: pending
+    depends_on:
+        - t0-upstream-readback-and-starter-assets
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/history/orchestration-companion-stop-hooks/plan-wave-picker-assessment.md
+    verification_required: true
+    notes: 'Document that v1 scaffolds/modernizes the skill without a Stop hook because no durable accepted-selection receipt exists; capture future receipt options without implementing one. Contract: tasks/t4-wave-picker-no-hook-assessment.contract.md.'

@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: orchestration-companion-stop-hooks
+order: 2
+task:
+    id: t2-orchestrator-handoff-gate
+    title: Add orchestrator-session-start delegated-handoff lifecycle gate and skill wiring
+    status: pending
+    depends_on:
+        - t0-upstream-readback-and-starter-assets
+        - t1-companion-sentinel-operations
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/hooks/global/orchestrator-handoff-gate/
+        - internal/scaffold/hooks/copy_test.go
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+    verification_required: true
+    notes: 'External gate: requires upstream platform/native-output hook bundles and verified non-terminal event behavior. Terminally gate only fanout or existing-bundle handoff evidence; add bounded PreToolUse prerequisite prevention and PreCompact advice without duplicating isp/worker checks. Contract: tasks/t2-orchestrator-handoff-gate.contract.md.'

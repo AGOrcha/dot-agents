@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: orchestration-companion-stop-hooks
+order: 0
+task:
+    id: t0-upstream-readback-and-starter-assets
+    title: Align wave-picker canonical guidance (skill promotion already shipped)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/plan-wave-picker/
+        - internal/scaffold/home/copy_test.go
+    verification_required: true
+    notes: 'COHERENCE 2026-06-25: orchestrator-session-start, delegation-lifecycle, and plan-wave-picker ALL already ship in internal/scaffold/home/starter/skills/global/ (PR #134 + loop-discipline P3b). The original "promote missing skill trees" obligation is satisfied — write_scope reduced to wave-picker guidance only. Remaining work: update plan-wave-picker guidance to prefer canonical workflow eligible/PLAN.yaml/TASKS.yaml state over legacy active *.plan.md markdown (spec R1.4/D3). The new sentinel-write wiring for orchestrator-session-start moves to t2; for delegation-lifecycle to t3. Contract: tasks/t0-upstream-readback-and-starter-assets.contract.md.'

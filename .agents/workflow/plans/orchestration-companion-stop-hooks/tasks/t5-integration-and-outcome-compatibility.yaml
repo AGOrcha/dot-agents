@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: orchestration-companion-stop-hooks
+order: 5
+task:
+    id: t5-integration-and-outcome-compatibility
+    title: Exercise companion gates and preserve R1.5 outcome compatibility
+    status: pending
+    depends_on:
+        - t2-orchestrator-handoff-gate
+        - t3-delegation-closeout-gate
+        - t4-wave-picker-no-hook-assessment
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - tests/test-orchestration-companion-stop-hooks.sh
+        - internal/scaffold/hooks/global/orchestrator-handoff-gate/
+        - internal/scaffold/hooks/global/delegation-closeout-gate/
+    verification_required: true
+    notes: 'External coordination: consume R1.5 structured outcome capture if it has shipped; hand off PostToolUse/PostToolUseFailure observation fixtures to R1.5 T1b and add no private telemetry format. Contract: tasks/t5-integration-and-outcome-compatibility.contract.md.'

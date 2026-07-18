@@ -1,0 +1,11 @@
+schema_version: 1
+id: orchestration-companion-stop-hooks
+title: Orchestration Companion Lifecycle Hooks
+status: draft
+summary: Add terminal gates plus bounded pre-action prevention and compaction continuity for delegated handoff and parent closeout, while scaffolding plan-wave-picker without inventing unenforceable selection hooks.
+created_at: "2026-05-25T18:54:57Z"
+updated_at: "2026-06-30T18:37:04Z"
+owner: dot-agents
+success_criteria: Two companion terminal gates enforce only durable handoff/closeout evidence; verified pre-action prerequisite guards and non-blocking compaction advice are bounded; orchestrator-session-start and plan-wave-picker ship in the starter; delegation-lifecycle consumes upstream scaffold work; plan-wave-picker remains ungated unless a durable selection receipt is separately approved.
+verification_strategy: Sentinel extension unit tests; scaffold materialization tests; script and shell integration tests for terminal remediation, pre-action prevention, and compaction advice; post-tool observation fixture handoff and compatibility check against R1.5 outcome capture when available.
+current_focus_task: Add orchestrator-session-start delegated-handoff lifecycle gate and skill wiring

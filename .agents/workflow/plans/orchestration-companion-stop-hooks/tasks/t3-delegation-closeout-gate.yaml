@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: orchestration-companion-stop-hooks
+order: 3
+task:
+    id: t3-delegation-closeout-gate
+    title: Add delegation-lifecycle parent-closeout lifecycle gate and skill wiring
+    status: pending
+    depends_on:
+        - t0-upstream-readback-and-starter-assets
+        - t1-companion-sentinel-operations
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/hooks/global/delegation-closeout-gate/
+        - internal/scaffold/hooks/copy_test.go
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+    verification_required: true
+    notes: 'External gate: requires upstream P3b starter tree and verified non-terminal event behavior. Terminally gate parent closeout; add bounded PreToolUse prerequisite prevention and PreCompact advice; worker behavior remains owned by loop-worker-gate. Contract: tasks/t3-delegation-closeout-gate.contract.md.'

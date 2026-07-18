@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: orchestration-companion-stop-hooks
+order: 1
+task:
+    id: t1-companion-sentinel-operations
+    title: Extend upstream sentinel protocol for delegated handoff and parent closeout operations
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/hook_sentinel.go
+        - commands/workflow/hook_sentinel_test.go
+        - commands/workflow/static/workflow-hook-sentinel.schema.json
+        - schemas/workflow-hook-sentinel.schema.json
+    verification_required: true
+    notes: 'External gate: requires loop-discipline-stop-hooks P0 history-archiving sentinel CLI. Accept only companion skills/operation context required by this plan and reuse the durable archive contract. Contract: tasks/t1-companion-sentinel-operations.contract.md.'

@@ -1,0 +1,35 @@
+schema_version: 1
+plan_id: orchestration-companion-stop-hooks
+order: 6
+task:
+    id: t-cross-plan-readback
+    title: Verify upstream loop-discipline P0/P1c/P2/P3/P3b have shipped before companion gates start
+    status: pending
+    depends_on: []
+    blocks:
+        - t1-companion-sentinel-operations
+        - t2-orchestrator-handoff-gate
+        - t3-delegation-closeout-gate
+    owner: dot-agents
+    write_scope:
+        - .agents/history/orchestration-companion-stop-hooks/upstream-readback.md
+    verification_required: true
+    notes: |-
+        No code. Read-only assertion: enumerate which upstream loop-
+        discipline tasks have status=completed in TASKS.yaml on the
+        same branch, with commit SHAs proving each gate is satisfied.
+        T1/T2/T3 depend on this readback existing and naming each
+        external gate met (workflow `depends_on` can't cross plans;
+        this is the in-plan workaround). Reviewer verifies SHAs match
+        origin tips for upstream P0 (sentinel CLI), P1c (matcher
+        verification), P2 (hook scripts), P3 (starter promotion), P3b
+        (companion-discipline-skills).
+        COHERENCE 2026-06-25: all five upstream gates have shipped —
+        loop-discipline-stop-hooks p0-sentinel-cli, p1c-matcher-verification,
+        p2-hook-scripts, p3-starter-promotion, p3b-companion-discipline-skills
+        are all status=completed; the three gate bundles
+        (iteration-close-gate/isp-gate/loop-worker-gate) and all three skill
+        trees ship under internal/scaffold/. This readback is now SATISFIABLE
+        (no longer blocked on undone upstream work) — the task is to record the
+        SHAs, not to wait.
+    app_type: research
