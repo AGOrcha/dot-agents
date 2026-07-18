@@ -1,0 +1,14 @@
+schema_version: 1
+plan_id: git-ref-work-backend
+order: 0
+task:
+    id: spec-git-ref-backend
+    title: 'Spec: git-ref backend + read-from-master (amend storage-abstraction §9)'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/design.md
+    verification_required: false
+    notes: 'DONE (this kg-ideate run): appended §9 to work-tracking-storage-abstraction/design.md — D9 git-ref WorkStore backend, D10 (state ref NOT merged to default branch; ref↔remote sync only; optional one-way audit snapshot), §3B compliance, read-from-master shim, commit-scope resolution. Additions only; D1-D8 unchanged (single-source lesson).'

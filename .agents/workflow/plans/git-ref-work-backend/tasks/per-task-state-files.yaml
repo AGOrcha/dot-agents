@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: git-ref-work-backend
+order: 3
+task:
+    id: per-task-state-files
+    title: Split coordination status into per-task state files under the ref
+    status: completed
+    depends_on:
+        - git-ref-state-ref-write
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - commands/workflow/plan_task.go
+        - commands/workflow/delegation.go
+    verification_required: true
+    notes: Split status out of monolithic TASKS.yaml into per-task state files under refs/agents/state so two workers transitioning DIFFERENT tasks never hit a line-level conflict (realizes D5 per-task lease/claim). CAS-retry is the fallback. Keep the projected TASKS.yaml view regenerable (§3B / D1' projection fidelity).
+    app_type: go-cli

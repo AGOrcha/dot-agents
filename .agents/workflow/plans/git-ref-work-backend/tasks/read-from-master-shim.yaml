@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: git-ref-work-backend
+order: 1
+task:
+    id: read-from-master-shim
+    title: 'read-from-master shim: resolve task-state from the canonical ref, not the worktree copy'
+    status: completed
+    depends_on:
+        - spec-git-ref-backend
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - commands/workflow/plan_task.go
+        - commands/workflow/eligible_accounting.go
+        - commands/workflow/next.go
+        - internal/config/agentsrc.go
+        - commands/config/
+    verification_required: true
+    notes: 'Add work_tracking.read_from = worktree|master. When master, loadCanonicalTasks (plan_task.go:508) + the scout''s eligibility/next read resolve TASKS.yaml from the canonical ref / origin/<default-branch> (git show), NOT the per-worktree working copy; writes land as today. Read-side-only; kills the worktree-isolation re-dispatch storm (lesson worktree-isolation-defeats-status-tracking; done-criterion #2). Ship FIRST — cheapest high-value unblock.'
+    app_type: go-cli

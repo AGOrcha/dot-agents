@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: git-ref-work-backend
+order: 6
+task:
+    id: document-and-default-git-ref
+    title: 'Adoption: document + recommend git-ref, surface the active backend so consumers know to use it'
+    status: pending
+    depends_on:
+        - workstore-git-ref-backend
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - docs/LAYERED_CONFIG_GUIDE.md
+        - docs/WORKFLOW.md
+        - commands/workflow/status.go
+        - internal/scaffold/home/starter/
+    verification_required: true
+    notes: Closes the 'as long as they know to use it' condition. (1) Document enabling work_tracking.backend=git-ref + read_from=master in LAYERED_CONFIG_GUIDE + the workflow docs; recommend git-ref as the default upgrade from local (D9). (2) da workflow status/health surface the ACTIVE work_tracking backend + state-ref so operators/orchestrators see which SOT is live (agents still just read the projected file per §3B — zero new semantics; this is operator-facing discoverability). (3) Seed the config default recommendation in the starter. Concurrency-safety ('safe concurrent updates') is gated separately by git-ref-state-ref-write (CAS) + per-task-state-files + the concurrent-transition regression test.
+    app_type: go-cli

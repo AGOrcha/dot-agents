@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: git-ref-work-backend
+order: 5
+task:
+    id: workstore-git-ref-backend
+    title: Expose git-ref as a WorkStore backend + work_tracking.backend config value
+    status: pending
+    depends_on:
+        - per-task-state-files
+        - decouple-coordination-commits
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+        - commands/config/
+        - commands/workflow/
+    verification_required: true
+    notes: 'Land git-ref behind the WorkStore interface (storage-abstraction D3) + add it to the D8 scope ladder: work_tracking.backend = local|git-ref|kg|cloudflare-do|jira|linear. Converges with the storage-abstraction end-state; graduation local->git-ref->kg with zero agent-facing change (§3B).'
+    app_type: go-cli

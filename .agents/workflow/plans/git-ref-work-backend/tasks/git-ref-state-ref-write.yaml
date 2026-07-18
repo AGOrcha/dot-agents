@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: git-ref-work-backend
+order: 2
+task:
+    id: git-ref-state-ref-write
+    title: 'Write path: commit transitions to refs/agents/state via update-ref CAS'
+    status: completed
+    depends_on:
+        - read-from-master-shim
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - commands/workflow/plan_task.go
+        - internal/gitwt/
+        - internal/agentslock/
+    verification_required: true
+    notes: Status transitions write the changed state file(s) to refs/agents/state via atomic compare-and-swap (git update-ref <ref> <new> <old>, retry-on-mismatch) — the interprocess-safe RMW today's agentslock only half-covers (only plan_task.go locks). Ref is orthogonal to the code branch (D9). No merge to default branch (D10).
+    app_type: go-cli

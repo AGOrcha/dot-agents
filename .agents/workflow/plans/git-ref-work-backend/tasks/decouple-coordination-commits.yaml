@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: git-ref-work-backend
+order: 4
+task:
+    id: decouple-coordination-commits
+    title: Stop staging .agents/workflow/** into code-branch commits (fold commit-scope)
+    status: pending
+    depends_on:
+        - git-ref-state-ref-write
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - commands/workflow/commit_cmd.go
+        - commands/workflow/commit_pathset.go
+    verification_required: true
+    notes: 'With coordination state on refs/agents/state, task-state is no longer committed into code branches — the whole-store-vs-task-scoped commit problem (obs-da-workflow-commit-scope-safety.md) dissolves. RE-SCOPES/SUPERSEDES payout:worker-bundle-authoring/commit-1-task-pathset + commit-2-cli-scoped-mode: ''write to state ref'', not ''scope the code-branch commit''. Cross-repo relation — coordinate before implementing those.'
+    app_type: go-cli
