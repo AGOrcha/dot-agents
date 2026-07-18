@@ -235,7 +235,7 @@ default is the per-worktree working copy (byte-for-byte today's behaviour);
 `refs/agents/state` ref (read-your-writes safe, orthogonal to the code branch).
 The default stays `local` — flipping it is a gated cutover. `da workflow status`
 surfaces the active backend. The field-by-field contract and the migration gate
-live in [Layered Configuration → Work tracking](../LAYERED_CONFIG_GUIDE.md#work-tracking-coordination-state-plane).
+live in [Layered Configuration → Work tracking](./LAYERED_CONFIG_GUIDE.md#work-tracking-coordination-state-plane).
 
 ---
 
