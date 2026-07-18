@@ -24,7 +24,6 @@ function mockFetch(status: number, body: unknown) {
 
 function run(over: Partial<R2DashboardRunSessionDTO> & { session_id: string }): R2DashboardRunSessionDTO {
   return {
-    session_id: over.session_id,
     rubric_version: '2.1.0',
     iteration_count: 1,
     scored: true,
