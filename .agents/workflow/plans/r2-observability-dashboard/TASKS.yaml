@@ -537,7 +537,7 @@ tasks:
       app_type: web
     - id: t16-coverage-gate-and-ci
       title: Coverage gate + CI wiring for new dashboard packages
-      status: in_progress
+      status: completed
       depends_on:
         - t12-e2e-smoke-live-iteration
       blocks:
@@ -545,8 +545,11 @@ tasks:
       owner: dot-agents
       write_scope:
         - .github/workflows/dashboard.yml
-        - internal/dashboard/coverage_test.go
-        - web/dashboard/.github/workflows/test.yml
+        - web/dashboard/tsconfig.json
+        - web/dashboard/src/components/CacheTrendChart.test.tsx
+        - web/dashboard/src/components/RunsGrid.test.tsx
+        - web/dashboard/src/components/ScoreTrendChart.test.tsx
+        - web/dashboard/src/views/AggregateView.test.tsx
       verification_required: true
       notes: |-
         Mirror the existing per-package coverage convention
