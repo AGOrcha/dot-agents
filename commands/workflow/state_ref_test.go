@@ -1170,32 +1170,54 @@ func TestRunWorkflowAdvance_GitRefBackendSingleRefCommit(t *testing.T) {
 	}
 }
 
-// TestSaveCanonicalTasksMirrored_MirrorFailureIsBestEffort proves the mirror is
-// best-effort: a forced CAS failure is warned, never propagated, and the
-// working-copy write remains durable (the ref-write failure must not fail or roll
-// back the authoritative working-copy write).
-func TestSaveCanonicalTasksMirrored_MirrorFailureIsBestEffort(t *testing.T) {
-	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+// TestSaveCanonicalTasksMirrored_MirrorFailureModeAware proves the mode-aware
+// failure policy: under backend=git-ref (the ref IS the read source) a forced CAS
+// failure PROPAGATES so the caller retries; under the additive write_to=state-ref
+// mode it is WARNED and swallowed. Either way the working-copy write stays durable
+// and no ref is left behind.
+func TestSaveCanonicalTasksMirrored_MirrorFailureModeAware(t *testing.T) {
 	prev := casSwapFn
 	t.Cleanup(func() { casSwapFn = prev })
 	casSwapFn = func(projectPath, newCommit, old string) error {
 		return fmt.Errorf("simulated CAS failure")
 	}
-	tf := &CanonicalTaskFile{SchemaVersion: 1, PlanID: stateRefTestPlanID, Tasks: []CanonicalTask{
-		{ID: "t1", Title: "one", Status: "in_progress", VerificationRequired: true},
-	}}
-	if err := saveCanonicalTasksMirrored(repo, tf, "t1"); err != nil {
-		t.Fatalf("mirror failure must be best-effort (non-fatal), got: %v", err)
+	newTF := func() *CanonicalTaskFile {
+		return &CanonicalTaskFile{SchemaVersion: 1, PlanID: stateRefTestPlanID, Tasks: []CanonicalTask{
+			{ID: "t1", Title: "one", Status: "in_progress", VerificationRequired: true},
+		}}
 	}
+
+	// backend=git-ref: a failed mirror PROPAGATES.
+	gitRef := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	if err := saveCanonicalTasksMirrored(gitRef, newTF(), "t1"); err == nil {
+		t.Fatal("backend=git-ref: a failed mirror must propagate (ref is the read source)")
+	}
+	assertTasksFileContains(t, gitRef, "in_progress")
+	if stateRefHead(gitRef) != "" {
+		t.Fatal("a failed mirror must leave no ref behind")
+	}
+
+	// additive write_to=state-ref: a failed mirror is WARNED, not propagated.
+	additive := seedGitRefBackendRepo(t, `{"write_to":"state-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	if err := saveCanonicalTasksMirrored(additive, newTF(), "t1"); err != nil {
+		t.Fatalf("write_to=state-ref: a failed mirror must be warned, not fatal: %v", err)
+	}
+	assertTasksFileContains(t, additive, "in_progress")
+	if stateRefHead(additive) != "" {
+		t.Fatal("a failed mirror must leave no ref behind")
+	}
+}
+
+// assertTasksFileContains fails unless the state-ref test plan's working-copy
+// TASKS.yaml contains want (proving the working-copy write is durable).
+func assertTasksFileContains(t *testing.T, repo, want string) {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(plansBaseDir(repo), stateRefTestPlanID, workflowTasksFileName))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "in_progress") {
-		t.Fatal("working-copy TASKS.yaml must be written even when the mirror fails")
-	}
-	if stateRefHead(repo) != "" {
-		t.Fatal("a failed mirror must leave no ref behind")
+	if !strings.Contains(string(raw), want) {
+		t.Fatalf("working-copy TASKS.yaml must contain %q even when the mirror fails", want)
 	}
 }
 
@@ -1242,21 +1264,32 @@ func TestSaveCanonicalPlanMirrored_SaveErrorPropagates(t *testing.T) {
 	}
 }
 
-// TestSaveCanonicalPlanMirrored_MirrorFailureIsBestEffort proves the plan-only
-// mirror is best-effort: a forced CAS failure is warned, not propagated, and the
-// working-copy write stays durable.
-func TestSaveCanonicalPlanMirrored_MirrorFailureIsBestEffort(t *testing.T) {
-	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+// TestSaveCanonicalPlanMirrored_MirrorFailureModeAware proves the plan-only
+// mirror follows the same mode-aware failure policy: propagate under
+// backend=git-ref, warn under the additive write_to=state-ref mode.
+func TestSaveCanonicalPlanMirrored_MirrorFailureModeAware(t *testing.T) {
 	prev := casSwapFn
 	t.Cleanup(func() { casSwapFn = prev })
 	casSwapFn = func(projectPath, newCommit, old string) error {
 		return fmt.Errorf("simulated CAS failure")
 	}
-	plan := &CanonicalPlan{SchemaVersion: 1, ID: stateRefTestPlanID, Title: "t", Status: "paused"}
-	if err := saveCanonicalPlanMirrored(repo, plan); err != nil {
-		t.Fatalf("mirror failure must be best-effort (non-fatal), got: %v", err)
+	newPlan := func() *CanonicalPlan {
+		return &CanonicalPlan{SchemaVersion: 1, ID: stateRefTestPlanID, Title: "t", Status: "paused"}
 	}
-	if stateRefHead(repo) != "" {
+
+	gitRef := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	if err := saveCanonicalPlanMirrored(gitRef, newPlan()); err == nil {
+		t.Fatal("backend=git-ref: a failed plan mirror must propagate")
+	}
+	if stateRefHead(gitRef) != "" {
+		t.Fatal("a failed mirror must leave no ref behind")
+	}
+
+	additive := seedGitRefBackendRepo(t, `{"write_to":"state-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	if err := saveCanonicalPlanMirrored(additive, newPlan()); err != nil {
+		t.Fatalf("write_to=state-ref: a failed plan mirror must be warned, not fatal: %v", err)
+	}
+	if stateRefHead(additive) != "" {
 		t.Fatal("a failed mirror must leave no ref behind")
 	}
 }
