@@ -1,0 +1,40 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 3
+task:
+    id: t03-handlers-rest
+    title: Implement HTTP handlers for the REST API per the contract
+    status: completed
+    depends_on:
+        - t01-api-contract-design
+        - t02-storage-read-layer
+    blocks:
+        - t07-standalone-service-bin
+        - t13-r3-mount-integration
+        - t09-feature-aggregate-view
+        - t10-feature-per-run-drilldown
+    owner: dot-agents
+    write_scope:
+        - internal/dashboard/handlers/
+    verification_required: true
+    notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): these REST handlers live
+        on the HTTP/SSE browser edge — the one surface r3's §2A
+        surface→transport map deliberately keeps on HTTP
+        (browser-facing arm of the selection rule). When mounted in
+        R3 (t13) they mount on that HTTP edge via RegisterMount,
+        never on the UDS control plane. Transport is single-sourced
+        in r3 spec §2A; this plan does not re-decide it.
+        Pure handlers — depend on dashboard.Store and
+        dashboard.Events interfaces, NOT on net/http.ServeMux or any
+        router. Wiring lives in t07 / t13. Use stdlib net/http only.
+
+        Each handler: parses query params, validates, calls Store,
+        writes envelope-wrapped JSON, sets ETag from store mtime,
+        emits structured log lines (slog).
+
+        contract_test.go: golden-file response per endpoint + JSON
+        Schema validation using
+        github.com/santhosh-tekuri/jsonschema (already in go.mod).
+        Fixture iter-log lives under handlers/testdata/.
+    app_type: go-cli

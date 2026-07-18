@@ -1,0 +1,33 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 11
+task:
+    id: t11-frontend-sse-integration
+    title: Connect frontend to /api/v1/observability/events and invalidate queries on events
+    status: completed
+    depends_on:
+        - t08-frontend-skeleton
+        - t05-sse-handler
+    blocks:
+        - t12-e2e-smoke-live-iteration
+    owner: dot-agents
+    write_scope:
+        - web/dashboard/src/api/eventStream.ts
+        - web/dashboard/src/api/eventStream.test.ts
+        - web/dashboard/src/hooks/useLiveUpdates.ts
+        - web/dashboard/src/hooks/useLiveUpdates.test.ts
+    verification_required: true
+    notes: |-
+        Wrap EventSource in a small reconnecting client. On each
+        received event:
+          iteration.scored  → invalidate queries: runs, runs/:sid,
+                              iterations/:n (for the affected ids).
+          session.updated   → invalidate runs + runs/:sid.
+          score.recomputed  → invalidate iterations/:n.
+        useLiveUpdates hook wires the client into the QueryClient at
+        app root. On disconnect: exponential backoff up to 30s; on
+        reconnect: invalidate all queries to recover from missed
+        events.
+        Tests: mock EventSource, push fake events, assert correct
+        QueryClient.invalidateQueries calls.
+    app_type: web

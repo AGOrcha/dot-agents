@@ -1,0 +1,38 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 2
+task:
+    id: t02-storage-read-layer
+    title: Build dashboard.Store read-through layer over iter-log + score sidecars
+    status: completed
+    depends_on:
+        - t01-api-contract-design
+    blocks:
+        - t03-handlers-rest
+        - t06-recompute-on-miss-and-fswatch
+    owner: dot-agents
+    write_scope:
+        - internal/dashboard/store/
+    verification_required: true
+    notes: |-
+        Implements design.md Q2: read directly from
+        .agents/active/iteration-log/ + iter-N.score.yaml +
+        session-*.score.yaml sidecars, with a small in-process LRU
+        cache (size 256, TTL 30s, exposed metrics).
+
+        Store interface (sketch):
+          type Store interface {
+            ListRuns(ctx, filter) ([]RunSummary, error)
+            GetRun(ctx, sessionID) (RunDetail, error)
+            ListIterations(ctx, sessionID) ([]IterationSummary, error)
+            GetIteration(ctx, iter int) (IterationDetail, error)
+            Rubric(ctx) (RubricDoc, error)
+          }
+
+        Uses internal/scoring.LoadIterationLog for the iter-log walk
+        and a sidecar glob + YAML decode for scores. Wraps disk reads
+        in a sync.Mutex-protected LRU keyed by (root, sessionID|iter).
+        Cache invalidation on iter-log mtime change; the broker (t04)
+        also evicts on push events.
+        Anti-scope: no writes, no recompute (t06 owns recompute).
+    app_type: go-cli

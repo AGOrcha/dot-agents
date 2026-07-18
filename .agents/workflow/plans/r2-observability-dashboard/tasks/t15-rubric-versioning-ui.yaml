@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 15
+task:
+    id: t15-rubric-versioning-ui
+    title: Rubric explainer view (read /api/rubric, render weights + bands)
+    status: pending
+    depends_on:
+        - t08-frontend-skeleton
+        - t03-handlers-rest
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - web/dashboard/src/views/RubricView.tsx
+        - web/dashboard/src/views/RubricView.test.tsx
+        - web/dashboard/src/components/RubricTable.tsx
+        - web/dashboard/src/components/RubricTable.test.tsx
+    verification_required: true
+    notes: |-
+        Small view rendering the active rubric (version, six signals
+        with weight + label + description, band ladder). Each score
+        in the UI links here. Per spec D3 ("rubric is versioned") —
+        every iteration card shows the rubric version it was scored
+        under; mismatch with active version renders an info pill.
+    app_type: web

@@ -1,0 +1,30 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 9
+task:
+    id: t09-feature-aggregate-view
+    title: Aggregate-dashboard view (runs grid, score trend, cache trend)
+    status: completed
+    depends_on:
+        - t08-frontend-skeleton
+        - t03-handlers-rest
+    blocks:
+        - t12-e2e-smoke-live-iteration
+    owner: dot-agents
+    write_scope:
+        - web/dashboard/src/views/AggregateView.tsx
+        - web/dashboard/src/views/AggregateView.test.tsx
+        - web/dashboard/src/components/RunsGrid.tsx
+        - web/dashboard/src/components/RunsGrid.test.tsx
+        - web/dashboard/src/components/ScoreTrendChart.tsx
+        - web/dashboard/src/components/ScoreTrendChart.test.tsx
+        - web/dashboard/src/components/CacheTrendChart.tsx
+        - web/dashboard/src/components/CacheTrendChart.test.tsx
+    verification_required: true
+    notes: |-
+        Renders /api/runs as a sortable filterable grid (columns:
+        session id, harness, last iter, iters count, mean score,
+        band, last update). Time-series charts (Recharts): score
+        trend per iteration over last N; cache_hit_rate per iteration
+        same window. Loading skeleton, empty-state, error-boundary.
+    app_type: web

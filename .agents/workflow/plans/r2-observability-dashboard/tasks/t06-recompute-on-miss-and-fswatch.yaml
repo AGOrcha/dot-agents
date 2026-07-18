@@ -1,0 +1,42 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 6
+task:
+    id: t06-recompute-on-miss-and-fswatch
+    title: Score-recompute-on-miss + iter-log filesystem watcher → broker bridge
+    status: completed
+    depends_on:
+        - t02-storage-read-layer
+        - t04-sse-broker
+    blocks:
+        - t07-standalone-service-bin
+        - t12-e2e-smoke-live-iteration
+    owner: dot-agents
+    write_scope:
+        - internal/dashboard/store/recompute.go
+        - internal/dashboard/store/recompute_test.go
+        - internal/dashboard/watch/
+    verification_required: true
+    notes: |-
+        Two thin pieces:
+
+        (1) recompute.go — when Store.GetIteration is called and the
+        iter-N.score.yaml sidecar is missing or older than
+        iter-N.yaml, the store calls
+        internal/scoring.ScoreIteration synchronously and returns
+        the freshly-computed score. The sidecar write is best-effort
+        (background goroutine). Cold-cache fallback so the dashboard
+        never says "no score" when the scorer could just answer.
+
+        (2) fswatch.go — wraps fsnotify (add dep:
+        github.com/fsnotify/fsnotify) to watch the iter-log root
+        list. On iter-*.yaml or session-*.score.yaml change/create,
+        publish an event to the broker (iteration.scored or
+        session.updated). This is the v1 standalone push path BEFORE
+        R3's publish primitive exists.
+
+        When R3's publisher lands (t13), fswatch becomes the
+        fallback only — R3's in-process publish is the primary path;
+        the watcher exists because some writers may not go through
+        R3 (eg. developer running `da score run` manually).
+    app_type: go-cli

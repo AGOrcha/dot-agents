@@ -1,0 +1,53 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 4
+task:
+    id: t04-sse-broker
+    title: Build SSE event broker (subscribe / publish / fan-out)
+    status: completed
+    depends_on:
+        - t01-api-contract-design
+    blocks:
+        - t05-sse-handler
+        - t13-r3-mount-integration
+    owner: dot-agents
+    write_scope:
+        - internal/dashboard/events/
+    verification_required: true
+    notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): the cross-plan contract
+        is r3's §D4.1 EventBus INTERFACE —
+          Publish(topic string, payload any) error
+          Subscribe(topic string) (<-chan Event, func(), error)
+          Close() error
+        (r3 task event-bus-interface-seam) — bind to it, never to the
+        concrete *events.Bus. Assume only the §D4.2 G1-G4 floor:
+        at-most-once best-effort delivery, best-effort per-topic
+        order, bounded-buffer drop-oldest (publishers never block),
+        no cross-publish atomicity. The bus backend may later be
+        config-selected (§D4.4) without changing this broker. SSE
+        stays this plan's browser-push wire per the §2A map.
+
+        Tiny in-process broker. Interface:
+          type Publisher interface { Publish(topic string, payload any) }
+          type Broker struct { ... }    // implements Publisher
+          func (b *Broker) Subscribe(ctx) (<-chan Event, func())
+        (Broker's local Publisher shape stays minimal; the r3-facing
+        seam is bridged in t13 against the EventBus interface.)
+
+        Fan-out: N goroutines each holding a buffered channel; an event
+        arriving on a FULL channel disconnects that subscriber immediately
+        (client refetches on reconnect) — RATIFIED 2026-07-02 during t04
+        review: with G3 non-blocking publishers and gapless delivered
+        streams, arrival-on-full forces either a silent gap (unsound) or a
+        disconnect; a pre-drop grace window is unsatisfiable as previously
+        worded. This is the OQ5 bounded-buffer disconnect-on-overflow policy.
+        Heartbeat: emit a ping every 15s.
+
+        When R3's bus lands (t13), it replaces this broker as the
+        primary publisher; this broker becomes a thin
+        subscriber+fanout.
+
+        Anti-scope: do NOT define WHERE events come from — that is
+        R3's EventBus (via t13) and a filesystem watcher bridge (t06).
+    app_type: go-cli

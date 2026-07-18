@@ -1,0 +1,32 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 7
+task:
+    id: t07-standalone-service-bin
+    title: Standalone dashboard service (cmd/da-dashboard) for dev + pre-R3 use
+    status: completed
+    depends_on:
+        - t03-handlers-rest
+        - t05-sse-handler
+        - t06-recompute-on-miss-and-fswatch
+    blocks:
+        - t12-e2e-smoke-live-iteration
+    owner: dot-agents
+    write_scope:
+        - cmd/da-dashboard/
+        - internal/dashboard/server/
+    verification_required: true
+    notes: |-
+        Tiny standalone binary that wires Store + Broker + Handlers
+        + Watcher into an http.Server bound to 127.0.0.1:<port>.
+        Flags: --iter-log-dir (repeatable), --addr (default
+        127.0.0.1:7300), --dev-asset-proxy (when set, proxies
+        non-/api/ to Vite dev server), --static-dir (overrides
+        go:embed dist/ for local frontend iteration).
+        Dev-and-pre-R3 home for the dashboard. When R3 ships, R3's
+        service mounts the same Server type via t13 — cmd/da-dashboard
+        remains for dev and for users who do not run R3.
+        Tests: server start/stop, /api/health returns 200, embedded
+        static handler serves index.html for non-/api/ routes (SPA
+        fallback).
+    app_type: go-cli

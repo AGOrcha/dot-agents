@@ -1,0 +1,48 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 8
+task:
+    id: t08-frontend-skeleton
+    title: Vite + React + TS skeleton with routing, API client, query layer
+    status: completed
+    depends_on:
+        - t01-api-contract-design
+    blocks:
+        - t09-feature-aggregate-view
+        - t10-feature-per-run-drilldown
+        - t11-frontend-sse-integration
+        - t15-rubric-versioning-ui
+    owner: dot-agents
+    write_scope:
+        - web/dashboard/
+    verification_required: true
+    notes: |-
+        Per design.md Q1: Vite + React 18 + TS + TanStack Query v5 +
+        Tailwind + Recharts. TypeScript types in src/api/types.gen.ts
+        are GENERATED from the JSON Schemas shipped in t01 — wire
+        json-schema-to-typescript into a `pnpm types` script; commit
+        the generated file so Go-side and frontend-side stay in
+        lockstep.
+
+        Routes (react-router-dom v6):
+          /                  → AggregateView (placeholder this task)
+          /runs/:sessionId   → RunDetailView (placeholder)
+          /iterations/:n     → IterationDetailView (placeholder)
+          /rubric            → RubricView (placeholder)
+
+        API client: thin fetch wrapper, base URL from
+        import.meta.env.VITE_API_BASE (default '' so same-origin).
+        TanStack Query keys named per endpoint.
+
+        Tests: Vitest + React Testing Library; smoke test renders
+        App without crashing; ScoreBadge renders bands correctly.
+
+        Build outputs to web/dashboard/dist/, which t07's server
+        embeds via go:embed.
+
+        Cross-plan dep: R5's review-ui task hooks into this skeleton
+        (NEEDS localStorage-based Bearer-token plumbing in the API
+        client + extension slots on RunDetailView).
+
+        AUTH RULING (owner, 2026-07-04): SUPERSEDES the localStorage Bearer plumbing in this task's original R5 line. Access token is IN-MEMORY (module-scoped), refresh token is an HttpOnly cookie set by R5 (SPA never reads it); 401 -> refresh-via-cookie -> retry. Rationale: localStorage is XSS-readable. Delivered in #286. FOLLOWUP(t16): main.test.tsx guard test is partly tautological (reimplements guard vs importing main.tsx); CI coverage-gate wiring (test.yml, sonar-project.properties, vitest lcov) was folded into #286 to unblock t08's own sonar coverage gate.
+    app_type: web

@@ -1,0 +1,28 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 16
+task:
+    id: t16-coverage-gate-and-ci
+    title: Coverage gate + CI wiring for new dashboard packages
+    status: pending
+    depends_on:
+        - t12-e2e-smoke-live-iteration
+    blocks:
+        - t14-documentation
+    owner: dot-agents
+    write_scope:
+        - .github/workflows/dashboard.yml
+        - internal/dashboard/coverage_test.go
+        - web/dashboard/.github/workflows/test.yml
+    verification_required: true
+    notes: |-
+        Mirror the existing per-package coverage convention
+        (coverage-95-staged plan's pattern). Assert coverage floor
+        on internal/dashboard/{store,handlers,events,watch,server}
+        — pick project's standard threshold (likely 95% per
+        coverage-gate-per-file).
+        CI: a dashboard job that runs `go test
+        ./internal/dashboard/...` plus `pnpm --filter dashboard
+        test` plus a build check (`pnpm --filter dashboard build`).
+        Playwright e2e behind the `e2e` tag, gated to manual/nightly.
+    app_type: go-cli

@@ -1,0 +1,49 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 1
+task:
+    id: t01-api-contract-design
+    title: Design dashboard API contract (endpoints, payload shapes, JSON Schemas)
+    status: completed
+    depends_on:
+        - design-doc
+    blocks:
+        - t02-storage-read-layer
+        - t03-handlers-rest
+        - t04-sse-broker
+        - t08-frontend-skeleton
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/r2-observability-dashboard/design/API.md
+        - schemas/dashboard-run.schema.json
+        - schemas/dashboard-iteration.schema.json
+        - schemas/dashboard-rubric.schema.json
+        - schemas/dashboard-event.schema.json
+    verification_required: false
+    notes: |-
+        Read-mostly design pass. Produce API.md covering:
+          - Final endpoint list per design.md Q4.
+          - For each endpoint: method, path, query params, response
+            envelope, status codes, example response.
+          - Payload field-by-field mapping to existing Go types:
+            internal/scoring.PersistedScore / SessionScore /
+            IterationRecord. The dashboard DTO is a presentation
+            projection — name it and pin its fields here so handler
+            authors and frontend authors share one source.
+          - SSE event taxonomy: iteration.scored, session.updated,
+            score.recomputed; payload shape per event; ordering and
+            replay semantics (no replay in v1, document explicitly).
+          - Error envelope (RFC 7807 problem+json or simpler
+            { error: { code, message } }; pick one and pin).
+          - Embedded JSON Schemas shipped under schemas/ so the
+            contract test in t03 + the frontend types-from-schema
+            generator both consume the same source.
+        Anti-scope: NO RBAC (R5), NO write endpoints, NO pagination
+        beyond limit/offset. This task lands BEFORE handler /
+        frontend / broker implementation so all four downstreams
+        build to one contract.
+        SHIPPED (coherence 2026-06-25): the four entity schemas
+        (schemas/dashboard-{run,iteration,rubric,event}.schema.json)
+        and API.md landed via commit c74d8d8b ("design(r2):
+        dashboard API contract + entity JSON schemas"). Marked
+        completed; downstream tasks build to this contract.

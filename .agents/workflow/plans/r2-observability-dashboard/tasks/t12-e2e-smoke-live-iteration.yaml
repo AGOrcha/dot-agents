@@ -1,0 +1,42 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 12
+task:
+    id: t12-e2e-smoke-live-iteration
+    title: End-to-end smoke — live iteration triggers UI update within 2s
+    status: completed
+    depends_on:
+        - t07-standalone-service-bin
+        - t09-feature-aggregate-view
+        - t10-feature-per-run-drilldown
+        - t11-frontend-sse-integration
+    blocks:
+        - t14-documentation
+    owner: dot-agents
+    write_scope:
+        - tests/e2e/dashboard_live_iteration_test.go
+        - web/dashboard/playwright.config.ts
+        - web/dashboard/e2e/live-iteration.spec.ts
+    verification_required: true
+    notes: |-
+        Two complementary tests:
+
+        (a) Go integration test
+        (tests/e2e/dashboard_live_iteration_test.go):
+          1. spin up cmd/da-dashboard against a fresh tmpdir iter-log
+             fixture (3 iters);
+          2. open an SSE client to /api/v1/observability/events;
+          3. write a new iter-4.yaml + run scoring.ScoreIteration +
+             write the sidecar;
+          4. assert an iteration.scored frame arrives within 2s.
+
+        (b) Playwright UI smoke (web/dashboard/e2e/):
+          1. start the standalone service in test mode against the
+             same fixture,
+          2. navigate to /, assert RunsGrid renders,
+          3. drill into /runs/:sid, assert iteration count,
+          4. write a new iter-4 sidecar from the test harness,
+          5. assert the grid count increments without reload.
+
+        Both tests skip-guarded behind an `e2e` build tag.
+    app_type: go-cli

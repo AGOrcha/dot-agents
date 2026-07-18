@@ -1,0 +1,28 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 14
+task:
+    id: t14-documentation
+    title: Documentation — operator guide, API reference, frontend dev guide
+    status: pending
+    depends_on:
+        - t12-e2e-smoke-live-iteration
+        - t13-r3-mount-integration
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/OBSERVABILITY_DASHBOARD.md
+        - docs/DASHBOARD_API.md
+        - web/dashboard/README.md
+        - README.md
+    verification_required: false
+    notes: |-
+        OBSERVABILITY_DASHBOARD.md: how to run (standalone vs.
+        R3-hosted), config (iter-log roots, addr, dev-proxy), push
+        channel architecture, troubleshooting.
+        DASHBOARD_API.md: generated-from-JSON-Schema reference for
+        every endpoint, SSE event taxonomy, error envelope.
+        web/dashboard/README.md: dev-loop (vite dev + dev-asset-proxy
+        flag), build, test, types-gen script.
+        README.md: one-paragraph mention of the dashboard + link.
+    app_type: docs

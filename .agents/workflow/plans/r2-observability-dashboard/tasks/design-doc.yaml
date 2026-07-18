@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 0
+task:
+    id: design-doc
+    title: Resolve R2 open questions (frontend, storage, real-time) in design.md
+    status: completed
+    depends_on: []
+    blocks:
+        - t01-api-contract-design
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/r2-observability-dashboard/design.md
+    verification_required: false
+    notes: |-
+        Landed via R2 planner output 2026-05-25: Q1 Vite + React +
+        TypeScript + TanStack Query + Tailwind (static-built bundle
+        via go:embed); Q2 read-through from disk + in-process LRU
+        (no new persistent store v1; Store interface for future
+        swap); Q3 SSE with R3 publish primitive bridge (rejected
+        WS/long-poll); Q4 REST/JSON resource-oriented API; Q5
+        config-resolved iter-log root list; Q6 4 frontend routes.
+    app_type: research

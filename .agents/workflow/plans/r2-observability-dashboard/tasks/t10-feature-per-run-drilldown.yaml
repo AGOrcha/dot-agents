@@ -1,0 +1,38 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 10
+task:
+    id: t10-feature-per-run-drilldown
+    title: Per-run drill-down view (iteration timeline + breakdown + integrity)
+    status: completed
+    depends_on:
+        - t08-frontend-skeleton
+        - t03-handlers-rest
+    blocks:
+        - t12-e2e-smoke-live-iteration
+    owner: dot-agents
+    write_scope:
+        - web/dashboard/src/views/RunDetailView.tsx
+        - web/dashboard/src/views/RunDetailView.test.tsx
+        - web/dashboard/src/views/IterationDetailView.tsx
+        - web/dashboard/src/views/IterationDetailView.test.tsx
+        - web/dashboard/src/components/IterationTimeline.tsx
+        - web/dashboard/src/components/IterationTimeline.test.tsx
+        - web/dashboard/src/components/SignalBreakdown.tsx
+        - web/dashboard/src/components/SignalBreakdown.test.tsx
+        - web/dashboard/src/components/IntegrityPanel.tsx
+        - web/dashboard/src/components/IntegrityPanel.test.tsx
+    verification_required: true
+    notes: |-
+        RunDetailView: header (session id, harness, mean score),
+        then IterationTimeline (horizontal strip, one tick per
+        iteration, colored by band, click → IterationDetailView).
+        IterationDetailView: full iteration record (task_id, commit,
+        files_changed, lines_added/removed, retries, verifier
+        results), SignalBreakdown table (one row per signal with
+        weight, sub_score, contribution from PersistedScore.
+        Breakdown), IntegrityPanel showing claimed-vs-observed
+        deltas for two-way signals.
+        Deep-linkable: /iterations/:n loads IterationDetailView
+        standalone (no run context required).
+    app_type: web

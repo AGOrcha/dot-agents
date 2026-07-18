@@ -1,0 +1,29 @@
+schema_version: 1
+plan_id: r2-observability-dashboard
+order: 5
+task:
+    id: t05-sse-handler
+    title: Wire /api/v1/observability/events SSE handler to broker
+    status: completed
+    depends_on:
+        - t03-handlers-rest
+        - t04-sse-broker
+    blocks:
+        - t07-standalone-service-bin
+        - t12-e2e-smoke-live-iteration
+    owner: dot-agents
+    write_scope:
+        - internal/dashboard/handlers/handlers.go
+        - internal/dashboard/handlers/stream.go
+        - internal/dashboard/handlers/stream_test.go
+    verification_required: true
+    notes: |-
+        Long-lived HTTP handler for GET /api/v1/observability/events emitting text/event-stream. Route registration lives in handlers.go because Mount.routes() owns every full-path binding; stream.go owns the handler implementation and stream_test.go owns the endpoint proof. Treat design/API.md as authoritative over older /api/stream references in adjacent narrative docs/schema descriptions.
+        Each
+        connected client subscribes to the broker, formats incoming
+        Events as SSE frames (event: <topic>, id: <seq>, data:
+        <json>). Sends 2KB padding comment on connect to defeat
+        proxy buffering. Respects request context cancellation.
+        Test: httptest server, EventSource-like reader, broker
+        publishes one event, assert frame arrives within 100ms.
+    app_type: go-cli
