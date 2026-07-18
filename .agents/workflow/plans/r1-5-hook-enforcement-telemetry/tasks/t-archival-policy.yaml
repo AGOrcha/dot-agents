@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 8
+task:
+    id: t-archival-policy
+    title: Decide hook-outcome sidecar retention and archival
+    status: completed
+    depends_on:
+        - t1-capture-outcomes
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+    verification_required: false
+    notes: |-
+        Resolve design Q3. Default proposal: never auto-prune
+        (mirrors R5 audit log policy). Specify
+        `da workflow hook-outcome prune --before <date>` admin-only
+        command spec (implementation deferred unless an operator
+        request emerges). No code in this task — design + docs only.
+    app_type: research

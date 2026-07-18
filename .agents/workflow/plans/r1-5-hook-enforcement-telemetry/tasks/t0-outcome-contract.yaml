@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 0
+task:
+    id: t0-outcome-contract
+    title: Define durable hook-outcome schema and archived-sentinel linkage
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/specs/r1-5-hook-enforcement-telemetry/design.md
+        - schemas/workflow-hook-outcome.schema.json
+        - commands/workflow/static/workflow-hook-outcome.schema.json
+        - docs/OUTCOME_SCORING_RUBRIC.md
+    verification_required: true
+    notes: Start only after loop-discipline lifecycle-hook native output and sentinel archive contracts are stable; define allow/advise/remediate plus lifecycle/intervention classification without transcript content.

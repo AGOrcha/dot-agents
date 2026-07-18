@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 3
+task:
+    id: t2-scoring-signal
+    title: Add objective hook-outcome signal to scoring
+    status: completed
+    depends_on:
+        - t1b-post-tool-observation-evaluation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scoring
+        - docs/OUTCOME_SCORING_RUBRIC.md
+    verification_required: true
+    notes: Extend the shipped rubric deliberately with a version bump and explainable per-rule contributions; score post-tool observation only if T1b explicitly approves an objective, deduplicated signal.

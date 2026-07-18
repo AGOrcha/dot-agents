@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 4
+task:
+    id: t3-cli-readback
+    title: Render hook outcome contribution in score queries
+    status: completed
+    depends_on:
+        - t2-scoring-signal
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/score.go
+        - commands/score_test.go
+    verification_required: true
+    notes: Expose outcome source and rule identifiers without printing transcript contents.

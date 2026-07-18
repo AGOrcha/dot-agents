@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 5
+task:
+    id: t-schema-validator-wiring
+    title: Wire hook-outcome schema into the workflow validator pipeline
+    status: completed
+    depends_on:
+        - t0-outcome-contract
+    blocks:
+        - t1-capture-outcomes
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/static/schemas.go
+        - commands/workflow/static/schemas_test.go
+    verification_required: true
+    notes: |-
+        Register workflow-hook-outcome.schema.json in the bundled schema
+        list and assert the validator rejects records with any disallowed
+        transcript-content field (per D2). Sized as a one-task slice so
+        the validator change can land independently of the CLI primitive
+        in t1.
+    app_type: go-cli

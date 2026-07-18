@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 7
+task:
+    id: t2d-companion-gate-compatibility
+    title: Verify companion gates emit R1.5-compatible records without schema change
+    status: completed
+    depends_on:
+        - t2-scoring-signal
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scoring/signal_hook_outcomes_test.go
+        - tests/fixtures/r1-5-hook-outcomes/companion-gates/
+    verification_required: true
+    notes: |-
+        Per design D2/D6 and orchestration-companion spec D5:
+        contribute test fixtures emitting orchestrator-handoff and
+        delegation-closeout gate outcomes under the R1.5 schema and
+        assert the extractor + scorer handle them with no schema
+        change. Cross-plan coordination with
+        orchestration-companion-stop-hooks but does not write any
+        companion-plan code; that plan's own implementation tasks
+        consume these fixtures as a contract test.
+    app_type: go-cli

@@ -1,0 +1,42 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 11
+task:
+    id: release-minor
+    title: 'Release: bump VERSION + finalize CHANGELOG for the hook-telemetry minor'
+    status: pending
+    depends_on:
+        - t0-outcome-contract
+        - t1-capture-outcomes
+        - t1b-post-tool-observation-evaluation
+        - t2-scoring-signal
+        - t3-cli-readback
+        - t-schema-validator-wiring
+        - t2c-rubric-version-coordination
+        - t2d-companion-gate-compatibility
+        - t-archival-policy
+        - t-e2e-integration-test
+        - t-docs
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - VERSION
+        - CHANGELOG.md
+    verification_required: true
+    notes: |-
+        Release-gated tail task (hybrid convention, MINOR path). This plan
+        delivers new user-visible surface — persisted hook-enforcement
+        outcomes, new objective scoring signals exposed with rule-level
+        explanation, and CLI readback of an approved contribution. New
+        score signals + new CLI readback are additive surface, MINOR not
+        MAJOR (no public surface removed or incompatibly changed; rubric
+        version bump is a deliberate reviewable act, not a break).
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
+        minor is 0.4.0, but resolve from VERSION when this task becomes
+        ready; serialize at the VERSION bump if another minor ships first.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section. Merge to master fires
+        auto-release.yml. Note: this plan depends on loop-discipline-stop-hooks
+        gates shipping first.
+    app_type: release

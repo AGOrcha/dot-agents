@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 10
+task:
+    id: t-docs
+    title: Update OUTCOME_SCORING_RUBRIC.md and HOOKS.md for R1.5
+    status: completed
+    depends_on:
+        - t2-scoring-signal
+        - t-archival-policy
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/OUTCOME_SCORING_RUBRIC.md
+        - docs/HOOKS.md
+    verification_required: false
+    notes: |-
+        Single doc task consolidating all R1.5-driven doc changes:
+        new hook_outcomes signal spec, weight rebalance table, the
+        RubricVersion ordering policy (D5), the archival policy, the
+        approved-rule list (D6), and a HOOKS.md cross-reference to
+        the outcome schema. Separating docs from code keeps the
+        rubric-bump task's diff focused on weight changes only.
+    app_type: research

@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 1
+task:
+    id: t1-capture-outcomes
+    title: Persist hook gate outcomes alongside archived sentinel history
+    status: completed
+    depends_on:
+        - t0-outcome-contract
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/hook_sentinel.go
+        - commands/workflow/hook_sentinel_test.go
+        - internal/scaffold/hooks/global/iteration-close-gate/
+        - internal/scaffold/hooks/global/isp-gate/
+        - internal/scaffold/hooks/global/loop-worker-gate/
+    verification_required: true
+    notes: This consumes the completed loop-discipline gate bundles; do not run concurrently with their implementation task.

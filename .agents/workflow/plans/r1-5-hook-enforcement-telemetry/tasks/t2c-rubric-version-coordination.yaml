@@ -1,0 +1,26 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 6
+task:
+    id: t2c-rubric-version-coordination
+    title: Resolve RubricVersion ordering with r5-review-labeling-access
+    status: completed
+    depends_on:
+        - t2-scoring-signal
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+    verification_required: false
+    notes: |-
+        Per design D5: at task execution time, read the current
+        internal/scoring/rubric.go RubricVersion constant. If 2.0.2,
+        target 2.1.0 (R1.5 lands first). If R5 has already shipped and
+        bumped to 3.0.0, target 3.1.0. Coordinate with the R5 plan's
+        r1-integration task by reading its current status; if both
+        plans are in flight, the first to merge wins the minor bump
+        and the second rebases. Document the ordering policy in
+        OUTCOME_SCORING_RUBRIC.md under a new "RubricVersion ordering
+        for concurrent plans" section.
+    app_type: research

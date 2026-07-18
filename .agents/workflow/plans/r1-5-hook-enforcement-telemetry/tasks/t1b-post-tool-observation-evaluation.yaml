@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 2
+task:
+    id: t1b-post-tool-observation-evaluation
+    title: Evaluate PostToolUse and PostToolUseFailure as bounded workflow feedback
+    status: completed
+    depends_on:
+        - t1-capture-outcomes
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/history/r1-5-hook-enforcement-telemetry/post-tool-observation-assessment.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+    verification_required: true
+    notes: Evaluate vendor payload stability, workflow-command filtering, redaction/privacy, and prevention/remediation deduplication before any observation contributes to scoring; observation is non-blocking by default.

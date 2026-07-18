@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+order: 9
+task:
+    id: t-e2e-integration-test
+    title: End-to-end test exercising sentinel → gate → sidecar → score
+    status: completed
+    depends_on:
+        - t2-scoring-signal
+        - t3-cli-readback
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - tests/test-r1-5-hook-enforcement-telemetry.sh
+        - tests/fixtures/r1-5-hook-outcomes/
+    verification_required: true
+    notes: |-
+        Shell integration test: scaffold a temp project, write a fake
+        sentinel, invoke iteration-close-gate with a missing artifact,
+        assert the outcome sidecar is written, run `da score iteration`,
+        assert the hook_outcomes contribution row appears with the
+        expected rule_id and "remediate" result. Mirror pattern of
+        existing tests/test-* integration scripts.
+    app_type: go-cli
