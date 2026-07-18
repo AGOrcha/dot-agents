@@ -37,6 +37,9 @@
     "promise-gap-analyst"
   ],
   "hooks": true,
+  "work_tracking": {
+    "write_to": "state-ref"
+  },
   "mcp": [
     "code-review-graph",
     "sonarqube"
