@@ -1,0 +1,36 @@
+schema_version: 1
+plan_id: shared-target-projection-wiring
+order: 4
+task:
+    id: stp3-regression-parity
+    title: 'Regression: import-relink + doctor + refresh-skill-mirror produce projection; dry-run/idempotent'
+    status: completed
+    depends_on:
+        - stp-import-relink
+        - stp-doctor-repair
+        - refresh-skill-relink/fix-shared-skill-relink
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/import_test.go
+        - commands/doctor_test.go
+        - commands/refresh_test.go
+    verification_required: true
+    notes: |-
+        refresh/install/add already covered upstream — scope here is the
+        NEWLY wired paths. Behavior-asserting tests: (a) import relink
+        produces repo .codex/agents/*.toml + Claude shared-skills
+        projection, (b) doctor repair (if wired per stp-doctor-repair
+        decision), (c) dry-run no-mutation, (d) idempotent second run,
+        (e) no regression to existing relink/repair behavior, (f) the
+        refresh-skill-mirror routing landed by
+        refresh-skill-relink/fix-shared-skill-relink — same dry-run +
+        idempotence assertions; no per-platform CreateLinks regression.
+        go test ./... green; per-file cov gate via interface seams,
+        zero new allowlist entries.
+
+        CROSS-PLAN: stp3 deliberately waits on
+        refresh-skill-relink/fix-shared-skill-relink so the regression
+        sweep can validate that routing alongside import-relink + doctor.
+        Acyclic — refresh-skill-relink depends_on stp1-wire-refresh
+        (completed) for its prereq; stp3 then closes the loop here.

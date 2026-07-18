@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: shared-target-projection-wiring
+order: 2
+task:
+    id: stp-import-relink
+    title: Wire projection into import.go relinkImportedProjects (the real gap)
+    status: completed
+    depends_on: []
+    blocks:
+        - stp3-regression-parity
+    owner: dot-agents
+    write_scope:
+        - commands/import.go
+    verification_required: true
+    notes: |-
+        THE genuine remaining gap (spec Q1 4th entry). `relinkImportedProjects`
+        (commands/import.go:1425, called from import.go:322) loops platforms
+        calling `p.CreateLinks(project, path)` (:1435) WITHOUT first running
+        `RunSharedTargetProjection` — so a user-config import does NOT
+        materialize repo `.codex/agents/*.toml` or the Claude shared-skills
+        projection for relinked projects. Add the projection call before the
+        per-project CreateLinks loop, matching refresh/install/add ordering
+        and enabled-platform scoping. Existing Deps/contract shape only — do
+        not pre-empt di-refactor / graphstore-contract. Interface seam for
+        coverage, no allowlist entry.

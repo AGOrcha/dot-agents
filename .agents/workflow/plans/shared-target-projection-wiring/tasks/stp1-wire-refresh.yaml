@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: shared-target-projection-wiring
+order: 0
+task:
+    id: stp1-wire-refresh
+    title: Wire shared-target projection into refresh (+ resolve entry-point set)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/refresh.go
+    verification_required: true
+    notes: |-
+        ALREADY SATISFIED ON MASTER. The audit (proposal Finding 2) ran
+        against a STALE local `master` ref (04826b21/#13) and wrongly
+        concluded "no production caller on master". Verified against real
+        origin/master efb19756: `commands/refresh.go:157`
+        `platform.RunSharedTargetProjection(...)` runs BEFORE the
+        per-platform CreateLinks loop (:180). Landed via `8e86a35e`
+        (ancestor of efb19756). No code change required; closed as
+        already-done. Resolved spec Q1 — see new stp-import-relink /
+        stp-doctor-repair tasks for the genuine remaining gap.

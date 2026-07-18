@@ -1,0 +1,29 @@
+schema_version: 1
+plan_id: shared-target-projection-wiring
+order: 3
+task:
+    id: stp-doctor-repair
+    title: Doctor repair fixes broken projection + links ALL managed da entities
+    status: completed
+    depends_on:
+        - stp-import-relink
+    blocks:
+        - stp3-regression-parity
+    owner: dot-agents
+    write_scope:
+        - commands/doctor.go
+    verification_required: true
+    notes: |-
+        DECISION (user 2026-05-18): doctor repair must NOT stay
+        symlink-only. It must (a) run RunSharedTargetProjection to fix
+        broken/missing projected shared-target artifacts, AND (b) ensure
+        ALL managed da entities are linked for the project (full
+        CreateLinks across installed platforms — not merely re-repairing
+        already-detected broken symlinks). Today `commands/doctor.go:191`
+        only re-runs CreateLinks for links it already found broken and
+        never runs the projection, so a missing/broken shared-skill or
+        codex-toml is not repaired. Mirror the established
+        refresh/install/add/import projection-call shape; keep idempotent
+        (a healthy managed project → no spurious changes/output). Existing
+        Deps/contract shape only — do not pre-empt di-refactor /
+        graphstore-contract.

@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: shared-target-projection-wiring
+order: 1
+task:
+    id: stp2-wire-install-add
+    title: Wire the same projection into install + add (entry-order parity)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/install.go
+        - commands/add.go
+    verification_required: true
+    notes: |-
+        ALREADY SATISFIED ON MASTER (same 8e86a35e). Verified:
+        `commands/add.go:531` and `commands/install.go:222` both invoke
+        `platform.RunSharedTargetProjection(...)`. No change required.

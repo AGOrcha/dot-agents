@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: shared-target-projection-wiring
+order: 5
+task:
+    id: stp4-doc-reconcile-close
+    title: Final doc reconcile + pr10 cross-ref + close
+    status: pending
+    depends_on:
+        - stp3-regression-parity
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/PLATFORM_DIRS_DOCS.md
+    verification_required: true
+    notes: |-
+        PARTIALLY DONE: PR #29 already corrected the Codex row to the
+        accurate narrow truth (refresh/install/add DO produce it; gap is
+        import-relink + doctor). After stp-import-relink/doctor land,
+        remove the "known narrow gap" caveat. Cross-reference this plan
+        from pr10-branch-split / retire-old-branches so closeout's
+        diff-verify accounts for this slice (spec Q2). Archive plan.
