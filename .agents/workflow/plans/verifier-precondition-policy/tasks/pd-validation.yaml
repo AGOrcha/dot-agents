@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: verifier-precondition-policy
+order: 3
+task:
+    id: pd-validation
+    title: 'Slice B5: config verify/lint fail-closed on bad policy ref + unknown signal kind'
+    status: pending
+    depends_on:
+        - pb-config-registry
+        - pc-lockfile-resolution
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/precondition_resolve.go
+        - commands/config/verify.go
+        - internal/config/verify_layers.go
+    verification_required: true
+    notes: 'Fail-closed validation via da config verify/lint: undefined precondition_policy reference -> error; predicate signal kind not in the registry -> error. Full design in plan.md section Slice B5.'
+    app_type: go-cli

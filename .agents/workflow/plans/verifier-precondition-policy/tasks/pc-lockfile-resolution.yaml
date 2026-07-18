@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: verifier-precondition-policy
+order: 2
+task:
+    id: pc-lockfile-resolution
+    title: 'Slice B3/B4: resolve named policy from lockfile + wire verifier call site'
+    status: awaiting_owner_review
+    depends_on:
+        - pa-predicate-evaluator
+        - pb-config-registry
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/precondition_resolve.go
+        - internal/config/precondition_resolve_test.go
+        - commands/workflow/transitions.go
+    verification_required: true
+    notes: 'ResolvePreconditionPolicy reads RESOLVED config from the lockfile (ResolveLocked -> Snapshot), not raw .agentsrc.json: app_type -> stage profile -> precondition_policy name -> named entry -> commands/workflow PreconditionPolicy; unset -> built-in default; wire verifier dispatch call site. Depends on config-v2 lock surface exposing precondition_policies in the resolved Snapshot. Full design in plan.md section Slice B3/B4.'
+    app_type: go-cli

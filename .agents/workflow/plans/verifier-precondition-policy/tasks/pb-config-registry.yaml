@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: verifier-precondition-policy
+order: 1
+task:
+    id: pb-config-registry
+    title: 'Slice B1/B2: precondition_policies registry (6 sync points) + StageProfile ref'
+    status: awaiting_owner_review
+    depends_on:
+        - pa-predicate-evaluator
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/agentsrc_test.go
+        - schemas/agentsrc.schema.json
+    verification_required: true
+    notes: Top-level precondition_policies registry across all 6 AgentsRC sync points (struct, agentsRCCore, UnmarshalJSON, MarshalJSON, agentsRCKnown, schema json), object-keyed no enum; plus StageProfile.precondition_policy name ref. Full design in plan.md section Slice B1/B2.
+    app_type: go-cli
