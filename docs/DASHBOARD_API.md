@@ -20,6 +20,20 @@ registered by
 No prefix is stripped when the handler is mounted in either standalone or
 R3-hosted mode.
 
+## Bus direction and payload boundary
+
+The current HTTP API and SSE bus are read-only. The bus is egress-only:
+dashboard producers and the R3 runtime-to-broker bridge can send events to
+browser clients, but clients cannot publish or inject events upstream. There
+are no mutation endpoints.
+
+Browser-bound events use the narrow payloads listed in the event inventory
+below. The shipped watcher and R3 bridge shape those payloads at the producer
+boundary; they do not forward tokens, credentials, or other secret-bearing
+internal event fields. Producers must not place secrets in dashboard payloads.
+This one-way, no-secret boundary is also the direction specified by
+`dashboard-subsystem-and-bus-security`.
+
 ## Schema sources
 
 Four JSON Schemas exist and ground the response and event DTOs in this reference:

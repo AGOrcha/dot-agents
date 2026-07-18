@@ -11,6 +11,25 @@ iteration-log and score-sidecar files; it does not introduce another persistent
 store. See the [Dashboard API reference](./DASHBOARD_API.md) for the HTTP and SSE
 contracts.
 
+## Direction
+
+The commands below describe the dashboard as it ships today: a standalone
+`da-dashboard` process for local use and a mount on the R3 runtime. The planned
+direction in the `dashboard-subsystem-and-bus-security` spec consolidates local
+use into a `da dashboard` subsystem and retires the separate `da-dashboard`
+root. It also establishes a seam for a slim, separately deployable production
+runtime; that runtime artifact is deferred and does not exist yet.
+
+## Security posture
+
+The current HTTP and SSE surface is read-only and binds to loopback by default.
+The dashboard does not provide network authentication. Treat exposure beyond
+loopback as fail-closed: do not expose the dashboard listener directly; opt in
+only through a fronting reverse proxy or tunnel that owns authentication and
+TLS. The planned capability model keeps read-only as the default and permits
+future mutations only through explicit, allowlisted write-operation paths—there
+is no ambient write capability.
+
 ## Standalone mode
 
 The standalone entrypoint is [`cmd/da-dashboard/main.go`](../cmd/da-dashboard/main.go).
@@ -94,7 +113,7 @@ semantics live in
 | Flag | Default | Meaning |
 |---|---:|---|
 | `--iter-log-dir PATH` | none | Iter-log root to read and watch. Repeat the flag for multiple roots. |
-| `--addr HOST:PORT` | `127.0.0.1:7300` | TCP listen address. A non-loopback host is an explicit exposure of an unauthenticated local dashboard. |
+| `--addr HOST:PORT` | `127.0.0.1:7300` | TCP listen address. Keep the loopback default unless a fronting reverse proxy or tunnel owns authentication and TLS; the dashboard itself provides no network authentication. |
 | `--dev-asset-proxy URL` | unset | Proxy all non-`/api` requests to a Vite server. Takes precedence over static assets. |
 | `--static-dir PATH` | embedded bundle | Serve a frontend build from disk instead of the embedded bundle. Ignored when `--dev-asset-proxy` is set. |
 

@@ -5,6 +5,12 @@ HTTP and SSE backend is the Go service in `cmd/da-dashboard`; see the
 [operator guide](../../docs/OBSERVABILITY_DASHBOARD.md) and
 [API reference](../../docs/DASHBOARD_API.md).
 
+The development loop below describes the currently shipped standalone
+`da-dashboard` entrypoint. The planned direction in
+`dashboard-subsystem-and-bus-security` moves local use into the `da dashboard`
+subsystem and retires that separate root; those subsystem commands are not
+available yet.
+
 ## Prerequisites
 
 The repository is a pnpm workspace (`pnpm-lock.yaml` and
