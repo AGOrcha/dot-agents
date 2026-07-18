@@ -134,7 +134,7 @@ func TestStateRefReconcile_AbsentPlanFullySeeded(t *testing.T) {
 		t.Fatalf(msgReconcileErr, err)
 	}
 
-	if head := stateRefHead(repo); head == "" {
+	if stateRefHead(repo) == "" {
 		t.Fatal("reconcile must create refs/agents/state from the working copy")
 	}
 	if got := refTaskSet(t, repo, "p1"); !equalStrings(got, []string{"t1", "t2"}) {
