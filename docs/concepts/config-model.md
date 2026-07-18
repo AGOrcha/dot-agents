@@ -223,6 +223,22 @@ canonical `schemas/agentsrc.schema.json`.
 
 ---
 
+## Work tracking (coordination-state plane)
+
+Separate from the config *layers* above, `work_tracking` selects the **storage
+plane** for a project's coordination state (`PLAN.yaml` + per-task status blobs):
+`read_from` (worktree | master), `write_to` (worktree | state-ref), and `backend`
+(local | git-ref; kg / cloudflare-do / jira / linear reserved). Layering decides
+*what your config is*; `work_tracking` decides *where plan/task state lives*. The
+default is the per-worktree working copy (byte-for-byte today's behaviour);
+`backend=git-ref` is an opt-in that moves the source of truth to the local
+`refs/agents/state` ref (read-your-writes safe, orthogonal to the code branch).
+The default stays `local` — flipping it is a gated cutover. `da workflow status`
+surfaces the active backend. The field-by-field contract and the migration gate
+live in [Layered Configuration → Work tracking](./LAYERED_CONFIG_GUIDE.md#work-tracking-coordination-state-plane).
+
+---
+
 ## Machine-local scope and portable setup
 
 The model separates **portable identity** from **machine-local paths**, which is what makes a setup

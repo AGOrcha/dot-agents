@@ -77,6 +77,7 @@ type workflowOrientState struct {
 	PendingMergeBacks int                            `json:"pending_merge_backs"`
 	LocalDrift        *RepoDriftReport               `json:"local_drift,omitempty"`
 	RecentSessions    []branchSessionInfo            `json:"recent_sessions,omitempty"`
+	WorkTracking      workflowWorkTrackingSummary    `json:"work_tracking"`
 }
 
 // branchSessionInfo is a compact view of a platform session active on the current branch.
@@ -85,6 +86,23 @@ type branchSessionInfo struct {
 	SessionID    string `json:"session_id"`
 	Timestamp    string `json:"timestamp"`
 	MessageCount int    `json:"message_count"`
+}
+
+// workflowWorkTrackingSummary surfaces the ACTIVE coordination-state storage
+// plane (work_tracking.backend) so operators and orchestrators can see which
+// store is authoritative. Agents still read the projected working-copy files
+// regardless of backend; this reports the SOURCE OF TRUTH those projections are
+// derived from.
+type workflowWorkTrackingSummary struct {
+	// Backend is rc.WorkStoreBackend(): "local" (default) or "git-ref". Reserved
+	// ladder values (kg / cloudflare-do / jira / linear) resolve to "local" until
+	// implemented.
+	Backend string `json:"backend"`
+	// StateRefSOT is true when refs/agents/state is the live coordination SOT —
+	// i.e. the git-ref backend is active.
+	StateRefSOT bool `json:"state_ref_sot"`
+	// StateRef names the coordination ref when StateRefSOT is true.
+	StateRef string `json:"state_ref,omitempty"`
 }
 
 // workflowDelegationSummary is a compact view of active delegation state for orient/status.

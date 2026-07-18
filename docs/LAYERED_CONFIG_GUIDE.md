@@ -68,6 +68,7 @@ the original v1 settings (all v2 fields are optional, so a v1 manifest still val
 | `packages` | array | Executable **artifacts** (agents/skills bundles) to install. |
 | `features` | object | Feature-flag overrides (`features.*`). |
 | `execution_profile` | object | Workflow execution shape by `app_type` (see [Config Relevance](./CONFIG_RELEVANCE.md)). |
+| `work_tracking` | object | Coordination-state storage plane — `read_from` / `write_to` / `backend` (see [Work tracking](#work-tracking-coordination-state-plane)). Default (unset) is the per-worktree working copy. |
 
 A minimal v2 manifest:
 
@@ -253,6 +254,91 @@ uv's model:
 A source may override its cache key via `cache_keys` (tracked file/glob paths, git commit/tags,
 environment variables, directory-presence markers) and can force re-validation with an
 always-revalidate marker. At runtime, `--refresh` forces a single unit to re-check upstream.
+
+---
+
+## Work tracking (coordination-state plane)
+
+The `work_tracking` block selects **where a project's coordination state** —
+`PLAN.yaml` and the per-task status blobs under
+`.agents/workflow/plans/<id>/tasks/` — is read from and written to. It is a
+storage plane orthogonal to the config layers above: layering decides *what your
+config is*, `work_tracking` decides *where plan/task state lives*.
+
+```json
+{
+  "work_tracking": {
+    "read_from": "worktree",
+    "write_to": "worktree",
+    "backend": "local"
+  }
+}
+```
+
+All three keys are optional; an **absent `work_tracking` block is byte-for-byte
+today's behaviour** — the per-worktree working copy is the source of truth.
+
+| Key | Values | Meaning |
+|---|---|---|
+| `read_from` | `worktree` (default) · `master` | Where coordination state is **read**. `master` reads the canonical ref (`origin/<default-branch>`) via `git show` — a read-side-only shim. |
+| `write_to` | `worktree` (default) · `state-ref` | Where a status transition is **written**. `state-ref` *additionally* mirrors each transition to `refs/agents/state` via compare-and-swap (the working-copy write still happens). |
+| `backend` | `local` (default) · `git-ref` · *(reserved: `kg`, `cloudflare-do`, `jira`, `linear`)* | The coordination-state **storage plane** (the D8/D9 scope ladder). Reserved values validate but resolve to `local` until implemented. |
+
+### Enabling `backend=git-ref`
+
+```json
+{ "work_tracking": { "backend": "git-ref" } }
+```
+
+With the git-ref backend active:
+
+- **Reads project from `refs/agents/state`.** Plan/task state is projected from
+  the per-task blobs on the state ref (`.agents/workflow/plans/<id>/tasks/<taskID>.yaml`),
+  reconstructing the canonical `TASKS.yaml` view with byte fidelity. When a plan
+  has no blobs on the ref yet, reads gracefully fall back to the working copy.
+- **Read-your-writes safe.** `refs/agents/state` is a *local* ref updated
+  in-process, so a write is immediately visible to the next read in the same
+  worktree — unlike the `read_from=master` shim (see the footgun below).
+- **The write mirror is implied.** You do **not** also need `write_to=state-ref`;
+  under `backend=git-ref`, every transition CAS-updates the ref.
+- **Plan-state decoupled from code-branch commits.** The state ref is orthogonal
+  to the code branch — worktrees on any feature branch or detached HEAD resolve
+  status against the one ref, and it is **never merged into the default branch**
+  (a parallel lineage, like `refs/notes/*`). Coordination state stops riding on
+  code-branch commits.
+- **Agents still read the projected files.** The backend changes the *source of
+  truth*, not the interface: agents and skills keep reading the working-copy
+  `TASKS.yaml` / `PLAN.yaml` the projection materialises.
+
+`da workflow status` (and `orient`) surface the active `backend` and whether
+`refs/agents/state` is the live coordination SOT, so operators can see which
+store is authoritative at a glance.
+
+**Recommendation.** For **worktree-platform** work — many concurrent worktrees
+coordinating on shared plan state — `git-ref` is the recommended upgrade from
+`local`: it gives cross-worktree, read-your-writes-safe coordination without a
+merge conflict on `TASKS.yaml`.
+
+### The default stays `local` — flipping it is gated
+
+> [!IMPORTANT]
+> The **default backend remains `local`.** `backend=git-ref` is strictly
+> **opt-in** per project via `work_tracking.backend`. Changing the *default* to
+> git-ref for everyone is a separate, gated cutover tracked by
+> [`.agents/active/state-ref-transition.md`](../.agents/active/state-ref-transition.md)
+> — an atomic-cutover plan with rollback and validation steps. This document
+> describes the **opt-in**, not a default change.
+
+### Footgun: `read_from=master` is not read-your-writes safe
+
+`read_from=master` reads coordination state from the remote-tracking canonical
+ref (`origin/<default-branch>`). Because that ref only advances when you push and
+fetch, a status transition you just wrote locally is **not** visible to the next
+`master` read until it lands upstream — a stale-read footgun that has bitten
+operators (a write appears to "not take"). `backend=git-ref` **supersedes** this
+shim: it takes precedence over `read_from=master` and, because the state ref is a
+local ref, reads are always read-your-writes safe. Prefer `backend=git-ref` over
+`read_from=master` for shared coordination.
 
 ---
 
@@ -541,6 +627,7 @@ $ echo $?
 | `packages` | array of `string` | Ref form `source-id:path@version`; resolves to `artifact` units; valid from any source (git/local/http/oci). |
 | `features` | object (map-merge) | Feature-flag overrides. |
 | `execution_profile` | object (map-merge) | Execution shape by `app_type` — see [Config Relevance](./CONFIG_RELEVANCE.md). |
+| `work_tracking` | object `{ read_from?, write_to?, backend? }` | Coordination-state plane. `read_from` ∈ `worktree`/`master`; `write_to` ∈ `worktree`/`state-ref`; `backend` ∈ `local`/`git-ref` (reserved: `kg`/`cloudflare-do`/`jira`/`linear`). Default is the per-worktree working copy — see [Work tracking](#work-tracking-coordination-state-plane). |
 
 ### Layer stack (lowest → highest precedence)
 
