@@ -422,7 +422,7 @@ tasks:
       app_type: go-cli
     - id: t6a-parity-surfaces
       title: CRG native parity surfaces for flows communities and postprocess
-      status: pending
+      status: completed
       depends_on:
         - t4-crg-dual-read
       blocks:
@@ -437,21 +437,21 @@ tasks:
       app_type: go-cli
     - id: t6b-gate-automation
       title: Promote CRG parity matrix and behavior harness into CI
-      status: pending
+      status: completed
       depends_on:
         - t6a-parity-surfaces
       blocks:
         - t6d-final-bridge-deletion
       owner: dot-agents
       write_scope:
-        - .github/workflows/ci.yml
+        - .github/workflows/test.yml
         - testdata/crg-parity/
       verification_required: true
       notes: 'Wire corrected parity matrix + behavior-preservation harness into CI so the decommission soak clock can start. Starts the evidence clock; does NOT claim the multi-week gate satisfied. Anti-scope: no bridge deletion; do not mark soak complete in the same change that introduces the gate.'
       app_type: go-cli
     - id: t6c-consumer-audit
       title: Audit bridge consumers and cutover readiness
-      status: pending
+      status: completed
       depends_on:
         - t4-crg-dual-read
       blocks:
