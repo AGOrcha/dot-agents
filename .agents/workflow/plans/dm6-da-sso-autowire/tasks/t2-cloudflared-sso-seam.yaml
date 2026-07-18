@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: dm6-da-sso-autowire
+order: 1
+task:
+    id: t2-cloudflared-sso-seam
+    title: CF Access JWT acquisition seam (cloudflared access + paste fallback)
+    status: pending
+    depends_on:
+        - docs-starlight-migration/dm6-agent-internal-access
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/docsaccess/
+    verification_required: true
+    notes: |-
+        Implement the SSO leg per spec section 2 (two-horizon). NEAR-TERM = Option A: obtain a CF Access app JWT by
+        shelling to `cloudflared access login <app-url>` then `cloudflared access token --app=<app-url>`; detect
+        cloudflared absence and degrade to a paste-fallback (Option C) + install hint; never crash. CRITICAL: put the
+        acquirer behind a swappable interface-DI seam (a JWTAcquirer interface; the exec runner injected) so the
+        command/consumer code is unchanged when the mechanism becomes Option B (loopback browser->127.0.0.1 callback,
+        the gh/VS Code/Claude pattern) on the future daemon + auth-proxy. JWT held only for the provision call, never
+        persisted by da, never logged (section 7). OQ-1: A now, B later via the seam.
+    app_type: go-cli

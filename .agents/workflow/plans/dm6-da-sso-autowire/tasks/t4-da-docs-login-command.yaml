@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: dm6-da-sso-autowire
+order: 3
+task:
+    id: t4-da-docs-login-command
+    title: da docs login command (interactive default + paste + status modes)
+    status: pending
+    depends_on:
+        - t1-credstore-write-path
+        - t2-cloudflared-sso-seam
+        - t3-provision-client
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/
+    verification_required: true
+    notes: |-
+        New `da docs login` (sibling to obs `da observability login`); NOT a flag on init/refresh (section 3). Wires
+        t2 SSO -> t3 provision -> t1 store. Supplies a sanitized device suffix (hostname or stable local device id) so
+        the minted token is per-device (section 6). Modes: interactive default; paste-JWT fallback; status/check
+        (reports whether stored creds exist, authenticate, AND time-to-expiry per the TTL, mints nothing); local-clear
+        (remove the two ids). Honor global dry-run/yes/verbose/force; dry-run mints+writes nothing but describes the
+        flow. Output prints only the token NAME + the credential ids, never client_secret / JWT (section 3 UX,
+        done-criteria 7,10). Persist the non-secret expiry so status can warn before expiry. Register in commands/root.go.
+    app_type: go-cli

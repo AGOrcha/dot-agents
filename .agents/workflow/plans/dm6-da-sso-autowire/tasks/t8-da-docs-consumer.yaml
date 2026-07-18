@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: dm6-da-sso-autowire
+order: 6
+task:
+    id: t8-da-docs-consumer
+    title: da docs get/sync consumer + gated internal .md endpoints
+    status: pending
+    depends_on:
+        - t4-da-docs-login-command
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/
+        - internal/docsaccess/
+        - docs/web/
+    verification_required: true
+    notes: |-
+        Close the consumer gap (section 3a): the attach client (#83) has no caller today, so a provisioned token does
+        nothing. Add `da docs get <path>` / `da docs sync` that fetch the gated /internal/* surface THROUGH da so the
+        attach client adds the service-token headers (raw agent WebFetch is unauthenticated -> 401). Extend dm4's .md
+        emission to also produce the INTERNAL pages raw markdown behind the dm5 gate (agent-readable shape; public .md
+        surface unchanged). HTTPS-only, DA_DOCS_HOST override, fail-loud on missing creds; on 401 (expired/stale per
+        TTL) point at `da docs login`. Tests: httptest consumer with injected attach client; gated .md endpoint
+        excludes from public, included under /internal/. Done-criteria 2.
+    app_type: go-cli

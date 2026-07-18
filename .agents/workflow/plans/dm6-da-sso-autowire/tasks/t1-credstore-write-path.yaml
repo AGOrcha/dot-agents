@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: dm6-da-sso-autowire
+order: 0
+task:
+    id: t1-credstore-write-path
+    title: Credstore write path for docsaccess ids (atomic, auto-wire)
+    status: pending
+    depends_on:
+        - docs-starlight-migration/dm6-agent-internal-access
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/credstore/
+        - internal/docsaccess/
+    verification_required: true
+    notes: |-
+        Add/confirm an all-or-nothing write of the pair cf-access-client-id / cf-access-client-secret into the
+        existing encrypted, keychain-wrapped credstore (no new format/file/loader). Mirror the attach client's
+        "never half-set" invariant: both ids written or neither. Prove auto-wire with a test that writes via this
+        path then resolves through the standard loader chain and feeds internal/docsaccess.Decorate successfully.
+        Spec section 5. No new privileged key in the binary (section 7).
+    app_type: go-cli

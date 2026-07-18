@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: dm6-da-sso-autowire
+order: 4
+task:
+    id: t5-init-refresh-hints
+    title: 'init/refresh: non-fatal unprovisioned hint; never mint or prompt'
+    status: pending
+    depends_on:
+        - t4-da-docs-login-command
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/internal/lifecycle/
+    verification_required: true
+    notes: |-
+        Confirm da init and da refresh stay non-interactive and never mint (section 5). At most surface a non-fatal
+        hint pointing at `da docs login` when docsaccess creds are absent; init/refresh still succeed. A missing-cred
+        error on an /internal/* fetch stays fail-loud (existing attach-client behavior) with the same hint. Tests
+        assert no browser/prompt and that absence is hint-not-hang. Done-criteria 3.
+    app_type: go-cli

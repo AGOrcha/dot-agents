@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: dm6-da-sso-autowire
+order: 5
+task:
+    id: t6-worker-per-device-rotate-ttl
+    title: 'Worker route: per-device naming + delete-then-create rotate + TTL'
+    status: pending
+    depends_on:
+        - t4-da-docs-login-command
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/src/worker.js
+        - docs/web/tests/worker.test.js
+        - docs/web/wrangler.jsonc
+    verification_required: true
+    notes: |-
+        OQ-2 RESOLVED = per-device model (section 6). Extend the merged dm6 /internal/provision route (#93):
+        (a) accept an optional client-supplied device suffix in the POST body, sanitize it, and append to the
+        JWT-derived user slug -> agorcha-agents-<user-slug>-<device> (user part still ONLY from the verified JWT, never
+        client-supplied, to prevent impersonation); (b) delete-then-create that exact name so re-provision on a device
+        rotates rather than duplicates (list service_tokens, delete the match, then create); (c) set a server-enforced
+        duration (~720h / 30 days) on the mint call so secrets expire (freshness + leak blast-radius) — TTL as a Worker
+        const/var, NOT client-overridable. Confirm the CF API duration format + any min/max against the live API. Add
+        worker tests for device-suffix derivation, rotate (delete-then-create) and the duration in the mint body.
+        Tokens accumulate across devices by design; revoke = delete by name/prefix.
+    app_type: docs

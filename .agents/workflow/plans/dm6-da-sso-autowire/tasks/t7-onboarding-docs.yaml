@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: dm6-da-sso-autowire
+order: 7
+task:
+    id: t7-onboarding-docs
+    title: Developer onboarding docs for internal-docs self-provision
+    status: pending
+    depends_on:
+        - t4-da-docs-login-command
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/
+    verification_required: false
+    notes: |-
+        Document the end-to-end developer flow (run da docs login -> agents read /internal/*), the cloudflared
+        prerequisite + paste fallback, the status/check and local-clear modes, and the rotation/revocation story from
+        t6. Lives on the internal docs surface. Section 11 done-criteria become the doc's "verify it worked" steps.
+    app_type: docs

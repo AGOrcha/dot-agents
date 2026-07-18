@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: dm6-da-sso-autowire
+order: 2
+task:
+    id: t3-provision-client
+    title: 'Provision HTTP client: POST /internal/provision, status mapping'
+    status: pending
+    depends_on:
+        - docs-starlight-migration/dm6-agent-internal-access
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/docsaccess/
+    verification_required: true
+    notes: |-
+        HTTPS-only client (ErrInsecureScheme parity, section 7) that POSTs the JWT to /internal/provision on the
+        configured docs host (default agorcha.dev, override DA_DOCS_HOST) and parses {client_id, client_secret, name}.
+        Map each Worker status to a distinct, actionable, secret-free error: 401 re-login, 422 no-identity, 503
+        mint-unconfigured (server gap), 502 backend failure (surface reason code only). httptest-driven tests for every
+        branch. Contract = PR #93 worker.js response/status shape. Spec sections 4, 9.
+    app_type: go-cli
