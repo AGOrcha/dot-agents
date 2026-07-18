@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: config-transitive-layering
+order: 0
+task:
+    id: org-config-spec-transitive-scope
+    title: Spec org→team→repo transitive extends + source scope/owner routing
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - .agents/workflow/specs/org-config-resolution/design.md
+        - .agents/workflow/specs/config-distribution-model/design.md
+        - docs/LAYERED_CONFIG_GUIDE.md
+    verification_required: true
+    notes: 'Spec repo→team→org transitive extends with POST-ORDER precedence (org before team before repo-local); define sources[].scope (public|org|team|repo) + owner as ROUTING metadata (NOT authority — authority stays authority_grants; imported layers default AuthPublic per authority_apply.go:44-103). Worked PA example: repo declares ONLY the PA source, inherits Roos org transitively. Design lives in payout:platform-config-layering.plan.md §Schema Api Shape.'

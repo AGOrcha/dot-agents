@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: config-transitive-layering
+order: 2
+task:
+    id: config-transitive-extends-resolver
+    title: 'CORE: resolve layer-declared sources/extends transitively'
+    status: pending
+    depends_on:
+        - config-source-scope-schema
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - internal/config/resolver.go
+        - internal/config/resolver_test.go
+        - internal/config/resolver_extra_test.go
+        - internal/config/lock_units.go
+        - internal/config/units_lock_wiring_test.go
+    verification_required: true
+    notes: 'THE key gap. Current LayeredResolver resolves only repo-local extends (config-v2-migration p1b). Add resolveExtendsGraph: for each extends entry, decode the fetched layer''s OWN sources+extends, extend a child sourceEnv, recurse; return CHILDREN FIRST (org before team before repo-local); dedupe by ref+digest (fail loudly on ref→different-digest); detect cycles (A→B→A, don''t silently drop); LOCK all transitive layer units (writeUnitsLock) so offline/locked reproduces the full stack. Algorithm+types in payout:platform-config-layering.plan.md §Schema Api Shape.transitive_extends_api.'

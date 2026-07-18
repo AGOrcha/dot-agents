@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: config-transitive-layering
+order: 1
+task:
+    id: config-source-scope-schema
+    title: Add Source.Scope/Owner typed schema surface
+    status: pending
+    depends_on:
+        - org-config-spec-transitive-scope
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+        - internal/config/agentsrc_test.go
+        - internal/config/schema_roundtrip_test.go
+    verification_required: true
+    notes: 'Source.Scope (enum public|org|team|repo) + Source.Owner (string) as ROUTING metadata. schema $defs.source.properties.scope enum + owner. Round-trip; legacy v1 sources (no scope) byte-stable. Comment: routing, not authority. Target agentsrc.schema.json:440-510.'

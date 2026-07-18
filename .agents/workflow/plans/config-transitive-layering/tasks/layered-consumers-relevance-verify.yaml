@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: config-transitive-layering
+order: 3
+task:
+    id: layered-consumers-relevance-verify
+    title: Make relevance/verify/verifier dispatch read layered snapshots
+    status: pending
+    depends_on:
+        - config-transitive-extends-resolver
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - commands/config/relevance.go
+        - commands/config/explain.go
+        - commands/workflow/
+        - internal/config/precondition_resolve.go
+        - docs/CONFIG_RELEVANCE.md
+    verification_required: true
+    notes: da config relevance resolves through legacy loadFlatSnapshot (commands/config/explain.go) — product-defaults→user-local→repo-local, NEVER extends → org-through-team app_types show matched:false. Migrate relevance + prompt-driven verifier dispatch onto the layered/locked resolver. SHARED prerequisite for worker-bundle-lessons:load-lessons-2. Consumer gap documented in payout/po-agents-config/README.md:103-108.
