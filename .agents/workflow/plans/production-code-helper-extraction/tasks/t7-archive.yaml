@@ -1,0 +1,44 @@
+schema_version: 1
+plan_id: production-code-helper-extraction
+order: 5
+task:
+    id: t7-archive
+    title: Open follow-up PR; verify gate; archive plan
+    status: pending
+    depends_on:
+        - t2-graphstore-helpers
+        - t3-resource-plan-helper
+        - t4-commands-cli-family
+        - t5-platform-mcp-settings
+    blocks: []
+    owner: ""
+    write_scope:
+        - .agents/history/production-code-helper-extraction/
+    verification_required: false
+    notes: |-
+        Tier: T1 (closeout).
+
+        Open the follow-up PR off master with all extraction
+        commits stacked. Verify:
+          * mcp__sonarqube__get_project_quality_gate_status reports
+            Cluster E.other contribution reduced by >= 60%, OR
+            new_duplicated_lines_density below 3% (latter only if
+            go-test-fixture-extraction has also landed).
+          * go test ./... passes
+          * Cross-link to ADR-0008 + the companion plan in the PR
+            description so the dedup story is auditable end-to-end.
+
+        On merge: archive plan via
+          dot-agents workflow plan archive --plan production-code-helper-extraction.
+
+        Anti-scope: do NOT bundle go-test-fixture-extraction commits
+        into the same PR. Cluster D and Cluster E.other are
+        independent plans by design (ADR-0008).
+
+        ISP routing:
+          mode: direct (closeout)
+          verifier: smoke (gate snapshot + go test)
+          review: closeout
+          output contract: history dir populated; ADR-0008 +
+                           companion plan linked from PR description
+    app_type: workflow

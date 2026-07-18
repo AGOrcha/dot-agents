@@ -1,0 +1,53 @@
+schema_version: 1
+plan_id: production-code-helper-extraction
+order: 1
+task:
+    id: t2-graphstore-helpers
+    title: Extract graphstore shared helpers (Group GS)
+    status: completed
+    depends_on:
+        - t1-triage-and-classify
+    blocks: []
+    owner: ""
+    write_scope:
+        - internal/graphstore/sqlite.go
+        - internal/graphstore/postgres.go
+        - internal/graphstore/mcp_server.go
+        - internal/graphstore/
+    verification_required: true
+    notes: |-
+        Tier: T2 (compound — three files; the cross-pair sqlite ↔
+        postgres duplication is the largest single cluster in this
+        plan at ~95 dup lines).
+
+        Implements EXTRACT decisions from T1 for Group GS. Likely
+        shapes (subject to T1's resolution):
+          * scanGraphRows(rows, cols) — collapses the ~80-line
+            row-scan duplication between sqlite and postgres.
+          * upsertGraphRow(...) or similar — collapses the ~15-line
+            block at sqlite:459 ↔ postgres:570.
+          * dispatchKGTool(...) — handles mcp_server.go's
+            tool-dispatch repetition.
+
+        Per file: one commit. Hard test per commit:
+          go test ./internal/graphstore/...
+
+        Wire-format watch: if any helper touches SQL parameter
+        emission, reviewer compares the emitted SQL pre/post for
+        each driver. SQL parameter reordering is silent and breaks
+        prepared-statement caching.
+
+        Anti-scope: do NOT touch graphstore consumers in
+        commands/kg/ in this task. Production-code internal only.
+
+        ISP routing:
+          mode: direct (storage code is subtle; sequential
+                        processing reduces flake risk)
+          verifier: smoke (go test ./internal/graphstore/...)
+          review: code review (SQL parity check) + integration
+                   (mcp_server tool dispatch parity)
+          bundle-context (if fanout): T1's classification, the
+                                       three files, existing
+                                       graphstore_test fixtures
+          output contract: ~150-200 dup lines removed from Group GS
+    app_type: code-fix

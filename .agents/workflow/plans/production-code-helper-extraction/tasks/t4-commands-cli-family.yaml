@@ -1,0 +1,55 @@
+schema_version: 1
+plan_id: production-code-helper-extraction
+order: 3
+task:
+    id: t4-commands-cli-family
+    title: Extract commands/{settings,mcp,rules,...} CLI helpers (Group CMDS)
+    status: completed
+    depends_on:
+        - t1-triage-and-classify
+    blocks: []
+    owner: ""
+    write_scope:
+        - commands/settings.go
+        - commands/mcp.go
+        - commands/rules.go
+        - commands/import_plugins.go
+        - commands/explain.go
+        - commands/status.go
+        - commands/ux.go
+        - commands/skills.go
+        - commands/internal/cmdutil/
+    verification_required: true
+    notes: |-
+        Tier: T2 (compound — up to 8 files; T1 may narrow).
+
+        commands/{settings,mcp,rules}.go form a clear three-way
+        cross-duplication of cobra subcommand registration + write
+        boilerplate. Other commands/*.go entries are likely
+        independent self-duplications; T1 audit decides which to
+        extract vs accept.
+
+        Helpers land in commands/internal/cmdutil/ (new package)
+        unless T1 finds the right home is internal/projectsync (for
+        manifest-shaped helpers).
+
+        Per file: one commit. Hard test per commit: go test ./commands/.
+
+        commands/skills.go's residual: PR#10's E.promote work removed
+        most of its duplications; re-snap at T1 to confirm what
+        remains.
+
+        Anti-scope: do NOT change CLI surface (flags, exit codes,
+        UI text). Extraction is structural only.
+
+        ISP routing:
+          mode: fanout-amenable per file pair (settings/mcp/rules
+                 group is one task; others are independent)
+          verifier: smoke (go test ./commands/) + manual CLI
+                     spot-check on one extracted command
+          review: code review (CLI surface preserved)
+          bundle-context (if fanout): T1's classification, the file
+                                       group, ExampleBlock and
+                                       cobra.Command precedents
+          output contract: ~150-200 dup lines removed from Group CMDS
+    app_type: code-fix

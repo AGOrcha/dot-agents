@@ -1,0 +1,40 @@
+schema_version: 1
+plan_id: production-code-helper-extraction
+order: 4
+task:
+    id: t5-platform-mcp-settings
+    title: Extract internal/platform/mcp_settings + plugins helper (Group MCP)
+    status: completed
+    depends_on:
+        - t1-triage-and-classify
+    blocks: []
+    owner: ""
+    write_scope:
+        - internal/platform/mcp_settings.go
+        - internal/platform/plugins.go
+    verification_required: true
+    notes: |-
+        Tier: T1 (compound — two files; smallest extract group).
+
+        mcp_settings.go and plugins.go share ~26+22 dup lines. T1
+        audit determines whether their shape overlaps with
+        commands/mcp.go (Group CMDS) — if so, extraction may be
+        merged into T4 with a cross-package helper. If not, this
+        task lands a small platform-level helper.
+
+        One or two commits depending on T1's decision. Hard test:
+          go test ./internal/platform/...
+
+        Anti-scope: do NOT touch mcp settings semantics; the
+        on-disk JSON wire format must be byte-identical pre/post.
+
+        ISP routing:
+          mode: direct (small, two-file)
+          verifier: smoke (go test ./internal/platform/...) +
+                     wire-format diff if helper touches JSON emission
+          review: code review (JSON parity)
+          bundle-context (if fanout): T1's classification, the two
+                                       files, group CMDS overlap
+                                       analysis
+          output contract: ~50 dup lines removed from Group MCP
+    app_type: code-fix

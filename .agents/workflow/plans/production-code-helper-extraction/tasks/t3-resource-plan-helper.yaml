@@ -1,0 +1,41 @@
+schema_version: 1
+plan_id: production-code-helper-extraction
+order: 2
+task:
+    id: t3-resource-plan-helper
+    title: Extract internal/platform/resource_plan.go bucket-listing helper (Group RP)
+    status: completed
+    depends_on:
+        - t1-triage-and-classify
+    blocks: []
+    owner: ""
+    write_scope:
+        - internal/platform/resource_plan.go
+    verification_required: true
+    notes: |-
+        Tier: T1 (single-file refactor; tightest single win).
+
+        resource_plan.go has three near-identical 18-26 line blocks
+        at lines 284, 337, 461 — the listScopedResourceDirs +
+        intent-construction pattern repeated per bucket. Single
+        helper (likely intentsFromBucket(bucket, manifestName,
+        targetRoot)) collapses all three.
+
+        One commit. Hard test:
+          go test ./internal/platform/...
+
+        Wire-format watch: ResourcePlan intent emission order
+        matters for downstream Execute(); helper must preserve
+        per-bucket ordering.
+
+        Anti-scope: do NOT touch BuildSharedAgentMirrorIntents or
+        the public API surface; refactor internals only.
+
+        ISP routing:
+          mode: direct (single-file)
+          verifier: smoke (go test ./internal/platform/...)
+          review: code review (intent ordering preserved)
+          bundle-context (if fanout): T1's classification, the
+                                       file's three offending blocks
+          output contract: ~70 dup lines removed from Group RP
+    app_type: code-fix

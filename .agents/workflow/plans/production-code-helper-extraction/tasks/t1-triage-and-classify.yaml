@@ -1,0 +1,65 @@
+schema_version: 1
+plan_id: production-code-helper-extraction
+order: 0
+task:
+    id: t1-triage-and-classify
+    title: Triage Cluster E.other groups; classify extract-vs-accept per group
+    status: completed
+    depends_on: []
+    blocks:
+        - t2-graphstore-helpers
+        - t3-resource-plan-helper
+        - t4-commands-cli-family
+        - t5-platform-mcp-settings
+    owner: ""
+    write_scope:
+        - .agents/workflow/specs/production-code-helper-extraction/design.md
+    verification_required: false
+    notes: |-
+        Tier: T1 (research + decision memo).
+
+        Concrete deliverable: design.md "Open questions" section
+        resolved, with each group classified one of:
+          * EXTRACT — viable shared helper; describe the helper's
+            intended package, signature, and which call sites it
+            replaces.
+          * ACCEPT — duplication is real but extraction is a net
+            negative (e.g. one-off pattern coincidence; helper would
+            need three+ knobs and obscure the call site). Record the
+            reasoning so a future audit doesn't re-litigate.
+
+        Steps:
+          1. Re-snapshot live Cluster E.other duplications via
+             mcp__sonarqube__search_duplicated_files +
+             get_duplications on the latest PR head. Counts in
+             design.md drift across pushes.
+          2. For each group (GS, RP, CMDS, MCP, TS), read the
+             reported duplicated blocks in the actual files. Confirm
+             the duplication is structural (same shape, different
+             nouns) vs accidental (same lines, different intent).
+          3. For EXTRACT groups, propose the helper API. For ACCEPT
+             groups, write the rationale.
+          4. Decide intra-plan ordering. RP is likely smallest single
+             win; GS is likely largest. Check whether any extraction
+             depends on another (e.g. commands/* CLI helper might
+             depend on platform helper).
+
+        Hard test: design.md "Open questions" empty; every group has
+        a classification + rationale; T2-T6 task lists update to
+        reflect the actual extraction set.
+
+        Anti-scope: do NOT begin extracting in this task. Triage only.
+        If the audit reveals additional groups not currently listed
+        (e.g. a fourth subset surfaces post-PR#10 merge), surface via
+        fold-back rather than expanding scope here.
+
+        ISP routing:
+          mode: direct (research + spec edit)
+          verifier: doc review
+          review: design quality
+          bundle-context (if fanout): findings.md Cluster E table,
+                                       the listed files, projectsync
+                                       helpers as a precedent
+          output contract: design.md updated with per-group
+                           classification; T2-T6 task scopes adjusted
+    app_type: research
