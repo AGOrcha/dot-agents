@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: first-class-resource-docs
+order: 4
+task:
+    id: rd-workflow-catalog-gaps
+    title: 'Workflow catalog: add absent commands to README + internal-commands reference'
+    status: pending
+    depends_on:
+        - rd-config-guide
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/
+        - README.md
+    verification_required: false
+    notes: |-
+        Audit §3: several workflow commands are missing from the README command catalog — `contract`
+        (contract.go), `resolve-prompt` (profile_prompt.go), `slots` (eligible_accounting.go), `blocked-on`
+        (blocked_on.go). Add them to the README workflow tables. Separately, the maintainer-internal/automation
+        commands (workflow hook-sentinel/hook-outcome/commit/archive-orphans, kg serve, kg lockfile) get a short
+        "automation / internal commands" REFERENCE entry (these are skill/hook-driven, not run by hand) — NOT
+        end-user guides. Verify each command exists via da workflow|kg --help.
+    app_type: docs

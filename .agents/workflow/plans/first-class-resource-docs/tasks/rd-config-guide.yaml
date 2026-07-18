@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: first-class-resource-docs
+order: 0
+task:
+    id: rd-config-guide
+    title: Layered config guide (config-v2) — the exemplar template
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/
+    verification_required: true
+    notes: |-
+        DONE pending #110 merge (PR #110, open + green) (docs/LAYERED_CONFIG_GUIDE.md, surfaced via PUBLIC_PAGES under Guides,
+        README-linked, build:public passes). Sets the shared first-class template
+        (Overview/Model/Commands/Worked-example/Reference) the other gap tasks follow. config is GOOD.
+    app_type: docs

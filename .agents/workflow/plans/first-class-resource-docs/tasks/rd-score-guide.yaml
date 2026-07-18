@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: first-class-resource-docs
+order: 2
+task:
+    id: rd-score-guide
+    title: 'Score guide: run and read agent-run outcome scores'
+    status: pending
+    depends_on:
+        - rd-config-guide
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/
+    verification_required: true
+    notes: |-
+        score (commands/score.go: run/iteration/session) is backed only by OUTCOME_SCORING_RUBRIC.md (a rubric/spec
+        that is NOT in PUBLIC_PAGES) + one README row — effectively undocumented for site visitors. Write a
+        task-oriented guide (compute a run score, query iteration/session scores, read the output) following the #110
+        template; Reference target: OUTCOME_SCORING_RUBRIC.md. Surface in PUBLIC_PAGES + README. Verify vs da score --help.
+    app_type: docs

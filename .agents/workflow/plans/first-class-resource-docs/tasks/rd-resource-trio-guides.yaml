@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: first-class-resource-docs
+order: 1
+task:
+    id: rd-resource-trio-guides
+    title: Task-oriented guides for rules / mcp / settings (contract-only today)
+    status: pending
+    depends_on:
+        - rd-config-guide
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/
+    verification_required: true
+    notes: |-
+        The clearest user-facing gap (audit §3). rules (commands/internal/rules/), mcp (commands/internal/mcp/),
+        settings (commands/internal/settings/) each have ONLY RESOURCE_COMMAND_CONTRACT.md (implementer contract) +
+        one generic README row under "Canonical Resource Inspection" — no task-oriented guide, unlike hooks (full
+        HOOKS.md). Write a guide per family (or one combined resource-management guide) following the #110 template:
+        what each resource is, declaring it, the per-platform emit (cross-link PLATFORM_DIRS_DOCS for rules/mcp
+        locations), the list/show/remove surface. Reference target: RESOURCE_COMMAND_CONTRACT.md. Surface in
+        PUBLIC_PAGES + README. Verify against da rules|mcp|settings --help.
+    app_type: docs

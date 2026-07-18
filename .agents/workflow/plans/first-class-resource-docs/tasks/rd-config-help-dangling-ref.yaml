@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: first-class-resource-docs
+order: 3
+task:
+    id: rd-config-help-dangling-ref
+    title: Fix dangling docs/CONFIG_DISTRIBUTION_MODEL.md reference in config help
+    status: pending
+    depends_on:
+        - rd-config-guide
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/config/
+    verification_required: true
+    notes: |-
+        `da config ... --help` cites docs/CONFIG_DISTRIBUTION_MODEL.md, which does NOT exist in docs/ (audit §3). Fix
+        the dead pointer: re-point the help text to the shipped docs/LAYERED_CONFIG_GUIDE.md (PR #110). Small code
+        change in commands/config (help strings). Grep the package for the dead path; update any test asserting the
+        old string. Verify go build + the config command tests; coverage gate on touched files.
+    app_type: go-cli
