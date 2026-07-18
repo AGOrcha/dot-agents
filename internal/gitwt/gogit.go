@@ -230,15 +230,38 @@ func assertLinkedWorktree(path string) error {
 // real error and is returned as such so callers do not mistake it for
 // "never existed."
 func (m *manager) adminDir(name string) (string, error) {
-	fs := m.repo.Storer.(interface{ Filesystem() billy.Filesystem }).Filesystem()
-	path := filepath.Join(fs.Root(), "worktrees", name)
-	if _, err := fs.Lstat(filepath.Join("worktrees", name)); err != nil {
+	path := filepath.Join(m.commonGitDir(), "worktrees", name)
+	if _, err := os.Lstat(path); err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf(errFmtWrap, ErrWorktreeNotFound, name)
 		}
 		return "", fmt.Errorf("gitwt: stat admin dir for worktree %q: %w", name, err)
 	}
 	return path, nil
+}
+
+// commonGitDir returns the SHARED git directory (the main worktree's .git) that
+// owns worktrees/<name> admin metadata for every linked worktree. When the
+// manager was opened from a LINKED worktree, the storer filesystem root is that
+// worktree's per-worktree git dir (.git/worktrees/<self>), whose `commondir`
+// file points at the shared dir; resolving it here stops adminDir from
+// double-nesting worktrees/<name> under the per-worktree dir (the failure seen
+// running `da worktree create` from inside a linked worktree). From the main
+// worktree there is no `commondir` file and the storer root already is shared.
+func (m *manager) commonGitDir() string {
+	fs := m.repo.Storer.(interface{ Filesystem() billy.Filesystem }).Filesystem()
+	root := fs.Root()
+	data, err := os.ReadFile(filepath.Join(root, "commondir"))
+	if err != nil {
+		return root
+	}
+	// A missing commondir is handled above; an empty/whitespace one falls through
+	// to Join(root, "") == root below, so no explicit empty-string guard is needed.
+	common := strings.TrimSpace(string(data))
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(root, common)
+	}
+	return filepath.Clean(common)
 }
 
 // worktreeDir resolves the working-tree directory for a linked worktree by

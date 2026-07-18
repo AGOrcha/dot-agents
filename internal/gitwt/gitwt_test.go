@@ -621,3 +621,65 @@ func assertCommitAll(t *testing.T, wt Worktree, path string) {
 		t.Fatalf("after commit -a worktree should be clean: %v", st)
 	}
 }
+
+// TestManagerFromLinkedWorktreeUsesSharedGitDir reproduces the dogfood failure:
+// a Manager opened from a LINKED worktree (as `da worktree` runs when invoked
+// inside a worktree) must resolve worktree admin metadata against the SHARED git
+// dir, not the per-worktree git dir — otherwise base-ref and registry paths
+// double-nest under .git/worktrees/<self>/worktrees/... and reads/writes miss.
+func TestManagerFromLinkedWorktreeUsesSharedGitDir(t *testing.T) {
+	f := newFixture(t)
+	if err := f.mgr.AddBranch("alpha", f.wtPath("alpha"), f.base); err != nil {
+		t.Fatalf("AddBranch: %v", err)
+	}
+	// Open a fresh Manager rooted at the LINKED worktree (not the main repo).
+	linked, err := NewManager(f.wtPath("alpha"))
+	if err != nil {
+		t.Fatalf("NewManager(linked): %v", err)
+	}
+	m := linked.(*manager)
+
+	// adminDir must resolve to the SHARED <main>/.git/worktrees/alpha and exist
+	// (the bug produced .git/worktrees/alpha/worktrees/alpha, which does not).
+	got, err := m.adminDir("alpha")
+	if err != nil {
+		t.Fatalf("adminDir from linked worktree: %v", err)
+	}
+	wantMain, err := f.mgr.(*manager).adminDir("alpha")
+	if err != nil {
+		t.Fatalf("adminDir from main: %v", err)
+	}
+	if got != wantMain {
+		t.Fatalf("adminDir(linked)=%q, want shared %q", got, wantMain)
+	}
+
+	// RecordBaseRef (the exact call that failed in the dogfood) must round-trip
+	// via the shared dir: recorded from the linked manager, read from the main.
+	if err := linked.RecordBaseRef("alpha", f.base); err != nil {
+		t.Fatalf("RecordBaseRef from linked worktree: %v", err)
+	}
+	if ref, err := f.mgr.BaseRef("alpha"); err != nil || ref != f.base {
+		t.Fatalf("BaseRef(main) after linked RecordBaseRef = %v, %v; want %v", ref, err, f.base)
+	}
+
+	// Registry roster/sidecar (gitDir) must likewise use the shared dir: a record
+	// created via the linked-worktree manager is visible from the main-repo one.
+	regLinked, err := NewRegistry(linked, time.Hour)
+	if err != nil {
+		t.Fatalf("NewRegistry(linked): %v", err)
+	}
+	if _, err := regLinked.Create("alpha", Metadata{Purpose: "dogfood"}); err != nil {
+		t.Fatalf("Create via linked worktree: %v", err)
+	}
+	regMain, err := NewRegistry(f.mgr, time.Hour)
+	if err != nil {
+		t.Fatalf("NewRegistry(main): %v", err)
+	}
+	meta, err := regMain.Get("alpha")
+	if err != nil {
+		t.Fatalf("Get from main after linked Create: %v", err)
+	}
+	if meta.Purpose != "dogfood" {
+		t.Fatalf("roster/sidecar not shared across checkouts: got purpose %q", meta.Purpose)
+	}
+}
