@@ -1,0 +1,100 @@
+schema_version: 1
+plan_id: git-ref-work-backend
+tasks:
+    - id: spec-git-ref-backend
+      title: 'Spec: git-ref backend + read-from-master (amend storage-abstraction §9)'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/design.md
+      verification_required: false
+      notes: 'DONE (this kg-ideate run): appended §9 to work-tracking-storage-abstraction/design.md — D9 git-ref WorkStore backend, D10 (state ref NOT merged to default branch; ref↔remote sync only; optional one-way audit snapshot), §3B compliance, read-from-master shim, commit-scope resolution. Additions only; D1-D8 unchanged (single-source lesson).'
+    - id: read-from-master-shim
+      title: 'read-from-master shim: resolve task-state from the canonical ref, not the worktree copy'
+      status: completed
+      depends_on:
+        - spec-git-ref-backend
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - commands/workflow/plan_task.go
+        - commands/workflow/eligible_accounting.go
+        - commands/workflow/next.go
+        - internal/config/agentsrc.go
+        - commands/config/
+      verification_required: true
+      notes: 'Add work_tracking.read_from = worktree|master. When master, loadCanonicalTasks (plan_task.go:508) + the scout''s eligibility/next read resolve TASKS.yaml from the canonical ref / origin/<default-branch> (git show), NOT the per-worktree working copy; writes land as today. Read-side-only; kills the worktree-isolation re-dispatch storm (lesson worktree-isolation-defeats-status-tracking; done-criterion #2). Ship FIRST — cheapest high-value unblock.'
+      app_type: go-cli
+    - id: git-ref-state-ref-write
+      title: 'Write path: commit transitions to refs/agents/state via update-ref CAS'
+      status: pending
+      depends_on:
+        - read-from-master-shim
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - commands/workflow/plan_task.go
+        - internal/gitwt/
+        - internal/agentslock/
+      verification_required: true
+      notes: Status transitions write the changed state file(s) to refs/agents/state via atomic compare-and-swap (git update-ref <ref> <new> <old>, retry-on-mismatch) — the interprocess-safe RMW today's agentslock only half-covers (only plan_task.go locks). Ref is orthogonal to the code branch (D9). No merge to default branch (D10).
+      app_type: go-cli
+    - id: per-task-state-files
+      title: Split coordination status into per-task state files under the ref
+      status: pending
+      depends_on:
+        - git-ref-state-ref-write
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - commands/workflow/plan_task.go
+        - commands/workflow/delegation.go
+      verification_required: true
+      notes: Split status out of monolithic TASKS.yaml into per-task state files under refs/agents/state so two workers transitioning DIFFERENT tasks never hit a line-level conflict (realizes D5 per-task lease/claim). CAS-retry is the fallback. Keep the projected TASKS.yaml view regenerable (§3B / D1' projection fidelity).
+      app_type: go-cli
+    - id: decouple-coordination-commits
+      title: Stop staging .agents/workflow/** into code-branch commits (fold commit-scope)
+      status: pending
+      depends_on:
+        - git-ref-state-ref-write
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - commands/workflow/commit_cmd.go
+        - commands/workflow/commit_pathset.go
+      verification_required: true
+      notes: 'With coordination state on refs/agents/state, task-state is no longer committed into code branches — the whole-store-vs-task-scoped commit problem (obs-da-workflow-commit-scope-safety.md) dissolves. RE-SCOPES/SUPERSEDES payout:worker-bundle-authoring/commit-1-task-pathset + commit-2-cli-scoped-mode: ''write to state ref'', not ''scope the code-branch commit''. Cross-repo relation — coordinate before implementing those.'
+      app_type: go-cli
+    - id: workstore-git-ref-backend
+      title: Expose git-ref as a WorkStore backend + work_tracking.backend config value
+      status: pending
+      depends_on:
+        - per-task-state-files
+        - decouple-coordination-commits
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+        - commands/config/
+        - commands/workflow/
+      verification_required: true
+      notes: 'Land git-ref behind the WorkStore interface (storage-abstraction D3) + add it to the D8 scope ladder: work_tracking.backend = local|git-ref|kg|cloudflare-do|jira|linear. Converges with the storage-abstraction end-state; graduation local->git-ref->kg with zero agent-facing change (§3B).'
+      app_type: go-cli
+    - id: document-and-default-git-ref
+      title: 'Adoption: document + recommend git-ref, surface the active backend so consumers know to use it'
+      status: pending
+      depends_on:
+        - workstore-git-ref-backend
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - docs/LAYERED_CONFIG_GUIDE.md
+        - docs/WORKFLOW.md
+        - commands/workflow/status.go
+        - internal/scaffold/home/starter/
+      verification_required: true
+      notes: Closes the 'as long as they know to use it' condition. (1) Document enabling work_tracking.backend=git-ref + read_from=master in LAYERED_CONFIG_GUIDE + the workflow docs; recommend git-ref as the default upgrade from local (D9). (2) da workflow status/health surface the ACTIVE work_tracking backend + state-ref so operators/orchestrators see which SOT is live (agents still just read the projected file per §3B — zero new semantics; this is operator-facing discoverability). (3) Seed the config default recommendation in the starter. Concurrency-safety ('safe concurrent updates') is gated separately by git-ref-state-ref-write (CAS) + per-task-state-files + the concurrent-transition regression test.
+      app_type: go-cli
