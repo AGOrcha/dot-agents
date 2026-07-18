@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+order: 6
+task:
+    id: dm6-agent-internal-access
+    title: Agent internal-docs access via service token (da CLI, auth-proxy-ready, auto-wired)
+    status: completed
+    depends_on:
+        - dm0-cf-access-bootstrap
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/
+        - commands/
+        - docs/
+    verification_required: true
+    notes: 'SPLIT: (1) CLIENT HALF — DONE (PR #83): internal/docsaccess attaches CF-Access-Client-Id/Secret on /internal/* docs-host requests, sourced from credstore; fail-loud on missing creds; 18 tests green. (2) MINTING ENDPOINT — STILL BLOCKED on a maintainer-provided scoped CF API token (Access: Service Tokens Edit) for the gated per-user CF Access service-token self-provision (POST /accounts/bfabaf5bb310ba98e4b95c74e88dd271/access/service_tokens) + auto-wire into da init/refresh. PER-USER model; revoke = delete the dev''s token (policy = any_valid_service_token). Depends dm0(applied) + dm5(hosts endpoint, PR #81). See plan.md dm6 + spec D8. DESIGN (decided 2026-06-22): minting = a /provision ROUTE on the dm5 Worker (one deploy, shares the JWT plumbing) — not a separate Worker; the scoped CF API token is the WORKER server secret, NEVER shipped in the binary (a mint-anything key is plaintext to a decompiler); bootstrap auth = CF Access SSO (da runs the CLI device-flow yielding the user''s CF Access identity) which the /provision route turns into a minted per-user service token (idempotent per login; revoke = delete it). Headless auth DEFERRED — CI could use GitHub OIDC (no shared secret), but a prod headless agent may need a different mechanism (TBD); do not build speculatively.'
+    app_type: go-cli

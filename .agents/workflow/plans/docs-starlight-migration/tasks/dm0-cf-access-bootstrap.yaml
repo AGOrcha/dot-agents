@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+order: 0
+task:
+    id: dm0-cf-access-bootstrap
+    title: CF Access app + agent service token as Terraform IaC
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - infra/cloudflare/
+        - docs/cf-access-bootstrap.md
+    verification_required: true
+    notes: 'PER-USER (decided). Terraform under infra/cloudflare/ (cloudflare ~>5, v5 zero_trust_access_*): agorcha-internal-docs app + maintainer email-allow policy + a Service Auth policy accepting ANY valid service token. Do NOT declare a static service token — tokens are minted per-developer at runtime by dm6. Outputs: audTag (dm5 verifies JWT aud) + account_id/zone_id (dm6 minting needs them). Maintainer runs terraform apply with CLOUDFLARE_API_TOKEN. See plan.md dm0 + spec D8.'
+    app_type: docs

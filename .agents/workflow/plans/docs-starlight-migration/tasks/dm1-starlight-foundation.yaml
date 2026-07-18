@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+order: 1
+task:
+    id: dm1-starlight-foundation
+    title: 'Starlight foundation: replace custom site, public IA from docs/** via glob loader + astro-mermaid'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/package.json
+        - docs/web/astro.config.mjs
+        - docs/web/src/content.config.ts
+        - docs/web/src/
+    verification_required: true
+    notes: Convert docs/web to Starlight. Public docs via Astro glob() loader from ../../docs (schema derives title from first H1 when frontmatter lacks one — D2, no content fork). Sidebar = the 4 public sections (D3). Add astro-mermaid (D7). Preserve the Cloudflare base logic (base '/' when DEPLOY_TARGET=cloudflare). Remove the old custom canonical/demos content routes (Starlight collections replace them; internal handled in dm3). Leverage the validated spike at /tmp/starlight-spike/docs/web-starlight as the basis. See plan.md dm1.
+    app_type: docs

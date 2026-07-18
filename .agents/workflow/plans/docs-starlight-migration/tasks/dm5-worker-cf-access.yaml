@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+order: 5
+task:
+    id: dm5-worker-cf-access
+    title: 'Worker: gate /internal/* behind CF Access (2nd asset binding) + deploy both outputs'
+    status: completed
+    depends_on:
+        - dm3-visibility-gating
+        - dm0-cf-access-bootstrap
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/src/worker.js
+        - docs/web/wrangler.jsonc
+        - .github/workflows/deploy-docs.yml
+    verification_required: true
+    notes: Worker serves ASSETS (dist) at /*, ASSETS_INTERNAL (dist-internal) at /internal/* ONLY after CF Access JWT verify (aud == audTag = 50476bf0ad28d003fbf4cfb1d36ed2554907f7f2e0e6c699f5fb4bc4b8d1a6ff, APPLIED 2026-06-22); /schemas/* unauth carve-out FIRST. wrangler.jsonc gains ASSETS_INTERNAL binding (-> dist-internal); deploy-docs.yml builds+deploys both. audTag belongs as a wrangler var (non-secret). D5/proposal 1.3+2.3. Depends dm3 + dm0(applied). See plan.md dm5.
+    app_type: docs

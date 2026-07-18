@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+order: 4
+task:
+    id: dm4-md-llms-endpoints
+    title: 'Agent-readable: [...slug].md raw-markdown endpoints + llms.txt (public only)'
+    status: completed
+    depends_on:
+        - dm1-starlight-foundation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/src/pages/
+    verification_required: true
+    notes: Add src/pages/[...slug].md.ts static endpoints emitting each PUBLIC page's raw markdown (reuse the collection raw body) with text/markdown; plus src/pages/llms.txt.ts index enumerating the public pages (title — <url>.md). Honor the base path. Exclude internal (respects dm3's public filter). D6. See plan.md dm4.
+    app_type: docs

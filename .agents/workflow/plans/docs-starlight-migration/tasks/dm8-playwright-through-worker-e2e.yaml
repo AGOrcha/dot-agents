@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+order: 9
+task:
+    id: dm8-playwright-through-worker-e2e
+    title: Browser-through-Worker e2e for the docs site (Playwright over Miniflare)
+    status: pending
+    depends_on:
+        - dm5-worker-cf-access
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/tests/
+        - docs/web/playwright.config.ts
+        - docs/web/package.json
+        - .github/workflows/deploy-docs.yml
+    verification_required: true
+    notes: 'FAST-FOLLOW (deferred, non-blocking — from the dm5/dm6 security review). The dm5 Miniflare smoke (worker.smoke.test.js) already gives the security-critical real-Worker 401 assertion on unauth /internal. This task adds a BROWSER-through-Worker layer: drive Playwright against the docs site served through the REAL Worker (Miniflare/wrangler dev with run_worker_first), so a CF-Access misconfig (login redirect / empty body on /internal) is caught at the UI layer too. Build via build:merged, serve through the Worker (not npx serve which bypasses it), assert unauth /internal/<page> -> 401 (treat 302/empty as failure) + a public page renders. Completeness/quality, not a leak risk (smoke covers the leak). Target master.'
+    app_type: docs

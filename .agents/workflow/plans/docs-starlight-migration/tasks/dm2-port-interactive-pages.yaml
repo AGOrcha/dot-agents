@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+order: 2
+task:
+    id: dm2-port-interactive-pages
+    title: Port interactive pages (Cytoscape graphs + JSON diagrams) into the Starlight project
+    status: completed
+    depends_on:
+        - dm1-starlight-foundation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/src/pages/graphs/
+        - docs/web/src/pages/diagrams/
+        - docs/web/src/components/
+        - docs/web/src/data/
+    verification_required: true
+    notes: Port the bespoke /graphs/* (Cytoscape ResourceGraph) and /diagrams/* (JSON-driven tier-model/lens-dispatch/verifier-registry) from the old custom site into the Starlight project as custom Astro routes + components + data; link them from the Concepts section. Hybrid per D1 — nothing interactive is lost. See plan.md dm2.
+    app_type: docs

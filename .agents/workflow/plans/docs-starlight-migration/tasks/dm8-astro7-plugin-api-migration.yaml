@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+order: 10
+task:
+    id: dm8-astro7-plugin-api-migration
+    title: Migrate deprecated Astro 7 markdown plugin API (remarkPlugins/rehypePlugins/remarkRehype)
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/astro.config.mjs
+        - docs/web/package.json
+    verification_required: true
+    notes: 'Surfaced by the Astro ^6→^7 bump (PR #239, merged 2026-06-30). Astro 7 deprecates markdown.remarkPlugins, markdown.rehypePlugins, and markdown.remarkRehype in favor of passing them to unified({...}) from @astrojs/markdown-remark directly. The build still SUCCEEDS on Astro 7 (green CI + local smoke = 30 pages), so this is non-urgent, but must land before the next Astro major. RISK: the astro-mermaid integration relies on these rehype hooks, so validate mermaid + the interactive graphs/diagrams still render after the migration (the UI e2e gate covers this). Also non-fatal: Vite chunk-size >500kB warnings (pre-existing, separate). Done = astro.config.mjs uses the unified() plugin form, no deprecation warnings in the build log, UI e2e + link-check green.'
+    app_type: docs

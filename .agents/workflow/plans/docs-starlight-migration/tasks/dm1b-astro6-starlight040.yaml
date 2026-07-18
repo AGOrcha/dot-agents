@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+order: 7
+task:
+    id: dm1b-astro6-starlight040
+    title: Upgrade docs/web to Starlight 0.40 + Astro 6.4 (+ dependabot ignore astro majors)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/package.json
+        - docs/web/package-lock.json
+        - docs/web/astro.config.mjs
+        - docs/web/src/
+        - .github/dependabot.yml
+    verification_required: true
+    notes: 'dm1 pinned astro ^5.14/Starlight 0.36 (downgrade). Starlight 0.40.0 supports Astro 6.4 — upgrade docs/web to @astrojs/starlight ^0.40 + astro ^6.4 and fix any 0.36->0.40 / Astro 5->6 breaking changes; verify build + 4 sections + mermaid. Add .github/dependabot.yml ignore for astro MAJOR version-updates on docs/web (stay within the Starlight-supported major; bump deliberately). Supersedes dependabot #49 (which over-shot to astro 7). dm2/dm3/dm4 build on this.'
+    app_type: docs
