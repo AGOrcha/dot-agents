@@ -1,0 +1,13 @@
+schema_version: 1
+plan_id: git-ref-work-backend
+order: 8
+task:
+    id: ref-back-managed-artifacts
+    title: Ref-back managed .agents/active artifacts (delegation/merge-back, verification, review) under backend=git-ref
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope: []
+    verification_required: true
+    notes: Mirror managed .agents/active artifacts (delegation/merge-back, verification, review) to refs/agents/state under backend=git-ref; keep working copy as fallback/projection.
