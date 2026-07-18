@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: layered-pr-fanout
+order: 0
+task:
+    id: lpf-a-status-enum
+    title: awaiting_review task status + sub-statuses + advance validator + max_parallel default
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/task_status.go
+        - commands/workflow/task_status_test.go
+        - commands/workflow/plan_task.go
+    verification_required: true
+    notes: |-
+        Per spec layered-pr-fanout §2.1/§2.2/§3.1. Add the awaiting_review status with sub-statuses
+        awaiting_agent_review and awaiting_owner_review to the task-status vocabulary; make `da workflow advance
+        --status` accept them and reject invalid transitions per the §3.1 state machine. Dep-less root: the MVP
+        unblocker the other lpf tasks build on. Centralize status constants in a new task_status.go. NOTE: the
+        max_parallel_tasks AgentsRC field + schema (§2.9) is DEFERRED to a follow-on so this task does not touch
+        schemas/agentsrc.schema.json (owned by the open p5 PR #209); use the existing code default of 7 for now.
+    app_type: go-cli

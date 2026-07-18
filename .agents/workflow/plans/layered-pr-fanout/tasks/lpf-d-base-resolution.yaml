@@ -1,0 +1,29 @@
+schema_version: 1
+plan_id: layered-pr-fanout
+order: 3
+task:
+    id: lpf-d-base-resolution
+    title: Layered base-resolution algorithm in fanout (§4)
+    status: completed
+    depends_on:
+        - lpf-a-status-enum
+        - lpf-pr-producer
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/delegation.go
+        - commands/workflow/base_resolution.go
+        - commands/workflow/base_resolution_test.go
+        - commands/workflow/cmd.go
+    verification_required: true
+    notes: |-
+        Per §4. da workflow fanout computes base_branch for a new bundle from the union of the task's depends_on PR
+        branches (lineage-aware) rather than always master — so a fold/downstream task branches off its dependency's
+        open PR. Add the §4.2 bundle schema fields (base_branch, lineage) and the optional §4.3 lineage-certificate.
+        This is what makes land-it-once fold-tasks branch off the right PR.
+        BLOCKED-ON-PRODUCER (#214 must not merge as-is): this task drove the PR-event design. Its current PR #214
+        resolves dep PR branches via a bespoke `ghPRLister` seam — that must be REPLACED with the internal/events
+        producer (consume event.pr.* / the pr_source engine from lpf-pr-producer) so base-resolution is platform-agnostic,
+        not gh-coupled. Rework folds onto the existing #214 branch (land-it-once); do NOT merge #214 until the
+        ghPRLister->producer swap lands. Spec: workflow/specs/pr-event-source/design.md.
+    app_type: go-cli

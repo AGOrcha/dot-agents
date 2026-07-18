@@ -1,0 +1,30 @@
+schema_version: 1
+plan_id: layered-pr-fanout
+order: 6
+task:
+    id: lpf-pr-producer
+    title: 'PR as first event: gh pr_source config + event.pr.* registrations + AuthRoundTripper seam'
+    status: completed
+    depends_on:
+        - lpf-event-foundation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/events/pr.go
+        - internal/events/pr_test.go
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+    verification_required: true
+    notes: |-
+        Per .agents/proposals/pr-source-abstraction.md §2-§5. NO internal/prsource package — PR support is just
+        config + kind registrations + reactions on the lpf-event-foundation engine. Deliver: (1) the canonical PR
+        payload (PR/Rollup/Check/Comment) + the shared Rollup.State derive rule; (2) the event.pr.* kind registrations
+        (opened/ci_green/ci_failed/merged/closed/force_rebased/review_requested_change/comment_posted), all
+        CONTROL-PLANE disposition (reject-on-unknown); (3) the default `gh` pr_source config block (exec + field map)
+        interpreted by the generic engine; (4) the pr_source top-level .agentsrc.json field (per [[schema-usage]]
+        four-place AgentsRC rule + schema, additionalProperties open); (5) the AuthRoundTripper seam the producer
+        receives (proxy target localhost:<port>/proxy/<host>, with direct-load fallback consuming cred-store-loader).
+        A new platform = a pr_source config block, ZERO new Go. Map 1:1 to monitor-pr-review-comment §4 events.
+        Spec: workflow/specs/pr-event-source/design.md. Auth seam consumes external-agent-sources/cred-store-loader
+        (cross-plan) via the AuthRoundTripper, with direct-load fallback.
+    app_type: go-cli

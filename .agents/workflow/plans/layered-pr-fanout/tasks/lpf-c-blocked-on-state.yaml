@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: layered-pr-fanout
+order: 2
+task:
+    id: lpf-c-blocked-on-state
+    title: blocked-on:<ref> parameterized state + auto-resume predicates
+    status: completed
+    depends_on:
+        - lpf-a-status-enum
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/blocked_on.go
+        - commands/workflow/blocked_on_test.go
+    verification_required: true
+    notes: |-
+        Per §3.4. blocked-on:<ref> frees the slot (§3.4.3) and is tracked in the blocked bucket. Auto-resume predicate
+        evaluation (§3.4.5): task:<plan>/<task> (status completed), secret:<NAME> (gh secret list), decision:<id>
+        (da workflow resolve-decision), condition:<predicate> (pluggable evaluator). On predicate true -> in_progress
+        (default, --resume-as override). Eligibility decay annotation (blocker_stale_since, §3.4.4) after N days.
+    app_type: go-cli

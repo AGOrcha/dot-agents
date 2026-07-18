@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: layered-pr-fanout
+order: 4
+task:
+    id: lpf-e-transitions-poll
+    title: Verifier/lens/owner transition split + PR poll detector (§6, §3.2)
+    status: completed
+    depends_on:
+        - lpf-b-slot-dep-accounting
+        - lpf-pr-producer
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/transitions.go
+        - commands/workflow/transitions_test.go
+    verification_required: true
+    notes: |-
+        Per §6 + §3.2. Verifier owns in_progress->awaiting_agent_review (terminal-green + PR open + Sonar OK + 0 open
+        issues, §2.3); lens-gate owns awaiting_agent_review->awaiting_owner_review; owner-merge owns
+        awaiting_owner_review->completed. The PR poll detector CONSUMES event.pr.* (merged/closed/force_rebased/
+        review_requested_change) from the internal/events registry (lpf-pr-producer) — NO direct gh calls here — and
+        maps them to transitions: merged->completed, request-changes->in_progress, close->blocked cascade (§2.6),
+        force-rebase (SHA1 set diff §2.7)->rebase. Also wires the §3.4.5 auto-resume predicate evaluators.
+    app_type: go-cli

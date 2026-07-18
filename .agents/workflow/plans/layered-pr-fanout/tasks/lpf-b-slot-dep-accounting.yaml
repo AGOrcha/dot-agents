@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: layered-pr-fanout
+order: 1
+task:
+    id: lpf-b-slot-dep-accounting
+    title: Slot accounting (§2.8) + eligibility dep-satisfaction for awaiting_owner_review
+    status: completed
+    depends_on:
+        - lpf-a-status-enum
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/cmd.go
+        - commands/workflow/eligible_accounting.go
+        - commands/workflow/eligible_accounting_test.go
+    verification_required: true
+    notes: |-
+        Per §2.8 + §3.4.6/§4. Slot accounting table: in_progress + awaiting_agent_review COUNT against
+        max_parallel_tasks; awaiting_owner_review + blocked-on FREE the slot. Eligibility/dep-satisfaction: an
+        upstream in {completed, awaiting_owner_review} satisfies a downstream dep; in_progress does NOT. This is the
+        change that lets open-PR tasks free slots and unblock their dependents (e.g. config-v2 coherence fold-tasks).
+        Track a separate `blocked` slot-ledger bucket so an all-blocked state is visible.
+    app_type: go-cli

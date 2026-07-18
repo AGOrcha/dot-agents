@@ -1,0 +1,34 @@
+schema_version: 1
+plan_id: layered-pr-fanout
+order: 5
+task:
+    id: lpf-event-foundation
+    title: 'Unified event contract core: envelope + kind registry + dispatch + producer engine'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/events/envelope.go
+        - internal/events/envelope_test.go
+        - internal/events/registry.go
+        - internal/events/registry_test.go
+        - internal/events/dispatch.go
+        - internal/events/dispatch_test.go
+        - internal/events/producer.go
+        - internal/events/producer_test.go
+        - internal/events/jsonpath.go
+        - internal/events/jsonpath_test.go
+    verification_required: true
+    notes: |-
+        Implements spec workflow/specs/unified-event-contract/design.md (D1-D5: envelope, registry, dispatch,
+        validation disposition, generic producer engine). Dep-less foundation. Deliver in a NEW internal/events
+        package: (1) common envelope {type, source, occurred_at, idempotency_key, payload}; (2) kind registry keyed by
+        name (schema-additive, NO enum — mirrors stage_profiles) carrying a per-kind/namespace DISPOSITION
+        (reject|soft), default reject; (3) table-driven dispatch (no switch); (4) the generic exec/http PRODUCER engine
+        (run argv or http call, apply field map, diff vs last cycle, emit envelopes) — there must be NO per-platform
+        producer files; (5) a ~100-LINE built-in JSONPath SUBSET (.a.b, array index, one equality filter) — NO jq, NO
+        yq lib (a heavy expression evaluator must not be smuggled into a foundational contract). Validation:
+        control-plane kinds reject-on-unknown at EMIT time (fail-fast, loud); observational kinds may fail-soft. Graduates
+        into r3-background-worker-service (or sibling event-contract spec).
+    app_type: go-cli
