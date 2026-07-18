@@ -20,10 +20,17 @@ at the maintainer's request to schedule the full CF-Worker obs deploy into the t
 
 ## Decisions (from the proposal)
 
+- **CORRECTION (maintainer, 2026-07-18) — single-tenant per deployment.** `obs.agorcha.dev`
+  serves ONLY dot-agents; it is NOT the proposal's central multi-tenant hub. Routing is
+  per-project + client-side: each repo's `.agentsrc.json` `observability.endpoint` targets its
+  OWN backend (dot-agents → obs.agorcha.dev; payout → payout's configured backend). The ingest
+  schema + CLI + config stay generic/self-hostable; obs.agorcha.dev is the reference instance.
+  This drops the DO-per-project fan-out + per-project token issuance from THIS deployment.
 - **Topology (§2.4):** `obs.agorcha.dev` is its own Worker + its own CF Access app, dual-auth
   (CF Access JWT for browser, service token for CLI POST).
-- **Runtime (§4.5):** Worker + Durable Object per project (sharded by `project_id`) for live
-  state + D1 (single db, project_id-keyed) for history; R2 deferred to v2. Free-tier sufficient.
+- **Runtime (§4.5, single-tenant):** Worker + a single Durable Object for live state + D1 for
+  history, scoped to dot-agents; `project_id` retained as a column/idempotency-key component for
+  portability + a defensive foreign-project reject. R2 deferred. Free-tier trivially sufficient.
 - **Data flow (§5.2):** hybrid - best-effort push on checkpoint/verify-record, `da observability
   sync` for catch-up; no cron.
 - **Auth (§5.4):** reuse the external-agent-sources credential model (auth by credential-ref;

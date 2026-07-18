@@ -10,14 +10,17 @@ tasks:
       write_scope:
         - .agents/workflow/specs/obs-dashboard-cf-deploy/
       notes: |-
-        Promote the obs sections of the maintainer-reviewed proposal
-        (agorcha-public-vs-internal-and-obs-deploy §3.4-App2, §4 DO+D1, §5 push/sync, §6
-        local-canonical) into a canonical spec via spec-scaffold. Records the ratified
-        decisions + done criteria + the still-open §8 items as open questions. Notes the
-        coexistence with dashboard-subsystem-and-bus-security (local SSE, loopback) vs the
-        remote obs deploy (WebSocket, CF Access, multi-project) - not a conflict, a layering.
-        Verify: spec exists at write_scope with decisions tracing to the proposal; open
-        questions carry the §8 unresolved items.
+        Promote the obs deploy design (maintainer-reviewed proposal
+        agorcha-public-vs-internal-and-obs-deploy §3-§6) into a canonical spec via
+        spec-scaffold, WITH the maintainer's correction: obs.agorcha.dev is SINGLE-TENANT
+        (dot-agents only), NOT the proposal's central multi-tenant hub. Routing is per-project
+        and client-side - each repo's .agentsrc.json observability.endpoint points at ITS OWN
+        backend (dot-agents -> obs.agorcha.dev; payout -> payout's configured backend). The
+        ingest schema + da observability CLI + config stay generic/self-hostable so any project
+        stands up its own backend; obs.agorcha.dev is the reference instance for dot-agents.
+        Records decisions + done criteria + still-open items as open questions; notes
+        coexistence with dashboard-subsystem-and-bus-security (local SSE) vs remote (WebSocket).
+        Verify: spec exists with the single-tenant + per-project-routing decision explicit.
     - id: o2-obs-cf-access-app
       title: CF Access app for obs.agorcha.dev (dual-auth) via Terraform
       status: pending
@@ -77,7 +80,7 @@ tasks:
         -> 404; then `wrangler deploy` to a PREVIEW (<name>.<acct>.workers.dev) and curl the
         preview URL for the same. YAML/wrangler config validates.
     - id: o5-obs-ingest-do-d1
-      title: Per-project DO + D1 schema + idempotent ingest write-through
+      title: Single-tenant (dot-agents) ingest store - DO + D1, idempotent write-through
       status: pending
       depends_on:
         - o4-obs-worker-scaffold
@@ -86,14 +89,15 @@ tasks:
       write_scope:
         - obs/
       notes: |-
-        Proposal §4.5/§6.2. DO per project (idFromName(project_id), project_id = canonical git
-        remote host/owner/repo). DO holds the live iteration buffer + WebSocket subscriber list
-        (Hibernation API). D1 single db: append-only iterations/sessions/scores/observations
-        keyed by (project_id, plan_id, task_id, iteration), project_id leading on every index.
-        Ingest writes through DO -> D1; idempotency key (project_id, plan_id, task_id, iteration,
-        schema_hash); re-POST dedupes. Live smoke (wrangler dev + miniflare D1): POST the same
-        event twice -> {accepted:1, deduped:1}; query D1 -> exactly one row; a second distinct
-        event -> accepted:1.
+        Proposal §4.5 adapted to SINGLE-TENANT (maintainer correction): obs.agorcha.dev serves
+        ONLY dot-agents, so drop the DO-per-project fan-out and per-project token issuance. Use
+        a single DO for live state (iteration buffer + WebSocket subscriber list, Hibernation
+        API) + D1 (iterations/sessions/scores/observations). Keep project_id as a column +
+        idempotency key component (project_id, plan_id, task_id, iteration, schema_hash) for
+        portability and defensive validation, but this deployment only ever holds one
+        project_id (dot-agents' canonical git-remote form). Ingest writes DO -> D1; re-POST
+        dedupes. Live smoke (wrangler dev + miniflare D1): POST the same event twice ->
+        {accepted:1, deduped:1}; a foreign project_id -> rejected (o6); query D1 -> one row.
     - id: o6-obs-auth-gate
       title: Dual-mode auth on the obs Worker (CF Access JWT + service token), fail-closed
       status: pending
@@ -112,6 +116,9 @@ tasks:
         carve-out, HTTPS-only credentials. Live smoke (preview deploy): no creds -> 401/403;
         valid service token -> 200; JWT with wrong aud -> reject; encoded-path variants
         (/api%2f.., //api, /API) all gate; assert status codes for each.
+        Single-tenant guard: the obs Worker also REJECTS any ingest whose project_id is not
+        dot-agents' (belt-and-suspenders atop the client-side per-project endpoint routing) ->
+        assert a foreign project_id POST returns 4xx.
     - id: o7-obs-dashboard-frontend
       title: obs.agorcha.dev UI - read D1 + WebSocket live updates
       status: pending
@@ -186,7 +193,7 @@ tasks:
         Live smoke: sync --full a repo -> server {accepted:N}; re-run -> {accepted:0,
         deduped:N}; wipe remote D1 + re-sync --full -> the run set is identical (rebuild proof).
     - id: o11-obs-cf-access-iac-hardening
-      title: obs CF Access IaC + per-project tokens + retention knobs
+      title: obs CF Access IaC + single maintainer token + retention knobs
       status: pending
       depends_on:
         - o2-obs-cf-access-app
@@ -196,11 +203,13 @@ tasks:
         - infra/cloudflare/
         - docs/cf-access-bootstrap.md
       notes: |-
-        Proposal §3.7/§6.2b/§6.3. Ensure the obs Access app + Service-Auth policy live fully in
-        Terraform (no manual-only drift); document the per-project token issuance flow (§6.3)
-        and the scope-tiered retention/pruning defaults (§6.2b, solo=keep-local-indefinitely as
-        v1 default) as observability.retention config. Live smoke: `terraform validate` +
-        `fmt -check` pass; docs/cf-access-bootstrap.md lists both apps' audTags + policies;
+        Proposal §3.7/§6.2b, single-tenant. Ensure the obs Access app + Service-Auth policy
+        live fully in Terraform (no manual-only drift). Single-tenant means ONE maintainer
+        service token for dot-agents (drop the proposal's per-project token issuance flow -
+        other projects self-host their own backend + own their own tokens). Document the
+        scope-tiered retention/pruning defaults (§6.2b, solo=keep-local-indefinitely as the v1
+        default) as observability.retention config. Live smoke: `terraform validate` +
+        `fmt -check` pass; docs/cf-access-bootstrap.md lists the obs app's audTag + policies;
         a `da observability` config with a retention block round-trips.
     - id: o12-obs-verify-close
       title: End-to-end live smoke + close the plan
