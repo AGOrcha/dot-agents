@@ -492,7 +492,7 @@ tasks:
       app_type: go-cli
     - id: t14-documentation
       title: Documentation — operator guide, API reference, frontend dev guide
-      status: in_progress
+      status: completed
       depends_on:
         - t12-e2e-smoke-live-iteration
         - t13-r3-mount-integration
