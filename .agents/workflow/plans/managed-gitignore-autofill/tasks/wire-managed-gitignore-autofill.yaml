@@ -1,0 +1,57 @@
+schema_version: 1
+plan_id: managed-gitignore-autofill
+order: 0
+task:
+    id: wire-managed-gitignore-autofill
+    title: Wire EnsureManagedGitignore into da refresh + retire
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: NikashPrakash
+    write_scope:
+        - internal/links/gitignore.go
+        - internal/links/gitignore_test.go
+        - internal/platform/platform.go
+        - internal/platform/copilot.go
+        - commands/refresh.go
+        - commands/refresh_test.go
+        - .gitignore
+        - .agents/lessons/classify-generated-files-before-cleanup/LESSON.md
+        - .agents/lessons/index.md
+    verification_required: true
+    notes: |-
+        D14/R8 of config-distribution-model/design.md §15. THE gap: internal/links/gitignore.go
+        EnsureManagedGitignore(repoRoot, ignorePaths) already writes the idempotent delimited block
+        (markers "# >>> dot-agents managed (project outputs) >>>" / "<<< ... <<<", alwaysIgnored =
+        .agentsrc.local.json, neverIgnored = .agentsrc.json/.agentsrc.lock) but has ZERO production
+        callers — only def + tests. Wire it into `da refresh` so every enabled platform's generated/
+        projected outputs land in the managed block automatically.
+
+        WORK:
+        1. Per-platform generated-output surface: enumerate each enabled platform's materialized/
+           generated repo-relative outputs — projected platform links + generated platform configs +
+           materialized asset units. Copilot (internal/platform/copilot.go) generates .github/hooks/*.json
+           (copilotGitHubDir/copilotHooksDir via renderCopilotHookFile/createProjectHookFiles), plus
+           .github/copilot-instructions.md and .github/agents/*.agent.md; claude/cursor/codex/opencode
+           analogous. If no single "list my outputs" seam exists, add one (e.g. a Platform method or
+           reuse the resource_plan/CreateLinks intent collection) — do NOT hardcode paths in refresh.go.
+        2. Wire into `da refresh` (commands/refresh.go): collect all enabled-platform outputs → one
+           EnsureManagedGitignore(repoRoot, outputs) call. Idempotent + byte-stable (existing tests
+           cover regeneration/dedup/sort). Preserve user-authored ignores outside the markers.
+        3. Retire #381's ad-hoc root .gitignore rules: REMOVE BOTH `.github/hooks/*.json` AND
+           `.agentsrc.lock` from the root .gitignore. The hooks are now covered by the managed block;
+           .agentsrc.lock must never be ignored.
+        4. .agentsrc.lock CONTRACT (blocker from #381): it is neverIgnored (committed lockfile, uv.lock
+           analog — TestEnsureManagedGitignore_NeverIgnoresCommittedContract). Ensure it is NOT ignored
+           and COMMIT this repo's .agentsrc.lock (it is currently untracked; verify da refresh/init is
+           meant to have committed it and do so).
+        5. Fix lesson .agents/lessons/classify-generated-files-before-cleanup/LESSON.md (+ index row):
+           its "lock files -> gitignore" guidance is WRONG. Committed-contract lockfiles (.agentsrc.lock,
+           uv.lock) are TRACKED; only machine-specific generated WIRING is ignored, and via the managed
+           block (never ad-hoc root rules). Keep the config-vs-telemetry-vs-stale classification.
+
+        ACCEPTANCE: go test ./internal/links/... ./internal/platform/... ./commands/... green; dogfood
+        `da refresh` in a temp project + this repo — assert the managed block contains copilot
+        .github/hooks/*.json, that `git status` is clean with hooks ignored via the block, that
+        .agentsrc.lock is tracked (not ignored), and that re-running refresh is byte-stable. NO AI trailers.
+    app_type: go-cli
