@@ -1,0 +1,26 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 13
+task:
+    id: p3-pre-snapshot
+    title: Source-skill snapshot to prevent drift during P3/P3b/P4 implementation
+    status: completed
+    depends_on: []
+    blocks:
+        - p3-starter-promotion
+        - p3b-companion-discipline-skills
+        - p4-sentinel-wiring
+    owner: dot-agents
+    write_scope:
+        - .agents/history/loop-discipline-stop-hooks/source-skill-snapshot-2026-05-25.md
+    verification_required: true
+    notes: |-
+        P3, P3b, P4 all assume ~/.agents/skills/dot-agents/{iteration-
+        close,isp,loop-worker,delegation-lifecycle}/ and
+        ~/.agents/skills/global/agent-handoff/ are stable across the
+        implementation window. If a maintainer edits the source skill
+        mid-flight, the starter copy drifts.
+        Record git SHAs of each source skill tree at task start; P3/
+        P3b/P4 must copy from the recorded snapshot, not the moving
+        head. No code change in this task — just the snapshot record.
+    app_type: research

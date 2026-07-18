@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 8
+task:
+    id: p4-sentinel-wiring
+    title: Wire 'da workflow hook-sentinel write' call into the three starter skills
+    status: completed
+    depends_on:
+        - p0-sentinel-cli
+        - p3-starter-promotion
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/iteration-close/
+        - internal/scaffold/home/starter/skills/global/isp/
+        - internal/scaffold/home/starter/skills/global/loop-worker/
+    verification_required: true
+    notes: 'Add sentinel-write at skill entry after prerequisites needed to construct its arguments, before governed work begins; update gotchas. Contract: tasks/p4-sentinel-wiring.contract.md.'

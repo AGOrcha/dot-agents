@@ -1,0 +1,49 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 16
+task:
+    id: release-minor
+    title: 'Release: bump VERSION + finalize CHANGELOG for the loop-discipline-hooks minor'
+    status: pending
+    depends_on:
+        - p0-sentinel-cli
+        - p1a-mapper-extensions
+        - p1b-canonical-when-values
+        - p1c-matcher-verification
+        - p1d-claude-lifecycle-parity
+        - p2-hook-scripts
+        - p3-starter-promotion
+        - p3b-companion-discipline-skills
+        - p4-sentinel-wiring
+        - p5-e2e-integration
+        - p6-payout-backfill
+        - p7-legacy-override-migration
+        - p1e-docs-hooks-consistency
+        - p3-pre-snapshot
+        - p6-rollback-plan
+        - r1-5-t4-integration
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - VERSION
+        - CHANGELOG.md
+    verification_required: true
+    notes: |-
+        Release-gated tail task (hybrid convention, MINOR path). This plan
+        delivers new user-visible surface — three loop-discipline hooks plus
+        approved PreToolUse/SubagentStart/PreCompact behavior shipped in the
+        starter, a new sentinel CLI, platform mapper extensions, and promoted
+        discipline skills. New CLI + new starter hook/skill contracts are
+        additive surface, MINOR not MAJOR.
+        Ambiguity flag: p7-legacy-override-migration touches legacy downstream
+        overrides with explicit migration readback. Confirmed as additive +
+        migrated (not a removed contract), so MINOR holds. If the migration
+        actually drops a contract consumers depend on, reclassify to MAJOR.
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
+        minor is 0.4.0, but resolve from VERSION when ready; serialize at the
+        VERSION bump if another minor ships first.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section. Merge to master fires
+        auto-release.yml.
+    app_type: release

@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 6
+task:
+    id: p3-starter-promotion
+    title: Promote iteration-close, isp, loop-worker skills + AGENT.md + loop-worker profile into starter
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/iteration-close/
+        - internal/scaffold/home/starter/skills/global/isp/
+        - internal/scaffold/home/starter/skills/global/loop-worker/
+        - internal/scaffold/home/starter/agents/global/loop-worker/
+        - internal/scaffold/home/starter/profiles/loop-worker.md
+        - internal/scaffold/home/copy_test.go
+    verification_required: true
+    notes: 'Copy the existing assets into the starter and extend `TestCopyMissingStarterAssetsCopiesStarterBundle`. `CopyMissingStarterAssets` already walks arbitrary nested tiers, including new `agents/` and `profiles/` content; no loader code is expected. Contract: tasks/p3-starter-promotion.contract.md.'

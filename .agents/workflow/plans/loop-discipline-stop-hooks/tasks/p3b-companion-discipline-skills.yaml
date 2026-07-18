@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 7
+task:
+    id: p3b-companion-discipline-skills
+    title: Scaffold and assess agent-handoff and delegation-lifecycle discipline companions
+    status: completed
+    depends_on:
+        - p2-hook-scripts
+        - p3-starter-promotion
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/agent-handoff/
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+        - internal/scaffold/home/copy_test.go
+        - .agents/history/loop-discipline-stop-hooks/additional-discipline-skill-assessment.md
+    verification_required: true
+    notes: 'Ensure both companion skills ship complete starter assets and evaluate whether any evidence-backed lifecycle hook or bounded continuity advice is justified; route post-tool observation questions to R1.5 and do not add prose-only enforcement. Contract: tasks/p3b-companion-discipline-skills.contract.md.'

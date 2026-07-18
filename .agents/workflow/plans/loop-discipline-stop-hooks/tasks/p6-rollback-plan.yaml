@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 14
+task:
+    id: p6-rollback-plan
+    title: P6 payout-migration rollback documentation
+    status: pending
+    depends_on:
+        - p6-payout-backfill
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/history/loop-discipline-stop-hooks/payout-migration-rollback.md
+    verification_required: false
+    notes: |-
+        If P6's payout migration breaks payout's active loop, what's
+        the recovery? Document a 1-command rollback (e.g.,
+        `git -C /Users/nikashp/Documents/payout checkout HEAD --
+        .agentsrc.json && da refresh`). Cross-link from the P6
+        readback artifact. Operator-facing.
+    app_type: research

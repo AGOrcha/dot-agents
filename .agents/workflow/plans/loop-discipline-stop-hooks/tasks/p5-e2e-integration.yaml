@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 9
+task:
+    id: p5-e2e-integration
+    title: 'End-to-end integration test: native remediation and advisory behavior'
+    status: completed
+    depends_on:
+        - p2-hook-scripts
+        - p4-sentinel-wiring
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - tests/test-loop-discipline-stop-hooks.sh
+    verification_required: true
+    notes: 'Shell smoke test in the existing flat `tests/test-*.sh` convention; assert terminal and PreToolUse native remediation, SubagentStart/PreCompact non-blocking behavior, JSON block output where supported, Cursor followup output, and advisories. Contract: tasks/p5-e2e-integration.contract.md. Landed: merged to master via PR #124 (wave-2 state sync).'

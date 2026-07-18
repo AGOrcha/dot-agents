@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 3
+task:
+    id: p1c-matcher-verification
+    title: Per-event input/matcher verification and when_events schema extension
+    status: completed
+    depends_on:
+        - p1a-mapper-extensions
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+        - schemas/hook.schema.json
+        - docs/HOOKS.md
+    verification_required: true
+    notes: 'Add backward-compatible `when_events` after verifying inputs, matchers, native remediation outputs, and approved PreToolUse/SubagentStart/PreCompact capabilities from official docs; Cursor provides transcript fields but uses `followup_message`. Contract: tasks/p1c-matcher-verification.contract.md.'

@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 1
+task:
+    id: p1a-mapper-extensions
+    title: 'Platform mapper extensions: Codex SubagentStop, Copilot agentStop, Cursor subagentStop'
+    status: completed
+    depends_on:
+        - p0-sentinel-cli
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+    verification_required: true
+    notes: 'Extend gate-critical mappings only - Codex SubagentStop, Copilot agentStop/subagentStop, Cursor subagentStop. Copilot stop is agentStop, not stop. Contract: tasks/p1a-mapper-extensions.contract.md.'

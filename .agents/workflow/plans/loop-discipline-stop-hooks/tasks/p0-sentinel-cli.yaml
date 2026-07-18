@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 0
+task:
+    id: p0-sentinel-cli
+    title: 'Sentinel CLI: write/read/clear under ''da workflow hook-sentinel'''
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/hook_sentinel.go
+        - commands/workflow/hook_sentinel_test.go
+        - commands/workflow/cmd.go
+        - commands/workflow/static/workflow-hook-sentinel.schema.json
+        - schemas/workflow-hook-sentinel.schema.json
+    verification_required: true
+    notes: 'Introduce sentinel JSON schema v1 and `da workflow hook-sentinel {write,read,clear}`; archive successful sentinels under durable plan history rather than active state. Contract and exact schema/CLI behavior: tasks/p0-sentinel-cli.contract.md.'

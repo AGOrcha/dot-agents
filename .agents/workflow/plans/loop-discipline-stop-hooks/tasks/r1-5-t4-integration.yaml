@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 15
+task:
+    id: r1-5-t4-integration
+    title: r1-5 plan integration test (cross-plan coordination acknowledgment)
+    status: pending
+    depends_on:
+        - p5-e2e-integration
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/history/loop-discipline-stop-hooks/r1-5-coordination.md
+    verification_required: false
+    notes: |-
+        r1-5-hook-enforcement-telemetry has no integration test task
+        analogous to loop-discipline's P5. This task is a coordination
+        artifact: document the handoff between loop-discipline P2's
+        gate.sh outcomes and r1-5's `iter-N.hook-outcomes.yaml`
+        sidecar write (via the new `da workflow hook-outcome write`
+        CLI primitive r1-5 adds). Reserve a clean exit-emit boundary
+        in P2's gate.sh so r1-5 can wrap the decision point with a
+        single outcome-emit call without restructuring gate logic.
+    app_type: research

@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 12
+task:
+    id: p1e-docs-hooks-consistency
+    title: docs/HOOKS.md consistency pass after P1b/P1c/P1d additions
+    status: completed
+    depends_on:
+        - p1b-canonical-when-values
+        - p1c-matcher-verification
+        - p1d-claude-lifecycle-parity
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/HOOKS.md
+    verification_required: true
+    notes: |-
+        Three tasks edit docs/HOOKS.md (P1b, P1c, P1d) but no task
+        verifies the final document is internally consistent. Final
+        pass: verify mapping table, when_events syntax examples,
+        per-platform native-output contracts, and Cursor-wider surface
+        section all reconcile after the three additions. Acceptance:
+        docs/HOOKS.md renders, tables are sorted/deduplicated, every
+        canonical When value appears in exactly one row.
+    app_type: research

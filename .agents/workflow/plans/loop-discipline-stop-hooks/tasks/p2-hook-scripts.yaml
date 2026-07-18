@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+order: 5
+task:
+    id: p2-hook-scripts
+    title: Three HOOK.yaml + gate.sh bundles under internal/scaffold/hooks/global/
+    status: completed
+    depends_on:
+        - p0-sentinel-cli
+        - p1a-mapper-extensions
+        - p1b-canonical-when-values
+        - p1c-matcher-verification
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/hooks/global/iteration-close-gate/
+        - internal/scaffold/hooks/global/isp-gate/
+        - internal/scaffold/hooks/global/loop-worker-gate/
+        - internal/scaffold/hooks/copy_test.go
+    verification_required: true
+    notes: 'Add three canonical hook bundles and scaffold-copy assertions. Ship terminal validation, deterministic PreToolUse prevention, loop-worker SubagentStart bootstrap, and PreCompact continuity advice; hard outcomes require observable evidence and native remediation output. Contract: tasks/p2-hook-scripts.contract.md.'
