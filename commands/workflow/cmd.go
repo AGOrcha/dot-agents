@@ -70,6 +70,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		newWorkflowHookOutcomeCmd(),
 		newWorkflowArchiveOrphansCmd(),
 		newWorkflowJournalCmd(),
+		newWorkflowStateRefCmd(),
 	)
 	return cmd
 }
@@ -1121,6 +1122,43 @@ func newWorkflowAppTypesCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&format, "format", "", "Print only the recommended authoring snippet: flag, task, plan, or doc")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show source and recommendation details for each app_type")
+	return cmd
+}
+
+func newWorkflowStateRefCmd() *cobra.Command {
+	stateRefCmd := &cobra.Command{
+		Use:   "state-ref",
+		Short: "Inspect and reconcile the machine coordination state ref (refs/agents/state)",
+	}
+	stateRefCmd.AddCommand(newWorkflowStateRefReconcileCmd())
+	return stateRefCmd
+}
+
+func newWorkflowStateRefReconcileCmd() *cobra.Command {
+	var dryRun, asJSON bool
+	cmd := &cobra.Command{
+		Use:   "reconcile",
+		Short: "Re-mirror every plan's working-copy coordination state onto refs/agents/state",
+		Long: `Makes refs/agents/state a faithful mirror of every plan's working-copy
+coordination state. Reads each plan's working-copy TASKS.yaml/PLAN.yaml directly
+and re-runs the shipped seed mirror so every working-copy task has a per-task
+blob on the ref, closing the stale-subset gap left by plans transitioned before
+the choke-point mirror shipped. Reconciles TO the ref FROM the working copy
+regardless of the active work_tracking backend and is idempotent: an
+already-consistent run makes no new ref commit.`,
+		Example: deps.ExampleBlock(
+			"  da workflow state-ref reconcile",
+			"  da workflow state-ref reconcile --dry-run",
+			"  da workflow state-ref reconcile --json",
+		),
+		Args: deps.NoArgsWithHints("Run workflow state-ref reconcile from inside the project repository."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts := stateRefReconcileOpts{dryRun: dryRun || deps.Flags.DryRun(), json: asJSON}
+			return runWorkflowStateRefReconcile(cmd.OutOrStdout(), opts)
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what would be seeded without writing to the ref")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit the reconcile report as JSON (also honours the global --json flag)")
 	return cmd
 }
 
