@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: full-loop-orchestration-runtime
+order: 6
+task:
+    id: migrate-workflow-state-ref
+    title: Migrate active workflow plans and task state to refs/agents/state
+    status: pending
+    depends_on:
+        - state-ref-transition-instructions
+        - git-ref-work-backend/document-and-default-git-ref
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/
+        - .agents/active/
+        - refs/agents/state
+    verification_required: true
+    notes: Execute only after the git-ref WorkStore backend, per-task state files, and controlled full-loop validation are green. Snapshot source commit/ref, migrate all active plan triads and task state, compare projected views, verify rollback, then switch the active backend. No partial cutover.
+    app_type: meta

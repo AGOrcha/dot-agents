@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: full-loop-orchestration-runtime
+order: 2
+task:
+    id: n-plan-omp-driver
+    title: Implement the N-plan OMP outer-loop driver
+    status: completed
+    depends_on:
+        - per-task-omp-pipeline
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - bin/tests/omp-full-loop
+        - bin/tests/omp-full-loop_test.sh
+    verification_required: true
+    notes: Use da workflow slots/eligible/max_batch/fanout. Launch one omp-swarm inner pipeline per selected task, bounded by available slots, with separate coordination namespaces and a wave barrier. Never invoke Claude/Codex/Copilot CLIs directly.
+    app_type: meta

@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: full-loop-orchestration-runtime
+order: 4
+task:
+    id: controlled-multiplan-validation
+    title: Validate a controlled multi-plan full-loop run
+    status: completed
+    depends_on:
+        - lifecycle-refinement-reconcile
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/full-loop-orchestration-runtime/evidence/
+    verification_required: true
+    notes: Run driver self-tests with fake omp-swarm and fixture plans, validate both swarm YAMLs, then controlled real OMP smoke over non-overlapping disposable tasks. Prove slot cap, model pinning, fold-back re-entry, proposal emission, wave barrier, and serialized board writes.
+    app_type: meta

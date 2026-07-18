@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: full-loop-orchestration-runtime
+order: 3
+task:
+    id: lifecycle-refinement-reconcile
+    title: Integrate delegation lifecycle and meta-loop reconciliation
+    status: completed
+    depends_on:
+        - n-plan-omp-driver
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - bin/tests/omp-full-loop
+        - bin/tests/omp-full-loop_test.sh
+        - .agents/workflow/runtime/full-loop/reconcile.swarm.yaml
+    verification_required: true
+    notes: Serialize Main reconciliation after each wave; handle READY/FOLD-BACK, merge-back, delegation closeout boundaries, task/plan observations, proposal candidates, checkpoint/hook outcomes/score, and fresh slots+eligible reads. Workers emit artifacts only.
+    app_type: meta

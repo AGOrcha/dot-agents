@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: full-loop-orchestration-runtime
+order: 1
+task:
+    id: per-task-omp-pipeline
+    title: Promote and correct the per-task OMP pipeline
+    status: completed
+    depends_on:
+        - explicit-model-routing
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/runtime/full-loop/profile-driven.swarm.yaml
+        - .agents/workflow/runtime/full-loop/reconcile.swarm.yaml
+    verification_required: true
+    notes: Promote the validated state-ref draft into a runtime asset; support all configured verifier/lens counts; reserve a dedicated GPT-family cross-model lens instead of binding diversity to a numeric lens index; make every stage model explicit.
+    app_type: meta

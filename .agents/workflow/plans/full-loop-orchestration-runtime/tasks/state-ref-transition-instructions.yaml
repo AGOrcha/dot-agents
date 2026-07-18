@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: full-loop-orchestration-runtime
+order: 5
+task:
+    id: state-ref-transition-instructions
+    title: Add temporary state-ref transition instructions
+    status: completed
+    depends_on:
+        - controlled-multiplan-validation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/SKILL.md
+        - .agents/active/orchestrator.loop.md
+        - .agents/active/state-ref-transition.md
+    verification_required: true
+    notes: 'Temporary bounded instructions: detect active backend/ref, read/write only through da, forbid worktree TASKS.yaml edits, verify CAS/ref sync, and document rollback. Remove after git-ref becomes the default and the migration closes.'
+    app_type: docs

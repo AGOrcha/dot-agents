@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: full-loop-orchestration-runtime
+order: 0
+task:
+    id: explicit-model-routing
+    title: Add explicit per-stage model-family routing
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+        - commands/workflow/profile_prompt.go
+        - commands/workflow/profile_prompt_test.go
+        - internal/config/agentsrc_test.go
+        - .agentsrc.json
+        - internal/scaffold/home/starter/.agentsrc.json
+        - docs/concepts/verification-and-scoring.md
+        - docs/AGENT_TOOL_ROUTING.md
+    verification_required: true
+    notes: Add model/model_family authority to stage profiles and prompt resolution. Default high-volume stages to Claude through OMP; pin the blocking cross-model adversarial lens to GPT through OMP. Remove the obsolete inference that GPT use implies the Codex CLI harness or its permission whitelist.
+    app_type: go-cli
