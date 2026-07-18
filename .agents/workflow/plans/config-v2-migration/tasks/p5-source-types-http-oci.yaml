@@ -1,0 +1,40 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 9
+task:
+    id: p5-source-types-http-oci
+    title: 'Phase 5: source-type expansion (http+oci) + signing posture stub'
+    status: completed
+    depends_on:
+        - p1b-resolver-extends-tier1
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/fetcher_http.go
+        - internal/config/fetcher_oci.go
+        - internal/config/fetcher_test.go
+        - schemas/agentsrc.schema.json
+    verification_required: true
+    notes: |-
+        Per spec §4 (source types) — http fetch + oci wire-protocol stub (read-only; write/publish in p6).
+
+        http fetcher:
+        - GET layer.json from URL; content-hash for cache key
+        - auth provider opaque (delegated to external-agent-sources spec); credential-helper interface
+
+        oci fetcher (read-only):
+        - OCI Distribution v2 manifest GET + blob GET per external-agent-sources §6
+        - digest-pinnable; immutable cache under ~/.agents/cache/packages/<digest>/
+        - packages tier ONLY (validation rejects oci in extends)
+
+        Signing posture (per spec §14 Q3 + human addendum: 'let's bring in signing earlier'):
+        - introduce a Verifier interface for layer/package signing; default impl is permissive (warn-only) in this phase
+        - record signature_status in audit events (config.layer.resolve, registry.blob.fetch)
+        - actual key management deferred to external-agent-sources spec
+
+        Acceptance:
+        - fakeHTTPFetcher + fakeOCIFetcher test seams (no live network)
+        - digest-pin fixture: re-fetch with same digest produces zero-byte network call
+        - oci-in-extends rejected at schema validation BEFORE network call
+        - (fb:consolidate-clone-on-gogit) Consolidate the legacy install clone onto go-git. commands/internal/lifecycle/install.go CloneGitSource still shells out to a real git binary (exec git clone --depth 1 [--branch ref] -- url cacheDir), unlike internal/config/fetcher.go gitCloneShallow which clones in-process via go-git (gogit.CloneContext). Migrate CloneGitSource to go-git (gogit.PlainCloneContext to cacheDir; reuse fetcher ref-normalization) and share one go-git shallow-clone primitive across both paths. Removes the git-binary/PATH dependency, the entire argv flag-injection class (CVE-2017-1000117; the -- mitigation becomes unnecessary with no argv), and the buildFakeGit (go build) test scaffolding. Drop the gitBin param + rewrite TestCloneGitSource_MaliciousURLNotParsedAsFlag as a go-git-safe assertion. Follow-on: lets commands/internal/lifecycle TestMain drop its Go-toolchain PATH whitelist.
+    app_type: go-cli

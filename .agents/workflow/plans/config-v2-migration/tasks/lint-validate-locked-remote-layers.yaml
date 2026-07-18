@@ -1,0 +1,45 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 19
+task:
+    id: lint-validate-locked-remote-layers
+    title: 'Fast-follow: da config lint validates locked+cached remote layers (not blanket-skip)'
+    status: completed
+    depends_on:
+        - p4c-config-sync-lint
+        - p4f-units-lock-7a-wiring
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/fetcher.go
+        - internal/config/cache_keys.go
+        - commands/config/lint.go
+        - commands/config/lint_test.go
+        - internal/config/fetcher_test.go
+    verification_required: true
+    notes: |-
+        Codex adversarial review F-005 (2026-06-22), fast-follow (NOT a 0.4.0 release gate). Today
+        `da config lint` skips ALL non-local (git/http/oci) layers by source type
+        (commands/config/lint.go: `if src.Type != "local"` -> lintSkip), so a CORRUPT remote layer's
+        JSON stays unvalidated while lint still exits OK — lint claims a clean bill it did not check.
+
+        Fix: for a LOCKED remote layer (a units-lock entry with a recorded digest whose bytes are in the
+        local cache), read the cached bytes AT THE LOCKED DIGEST and validate them against the AgentsRC
+        schema, exactly like a local layer. Skip ONLY when the layer is unlocked OR its bytes are not
+        cached (then keep the 'run da config sync then lint' skip note). This requires EXPORTING a
+        cache-read-by-digest helper from internal/config (the cache helpers — cachedLayerPath /
+        readCachedLayer / layerCacheDir — are currently unexported); lint then resolves each locked
+        remote layer's digest via the units lock (cfg.ReadUnits / ReadLockedUnits) and reads the cached
+        layer.json at that digest.
+
+        Target 0.4.0 IF it lands without churn, else 0.4.1. It is lint-completeness ('lint must not
+        report OK on layers it never validated'), not a correctness/security blocker, so it is NOT in
+        release-minor depends_on. Depends on p4f for the units-lock digest surface and p4c for the lint
+        command.
+
+        Acceptance: a fixture with a locked remote (git) layer whose CACHED bytes are corrupt JSON makes
+        lint FAIL (not skip); an unlocked/uncached remote layer still SKIPs with the sync hint; a valid
+        cached remote layer PASSes.
+
+        Landed: merged to master via PR #127 (wave-2 state sync).
+    app_type: go-cli

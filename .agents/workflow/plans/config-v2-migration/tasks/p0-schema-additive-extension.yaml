@@ -1,0 +1,36 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 0
+task:
+    id: p0-schema-additive-extension
+    title: 'Phase 0: additive v2 schema extension (preserves v1 compat)'
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/agentsrc_test.go
+        - internal/config/schema_roundtrip_test.go
+        - schemas/agentsrc.schema.json
+        - internal/config/testdata/
+    verification_required: true
+    notes: |-
+        Per spec config-distribution-model/design.md §3-§5 and §15.2 of org-config-resolution:
+
+        Add v2 fields ADDITIVELY; keep v1 loadable:
+        - Source: add id, cache_ttl, auth (opaque); expand type enum to local|git|http|oci
+        - AgentsRC: add Extends []LayerRef, Packages []PackageRef, RepoID string, Features map[string]string
+        - Bump schema version to support both 1 and 2 (do NOT remove version 1)
+        - Tier constraint validation at schema time: extends must reference git|http|local; packages must reference oci|http
+
+        Acceptance:
+        - internal/config/testdata/v1/.agentsrc.json (current shape) loads unchanged
+        - internal/config/testdata/v2/.agentsrc.json (extends+packages+repo_id) loads and validates
+        - agentsRCKnown updated with new keys (per [[schema-usage]] four-place rule)
+        - agentsrc.schema.json: add Source.id, Source.cache_ttl; add http+oci to type enum; add extends, packages, repo_id, features as new top-level optional props
+        - additionalProperties: false on nested objects to catch drift
+        - No new CLI behavior — schema/struct only
+
+        Verification: go test ./internal/config/... -run 'TestAgentsRC|TestSchema' must pass on both v1 and v2 fixtures.
+    app_type: go-cli

@@ -1,0 +1,35 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 8
+task:
+    id: p4c-config-sync-lint
+    title: 'Phase 4c: da config sync + da config lint + da config verify commands'
+    status: completed
+    depends_on:
+        - p4-config-explain-cli
+        - p1b-resolver-extends-tier1
+        - p2-lockfile-doctor-status
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/config/sync.go
+        - commands/config/lint.go
+        - commands/config/verify.go
+        - commands/config/sync_test.go
+        - commands/config/lint_test.go
+        - commands/config/verify_test.go
+    verification_required: true
+    notes: |-
+        Per spec §13.1 (new config subtree commands).
+
+        - 'da config sync' — re-fetch all config layers (force), re-run pass 1, update lock config section. --layer source-id:path scopes to one layer.
+        - 'da config lint' — validate all declared layer files against the AgentsRC layer schema (spec §14 Q1).
+        - 'da config verify' — run repo setup contract checks (hooks present, binary readiness, doctor); standalone (no fetch).
+
+        Per spec §13.3: do NOT alias da refresh to config sync (per codex examination open question 4 + spec recommendation kept). Keep both surfaces distinct; da refresh is the existing projection-refresh path.
+
+        Acceptance:
+        - 'config sync' updates lockfile timestamps + re-resolves SHAs
+        - 'config lint' fails with structured error on a corrupt layer fixture
+        - 'config verify' delegates to existing doctor primitives without re-fetching
+    app_type: go-cli

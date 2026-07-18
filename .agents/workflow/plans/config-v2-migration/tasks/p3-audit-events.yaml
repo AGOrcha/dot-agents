@@ -1,0 +1,38 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 5
+task:
+    id: p3-audit-events
+    title: 'Phase 3: audit event taxonomy (config.* events)'
+    status: completed
+    depends_on:
+        - p1b-resolver-extends-tier1
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/audit.go
+        - internal/config/audit_test.go
+        - internal/config/resolver.go
+    verification_required: true
+    notes: |-
+        Per spec §9 (audit event taxonomy).
+
+        Emit structured audit events from the resolver:
+        - config.source.fetch (source_id; resolved_sha; cache_hit bool)
+        - config.layer.resolve (source_id:layer_path; field_count; sha)
+        - config.field.overridden (field_path; from_layer; to_layer; value_summary)
+        - config.field.protection_violation (field_path; attempted_by_layer; outcome=dropped)
+        - config.import.failed (source_id:layer_path; reason ∈ {transport,auth,content,schema,not_found})
+        - config.effective.produced (repo_id; layer_count; package_count; trace_id)
+
+        Base schema per external-agent-sources §8: {timestamp, actor, principal, action, target, outcome, trace_id}.
+
+        Sink: log line under .agents/active/audit/config-YYYY-MM-DD.jsonl (rotation per day; not in this task). Pluggable Sink interface so r2-observability-dashboard can consume later.
+
+        Acceptance:
+        - table-driven test asserting one fetch+resolve+effective.produced per resolver call
+        - protection-violation emitted exactly once per dropped field
+        - trace_id correlates events within a single resolution
+
+        No CLI change. Wires from p1b resolver.
+    app_type: go-cli

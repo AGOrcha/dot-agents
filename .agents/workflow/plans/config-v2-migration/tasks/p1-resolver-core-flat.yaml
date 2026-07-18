@@ -1,0 +1,45 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 2
+task:
+    id: p1-resolver-core-flat
+    title: 'Phase 1: effective-config snapshot API (flat scope first)'
+    status: completed
+    depends_on:
+        - p0-schema-additive-extension
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/snapshot.go
+        - internal/config/snapshot_test.go
+        - internal/config/resolver.go
+        - internal/config/resolver_test.go
+    verification_required: true
+    notes: |-
+        Per spec §6 (two-pass resolution) — but FLAT first (no network/git fetch). Foundation for p2+.
+
+        Introduce internal/config/snapshot.go with a Resolver interface that produces:
+          type Snapshot struct {
+            Effective AgentsRC
+            Provenance map[string]FieldProvenance   // field-path -> winning layer + full layer stack
+            Layers []ResolvedLayer
+          }
+          type FieldProvenance struct {
+            ActiveLayer string
+            Layers []LayerValue   // ordered by precedence
+          }
+
+        Initial Resolver impl: FlatResolver
+        - inputs: product defaults (built-in), user-local ~/.agents/agentsrc.json (if exists), repo-local .agentsrc.json
+        - pass-1 walks these three sources only (no extends fetch yet)
+        - emits provenance per the layer model in org-config-resolution §4
+
+        Why now: per codex examination §6 Phase-4 task config-snapshot-api, and per [[additive-state-fields]] (use []T{} not nil, pointer for distinguishable absence). This unblocks 'da config explain' (p4) and 'workflow app-types' refactor without waiting on tier-1 fetching.
+
+        Acceptance:
+        - snapshot for a field returns full layer stack with one ActiveLayer
+        - merge category rules per spec org-config-resolution §7.2 (scalar last-writer, set-union, map-merge, ordered-replace) covered by table-driven tests
+        - Protected fields (repo_id, project) honored: an attempt to override emits a non-fatal warning event in a returned []ProvenanceWarning
+
+        NO command surface change in this task — pure API + tests.
+    app_type: go-cli

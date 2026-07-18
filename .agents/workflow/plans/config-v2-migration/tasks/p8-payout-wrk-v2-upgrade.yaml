@@ -1,0 +1,60 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 20
+task:
+    id: p8-payout-wrk-v2-upgrade
+    title: Payout-wrk v1->v2 upgrade + fresh install-from-git validation (0.4.1)
+    status: ready
+    depends_on:
+        - p7b-v1-auto-migrator
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/history/config-v2-migration/payout-wrk-v2-upgrade-readback.md
+    verification_required: true
+    notes: |-
+        BROUGHT FORWARD for the 0.4.1 release at maintainer request. This is the
+        "payout upgrade": migrate the payout workspace repo NikashPrakash/payout-wrk
+        (org PayoutPos, has submodules, Windows machine) from a v1 .agentsrc.json to
+        v2, then prove a fresh install-from-git-source resolves correctly.
+
+        SCOPE (dot-agents-side readiness here; LIVE execution runs on the Windows box
+        against payout-wrk, NOT in this repo):
+        (a) Run `da config migrate` on payout-wrk (v1->v2). Per PR #138 the ORIGINAL
+            manifest is copied to `.agentsrc.json.v1.bak` before the v2 file is
+            written (recoverable), legacy keys are folded into stage_profiles /
+            execution_profile, version bumped to 2, idempotent on re-run.
+        (b) Verify a fresh install-from-git-source resolves correctly for payout-wrk's
+            configured git source (clean clone + `da install` / `da refresh` -> local
+            source resolves, units lock + layer stack resolve without error).
+        (c) DIAGNOSE the "failed to get the local" error the maintainer hit on Windows
+            BEFORE running (a)/(b). It is most plausibly the local-source resolve step
+            (internal/config/local_source.go emits "local source: ..." errors) reached
+            via the install-from-git path, which on Windows shells out to a real git
+            binary (commands/internal/lifecycle/install.go CloneGitSource uses
+            exec.LookPath("git") + `git clone`). Candidate root causes to confirm: git
+            not on PATH on the Windows box; submodule handling in the shallow clone;
+            or local `~/.agents` source dir not initialized/openable. The
+            config-v2-migration fold-back `fb:consolidate-clone-on-gogit` (migrate
+            CloneGitSource to in-process go-git, removing the git-binary/PATH
+            dependency) is the likely durable fix if PATH/clone is the cause -- treat
+            it as a candidate blocker to land first IF diagnosis confirms it blocks.
+
+        DEPENDENCY PICTURE (maintainer: assume no deps unless a REAL blocker):
+        - #124 (loop-discipline e2e smoke) is MERGED (2026-06-24) -- the earlier
+          work-plan "p6-payout-backfill depends on #124" dep is SATISFIED. (Note:
+          that p6 task is a DIFFERENT scope -- hook-discipline backfill to the LOCAL
+          /Users/nikashp/Documents/payout -- not this payout-wrk v1->v2 upgrade.)
+        - REAL BLOCKER: `da config migrate` does NOT exist on master yet. PR #138
+          (feat/config-migrate-command, task p7b-v1-auto-migrator) is OPEN, awaiting
+          owner review/merge. Step (a) cannot run until #138 merges. This task's
+          depends_on: p7b-v1-auto-migrator encodes that.
+        - CANDIDATE BLOCKER (to diagnose): the Windows "failed to get the local"
+          error -- step (c). If it blocks install-from-git, resolve before (b).
+        - Requires Windows access to the payout-wrk box for live execution.
+
+        Readback artifact records: pre-migration v1 manifest shape + resolved layers,
+        the `da config migrate` invocation + the v1.bak backup path, the v2 manifest
+        delta, the fresh install-from-git resolution result, and the Windows
+        local-fetch diagnosis (root cause + fix or confirmed non-blocker).
+    app_type: go-cli

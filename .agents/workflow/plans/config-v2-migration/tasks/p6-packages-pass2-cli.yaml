@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 10
+task:
+    id: p6-packages-pass2-cli
+    title: 'Phase 6: Tier 2 packages resolution (pass 2) + da packages subtree'
+    status: cancelled
+    depends_on:
+        - p5-source-types-http-oci
+        - p4c-config-sync-lint
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/packages.go
+        - internal/config/packages_test.go
+        - commands/packages/cmd.go
+        - commands/packages/install.go
+        - commands/packages/update.go
+        - commands/packages/list.go
+        - commands/packages/publish.go
+        - commands/packages/install_test.go
+        - commands/root.go
+    verification_required: true
+    notes: 'SUPERSEDED by config-distribution-model §15 (D3/D8). The config/packages tier wall collapsed into one units model: D3 retires the parallel ''da packages'' command tree (one CRUD surface via --scope/--source instead); D8 retires the OCI-only constraint (any source serves any kind). The surviving pass-2 artifact-resolution mechanic is now owned by config-v2-coherence/ce-unified-artifact-sourcing, built on p4f (units-lock wiring) + p5 (source types). No code was written for this task.'
+    app_type: go-cli

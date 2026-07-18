@@ -1,0 +1,33 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 1
+task:
+    id: p0b-repo-id-bootstrap
+    title: 'Phase 0b: repo_id field + da init auto-populate from git remote'
+    status: completed
+    depends_on:
+        - p0-schema-additive-extension
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/agentsrc.go
+        - commands/init.go
+        - commands/init_test.go
+    verification_required: true
+    notes: |-
+        Per org-config-resolution §5 (repo identity model):
+
+        - AgentsRC.RepoID field landed in p0; here we wire bootstrap.
+        - da init derives RepoID from 'git -C <repo> remote get-url origin' via normalization:
+          - github.com/<org>/<repo>, gitlab.acme.internal/<group>/<repo>, etc.
+          - strip .git suffix; lowercase host
+        - If no git remote (or detached), RepoID stays empty and da doctor warns
+        - RepoID is the protected field per spec §3 (cannot be overridden by imported layers); enforced in p1 resolver, not here.
+
+        Acceptance:
+        - new repo via 'da init' in a git checkout writes repo_id automatically
+        - existing v1 .agentsrc.json without repo_id is preserved unchanged on subsequent saves (round-trip preserves omitempty)
+        - normalization unit test covers github/gitlab/ssh/https forms
+
+        No resolver behavior change yet.
+    app_type: go-cli

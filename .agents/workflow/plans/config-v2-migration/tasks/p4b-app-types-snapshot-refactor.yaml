@@ -1,0 +1,29 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 7
+task:
+    id: p4b-app-types-snapshot-refactor
+    title: 'Phase 4b: refactor workflow app-types to consume snapshot API'
+    status: completed
+    depends_on:
+        - p4-config-explain-cli
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/app_types.go
+        - commands/workflow/app_types_test.go
+    verification_required: true
+    notes: |-
+        Per codex examination §2.2 task #3 and proposal config-explain-live-surface.md 'Phase 3'.
+
+        'workflow app-types' currently reads .agentsrc.json directly. Refactor to consume the snapshot API from p1 so layered (extended) repos report layered app types.
+
+        User-facing contract MUST be preserved: same flag surface, same output unless --verbose, same exit codes. This is a load-bearing pre-requisite for future scope-routed da review and staged-dispatch consumers reading the same snapshot.
+
+        Acceptance:
+        - snapshot-tests confirm identical output for a flat-only fixture (no extends)
+        - new fixture with synthetic extends layer adds an inherited app_type and 'app-types --verbose' shows winning layer
+        - existing app_types_test.go cases remain green
+
+        Cross-link: spec config-distribution-model §10 'one effective-config snapshot API' requirement.
+    app_type: go-cli

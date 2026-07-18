@@ -1,0 +1,44 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 16
+task:
+    id: p4f-units-lock-7a-wiring
+    title: 'Phase 4f: wire §7A units lock (inputs_digest + units) into resolve/sync; verify tracks local-scope drift'
+    status: completed
+    depends_on:
+        - p4-config-explain-cli
+        - config-v2-coherence/ca-units-lock-schema
+        - config-v2-coherence/cd-ensure-resolved-seam
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/staleness.go
+        - internal/config/lock_units.go
+        - internal/config/ensure_resolved.go
+        - internal/config/resolver.go
+        - commands/config/verify.go
+        - commands/config/explain.go
+    verification_required: true
+    notes: |-
+        Wire the dormant §7A seam (EnsureResolved/ComputeInputsDigest/WriteUnitsLock) into da config
+        sync and da install so every resolved project — including flat/local-only — gets a lockfile
+        carrying inputs_digest plus the units section. Migrate verify/explain/doctor to read units and
+        compare ComputeInputsDigest against the lock to report local-scope drift. Full design in
+        .agents/proposals/section-7a-units-lock-wiring.md.
+
+        MIGRATION = CLEAN CUTOVER (decided 2026-06-22). Pre-1.0 and the lock is regenerable, so do
+        NOT build a dual-write/dual-read window. The lock is units-only; a one-time on-read migration
+        converts any legacy `config`-section lock into `units` on first read, then the legacy reader is
+        REMOVED in this task. The §7 config lock section is retired here (ships in 0.4.0), not deferred.
+
+        Three correctness fixes the cutover MUST honor (adversarial review 2026-06-03):
+        (1) Stale-repair: the stale path (LayeredResolver.Resolve) currently calls only
+            WriteConfigLock. Route ALL writes through one authoritative path that calls WriteUnitsLock
+            + refreshes inputs_digest — leave no legacy WriteConfigLock behind.
+        (2) Offline reader: ResolveLocked and VerifyLayerLocks currently unmarshal only
+            LockSectionConfig. Switch them to read the `units` section; the one-time on-read migration
+            upgrades any old config-section lock so offline resolve never sees an 'empty' lock.
+        (3) verify invisibility: da config verify never calls Staleness()/compares inputs_digest. Add
+            a first-class staleness check backed by Staleness()/ReadUnits so local-scope drift shows
+            on the primary contract check.
+    app_type: go-cli

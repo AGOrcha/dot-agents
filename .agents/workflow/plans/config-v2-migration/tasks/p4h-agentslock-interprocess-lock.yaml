@@ -1,0 +1,41 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 18
+task:
+    id: p4h-agentslock-interprocess-lock
+    title: 'Phase 4h: agentslock interprocess lost-update protection (.agentsrc.lock)'
+    status: completed
+    depends_on:
+        - p4f-units-lock-7a-wiring
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/agentslock/lockfile.go
+        - internal/agentslock/lockfile_test.go
+    verification_required: true
+    notes: |-
+        Codex adversarial review F-006 (2026-06-22), GATED INTO 0.4.0. internal/agentslock/lockfile.go
+        has only an in-process sync.Mutex; there is NO interprocess protection. Two concurrent `da`
+        processes each Open a snapshot of the whole document, mutate their own section, and Flush via
+        temp-file + atomic rename (fsops.WriteFileAtomic) — the later rename silently DISCARDS the
+        earlier process's writes to sibling sections (a whole section + inputs_digest can vanish).
+
+        This is a data-integrity defect, NOT a p4f blocker (p4f's on-read migration is idempotent, so a
+        racing read yields a recoverable stale-read). But 0.4.0 GROWS the concurrency surface:
+        EnsureResolved auto-syncs on more commands, and the handoff PreCompact hook will run `da`
+        concurrently with the agent's own `da` against the SAME per-project lock — so ship the fix in
+        0.4.0.
+
+        Fix (choose one, document the choice): either (a) an interprocess advisory lock (e.g. flock on a
+        sidecar) held across Open..Flush, or (b) a compare-and-merge-retry: immediately before the
+        atomic rename, re-read the on-disk file; if it changed since Open, re-merge this process's
+        section deltas onto the latest on-disk sibling sections and retry (bounded). Preserve the atomic
+        temp+rename. The agentslock package is shared (KG lockfile, units lock, config lock) so keep the
+        public API stable.
+
+        Acceptance: a concurrent-writer test that launches two writers racing on the same .agentsrc.lock
+        (each setting a DIFFERENT section, e.g. one writes units + inputs_digest, the other writes a KG
+        or adapters section) and asserts BOTH sections AND inputs_digest survive after both Flush — i.e.
+        no lost update. Must be deterministic (no sleeps; use real goroutine/process contention with a
+        barrier).
+    app_type: go-cli

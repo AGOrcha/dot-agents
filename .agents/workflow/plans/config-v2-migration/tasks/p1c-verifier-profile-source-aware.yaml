@@ -1,0 +1,30 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 12
+task:
+    id: p1c-verifier-profile-source-aware
+    title: 'Phase 1c (optional): source-aware verifier_profile.prompt_files'
+    status: completed
+    depends_on:
+        - p1b-resolver-extends-tier1
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+        - commands/workflow/bundle.go
+        - commands/workflow/bundle_test.go
+    verification_required: true
+    notes: |-
+        DELIVERED + SUPERSEDED by stage-profile-and-routing-consolidation (PR #45, merged): PR #40
+        carried PromptFileRef; #45 absorbed it and unified verifier_profiles+reviewer_profiles into the
+        typed stage_profiles map, retiring app_type_verifier_map into execution_profile.topology. The
+        source-aware prompt_files goal below is shipped under stage_profiles.verifier.* (legacy keys fold).
+        --- original scope (historical) ---
+        Q1 ruling: Option B — force typed objects everywhere. p1c is CRITICAL-PATH (not optional). Scope expands to:
+        - Migrate ALL existing verifier_profiles entries across dot-agents .agentsrc.json + the embedded starter
+        - Bulk migration of prompt_files [string] → [{source, path, version}] for unit/api/batch/streaming/ui-e2e
+        - Update unit.project.md / api.project.md / etc. references in resolver to use typed-object lookup
+        - Add migration test fixtures (legacy flat → expected typed)
+        - Cross-link in lesson `[[verifier-owns-ci-watch-shift-left]]`
+    app_type: go-cli

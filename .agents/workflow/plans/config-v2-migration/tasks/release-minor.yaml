@@ -1,0 +1,50 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 15
+task:
+    id: release-minor
+    title: 'Release: bump VERSION + finalize CHANGELOG for the config-v2 minor'
+    status: completed
+    depends_on:
+        - p0-schema-additive-extension
+        - p0b-repo-id-bootstrap
+        - p1-resolver-core-flat
+        - p1b-resolver-extends-tier1
+        - p2-lockfile-doctor-status
+        - p3-audit-events
+        - p4-config-explain-cli
+        - p4b-app-types-snapshot-refactor
+        - p4c-config-sync-lint
+        - p5-source-types-http-oci
+        - p4f-units-lock-7a-wiring
+        - p1c-verifier-profile-source-aware
+        - p4g-da-install-units-sync
+        - p4h-agentslock-interprocess-lock
+        - config-v2-coherence/ce-unified-artifact-sourcing
+        - config-v2-coherence/ck-command-reshape
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - VERSION
+        - CHANGELOG.md
+    verification_required: true
+    notes: |-
+        Release-gated tail task (hybrid convention, MINOR path).
+        0.4.0 SCOPE (decided 2026-06-22) = the COMPLETE config-v2 §15 surface:
+        the effective-config resolver + unified units lockfile (one units
+        section + inputs_digest, clean cutover), da config explain/sync/lint/
+        verify, unified artifact sourcing (ce), the --scope/--source command
+        reshape (ck), and the re-scoped da install (p4g). Additive, no public
+        surface removed -> MINOR. v1 deprecation (p7/p7b) is DEFERRED to 0.5.0
+        (ships with that release's other work) and is NOT a 0.4.0 gate; da
+        install repurpose is IN 0.4.0 (p4g), not deferred.
+        Target version = next minor computed from VERSION at ready-time (do NOT
+        hardcode; expected 0.4.0) — serialize at the VERSION bump if another
+        feature minor lands first (then this claims the next number).
+        Action: bump VERSION + finalize the CHANGELOG "## [<target>]" section
+        documenting the v2 config model. Merge to master fires auto-release.yml.
+        Becomes eligible only once every dependency is completed.
+
+        Landed: 0.4.0 PUBLISHED (VERSION=0.4.0, CHANGELOG ## [0.4.0] - 2026-06-23) via
+        release PR #114. ARCHIVE-eligible (wave-2 state sync).
+    app_type: release

@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 14
+task:
+    id: p4d-da-install-repurpose
+    title: 'Phase 4d: repurpose da install per spec §13.3'
+    status: cancelled
+    depends_on:
+        - p4-config-explain-cli
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/install.go
+        - commands/install_test.go
+        - commands/lifecycle/install.go
+    verification_required: true
+    notes: 'DEFERRED out of the config-v2 critical path (per the config-v2-dependency-map proposal''s own recommendation: do not couple v2 to repurposing existing verbs; defer to a separate plan). Under §15, ''da install'' repurpose is a D12 command-intent concern, separable from the v2 substrate. Re-file as its own plan when picked up. No code was written for this task.'
+    app_type: go-cli

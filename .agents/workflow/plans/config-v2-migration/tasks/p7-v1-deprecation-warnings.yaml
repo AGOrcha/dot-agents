@@ -1,0 +1,44 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 11
+task:
+    id: p7-v1-deprecation-warnings
+    title: 'Phase 7: v1 surface deprecation warnings (post-soak)'
+    status: completed
+    depends_on:
+        - p4b-app-types-snapshot-refactor
+        - p4f-units-lock-7a-wiring
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/migrate.go
+        - internal/config/migrate_test.go
+        - commands/init.go
+        - commands/doctor.go
+    verification_required: true
+    notes: |-
+        Per spec §15.3 (deprecation cadence). NOT for the same release as p0; soak v2 for at least one minor cycle first.
+
+        Behaviors:
+        - LoadAgentsRC: if version=1 detected, emit one-time deprecation notice (to stderr) recommending 'da config migrate' to v2
+        - new 'da config migrate' subcommand: converts v1 to v2 in-place
+          - 'sources: [{type: local}, {type: git, url, ref}]' -> rewrites to v2 source-id'd form
+          - adds repo_id auto-derived from git remote
+          - adds extends: [] (empty, opt-in)
+          - bumps version: 1 -> 2
+          - idempotent; --dry-run prints diff
+        - 'da doctor' WARN if v1 .agentsrc.json detected
+        - 'da init' on a fresh repo writes v2 by default
+
+        DO NOT remove v1 loading code in this phase. Final removal is a separate plan after a documented soak window.
+
+        Acceptance:
+        - migrate on a real-shape v1 fixture (the project's own .agentsrc.json shape pre-migration) produces a valid v2 file that re-loads identically (semantic equivalence)
+        - migrate --dry-run prints unified diff
+        - existing v1 file continues to load (with warning)
+
+        Open question for the user: how long is the soak window? Recommended: 2 minor releases. Document in §5 of dependency-map proposal.
+
+        Landed: merged to master via PR #123 (wave-2 state sync).
+    app_type: go-cli

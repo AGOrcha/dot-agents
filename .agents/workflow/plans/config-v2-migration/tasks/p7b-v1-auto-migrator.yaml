@@ -1,0 +1,36 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 13
+task:
+    id: p7b-v1-auto-migrator
+    title: 'Phase 7b: v1→v2 auto-migrator with 1-day sunset'
+    status: completed
+    depends_on:
+        - p7-v1-deprecation-warnings
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/config/migrate.go
+        - commands/config/migrate_test.go
+        - internal/config/migrate.go
+        - internal/config/migrate_test.go
+        - internal/config/testdata/migrate/
+    verification_required: true
+    notes: |-
+        Q3 ruling: 1-day v1 sunset paired with auto-migrator. After p7 ships deprecation warnings, this phase ships:
+
+        1. Auto-detection: on `.agentsrc.json` load, if v1 schema detected (no extends/packages/repo_id, flat prompt_files), trigger migration
+        2. Migration logic: produce v2-schema-shaped .agentsrc.json + .agentsrc.json.v1.bak sidecar
+        3. Migration runs on appropriate triggers: `da install`, `da config sync`, first `da workflow *` call after deprecation date
+        4. User-visible: clear log line "migrating v1 .agentsrc.json to v2 (backup at .v1.bak)"
+        5. Idempotent: running on already-v2 file is a no-op
+
+        After this phase ships + the 1-day sunset window passes, v1 loading is REMOVED entirely (becomes a separate small PR after p7b proves the migrator covers).
+
+        Landed: `da config migrate` (opt-in v1→v2; v1.bak backup; folds legacy keys into
+        stage_profiles/execution_profile; idempotent; --dry-run) merged to master via PR #138
+        (2026-06-25) and shipped in the 0.4.1 release (#154, CHANGELOG ## [0.4.1] - 2026-06-24).
+        Implemented as the OPT-IN migrator with a 2-release soak (NOT a 1-day forced sunset — the
+        title is historical); v1 loading still works with a deprecation warning and is removed in a
+        later release. commands/config/migrate.go + internal/config/migrate.go.
+    app_type: go-cli

@@ -1,0 +1,44 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 6
+task:
+    id: p4-config-explain-cli
+    title: 'Phase 4: da config explain command + da config subtree'
+    status: completed
+    depends_on:
+        - p1-resolver-core-flat
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/root.go
+        - commands/config/cmd.go
+        - commands/config/explain.go
+        - commands/config/explain_test.go
+    verification_required: true
+    notes: |-
+        Per spec §10 + proposal config-explain-live-surface.md.
+
+        Net-new 'da config' subtree (no existing surface to migrate per codex examination §2.2).
+        - commands/root.go: register NewConfigCmd()
+        - commands/config/cmd.go: cobra parent
+        - commands/config/explain.go:
+          - 'da config explain [field-path]' default human-readable per spec §10 example
+          - --all: full effective config annotated by winning layer
+          - --flags: feature flag resolution view
+          - --value-only: just the value
+          - --origin-only: just the winning layer id
+          - --json: machine-readable {field, value, active_layer, layers[]}
+          - field-path syntax: dot-separated (e.g. stage_profiles.verifier.unit, execution_profile.by_app_type.go-cli)
+
+        Exit codes per spec §10: 0 success, 1 layer fetch failure, 2 schema validation, 3 auth failure.
+
+        Consumes snapshot API from p1; works on flat scope without needing p1b (degrades gracefully when no extends).
+
+        Per spec §10 'Resolved execution manifest visibility' addendum: explain output for app_type (json mode) MUST include {selected_profile_ref, resolved_version, content_digest, composition_expansion, verifier_chain[], review_kind, graph_adapter, stage_agents, reviewer_lenses, overlays, execution_mode, return_gate_policy} when those fields exist in the effective config. If not present, omit gracefully — do not invent.
+
+        Acceptance:
+        - explain output matches spec §10 example for both single-field and --all
+        - --json schema documented inline (godoc on the output struct)
+        - consumed by tests via 'go test ./commands/config/...'
+        - one bash smoke test under tests/test-config-explain.sh covering --value-only piped to a follow-on command
+    app_type: go-cli

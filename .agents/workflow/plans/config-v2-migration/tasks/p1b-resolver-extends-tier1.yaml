@@ -1,0 +1,44 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 3
+task:
+    id: p1b-resolver-extends-tier1
+    title: 'Phase 1b: resolver tier-1 extends (git+http+local layer fetch)'
+    status: completed
+    depends_on:
+        - p1-resolver-core-flat
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/resolver.go
+        - internal/config/resolver_test.go
+        - internal/config/fetcher.go
+        - internal/config/fetcher_test.go
+        - internal/config/layer_schema.go
+    verification_required: true
+    notes: |-
+        Per spec §6 (pass 1) + §7 (lockfile config section) + §8 (tier-1 caching).
+
+        Extend FlatResolver into LayeredResolver:
+        - pass-1 walks: product defaults -> user-local -> extends[] (left-to-right) -> repo-local -> plan/task/runtime overrides
+        - fetcher: git (clone/fetch to ~/.cache/dot-agents/sources/<sha>/...), http (GET layer.json), local (direct path)
+        - ref-syntax parse: 'source-id:layer-path[@version]' per spec §5
+        - tier-constraint check at resolve time: extends entry referencing oci source -> fail with config.import.failed reason=schema
+        - layer schema validation against AgentsRC layer schema (subset of full schema; layers cannot set repo_id/project)
+        - optional entries supported per spec §11 ({\"ref\":\"...\",\"optional\":true}) — skipped with warning on fetch failure
+
+        Lockfile config section (also in this task — keep cohesive):
+        - write .agentsrc.lock with resolved layers: {resolved_sha, fetched_at, ttl_expires_at} per spec §7
+        - caching: content-addressed by SHA under ~/.agents/cache/config/<source-id>/<layer-path>/<sha>/layer.json
+        - TTL-based re-check (not eviction) per spec §8
+        - offline behavior: use last resolved SHA from lockfile; emit cache_hit_offline warning
+
+        Acceptance:
+        - test fixture: local source with two layer files (org/base.json + team/frontend.json) resolves end-to-end
+        - a third git source fetch is mocked (interface seam) — no live network in tests; cover via fakeFetcher
+        - lockfile round-trip preserves both sections (config + empty packages stub)
+        - protected-field violation on imported layer is dropped + warning surfaced
+        - 'config explain' (still not wired) can be sanity-called from a test as the snapshot API consumer
+
+        Per [[validate-bundle-against-head]]: confirm internal/config/snapshot.go (from p1) exists at HEAD before authoring tests that import it.
+    app_type: go-cli

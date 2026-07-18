@@ -1,0 +1,36 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 4
+task:
+    id: p2-lockfile-doctor-status
+    title: 'Phase 2: lockfile drift surfaces (da doctor + da status)'
+    status: completed
+    depends_on:
+        - p1b-resolver-extends-tier1
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/doctor.go
+        - commands/doctor_test.go
+        - commands/status.go
+        - commands/status_test.go
+    verification_required: true
+    notes: |-
+        Per spec §13.4 (health surfaces).
+
+        da doctor additions:
+        - WARN if any layer's TTL has expired and 'da config sync' has not been run since
+        - ERROR if .agentsrc.json declares a layer or package not present in .agentsrc.lock (drift detector)
+        - WARN on any non-fatal config.field.protection_violation events from the last resolution
+
+        da status additions:
+        - show each declared layer with resolved SHA and TTL expiry
+        - show each declared package with resolved tag + digest + cache presence
+
+        NO new resolver behavior; this consumes the snapshot+lock from p1b.
+
+        Acceptance:
+        - doctor fixture with stale lock fails with actionable error pointing at 'da config sync'
+        - status output deterministic + golden-file test
+        - existing v1 (no lock file) is a no-op (legacy path unchanged)
+    app_type: go-cli

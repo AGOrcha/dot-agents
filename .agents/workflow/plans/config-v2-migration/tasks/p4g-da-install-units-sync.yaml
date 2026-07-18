@@ -1,0 +1,68 @@
+schema_version: 1
+plan_id: config-v2-migration
+order: 17
+task:
+    id: p4g-da-install-units-sync
+    title: 'Phase 4g: re-scope da install onto EnsureResolved + exact/prune projection (§15)'
+    status: completed
+    depends_on:
+        - p4f-units-lock-7a-wiring
+        - p4c-config-sync-lint
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/install.go
+        - commands/internal/lifecycle/install.go
+        - commands/internal/lifecycle/install_test.go
+    verification_required: true
+    notes: |-
+        Replaces the CANCELLED p4d, whose 'da install == da config sync && da packages install'
+        framing died with §15 (there is no da packages install; artifacts are kind:artifact units
+        resolved by the same resolver). Re-scope da install onto the unified seam.
+
+        Target flow: load manifest -> EnsureResolved(project) (staleness check; if stale, re-resolve
+        local scopes + write the units lock) -> create ~/.agents project dirs -> register project in
+        ~/.agents/config.json -> shared-target projection EXACT/PRUNE (reuse
+        RunSharedTargetProjectionExact, same path as refresh) -> platform links (Claude/Cursor/Codex/
+        Copilot) -> record the resolution stamp (version/commit/describe) in the LOCK, NOT
+        .agentsrc.json. da install stays the canonical 'make everything current'; the only step
+        required on a fresh clone.
+
+        INPUT/OUTPUT rule (decided 2026-06-22): .agentsrc.json is the hand-authored INPUT manifest and
+        must never be machine-stamped; all resolution OUTPUT (per-unit digests AND the version/commit/
+        describe stamp) lives in the lock. So REMOVE the current finalizeInstall .agentsrc.json write
+        and record the stamp in the units lock instead (coordinate the lock-header stamp field with
+        p4f's units-lock schema). This also makes installs reproducible: the lock fully describes what
+        was resolved.
+
+        Simplifications the units model enables (analyzed 2026-06-22; size S, ~10-20 lines of wiring):
+        - Collapse bespoke resolveInstallSources + linkInstallResources into ONE EnsureResolved call
+          (the resolver owns all unit resolution + the units lock write).
+        - Reuse RunSharedTargetProjectionExact (one exact/prune projection path; drop the additive-only
+          install projection).
+        - Dedupe vs da config sync: both call EnsureResolved, differing by intent/flags — install adds
+          ~/.agents projection + platform links + project registration; config sync does not.
+        - First-resolve is hermetic (fresh machine, no lock -> deterministic create-on-first-resolve).
+        Boundary: upstream re-check is explicit-only (da config sync --refresh); install resolves
+        local scopes only (D10). Depends on p4f so EnsureResolved writes the UNITS lock (clean
+        cutover), not the legacy config section. SEE the Codex constraints below.
+
+        Codex adversarial-review constraints (2026-06-22) that MUST be honored in this collapse:
+        (F-007) Before collapsing resolveInstallSources + linkInstallResources into EnsureResolved,
+            PROVE the units resolver materializes EVERY resource type linkInstallResources handles
+            (agents/skills/commands/hooks/mcp). If EnsureResolved does not materialize all of them, a
+            fresh clone with manifest-only sources would project nothing — so keep resource
+            materialization as an EXPLICIT post-EnsureResolved step rather than assuming the resolver
+            covers it. Verify with a fresh-clone test that asserts every resource type lands.
+        (F-008) EnsureResolved updates the lock BEFORE projection/platform-link runs, so a failed
+            projection would otherwise leave the lock 'current' while outputs are stale/partial. Make
+            projection AND platform-link failures HARD errors in the install path (non-zero exit), or
+            write an explicit incomplete-stamp to the lock instead of a success stamp. Do NOT keep the
+            legacy behavior of treating link/projection failures as warnings that still finalize
+            success. Test: a forced projection failure must fail the install (or stamp incomplete),
+            never report success with a current lock.
+
+        Landed: merged to master via PR #92 (install.go uses config.EnsureResolved +
+        RunSharedTargetProjectionExact with --inexact opt-out, fb6caf36). Status was stale
+        awaiting_agent_review from the #126 sync; reconciled to completed (wave-2 state sync).
+    app_type: go-cli
