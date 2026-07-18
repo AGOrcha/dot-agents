@@ -2689,3 +2689,128 @@ func TestWorkTracking_SchemaValidates(t *testing.T) {
 		t.Fatal("schema must reject an out-of-enum read_from value")
 	}
 }
+
+// TestWorkTracking_BackendRoundTrip verifies work_tracking.backend decodes into
+// the typed WorkTracking field (never ExtraFields), round-trips through
+// Marshal/Unmarshal, and drives the WorkStoreBackend/UseGitRefBackend helpers.
+func TestWorkTracking_BackendRoundTrip(t *testing.T) {
+	raw := []byte(`{"version":2,"project":"p","sources":[{"type":"local"}],"work_tracking":{"backend":"git-ref"}}`)
+	var rc AgentsRC
+	if err := json.Unmarshal(raw, &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rc.WorkTracking == nil || rc.WorkTracking.Backend != WorkTrackingBackendGitRef {
+		t.Fatalf("backend not decoded into typed field: %+v", rc.WorkTracking)
+	}
+	if _, leaked := rc.ExtraFields["work_tracking"]; leaked {
+		t.Fatal("work_tracking leaked into ExtraFields — agentsRCKnown out of sync")
+	}
+	if rc.WorkStoreBackend() != WorkTrackingBackendGitRef {
+		t.Fatalf("WorkStoreBackend()=%q, want git-ref", rc.WorkStoreBackend())
+	}
+	if !rc.UseGitRefBackend() {
+		t.Fatal("UseGitRefBackend() must be true for backend=git-ref")
+	}
+	data, err := json.Marshal(&rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back AgentsRC
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	if back.WorkTracking == nil || back.WorkTracking.Backend != WorkTrackingBackendGitRef {
+		t.Fatalf("backend lost on round-trip: %+v", back.WorkTracking)
+	}
+}
+
+// TestWorkTracking_BackendDefaultsToLocal asserts the default (absent / empty /
+// blank / local) config resolves WorkStoreBackend to "local" and leaves
+// UseGitRefBackend false — the byte-for-byte-unchanged read path — and that a
+// nil receiver is safe.
+func TestWorkTracking_BackendDefaultsToLocal(t *testing.T) {
+	var nilRC *AgentsRC
+	if nilRC.WorkStoreBackend() != WorkTrackingBackendLocal {
+		t.Fatal("nil receiver must default to local")
+	}
+	if nilRC.UseGitRefBackend() {
+		t.Fatal("nil receiver must not use the git-ref backend")
+	}
+	cases := []struct {
+		name, raw string
+	}{
+		{"absent", `{"version":1,"sources":[{"type":"local"}]}`},
+		{"empty", `{"version":1,"sources":[{"type":"local"}],"work_tracking":{}}`},
+		{"blank", `{"version":1,"sources":[{"type":"local"}],"work_tracking":{"backend":""}}`},
+		{"local", `{"version":1,"sources":[{"type":"local"}],"work_tracking":{"backend":"local"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var rc AgentsRC
+			if err := json.Unmarshal([]byte(tc.raw), &rc); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if rc.WorkStoreBackend() != WorkTrackingBackendLocal {
+				t.Fatalf("%s config must resolve to local, got %q", tc.name, rc.WorkStoreBackend())
+			}
+			if rc.UseGitRefBackend() {
+				t.Fatalf("%s config must not use the git-ref backend", tc.name)
+			}
+		})
+	}
+}
+
+// TestWorkTracking_ReservedBackendsValidateAndTreatedAsLocal proves the reserved
+// ladder rungs decode into the typed field and pass schema validation, but are
+// NOT the git-ref backend (treated as local/unimplemented until they land).
+func TestWorkTracking_ReservedBackendsValidateAndTreatedAsLocal(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	for _, backend := range []string{
+		WorkTrackingBackendKG,
+		WorkTrackingBackendCloudflareDO,
+		WorkTrackingBackendJira,
+		WorkTrackingBackendLinear,
+	} {
+		t.Run(backend, func(t *testing.T) {
+			raw := `{"version":2,"project":"p","sources":[{"type":"local"}],"work_tracking":{"backend":"` + backend + `"}}`
+			var doc any
+			if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+				t.Fatalf("parse fixture: %v", err)
+			}
+			if err := sch.Validate(doc); err != nil {
+				t.Fatalf("reserved backend %q must validate: %v", backend, err)
+			}
+			var rc AgentsRC
+			if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if rc.WorkStoreBackend() != backend {
+				t.Fatalf("WorkStoreBackend()=%q, want %q", rc.WorkStoreBackend(), backend)
+			}
+			if rc.UseGitRefBackend() {
+				t.Fatalf("reserved backend %q must not activate the git-ref backend", backend)
+			}
+		})
+	}
+}
+
+// TestWorkTracking_BackendSchemaValidates confirms a manifest carrying
+// work_tracking.backend=git-ref passes the compiled schema and that an
+// out-of-enum backend value is rejected.
+func TestWorkTracking_BackendSchemaValidates(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	parse := func(s string) any {
+		t.Helper()
+		var doc any
+		if err := json.Unmarshal([]byte(s), &doc); err != nil {
+			t.Fatalf("parse fixture: %v", err)
+		}
+		return doc
+	}
+	if err := sch.Validate(parse(`{"version":2,"project":"p","sources":[{"type":"local"}],"work_tracking":{"backend":"git-ref"}}`)); err != nil {
+		t.Fatalf("work_tracking.backend=git-ref must validate: %v", err)
+	}
+	if err := sch.Validate(parse(`{"version":2,"sources":[{"type":"local"}],"work_tracking":{"backend":"nonsense"}}`)); err == nil {
+		t.Fatal("schema must reject an out-of-enum backend value")
+	}
+}

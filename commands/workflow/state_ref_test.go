@@ -748,3 +748,268 @@ func TestApplyCloseoutDecisionToTasks_MirrorErrorPropagates(t *testing.T) {
 		t.Fatalf("expected wrapped mirror error, got %v", err)
 	}
 }
+
+// ── git-ref backend (work_tracking.backend) read path ──────────────────────────
+
+// seedGitRefBackendRepo builds a git repo with a single active plan whose
+// TASKS.yaml carries tasksYAML and an .agentsrc.json whose work_tracking block
+// is wtJSON verbatim ("" ⇒ no work_tracking block, exercising the default
+// local backend). Returns the repo root.
+func seedGitRefBackendRepo(t *testing.T, wtJSON, tasksYAML string) string {
+	t.Helper()
+	agentsrc := `{"version":1,"project":"p","sources":[{"type":"local"}]}`
+	if wtJSON != "" {
+		agentsrc = `{"version":1,"project":"p","sources":[{"type":"local"}],"work_tracking":` + wtJSON + `}`
+	}
+	repo := t.TempDir()
+	rel := ".agents/workflow/plans/" + stateRefTestPlanID + "/"
+	testutil.InitGitRepo(t, repo, map[string]string{
+		".agentsrc.json":   agentsrc,
+		rel + "PLAN.yaml":  planYAMLActive(stateRefTestPlanID),
+		rel + "TASKS.yaml": tasksYAML,
+	})
+	return repo
+}
+
+// writeWorktreeTasks overwrites the worktree TASKS.yaml for the state-ref test
+// plan, diverging it from whatever is recorded on refs/agents/state.
+func writeWorktreeTasks(t *testing.T, repo, content string) {
+	t.Helper()
+	path := filepath.Join(plansBaseDir(repo), stateRefTestPlanID, workflowTasksFileName)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeWorktreePlan overwrites the worktree PLAN.yaml for the state-ref test
+// plan with the given status, diverging it from the ref copy.
+func writeWorktreePlan(t *testing.T, repo, status string) {
+	t.Helper()
+	path := filepath.Join(plansBaseDir(repo), stateRefTestPlanID, workflowPlanFileName)
+	content := "schema_version: 1\nid: \"" + stateRefTestPlanID + "\"\ntitle: \"" + stateRefTestPlanID + "\"\nstatus: \"" + status + "\"\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestLoadCanonicalTasks_GitRefBackendReadsRefProjection proves acceptance (a):
+// under backend=git-ref, loadCanonicalTasks returns the per-task ref projection
+// even when the worktree TASKS.yaml has diverged — the working copy is never
+// consulted while the plan exists on the ref.
+func TestLoadCanonicalTasks_GitRefBackendReadsRefProjection(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "in_progress"))
+	if err := mirrorTransitionToStateRef(repo, stateRefTestPlanID, "t1"); err != nil {
+		t.Fatalf("mirror: %v", err)
+	}
+	// Diverge the worktree copy AFTER mirroring the ref.
+	writeWorktreeTasks(t, repo, tasksYAMLWithStatus(stateRefTestPlanID, "completed"))
+	tf, err := loadCanonicalTasks(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	if got := tf.Tasks[0].Status; got != "in_progress" {
+		t.Fatalf("git-ref backend must return the ref projection (in_progress), got %q — worktree copy leaked", got)
+	}
+}
+
+// TestLoadCanonicalPlan_GitRefBackendReadsRef proves loadCanonicalPlan resolves
+// PLAN.yaml from the ref under backend=git-ref, ignoring a divergent worktree
+// copy.
+func TestLoadCanonicalPlan_GitRefBackendReadsRef(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "in_progress"))
+	if err := mirrorTransitionToStateRef(repo, stateRefTestPlanID, "t1"); err != nil {
+		t.Fatalf("mirror: %v", err)
+	}
+	writeWorktreePlan(t, repo, "paused")
+	plan, err := loadCanonicalPlan(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalPlan: %v", err)
+	}
+	if plan.Status != "active" {
+		t.Fatalf("git-ref backend must return the ref PLAN.yaml (active), got %q", plan.Status)
+	}
+}
+
+// TestLoadCanonical_GitRefBackendFallsBackWhenAbsentOnRef proves acceptance (b):
+// when the plan has no blobs on refs/agents/state (a ref never written),
+// loadCanonicalTasks and loadCanonicalPlan gracefully fall back to the
+// per-worktree working copy.
+func TestLoadCanonical_GitRefBackendFallsBackWhenAbsentOnRef(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	// No ref was ever written.
+	if head := stateRefHead(repo); head != "" {
+		t.Fatalf("precondition: state ref must be absent, got %q", head)
+	}
+	tf, err := loadCanonicalTasks(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	if got := tf.Tasks[0].Status; got != "pending" {
+		t.Fatalf("absent-on-ref must fall back to the worktree copy (pending), got %q", got)
+	}
+	plan, err := loadCanonicalPlan(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalPlan: %v", err)
+	}
+	if plan.Status != "active" {
+		t.Fatalf("absent-on-ref plan must fall back to the worktree copy (active), got %q", plan.Status)
+	}
+}
+
+// TestRunWorkflowAdvance_GitRefBackendImpliesMirror proves acceptance (d): with
+// backend=git-ref and write_to UNSET, a transition still mirrors to
+// refs/agents/state (the backend implies the write mirror).
+func TestRunWorkflowAdvance_GitRefBackendImpliesMirror(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	chdirRepo(t, repo)
+
+	if err := runWorkflowAdvance(stateRefTestPlanID, "t1", "in_progress"); err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	if head := stateRefHead(repo); head == "" {
+		t.Fatal("backend=git-ref must imply the state-ref mirror even with write_to unset")
+	}
+	relTask := ".agents/workflow/plans/" + stateRefTestPlanID + "/tasks/t1.yaml"
+	blob := gitOut(t, repo, "show", stateRefName+":"+relTask)
+	if !strings.Contains(blob, "in_progress") {
+		t.Fatalf("per-task state ref blob missing new status; got:\n%s", blob)
+	}
+}
+
+// TestCanonicalWriteToStateRef_GitRefBackendImplies is the focused unit for the
+// implied-mirror guard: backend=git-ref activates canonicalWriteToStateRef (and
+// useGitRefBackend) even without work_tracking.write_to.
+func TestCanonicalWriteToStateRef_GitRefBackendImplies(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	if !canonicalWriteToStateRef(repo) {
+		t.Fatal("backend=git-ref must imply the write mirror")
+	}
+	if !useGitRefBackend(repo) {
+		t.Fatal("useGitRefBackend must be true for backend=git-ref")
+	}
+	// Default / local config activates neither.
+	local := seedGitRefBackendRepo(t, "", tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	if canonicalWriteToStateRef(local) {
+		t.Fatal("default config must not imply the write mirror")
+	}
+	if useGitRefBackend(local) {
+		t.Fatal("default config must not use the git-ref backend")
+	}
+}
+
+// TestRunWorkflowAdvance_GitRefBackendReadYourWrites proves acceptance (c): two
+// sequential runWorkflowAdvance transitions to DIFFERENT tasks both persist. The
+// worktree is deliberately reverted between the two advances to simulate the
+// cross-worktree divergence read_from=master fell victim to; because the git-ref
+// backend reads the LOCAL, in-process-updated state ref (read-your-writes safe),
+// the 2nd advance sees t1's transition and does NOT clobber it.
+func TestRunWorkflowAdvance_GitRefBackendReadYourWrites(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLTwoPending(stateRefTestPlanID))
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	chdirRepo(t, repo)
+
+	if err := runWorkflowAdvance(stateRefTestPlanID, "t1", "in_progress"); err != nil {
+		t.Fatalf("advance t1: %v", err)
+	}
+	// Simulate a divergent worktree: a worktree-sourced read would lose t1's
+	// transition here. The git-ref backend reads the state ref instead.
+	writeWorktreeTasks(t, repo, tasksYAMLTwoPending(stateRefTestPlanID))
+	if err := runWorkflowAdvance(stateRefTestPlanID, "t2", "in_progress"); err != nil {
+		t.Fatalf("advance t2: %v", err)
+	}
+
+	tf, err := loadCanonicalTasks(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	byID := map[string]string{}
+	for _, task := range tf.Tasks {
+		byID[task.ID] = task.Status
+	}
+	if byID["t1"] != "in_progress" {
+		t.Fatalf("t1 transition clobbered by the t2 transition: %q (read_your_writes violated)", byID["t1"])
+	}
+	if byID["t2"] != "in_progress" {
+		t.Fatalf("t2 transition lost: %q", byID["t2"])
+	}
+	projected, err := projectPlanTasksFromStateRef(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("project from ref: %v", err)
+	}
+	if len(projected.Tasks) != 2 {
+		t.Fatalf("ref projection must carry both tasks, got %d", len(projected.Tasks))
+	}
+}
+
+// TestLoadCanonicalTasks_GitRefBeatsReadFromMaster documents the precedence
+// decision: when backend=git-ref AND read_from=master are both set, the git-ref
+// backend wins for coordination reads (a LOCAL ref is read-your-writes safe,
+// unlike the stale remote-tracking master ref). With no origin remote,
+// read_from=master alone would fall back to the (divergent) worktree copy; the
+// git-ref backend instead resolves the state ref.
+func TestLoadCanonicalTasks_GitRefBeatsReadFromMaster(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref","read_from":"master"}`, tasksYAMLWithStatus(stateRefTestPlanID, "in_progress"))
+	if err := mirrorTransitionToStateRef(repo, stateRefTestPlanID, "t1"); err != nil {
+		t.Fatalf("mirror: %v", err)
+	}
+	writeWorktreeTasks(t, repo, tasksYAMLWithStatus(stateRefTestPlanID, "completed"))
+	tf, err := loadCanonicalTasks(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	if got := tf.Tasks[0].Status; got != "in_progress" {
+		t.Fatalf("git-ref must take precedence over read_from=master (want in_progress from the ref), got %q", got)
+	}
+}
+
+// TestLoadCanonicalTasks_GitRefBackendMalformedBlobErrors covers the error-propagation
+// leg of the git-ref read path: a malformed per-task blob on the ref surfaces as
+// an error from loadCanonicalTasks rather than being silently swallowed.
+func TestLoadCanonicalTasks_GitRefBackendMalformedBlobErrors(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "in_progress"))
+	base := ".agents/workflow/plans/" + stateRefTestPlanID + "/tasks/"
+	if err := writeStateRefCAS(repo, []stateRefFile{{relPath: base + "t1.yaml", content: []byte("this: : not valid [")}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadCanonicalTasks(repo, stateRefTestPlanID); err == nil {
+		t.Fatal("malformed per-task blob must surface as an error under the git-ref backend")
+	}
+}
+
+// TestLoadCanonicalPlan_GitRefBackendPlanAbsentFallsBack covers the leg where
+// the state ref EXISTS (a per-task blob was written) but PLAN.yaml is NOT on it:
+// loadCanonicalPlan gracefully falls back to the worktree copy.
+func TestLoadCanonicalPlan_GitRefBackendPlanAbsentFallsBack(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "in_progress"))
+	// Write only a task blob to the ref — PLAN.yaml is deliberately absent.
+	base := ".agents/workflow/plans/" + stateRefTestPlanID + "/tasks/"
+	blob := "schema_version: 1\nplan_id: \"" + stateRefTestPlanID + "\"\norder: 0\ntask:\n  id: \"t1\"\n  title: \"task one\"\n  status: \"in_progress\"\n  verification_required: true\n"
+	if err := writeStateRefCAS(repo, []stateRefFile{{relPath: base + "t1.yaml", content: []byte(blob)}}); err != nil {
+		t.Fatal(err)
+	}
+	if head := stateRefHead(repo); head == "" {
+		t.Fatal("precondition: state ref must exist")
+	}
+	plan, err := loadCanonicalPlan(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("loadCanonicalPlan: %v", err)
+	}
+	if plan.Status != "active" {
+		t.Fatalf("PLAN.yaml absent on the ref must fall back to the worktree copy (active), got %q", plan.Status)
+	}
+}
+
+// TestLoadCanonical_GitRefBackendMissingFileErrors covers the fallback os.ReadFile
+// error legs: under backend=git-ref, a plan present on neither the ref nor the
+// working copy surfaces the not-found error from loadCanonicalTasks and
+// loadCanonicalPlan (rather than a silent empty result).
+func TestLoadCanonical_GitRefBackendMissingFileErrors(t *testing.T) {
+	repo := seedGitRefBackendRepo(t, `{"backend":"git-ref"}`, tasksYAMLWithStatus(stateRefTestPlanID, "pending"))
+	if _, err := loadCanonicalTasks(repo, "ghost-plan"); err == nil {
+		t.Fatal("missing plan (absent on ref and worktree) must error from loadCanonicalTasks")
+	}
+	if _, err := loadCanonicalPlan(repo, "ghost-plan"); err == nil {
+		t.Fatal("missing plan (absent on ref and worktree) must error from loadCanonicalPlan")
+	}
+}
