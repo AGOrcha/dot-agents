@@ -43,10 +43,16 @@ Sequential concurrency (PLAN.yaml) — the D3 fork gates the seam.
 
 1. `t1-dashboard-subsystem` — `da dashboard` (serve/open/status) over the shared core.
 2. `t2-retire-standalone-root` — retire `cmd/da-dashboard` [dep t1].
-3. `t3-boundary-mechanism-decision` — **HARD fork, ideation-cycle**: build-tag vs
-   separate-module vs dedicated-entrypoint for the slim runtime. Gates t4.
-4. `t4-slim-runtime-seam` — implement the ratified boundary + import-guard [dep t3;
-   write_scope finalized by t3].
+3. `t3-boundary-mechanism-decision` — **RESOLVED (cross-brain gate, 2026-07-18)**: ratified
+   = dedicated release entrypoint + full-closure allowlist import-guard + internal/service
+   slim-core/fat-wiring split; claim scoped to static-import-isolation-provisional. See
+   `evidence/d3-boundary-mechanism.md`.
+4. `t4-slim-runtime-seam` — implement the ratified boundary: minimal cmd/ entrypoint +
+   allowlist guard over the exact production build's full transitive closure + service-core/
+   fat-wiring split [dep t3].
+4a. `t4a-release-artifact-measurement` — measure the ACTUAL fully-wired slim release
+   artifact's transitive closure (real GOOS/GOARCH/CGO/tags); wire it as the CI import-policy
+   subject [dep t4; blocks t12]. The gate's decisive fix — the package-set proxy under-counts.
 5. `t5-capability-writepaths` — deny-by-default + registered write-path mechanism [dep t1].
 6. `t6-oneway-egress-bridge` — one-way bridge, egress-only/GET-only [dep t1].
 7. `t7-loopback-failclosed` — loopback-default bind, fail-closed beyond [dep t1].

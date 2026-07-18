@@ -4,12 +4,13 @@ tasks:
     - id: t1-dashboard-subsystem
       title: da dashboard subsystem (serve/open/status) over the shared core
       status: pending
-      write_scope:
-        - commands/dashboard/
-        - commands/root.go
       depends_on: []
       blocks:
         - t2-retire-standalone-root
+      owner: ""
+      write_scope:
+        - commands/dashboard/
+        - commands/root.go
       verification_required: true
       notes: |-
         Spec D1/D2. Add a first-class `da dashboard` subsystem wired into the root
@@ -20,11 +21,12 @@ tasks:
     - id: t2-retire-standalone-root
       title: Retire the standalone da-dashboard separate root
       status: pending
-      write_scope:
-        - cmd/da-dashboard/
       depends_on:
         - t1-dashboard-subsystem
       blocks: []
+      owner: ""
+      write_scope:
+        - cmd/da-dashboard/
       verification_required: true
       notes: |-
         Spec D1. Retire cmd/da-dashboard as a distinct entry point; its local-serve
@@ -33,12 +35,13 @@ tasks:
         (its tests target the subsystem/runtime composition).
     - id: t3-boundary-mechanism-decision
       title: Resolve D3 slim-runtime boundary mechanism (ideation-cycle)
-      status: pending
-      write_scope:
-        - .agents/workflow/specs/dashboard-subsystem-and-bus-security/
+      status: completed
       depends_on: []
       blocks:
         - t4-slim-runtime-seam
+      owner: ""
+      write_scope:
+        - .agents/workflow/specs/dashboard-subsystem-and-bus-security/
       verification_required: true
       notes: |-
         Spec D3 open question. HARD fork: build-tag vs separate-module vs dedicated
@@ -52,29 +55,56 @@ tasks:
     - id: t4-slim-runtime-seam
       title: Implement the slim-runtime import/build boundary + guard
       status: pending
-      write_scope:
-        - tools/importguard/
       depends_on:
         - t3-boundary-mechanism-decision
       blocks: []
+      owner: ""
+      write_scope:
+        - internal/service/
+        - tools/importguard/
+        - cmd/
       verification_required: true
       notes: |-
-        Spec D3. Implement the boundary mechanism ratified by t3 so the network-facing
-        runtime builds WITHOUT the fat agent command surface, and add/extend an
-        import-guard that fails the build if the runtime target imports outside the
-        permitted set. write_scope is FINALIZED by t3's decision (build-tag files, a
-        new module dir, or a dedicated entrypoint may be added). Verifies done-criterion
-        "a build/import guard fails when the runtime target's dependency graph includes
-        the disallowed fat-command surface". Artifact/packaging remains DEFERRED (spec).
+        Spec D3 (ratified mechanism, post cross-brain gate). Add a dedicated minimal release
+        entrypoint under cmd/ and a CI import-policy that is an ALLOWLIST over the FULL
+        transitive closure of the exact production build (run per supported build config), NOT
+        a denylist or source grep. Split internal/service into slim-core vs fat-wiring so fat
+        adapters never enter the runtime core (the guard holds despite internal/service being
+        shared by the fat da service path). Verifies done-criterion "a build/import guard fails
+        when the runtime target's dependency graph includes the disallowed fat-command
+        surface". Isolation claim is STATIC-import-only, provisional; the real-artifact
+        measurement is t4a. Evidence:
+        specs/dashboard-subsystem-and-bus-security/evidence/d3-boundary-mechanism.md.
+    - id: t4a-release-artifact-measurement
+      title: Measure the fully-wired slim release artifact transitive closure
+      status: pending
+      depends_on:
+        - t4-slim-runtime-seam
+      blocks:
+        - t12-verify-close
+      owner: ""
+      write_scope:
+        - tools/importguard/
+        - .github/workflows/
+      verification_required: true
+      notes: |-
+        Cross-brain gate decisive fix (evidence/d3-boundary-mechanism.md GATE-2): the
+        package-set proxy under-counts. Build the ACTUAL fully-wired slim release entrypoint
+        and measure its transitive closure at real GOOS/GOARCH/CGO/tags (go list -deps -json),
+        then wire THAT exact target as the CI import-policy subject. Verifies: the guard runs
+        over the real release artifact and fails on a forbidden import. Settles STATIC import
+        isolation only; network attack surface needs the separate bus-security review (spec
+        Open Questions D3 axis B), covered by t5/t6/t7/t9.
     - id: t5-capability-writepaths
       title: Deny-by-default capability + registered write-operation paths
       status: pending
-      write_scope:
-        - internal/dashboard/handlers/
-        - internal/dashboard/server/
       depends_on:
         - t1-dashboard-subsystem
       blocks: []
+      owner: ""
+      write_scope:
+        - internal/dashboard/handlers/
+        - internal/dashboard/server/
       verification_required: true
       notes: |-
         Spec D5. Read-only by default; state mutates ONLY through an explicitly
@@ -85,13 +115,14 @@ tasks:
     - id: t6-oneway-egress-bridge
       title: One-way runtime->broker bridge; egress-only / GET-only
       status: pending
-      write_scope:
-        - internal/dashboard/events/
-        - internal/dashboard/server/
       depends_on:
         - t1-dashboard-subsystem
       blocks:
         - t9-payload-hygiene
+      owner: ""
+      write_scope:
+        - internal/dashboard/events/
+        - internal/dashboard/server/
       verification_required: true
       notes: |-
         Spec D4. Enforce/verify the runtime->broker bridge is strictly one-directional
@@ -101,12 +132,13 @@ tasks:
     - id: t7-loopback-failclosed
       title: Loopback-default bind; fail-closed beyond loopback
       status: pending
-      write_scope:
-        - internal/dashboard/server/
       depends_on:
         - t1-dashboard-subsystem
       blocks:
         - t10-multiuser-authz-gate
+      owner: ""
+      write_scope:
+        - internal/dashboard/server/
       verification_required: true
       notes: |-
         Spec D6. The runtime binds loopback by default and never binds a public
@@ -116,10 +148,11 @@ tasks:
     - id: t8-dos-cap-coalescing
       title: DoS governance - subscriber cap + high-freq coalescing
       status: pending
-      write_scope:
-        - internal/dashboard/events/
       depends_on: []
       blocks: []
+      owner: ""
+      write_scope:
+        - internal/dashboard/events/
       verification_required: true
       notes: |-
         Spec D7. Add a bound on concurrent subscribers and coalesce/debounce bursty
@@ -131,12 +164,13 @@ tasks:
     - id: t9-payload-hygiene
       title: Payload hygiene - no secrets in browser-bound events
       status: pending
-      write_scope:
-        - internal/dashboard/events/
-        - internal/dashboard/handlers/
       depends_on:
         - t6-oneway-egress-bridge
       blocks: []
+      owner: ""
+      write_scope:
+        - internal/dashboard/events/
+        - internal/dashboard/handlers/
       verification_required: true
       notes: |-
         Spec D8. Events crossing to browser clients carry no secrets, tokens, or PII;
@@ -145,11 +179,12 @@ tasks:
     - id: t10-multiuser-authz-gate
       title: Multi-user stream authz precondition (fail-closed gate)
       status: pending
-      write_scope:
-        - internal/dashboard/server/
       depends_on:
         - t7-loopback-failclosed
       blocks: []
+      owner: ""
+      write_scope:
+        - internal/dashboard/server/
       verification_required: true
       notes: |-
         Spec Deferred item. Per-subscriber stream authorization is a HARD precondition
@@ -160,14 +195,15 @@ tasks:
     - id: t11-docs-align
       title: Align dashboard docs with the shipped subsystem + posture
       status: pending
-      write_scope:
-        - docs/OBSERVABILITY_DASHBOARD.md
-        - docs/DASHBOARD_API.md
-        - web/dashboard/README.md
       depends_on:
         - t1-dashboard-subsystem
         - t2-retire-standalone-root
       blocks: []
+      owner: ""
+      write_scope:
+        - docs/OBSERVABILITY_DASHBOARD.md
+        - docs/DASHBOARD_API.md
+        - web/dashboard/README.md
       verification_required: false
       notes: |-
         Update the dashboard docs from the forward-looking spec-direction framing (the
@@ -177,11 +213,10 @@ tasks:
     - id: t12-verify-close
       title: Verify spec done-criteria and close the plan
       status: pending
-      write_scope:
-        - .agents/history/dashboard-subsystem-and-bus-security/
       depends_on:
         - t2-retire-standalone-root
         - t4-slim-runtime-seam
+        - t4a-release-artifact-measurement
         - t5-capability-writepaths
         - t6-oneway-egress-bridge
         - t7-loopback-failclosed
@@ -190,9 +225,16 @@ tasks:
         - t10-multiuser-authz-gate
         - t11-docs-align
       blocks: []
+      owner: ""
+      write_scope:
+        - .agents/history/dashboard-subsystem-and-bus-security/
       verification_required: true
       notes: |-
         Confirm every spec done-criterion is met (subsystem invocation, import guard,
         default-deny mutation, DoS cap+coalescing, loopback-default, payload hygiene),
-        run the full suite + CI green, and archive the plan. Verifies: all spec
-        done-criteria pass; `go test ./...` and CI are green.
+        run the full suite + CI green, and archive the plan. NOTE (cross-brain gate): the
+        D3 "attack surface reduced" claim is satisfied only by t4a (real release-artifact
+        transitive-closure measurement) + the bus-security tasks (t5/t6/t7/t9) + a
+        route/data-flow bus-security review — NOT by the import guard alone, which settles
+        static import isolation only. Verifies: all spec done-criteria pass; `go test ./...`
+        and CI are green.

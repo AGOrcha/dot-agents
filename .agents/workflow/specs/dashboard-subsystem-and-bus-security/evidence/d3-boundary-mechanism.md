@@ -87,12 +87,40 @@ isolation holds for the FAITHFUL prod runtime, not just the toy standalone — t
 confound (is the standalone representative?) is closed: even service+dashboard sheds the
 fat surface. This strengthens sub-fork A.
 
-## GATE 2 — cross-harness audit: UNAVAILABLE this cycle
+## GATE 2 — cross-harness audit verdict (GPT, cross-family)
 
-The codex cross-harness adversarial pass FAILED with `resource_exhausted` (codex quota).
-Per the fidelity gate, a same-model self-review is NOT a substitute for a cross-harness
-GATE 2, so it was not faked. **Status: the mandatory independent cross-harness audit is
-PENDING.** The empirical result (sub-forks A) is self-audited + confound-closed but NOT
-yet cross-harness-gated; the judgment call (sub-fork B) has NOT had its cross-brain
-trade-off pass. Ratification below is therefore CAVEATED and owner-gated: retry codex when
-quota recovers before locking, OR the owner may ratify-with-caveat.
+Codex-exec was quota-blocked (`resource_exhausted` ×2); the gate was instead run via the
+available cross-family GPT model (`completion(model="slow")`) — a genuinely different model
+family than the Claude author, satisfying the cross-harness requirement. Owner-ratified
+2026-07-18.
+
+**Sub-fork A — NOT-SOUND as an "attack-surface settled" claim; SOUND only as "static import
+isolation demonstrated provisionally."** Decisive flaws the gate raised:
+- package-count + binary-size are an invalid proxy for attack surface — one small package
+  (HTTP router, deserializer, template engine, reflection, cgo, known-CVE dep) can dominate
+  10 inert packages;
+- `internal/service`+`internal/dashboard` UNDER-COUNTS the real fully-wired release `main`
+  (adds config load, credential/keyring, TLS, auth middleware, concrete KG scoring);
+- `go list -deps` misses subprocesses (python bridge), runtime-loaded assets/plugins, and
+  network reachability;
+- no isolation exists while production still ships the fat `cmd/da` artifact.
+- **Decisive fix:** build the ACTUAL fully-wired slim release entrypoint and measure ITS
+  transitive closure at real release `GOOS`/`GOARCH`/`CGO`/tags (`go list -deps -json`); make
+  that exact target the CI import-policy subject; network attack surface still needs a
+  separate route/data-flow security review.
+
+**Sub-fork B — mechanism ranking SURVIVES, amended.** (1) dedicated entrypoint + an
+ALLOWLIST/layer policy over the FULL transitive closure of the exact production build (NOT a
+denylist or source grep), run for every supported build config, PLUS split `internal/service`
+into slim-core vs fat-wiring so fat adapters never enter the shared core; (2) separate module
+only if independent dependency governance / release ownership becomes a hard requirement;
+(3) build-tags only as a localized implementation-selection escape hatch. R3 note: a guard
+over the exact slim entrypoint's closure DOES hold even though `internal/service` is shared by
+both the fat `da service` path and the slim runtime — provided the layering split exists.
+
+**Ratified decision (owner-accepted):** dedicated release entrypoint + full-closure allowlist
+import-guard (per build config) + `internal/service` slim-core/fat-wiring split. D3's isolation
+claim is scoped to **"static import isolation, provisional"** — NOT "attack surface reduced."
+**Residual open axes** (folded into the spec Open Questions): (a) measure the real fully-wired
+release artifact's transitive closure (plan task t4a); (b) a separate SSE/bus network
+attack-surface route/data-flow review — package metrics cannot settle it.

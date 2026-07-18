@@ -70,6 +70,16 @@ the seam must exist now so that cut requires no re-architecture.
 abandoning separate-deployability (forecloses the prod posture and keeps a network
 service carrying the whole toolchain).
 
+**Ratified mechanism (2026-07-18, cross-brain gate — see `evidence/d3-boundary-mechanism.md`):**
+a dedicated minimal release entrypoint whose isolation is enforced by a CI import-policy that
+is an ALLOWLIST over the full transitive closure of the exact production build (run per build
+config), plus a split of the shared service package into slim-core vs fat-wiring so fat
+adapters never enter the runtime's core. Build-tags are a localized escape hatch only; a
+separate module only if independent dependency governance becomes a hard requirement. The
+isolation claim is scoped to **static import isolation, provisional** — NOT an attack-surface
+reduction (that requires the wired-release-artifact measurement + a separate bus-security
+review; see Open Questions).
+
 ### D4 — Event bus is egress-only and one-way from the runtime
 The push channel is server→client only (per r2 D2.2). The runtime→broker bridge is
 strictly one-directional: the dashboard consumes runtime events and cannot publish or
@@ -130,9 +140,12 @@ payloads are shaped and audited at the bridge boundary.
 
 ## Open Questions
 
-- What is the concrete boundary mechanism for D3 — build tags, a separate module, or a
-  dedicated minimal entrypoint — and which minimizes both attack surface and maintenance
-  cost? (candidate for an empirical prototype under the fidelity gate)
+- D3 residual axis A: the real fully-wired release `main`'s transitive closure must be measured
+  on the ACTUAL built artifact (real GOOS/GOARCH/CGO/tags), not the package-set proxy — the
+  decisive isolation evidence. The cross-brain gate found package-count/binary-size an invalid
+  attack-surface proxy. See `evidence/d3-boundary-mechanism.md`.
+- D3 residual axis B: a separate SSE/bus network attack-surface review (route + data-flow) —
+  package metrics cannot settle network-reachable surface.
 - What are the initial concurrent-subscriber bound and the coalescing/debounce policy
   (per-topic vs global; time-window vs count) appropriate to expected event rates?
   (needs a rate measurement, not a guess)
