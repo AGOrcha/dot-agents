@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: sdd-kg-schema-v4-corrections
+order: 0
+task:
+    id: g1-node-id-type-namespacing
+    title: Type-prefix node ids for spec/plan/task (close plan/spec bare-id collision)
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: Nikash Prakash
+    write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+    verification_required: true
+    notes: 'GAP 1 (dogfood, PR #179). The v4 composite-key rule covers TASK identity (task_key = plan_id + slash + task_id, draft S1.1 ~line 151-159) but NOT the plan/spec id-namespace overlap. A plan and a spec share a bare id by the dir-name convention (e.g. docs-starlight-migration exists as BOTH a plan and a spec); the DSL evaluator indexes notes by id, so a bare-id spec node and plan node overwrite each other in the id map, silently breaking type-checked edge traversal. FIX (already proven in PR #179 ingest.go specNodeID/planNodeID/taskNodeID): every graph NODE id is type-prefixed so ids are unique ACROSS types; unprefixed business keys (spec_id/plan_id/task_key) stay on FIELDS, which is what WHERE clauses match. Make this a NORMATIVE node-id rule in the draft identity section, not just the task composite-key note. Cross-ref PR #179 as grounding evidence.'
+    app_type: docs

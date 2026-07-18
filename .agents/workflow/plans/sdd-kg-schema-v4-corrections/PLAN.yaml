@@ -1,0 +1,11 @@
+schema_version: 1
+id: sdd-kg-schema-v4-corrections
+title: 'SDD-Entity KG schema v4 corrections (dogfood gaps from PR #179)'
+status: draft
+summary: 'Six schema-v4 draft corrections surfaced by the sdd-register KG dogfood (PR #179): node-id type-namespacing, on-disk plan->spec field, spec frontmatter Plan-line parse, spec schema/spec_id + status enum, depends_on dangling-ref policy, app_type drift re-check. Corrections land against work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md and, where on-disk, the spec/plan/task artifacts + schemas.'
+created_at: "2026-06-26T01:13:03Z"
+updated_at: "2026-06-26T01:18:26Z"
+owner: Nikash Prakash
+success_criteria: 'sdd-entity-kg-schema-draft.md adopts type-prefixed node ids for spec/plan/task (not just composite task_key); a normative on-disk plan->spec linkage and spec frontmatter contract are specified; spec status enum reconciled to freeform reality; depends_on dangling-ref emission policy documented; app_type gap closed/confirmed against #166. Draft remains internally consistent (no orphaned cardinality claims).'
+verification_strategy: Manual review of the draft revision against on-disk evidence; where an artifact/schema changes, go test ./... + the relevant schema validation; the sdd-register dogfood re-ingests cleanly (go test ./internal/adapters/builtin/sdd-register/).
+current_focus_task: ""

@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: sdd-kg-schema-v4-corrections
+order: 1
+task:
+    id: g2-on-disk-plan-spec-field
+    title: Specify on-disk plan->spec linkage field (replace dir-name convention)
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: Nikash Prakash
+    write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+    verification_required: true
+    notes: 'GAP 2 (dogfood, PR #179). plan->spec linkage today relies ONLY on the dir-name convention (plan_id == spec_id). The dogfood found 11/35 plans have NO matching spec, so plan_for_spec/implements_spec edges UNDER-LINK the real corpus (edge only fires when a same-named spec exists; see ingest.go linkedSpec). Specify a NORMATIVE on-disk field (e.g. PLAN.yaml spec_id / owning_spec) so linkage is explicit, not inference-by-dirname. Decide + document whether this is a PROPOSED field add to schemas/workflow-plan.schema.json and how the plan_for_spec derivation changes. This task is the DRAFT spec change; the on-disk schema change is a follow-up.'
+    app_type: docs

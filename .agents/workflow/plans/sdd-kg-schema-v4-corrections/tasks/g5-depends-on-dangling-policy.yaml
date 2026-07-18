@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: sdd-kg-schema-v4-corrections
+order: 4
+task:
+    id: g5-depends-on-dangling-policy
+    title: Document depends_on dangling/cross-plan-ref emission policy (529 edges)
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: Nikash Prakash
+    write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+    verification_required: true
+    notes: 'GAP 5 (dogfood, PR #179). depends_on targets dangle: cross-plan and stale refs are real (529 depends_on edges over the corpus; ingest.go addDeps emits a depends_on edge whose to-node may not exist as a projected node). Document the NORMATIVE policy in the draft: a depends_on edge records a DECLARED dependency even when the target is unresolved (stale/cross-plan), vs. requiring referential integrity. Specify how a consumer distinguishes resolved vs dangling (e.g. a derived view / health query). Decide whether dangling refs are a data-quality signal worth a separate lint, and note it.'
+    app_type: docs

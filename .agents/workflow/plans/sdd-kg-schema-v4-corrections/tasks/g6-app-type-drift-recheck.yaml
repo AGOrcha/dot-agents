@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: sdd-kg-schema-v4-corrections
+order: 5
+task:
+    id: g6-app-type-drift-recheck
+    title: Re-check app_type schema drift against t8/#166 (likely no-op)
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: Nikash Prakash
+    write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+    verification_required: false
+    notes: 'GAP 6 (dogfood, PR #179) — VERIFIED LIKELY NO-OP by orchestrator. The worker reported app_type schema-drift, but PR #166 (commit f0b60cd7, merged) ALREADY added the open-vocab app_type property to schemas/workflow-tasks.schema.json (additionalProperties:false was rejecting a field CanonicalTask emits). Confirmed present: schema line 66-69 defines app_type as open-vocabulary (e.g. go-cli, docs, http-service, meta), matching CanonicalTask.AppType. ACTION: confirm the draft text does not still claim app_type is missing/drifted; if it does, correct the stale claim and cite #166. Otherwise close as no-op. Do NOT re-add a field that already exists.'
+    app_type: docs

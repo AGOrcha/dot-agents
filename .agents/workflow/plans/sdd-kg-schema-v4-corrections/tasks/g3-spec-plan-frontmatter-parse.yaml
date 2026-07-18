@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: sdd-kg-schema-v4-corrections
+order: 2
+task:
+    id: g3-spec-plan-frontmatter-parse
+    title: Normalize spec frontmatter Plan-line (4 formats across 9 specs)
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: Nikash Prakash
+    write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+    verification_required: true
+    notes: 'GAP 3 (dogfood, PR #179). The spec frontmatter Plan reference is unparseable: 4 different formats appear across 9 specs. Specify a SINGLE normative frontmatter format for the spec->plan back-reference (or drop it in favor of the gap-2 forward PLAN.yaml field). Document the canonical format in the draft and enumerate the 4 current variants as the evidence ledger. Mechanical reconcile of the 9 on-disk specs is a follow-up once the format is ratified.'
+    app_type: docs

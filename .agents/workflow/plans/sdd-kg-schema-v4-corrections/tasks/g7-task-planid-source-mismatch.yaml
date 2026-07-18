@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: sdd-kg-schema-v4-corrections
+order: 6
+task:
+    id: g7-task-planid-source-mismatch
+    title: 'ingest task plan_id sourced from PLAN.yaml id, not TASKS.yaml header (codex review #179)'
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: Nikash Prakash
+    write_scope:
+        - internal/adapters/builtin/sdd-register/ingest.go
+        - internal/adapters/builtin/sdd-register/ingest_internal_test.go
+    verification_required: true
+    notes: |-
+        Found by codex adversarial review of PR #179 (point 5). schema.yaml:32 documents task.plan_id as [mirror: TASKS.yaml file-header plan_id], and CanonicalTaskFile exposes that header (commands/workflow/types.go:112). But ingest.go ignores tf.PlanID and materializes the EFFECTIVE PLAN.yaml id (effectivePlanID) onto every task (ingest.go addPlan line ~147/151/157, addTask ~184). On the current corpus PLAN.yaml id == TASKS.yaml plan_id so tests pass, but a mismatch silently projects the WRONG task_key with no failure. FIX: either (a) source task plan_id from tf.PlanID to match the schema mirror, with a consistency assertion when PLAN.yaml id != TASKS.yaml plan_id, or (b) correct schema.yaml to document plan_id as derived-from-PLAN.yaml. Add a test asserting the chosen source on a fixture where the two headers DISAGREE (tests-must-drive-the-production-path: the test must fail if the wrong source is used). Secondary: harden the unchecked type assertion at sddregister_test.go:184 (impl[0][colTaskKey].(string)) to the checked form. NOTE: a corpus-shape coverage tightening (codex point 3: trace-edge >0 floors, NodeCount as unique-id count) and an intra-type duplicate-id guard (point 2) are RELATED but lower priority — fold into g1/g5 or a follow-up, do not expand this task scope.
+        - (fb:codex-179-adapter-findings) Codex adversarial review of PR #179 (orchestrator stream B) corroborated #179 as NOT tautological (real disk walk + mutation-test anti-tautology) and merge-ready, but surfaced adapter bugs beyond the 6 reported gaps: (1) STRONGEST: task.plan_id is documented [mirror: TASKS.yaml header plan_id] but ingest sources it from PLAN.yaml effectivePlanID — silent wrong-key on a mismatch (-> task g7). (2) intra-type duplicate-id collision still possible (two plan dirs same PLAN.yaml id, or dup task ids) — prefix fix only closes CROSS-type collision. (3) coverage floors reject empty graph but not a materially under-linked one (trace-edge checks are >0 only; NodeCount is len(notes) not unique ids). (4) dangling depends_on edges are deliberate but conflict with the SDK edge-between-two-notes model — gap 5 should make the policy normative. Full review: scratchpad/codex-review-179.txt.
+    app_type: go-cli

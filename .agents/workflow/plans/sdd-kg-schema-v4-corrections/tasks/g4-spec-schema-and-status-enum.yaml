@@ -1,0 +1,15 @@
+schema_version: 1
+plan_id: sdd-kg-schema-v4-corrections
+order: 3
+task:
+    id: g4-spec-schema-and-status-enum
+    title: Spec frontmatter schema + spec_id; reconcile status enum to freeform reality
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: Nikash Prakash
+    write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+    verification_required: true
+    notes: 'GAP 4 (dogfood, PR #179). Spec frontmatter is freeform: no spec JSON Schema, no schema-d spec_id (identity is the dir name only), and **Status:** is free text. The draft (S1.2 ~line 204-206) currently models spec.status as a CLOSED enum [draft, ratified, superseded], but ingest.go parseSpecFrontmatter shows only freeform draft is attested on disk; ratified/superseded are INVENTED. Either (a) define a spec frontmatter contract + spec_id and a real status enum and mark them PROPOSED (not on disk), or (b) keep status as freeform string and drop the closed-enum claim. Make the draft internally consistent: a v4 status enum that does not hold against the corpus is the bug. This is the highest-value gap (formalizes spec identity + the schema-v4 status contract).'
+    app_type: docs
