@@ -11,7 +11,7 @@ func TestDerivePathSetManagedRootIncluded(t *testing.T) {
 	got := DerivePathSet([]StatusEntry{
 		{XY: ".M", Path: ".agents/workflow/plans/x/PLAN.yaml"},
 		{XY: ".M", Path: ".agents/history/y/PLAN.yaml"},
-	}, nil)
+	}, nil, false)
 	want := []string{
 		".agents/history/y/PLAN.yaml",
 		".agents/workflow/plans/x/PLAN.yaml",
@@ -29,7 +29,7 @@ func TestDerivePathSetNonManagedExcludedByDefault(t *testing.T) {
 		{XY: ".M", Path: "src/main.go"},
 		{XY: ".M", Path: "README.md"},
 		{XY: ".M", Path: ".agents/workflow/plans/x/PLAN.yaml"},
-	}, nil)
+	}, nil, false)
 	want := []string{".agents/workflow/plans/x/PLAN.yaml"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("non-managed path leaked: got %v, want %v", got, want)
@@ -43,7 +43,7 @@ func TestDerivePathSetMutationSurfaceOptsIn(t *testing.T) {
 	got := DerivePathSet([]StatusEntry{
 		{XY: ".M", Path: ".agents/active/iteration-log/iter-7.yaml"},
 		{XY: ".M", Path: "src/main.go"}, // never declared, excluded
-	}, []string{".agents/active/iteration-log/iter-7.yaml"})
+	}, []string{".agents/active/iteration-log/iter-7.yaml"}, false)
 	want := []string{".agents/active/iteration-log/iter-7.yaml"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
@@ -58,7 +58,7 @@ func TestDerivePathSetUntrackedOutsideManagedExcluded(t *testing.T) {
 		{XY: "??", Path: "tmp/notes.md", Untracked: true},
 		{XY: "??", Path: "node_modules/junk", Untracked: true},
 	}
-	got := DerivePathSet(status, nil)
+	got := DerivePathSet(status, nil, false)
 	if len(got) != 0 {
 		t.Errorf("untracked-outside-managed leaked: %v", got)
 	}
@@ -73,7 +73,7 @@ func TestDerivePathSetUntrackedUnderManagedIncluded(t *testing.T) {
 		{XY: "??", Path: ".agents/workflow/plans/new-plan/PLAN.yaml", Untracked: true},
 		{XY: "??", Path: ".agents/history/old-plan/PLAN.yaml", Untracked: true},
 	}
-	got := DerivePathSet(status, nil)
+	got := DerivePathSet(status, nil, false)
 	want := []string{
 		".agents/history/old-plan/PLAN.yaml",
 		".agents/workflow/plans/new-plan/PLAN.yaml",
@@ -90,7 +90,7 @@ func TestDerivePathSetMutationSurfaceClaimsUntrackedOutsideManaged(t *testing.T)
 	status := []StatusEntry{
 		{XY: "??", Path: ".agents/active/iteration-log/iter-7.yaml", Untracked: true},
 	}
-	got := DerivePathSet(status, []string{".agents/active/iteration-log/iter-7.yaml"})
+	got := DerivePathSet(status, []string{".agents/active/iteration-log/iter-7.yaml"}, false)
 	want := []string{".agents/active/iteration-log/iter-7.yaml"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
@@ -105,7 +105,7 @@ func TestDerivePathSetSubmodulePointersExcluded(t *testing.T) {
 		{XY: ".M", Path: "vendor/some-sub", Submodule: true},
 		{XY: ".M", Path: ".agents/workflow/plans/x/sub-link", Submodule: true},
 		{XY: ".M", Path: ".agents/workflow/plans/x/PLAN.yaml"},
-	}, nil)
+	}, nil, false)
 	want := []string{".agents/workflow/plans/x/PLAN.yaml"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("submodule entry leaked: got %v, want %v", got, want)
@@ -123,7 +123,7 @@ func TestDerivePathSetRenameStagesBothSides(t *testing.T) {
 			Path:     ".agents/history/plans/old/PLAN.yaml",
 			OrigPath: ".agents/workflow/plans/old/PLAN.yaml",
 		},
-	}, nil)
+	}, nil, false)
 	want := []string{
 		".agents/history/plans/old/PLAN.yaml",
 		".agents/workflow/plans/old/PLAN.yaml",
@@ -143,8 +143,8 @@ func TestDerivePathSetDeterministicSortedDeduplicated(t *testing.T) {
 		{XY: ".M", Path: ".agents/workflow/plans/b/PLAN.yaml"}, // dup
 		{XY: ".M", Path: ".agents/history/c/PLAN.yaml"},
 	}
-	got1 := DerivePathSet(status, nil)
-	got2 := DerivePathSet(status, nil)
+	got1 := DerivePathSet(status, nil, false)
+	got2 := DerivePathSet(status, nil, false)
 	if !reflect.DeepEqual(got1, got2) {
 		t.Errorf("non-deterministic output: %v vs %v", got1, got2)
 	}
@@ -165,9 +165,57 @@ func TestDerivePathSetPrefixAnchored(t *testing.T) {
 	got := DerivePathSet([]StatusEntry{
 		{XY: ".M", Path: ".agents/workflow_old/x"},
 		{XY: ".M", Path: ".agents/historyish/y"},
-	}, nil)
+	}, nil, false)
 	if len(got) != 0 {
 		t.Errorf("anchor broken: %v", got)
+	}
+}
+
+// Under the git-ref backend (skipPlanState=true) plan-coordination state under
+// .agents/workflow/ is authoritative on refs/agents/state and must NOT be
+// auto-staged into code-branch commits, while .agents/history/ archives (a) and
+// any explicitly-named path (c) still stage.
+func TestDerivePathSetSkipPlanStateDropsWorkflowRoot(t *testing.T) {
+	got := DerivePathSet([]StatusEntry{
+		{XY: ".M", Path: ".agents/workflow/plans/x/PLAN.yaml"},
+		{XY: "??", Path: ".agents/workflow/plans/new/PLAN.yaml", Untracked: true},
+	}, nil, true)
+	if len(got) != 0 {
+		t.Errorf("git-ref backend must not auto-stage .agents/workflow/**: %v", got)
+	}
+}
+
+// Under the git-ref backend .agents/history/ archives are durable git records,
+// not live coordination, so they REMAIN auto-staged.
+func TestDerivePathSetSkipPlanStateKeepsHistoryRoot(t *testing.T) {
+	got := DerivePathSet([]StatusEntry{
+		{XY: ".M", Path: ".agents/history/y/PLAN.yaml"},
+		{XY: ".M", Path: ".agents/workflow/plans/x/PLAN.yaml"}, // dropped
+	}, nil, true)
+	want := []string{".agents/history/y/PLAN.yaml"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("git-ref backend must keep .agents/history/**: got %v, want %v", got, want)
+	}
+}
+
+// Under the git-ref backend an explicitly-named path still stages — even a
+// .agents/workflow/ path — because the mutation-surface / --include opt-in
+// bypasses the auto-managed gate entirely.
+func TestDerivePathSetSkipPlanStateExplicitIncludeStillStages(t *testing.T) {
+	got := DerivePathSet([]StatusEntry{
+		{XY: ".M", Path: ".agents/workflow/plans/x/PLAN.yaml"},       // named -> staged
+		{XY: ".M", Path: ".agents/workflow/plans/other/PLAN.yaml"},   // unnamed -> dropped
+		{XY: ".M", Path: ".agents/active/iteration-log/iter-7.yaml"}, // named -> staged
+	}, []string{
+		".agents/workflow/plans/x/PLAN.yaml",
+		".agents/active/iteration-log/iter-7.yaml",
+	}, true)
+	want := []string{
+		".agents/active/iteration-log/iter-7.yaml",
+		".agents/workflow/plans/x/PLAN.yaml",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("explicit include must stage under git-ref backend: got %v, want %v", got, want)
 	}
 }
 
@@ -379,7 +427,7 @@ func TestParseAndDeriveDirtyWorktreeWithSubmodule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseStatus: %v", err)
 	}
-	got := DerivePathSet(entries, nil)
+	got := DerivePathSet(entries, nil, false)
 	want := []string{".agents/workflow/plans/x/PLAN.yaml"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v (submodule + code + untracked must all be excluded)", got, want)

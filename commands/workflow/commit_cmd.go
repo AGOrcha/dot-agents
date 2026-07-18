@@ -237,7 +237,7 @@ func runWorkflowCommit(out io.Writer, git gitOps, dryRun bool, includes []string
 	if err != nil {
 		return fmt.Errorf(commitErrFmt, err)
 	}
-	paths := DerivePathSet(entries, includes)
+	paths := DerivePathSet(entries, includes, planStateSkipped())
 	if len(paths) == 0 {
 		fmt.Fprintln(out, "workflow commit: nothing to stage (idempotent no-op)")
 		return nil
@@ -334,6 +334,27 @@ func commitDisabledFromPrefs() (bool, string) {
 		return true, "commit.disable=true in workflow preferences"
 	}
 	return false, ""
+}
+
+// planStateSkipped reports whether plan-coordination state under
+// .agents/workflow/ must be EXCLUDED from code-branch commits for the current
+// project — true iff the git-ref WorkStore backend is active
+// (work_tracking.backend == "git-ref"). Default points at
+// planStateSkippedFromConfig (the real implementation); tests rebind it to a
+// stub so they do not have to stand up an .agentsrc.json on disk.
+var planStateSkipped = planStateSkippedFromConfig
+
+// planStateSkippedFromConfig is the production implementation: resolve the
+// current project and consult W1's git-ref backend gate. Any project-resolution
+// or config-load failure falls back to false (local backend), so a bad/absent
+// config never silently drops plan-state from the commit — the fail-safe
+// direction matching the read/write state-ref seams in plan_task.go.
+func planStateSkippedFromConfig() bool {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return false
+	}
+	return useGitRefBackend(project.Path)
 }
 
 func indentMessage(s string) string {
