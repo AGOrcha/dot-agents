@@ -1,0 +1,45 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 10
+task:
+    id: event-bus-interface-seam
+    title: EventBus interface seam over the shipped concrete events.Bus (spec D4.1)
+    status: completed
+    depends_on:
+        - event-bus
+    blocks:
+        - http-server
+        - tasks-iterlog-ingester
+        - tasks-rescore
+    owner: dot-agents
+    write_scope:
+        - internal/service/events/
+    verification_required: true
+    notes: |-
+        ADDED 2026-07-02 (2A/D4 coherence, PR #162 reconciliation).
+        The shipped internal/service/events bus (PR #172) is a CONCRETE
+        *events.Bus; spec D4.1 requires the transport seam to be an
+        EventBus INTERFACE that publishers and subscribers bind to --
+        never the concrete channel implementation. http-server, the
+        scheduler task publishers, R2 t04-sse-broker/t13 and R5
+        collection-endpoint all sit downstream of this seam.
+        Deliverable: define EventBus in internal/service/events per D4.1
+          Publish(topic string, payload any) error
+          Subscribe(topic string) (<-chan Event, func(), error)
+          Close() error
+        and adapt the existing channel Bus into the builtin backend
+        behind it (D4.3, dotagents-builtin:eventbus/inproc@^1.0). The
+        interface promises ONLY the D4.2 G1-G4 floor (at-most-once
+        best-effort delivery; best-effort per-topic order; bounded-buffer
+        drop-oldest, publishers never block; no cross-publish atomicity)
+        -- callers MUST NOT assume more. Ship the D4.6
+        backend-conformance suite (takes a backend constructor, asserts
+        Publish/Subscribe/Close semantics + the G1-G4 floor), anchored by
+        the in-process builtin as the seam integration-test backend.
+        Anti-scope: NO external adapters (Kafka/NATS/Redis) -- OQ6 is
+        RESOLVED interface-only for v1; the event_bus config selection
+        field (D4.4) is post-v1, demand-gated. Do NOT pre-optimize the
+        single mutex (D4.5 per-topic locking is trigger-gated).
+        Reviewer verifies: conformance suite green against the builtin;
+        race detector clean; no caller left binding to *events.Bus.
+    app_type: go-cli

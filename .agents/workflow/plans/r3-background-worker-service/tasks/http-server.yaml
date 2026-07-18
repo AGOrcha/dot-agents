@@ -1,0 +1,63 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 3
+task:
+    id: http-server
+    title: Service transport layer — UDS/named-pipe control plane + HTTP/SSE edge (mounts for R2/R5, /healthz, /api/tasks)
+    status: completed
+    depends_on:
+        - design-doc
+        - scheduler-core
+        - event-bus
+        - event-bus-interface-seam
+    blocks:
+        - service-runtime
+    owner: dot-agents
+    write_scope:
+        - internal/service/http/
+    verification_required: true
+    notes: |-
+        RESCOPED 2026-07-02 (§2A coherence, PR #162): OQ5 is ruled —
+        option (B) UDS-first + HTTP edge (spec §2A). This task is a
+        TRANSPORT LAYER, not an HTTP-everywhere server. NOT
+        HTTP-by-default; each surface follows the §2A surface→transport
+        map and selection rule ("Use HTTP for a surface when it is
+        browser-facing, OR cross-machine, OR consumed by an external
+        tool that speaks HTTP. Otherwise use the local high-efficiency
+        transport."). Two listeners:
+        (1) Local control plane — Unix-domain socket (named pipe on
+        Windows) behind one small dialer abstraction. Serves
+        `da service status`/`stop` and the §D6 CLI-routes-when-present
+        path. Stop/admin is authorized by socket file permission +
+        peer-credential check (SO_PEERCRED on Linux, LOCAL_PEERCRED on
+        macOS, named-pipe client token on Windows) — this REPLACES the
+        old "POST /admin/stop gated on loopback" network-ACL shape
+        (OQ4). Named-pipe path must be exercised on the Windows box,
+        not assumed to mirror UDS (§2A cross-platform note).
+        (2) HTTP/SSE edge — net/http (no framework dep), mounted ONLY
+        for the browser/dashboard surface (R2) and the explicit
+        external bind (OQ3 default loopback 127.0.0.1:7878; external
+        requires explicit --addr opt-in). Serves GET /healthz (200 ok)
+        and GET /api/tasks (scheduler.State() as JSON).
+        RegisterMount(prefix, handler) stitches a sub-handler under an
+        arbitrary prefix on this edge — R2 calls with "/api" +
+        dashboard handler, R5 with "/api/reviews" + review handler.
+        Graceful shutdown via http.Server.Shutdown(ctx) wired to the
+        runtime ctx; the control-plane listener closes on the same ctx.
+        Dependencies: takes the §D4.1 EventBus INTERFACE (see
+        event-bus-interface-seam), never the concrete *events.Bus.
+        Anti-scope: NO R2 endpoints, NO R5 endpoints (only the mount
+        machinery + stub test that proves RegisterMount routes
+        correctly). NO authn/authz (R5 plan owns RBAC). NO
+        worker-dispatch wire (scheduler→task RunFns stay in-process Go
+        calls per the §2A map). NO external EventBus adapters.
+        Reviewer verifies: /healthz returns 200 and /api/tasks JSON
+        shape matches scheduler.State() on the HTTP edge; control
+        endpoints answered over the UDS/named-pipe listener
+        (integration test against a *socket* listener, not TCP, per
+        the §2A verifier-chain note); peer-credential gate enforced on
+        stop; RegisterMount with overlapping prefixes errors
+        deterministically; graceful shutdown of both listeners
+        completes within ctx deadline.
+        - (fb:windows-named-pipe-control-plane) The UDS control plane (status/stop) is stubbed fail-fast on Windows (control_windows.go): da service will not start on Windows at all. Deferred at the transport layer (#249) and composition layer (#272) because §2A requires the named-pipe path be exercised on a REAL Windows box, not assumed, and go-winio is only an indirect dep. OWNER-RELEVANT: the maintainer's work PC is Windows, so da service is unusable there until this lands. Needs a named-pipe listener/dialer + Windows peer-identity (named-pipe client token per §2A) behind the existing per-OS listenControl/dialControl/defaultPeerUID seam, validated on real Windows CI.
+    app_type: go-cli

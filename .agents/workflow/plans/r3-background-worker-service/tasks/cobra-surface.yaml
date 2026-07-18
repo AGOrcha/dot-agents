@@ -1,0 +1,53 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 7
+task:
+    id: cobra-surface
+    title: '`da service run|status|stop` cobra subcommand'
+    status: pending
+    depends_on:
+        - service-runtime
+    blocks:
+        - docs-and-verification
+    owner: dot-agents
+    write_scope:
+        - commands/service/
+        - commands/root.go
+    verification_required: true
+    notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): control-plane commands
+        ride the UDS/named-pipe control socket, not TCP/HTTP (spec §2A
+        map — local control plane row; OQ4 stop becomes a socket-
+        permission + peer-credential check, not a loopback network
+        ACL). Also reconciled to spec D1: `-d`/`--detach` self-
+        backgrounding + pidfile IS in scope — the earlier "no
+        daemonization / no PID file" anti-scope contradicted D1 and
+        the spec's done criteria.
+        Pattern after commands/score.go: NewServiceCmd() returns the
+        command group; wire into commands/root.go alongside
+        NewScoreCmd. Subcommands:
+          - `da service run`   — foreground; SIGINT/SIGTERM → graceful
+            shutdown. Flags: --addr (HTTP edge bind, default loopback
+            127.0.0.1:7878 per OQ3; explicit non-loopback = deliberate
+            external opt-in), --control-socket, --iter-log-dir,
+            --repo-dir, --rescore-interval, --task (repeatable
+            allow-list). --json prints startup banner as JSON.
+          - `da service run -d` (alias `--detach`) — self-backgrounds,
+            writes a pidfile, returns immediately (spec D1 + done
+            criteria; systemd/launchd supervision of the foreground
+            mode coexists).
+          - `da service status` — queries the running instance over
+            the control socket (UDS / named pipe) and renders the task
+            table (mirror score command's render style); --json passes
+            through; helpful error when no service is running.
+          - `da service stop`  — stop request over the control socket,
+            authorized by socket file permission + peer credential
+            (SO_PEERCRED / LOCAL_PEERCRED / named-pipe client token) —
+            NOT a POST /admin/stop loopback endpoint.
+        Reviewer verifies: --help text accurate; status renders over
+        the socket; stop refused for a non-owner peer where the
+        platform supports the check; `-d` writes a pidfile and returns
+        immediately; SIGINT triggers graceful shutdown in <5s; root.go
+        test still passes; named-pipe path exercised on the Windows
+        box (§2A cross-platform note).
+    app_type: go-cli

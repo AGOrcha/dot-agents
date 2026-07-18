@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 0
+task:
+    id: design-doc
+    title: Resolve R3 open questions in a per-plan design.md
+    status: completed
+    depends_on: []
+    blocks:
+        - scheduler-core
+        - event-bus
+        - http-server
+        - cobra-surface
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/r3-background-worker-service/design.md
+    verification_required: false
+    notes: |-
+        Landed via the R3 planner output 2026-05-25: hosting model =
+        `da service` cobra subcommand (R3-D1); task framework = minimal
+        in-process scheduler in internal/service/scheduler with fsnotify
+        triggers (R3-D2). See design.md for rejected alternatives
+        (asynq/river/cron-only/standalone-binary/sidecar) and the
+        per-task watermark protocol for restart-safe state.
+    app_type: research

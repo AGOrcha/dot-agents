@@ -1,0 +1,39 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 5
+task:
+    id: tasks-rescore
+    title: Rescore-on-rubric-bump task — interval trigger, rescores when RubricVersion changes
+    status: completed
+    depends_on:
+        - scheduler-core
+        - event-bus
+        - event-bus-interface-seam
+    blocks:
+        - service-runtime
+    owner: dot-agents
+    write_scope:
+        - internal/service/tasks/rescore.go
+        - internal/service/tasks/rescore_test.go
+    verification_required: true
+    notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): publish events.RescoreDone
+        via the §D4.1 EventBus INTERFACE (see event-bus-interface-seam),
+        not the concrete *events.Bus; assume only the §D4.2 G1-G4
+        floor. No transport wire here — scheduler→task dispatch is an
+        in-process Go call per the §2A map.
+        Interval trigger (default 60s, configurable). Reads watermark
+        .agents/active/service-state/rescore.watermark.yaml; compares
+        scoring.RubricVersion to the recorded value. If different,
+        invokes scoring.BuildSignalSets + rubric.ScoreAll for every
+        record, writes sidecars via scoring.WriteIterationScores +
+        WriteSessionScores, publishes events.RescoreDone{from_version,
+        to_version, iter_count} on the bus, updates watermark.
+        Anti-scope: DO NOT poll-rescore in the absent-watermark case
+        on every interval — that's quadratic and the per-iter task
+        already scores on ingest. Only act on version delta.
+        Reviewer verifies: no-op when version unchanged (most ticks);
+        rescore runs once per version bump; watermark persisted
+        before event publish to keep the bus eventually-consistent
+        with disk.
+    app_type: go-cli

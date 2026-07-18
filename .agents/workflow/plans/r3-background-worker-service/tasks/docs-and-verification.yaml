@@ -1,0 +1,35 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 8
+task:
+    id: docs-and-verification
+    title: Operator docs + umbrella verification (status, restart-preserves-state)
+    status: pending
+    depends_on:
+        - cobra-surface
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/SERVICE.md
+        - internal/service/service_integration_test.go
+    verification_required: true
+    notes: |-
+        Author docs/SERVICE.md: what the service does, how to
+        start/stop (foreground + systemd unit example + launchd
+        plist example), task list + what each does, mount contract
+        for R2/R5 plans to consume, event topics, watermark sidecar
+        layout + restart semantics, troubleshooting (how to read
+        /api/tasks, where logs go).
+        Add an end-to-end integration test demonstrating umbrella
+        verification: "da service status shows running tasks +
+        health; restart preserves in-flight task state; ingestion
+        + scoring tasks run on schedule and emit observable events
+        to a stubbed R2/R5 consumer." Stubbed R2 consumer = a test
+        handler RegisterMount'd at /api/test and asserted reachable;
+        stubbed R5 consumer = same pattern at /api/reviews/test.
+        Anti-scope: NO real R2/R5 endpoints, NO frontend code,
+        NO RBAC.
+        Reviewer verifies: docs are deployable; umbrella's three
+        verification clauses are proven by test assertions, not
+        just prose.
+    app_type: go-cli

@@ -1,0 +1,39 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 9
+task:
+    id: release-minor
+    title: 'Release: bump VERSION + finalize CHANGELOG for the da service minor'
+    status: pending
+    depends_on:
+        - design-doc
+        - scheduler-core
+        - event-bus
+        - event-bus-interface-seam
+        - http-server
+        - tasks-iterlog-ingester
+        - tasks-rescore
+        - service-runtime
+        - cobra-surface
+        - docs-and-verification
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - VERSION
+        - CHANGELOG.md
+    verification_required: true
+    notes: |-
+        Release-gated tail task (hybrid convention, MINOR path). This plan
+        delivers a new user-visible surface — the long-running `da service`
+        subcommand hosting the scheduler, telemetry ingestion, and rescore
+        background tasks plus an HTTP surface (/healthz, /api/tasks). New
+        command + new surface, MINOR not MAJOR (no public surface removed
+        or incompatibly changed).
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode). VERSION is 0.4.1 today (R1.5's minor
+        shipped), so the next minor is 0.5.0; resolve from VERSION when this
+        task becomes ready; if another minor ships first, rebase recomputes.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, moving the da-service entries out
+        of Unreleased. Merge to master fires auto-release.yml (tag + publish).
+    app_type: release

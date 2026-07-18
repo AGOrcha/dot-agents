@@ -1,0 +1,49 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 6
+task:
+    id: service-runtime
+    title: Service runtime that composes scheduler + http + bus + tasks
+    status: completed
+    depends_on:
+        - http-server
+        - tasks-iterlog-ingester
+        - tasks-rescore
+    blocks:
+        - cobra-surface
+    owner: dot-agents
+    write_scope:
+        - internal/service/service.go
+        - internal/service/service_test.go
+        - internal/service/config.go
+        - internal/service/config_test.go
+    verification_required: true
+    notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): compose to the §2A/§D4
+        shape, not the old HTTP-everywhere shape.
+        Run(ctx, Config) wires everything: build the EventBus (the
+        §D4.1 INTERFACE; v1 constructs the in-process builtin §D4.3
+        directly — no config-selected external backends yet, per the
+        OQ6 interface-only ruling), build scheduler, register
+        iterlog-ingester + rescore tasks (each receives the EventBus
+        interface), build the transport layer from http-server (UDS/
+        named-pipe control listener + HTTP/SSE edge; the edge receives
+        scheduler + bus), scheduler.Start, serve both listeners. On
+        ctx.Done() cancel scheduler, close the control-plane listener,
+        Shutdown the HTTP edge.
+        Config: {ControlSocket (UDS path / named-pipe name, sensible
+        per-repo default), HTTPAddr (default loopback 127.0.0.1:7878
+        per OQ3; explicit non-loopback = deliberate external opt-in),
+        IterLogDir, RepoDir, RescoreInterval, EnabledTasks []string}.
+        Sensible defaults match the rest of the CLI
+        (.agents/active/iteration-log; cwd for repo).
+        Integration test: spin up Run in a goroutine against a temp
+        iter-log dir, drop iter-1.yaml, subscribe via the EventBus
+        interface, assert iteration.scored event arrives within 2s and
+        sidecar exists, cancel ctx, assert Run returns within 5s.
+        Anti-scope: NO cobra here (that's the next task); NO os.Exit
+        — return clean errors so the cobra layer can render.
+        Reviewer verifies: clean shutdown of BOTH listeners,
+        integration test green, all goroutines exit (use goleak or
+        manual wait).
+    app_type: go-cli

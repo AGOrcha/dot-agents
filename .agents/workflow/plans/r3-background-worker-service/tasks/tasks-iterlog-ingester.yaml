@@ -1,0 +1,50 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 4
+task:
+    id: tasks-iterlog-ingester
+    title: Iter-log ingester task — fsnotify trigger, calls R1 scorer, publishes event
+    status: completed
+    depends_on:
+        - scheduler-core
+        - event-bus
+        - event-bus-interface-seam
+    blocks:
+        - service-runtime
+    owner: dot-agents
+    write_scope:
+        - internal/service/tasks/ingest_iterlog.go
+        - internal/service/tasks/ingest_iterlog_test.go
+        - internal/service/state/
+    verification_required: true
+    notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): publish via the §D4.1
+        EventBus INTERFACE (see event-bus-interface-seam), not the
+        concrete *events.Bus, and assume only the §D4.2 G1-G4 floor —
+        a missed event is recoverable from the sidecar + watermark
+        (§D3), never from the bus. No transport wire here:
+        scheduler→task dispatch is an in-process Go call per the §2A
+        surface→transport map (worker-dispatch row).
+        FSNotify trigger on .agents/active/iteration-log/. On a new
+        or modified iter-N.yaml: call into internal/scoring (use
+        ScoreIteration which is the same entrypoint
+        commands/workflow/close_task.go calls — DO NOT duplicate that
+        pipeline), write the sidecar via
+        scoring.WriteIterationScoreWithRecord, publish
+        events.IterationScored{iter, score, band, sidecar_path} on
+        the bus, update watermark.
+        Cross-plan dep: depends on the r1-outcome-scoring/persist
+        sidecar shape (already shipped). If sidecar already current
+        per watermark, skip — idempotent.
+        Watermark sidecar at
+        .agents/active/service-state/iterlog-ingester.watermark.yaml
+        with {last_iter_processed, last_mtime, rubric_version}.
+        Atomic write (temp+rename), mirroring
+        internal/scoring/persist.go writeYAMLAtomic.
+        Anti-scope: NO new scoring logic (delegate to
+        internal/scoring), NO session-aggregate handling here.
+        Reviewer verifies: restart test (write iter-1, run, kill,
+        write iter-2, restart, assert only iter-2 is processed); drop
+        and coalesce of rapid fsnotify events; absent watermark on
+        first run.
+    app_type: go-cli

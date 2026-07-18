@@ -1,0 +1,40 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 2
+task:
+    id: event-bus
+    title: In-process pub/sub bus for task → consumer events
+    status: completed
+    depends_on:
+        - design-doc
+    blocks:
+        - tasks-iterlog-ingester
+        - http-server
+    owner: dot-agents
+    write_scope:
+        - internal/service/events/
+    verification_required: true
+    notes: |-
+        Bus.Publish(topic, payload), Bus.Subscribe(topic) returns
+        <-chan Event. Channel-based, bounded buffer per subscriber,
+        drop-oldest on slow consumer with a counter on dropped events.
+        Event{Topic, Timestamp, Payload any}. Topics defined as
+        constants: iteration.scored, rescore.done, task.error.
+
+        Cross-plan contract: Bus.Publish signature is the shape R2's
+        sse-broker (t04) and R5's collection-endpoint depend on. Keep
+        it tiny: `Publish(topic string, payload any)`. If async/
+        queue-backed is required later, that's a follow-up via a
+        sibling Publisher interface.
+
+        Anti-scope: NO durable storage (events are ephemeral — R2
+        reads canonical state from sidecars), NO cross-process IPC.
+        Reviewer verifies: drop-oldest semantics under back-pressure,
+        unsubscribe closes channel cleanly, race detector clean.
+        SHIPPED (coherence 2026-06-25): internal/service/events/
+        (events.go + tests) landed via PR #172 (commits 7cd41916
+        "feat(service): in-process event bus" + 594d0e75 Sonar fix).
+        The shipped surface is Publish(topic, payload) +
+        Subscribe(topic) (<-chan Event, func()) per D4; R2 t04-sse-broker
+        and R5 collection-endpoint bind to it. Marked completed.
+    app_type: go-cli

@@ -1,0 +1,39 @@
+schema_version: 1
+plan_id: r3-background-worker-service
+order: 1
+task:
+    id: scheduler-core
+    title: In-process scheduler with interval + fsnotify triggers
+    status: completed
+    depends_on:
+        - design-doc
+    blocks:
+        - tasks-iterlog-ingester
+        - tasks-rescore
+        - cobra-surface
+    owner: dot-agents
+    write_scope:
+        - internal/service/scheduler/
+        - go.mod
+        - go.sum
+    verification_required: true
+    notes: |-
+        Build the scheduler primitive: Register(Task), Start(ctx),
+        Stop(timeout). Task has {Name, Trigger, RunFn(ctx) error,
+        Timeout}. Trigger interface with Interval and FSNotify
+        implementations (fsnotify dep is new — add to go.mod).
+        Scheduler tracks per-task last-run-at, next-run-at,
+        last-error, consecutive-failures; exposes them via State()
+        snapshot for the status CLI. Panics in RunFn are recovered
+        and recorded as last-error, NOT propagated. Stop() drains
+        in-flight runs up to timeout then cancels their context.
+        Anti-scope: NO http surface here, NO concrete tasks, NO
+        watermark logic (per-task in tasks/).
+        Reviewer verifies: race detector clean, panic recovery test,
+        Stop honors ctx cancellation, fsnotify coalesces rapid events.
+        SHIPPED (coherence 2026-06-25): internal/service/scheduler/
+        (scheduler.go + trigger.go + tests) landed via commit 0a57f0b6
+        ("feat(service): in-process scheduler core") with the SonarCloud
+        follow-up f9ea6632. Marked completed.
+        - (fb:fsnotify-rearm-flake) TestFSNotifyTriggerReArmDuringBurst fails ~40 percent locally under -race on unmodified master (macOS); timing-sensitive re-arm window. Needs the deterministic-seam treatment (like the hangup/partial-identity fixes) rather than timing luck. Found during service-runtime integration (#272).
+    app_type: go-cli
