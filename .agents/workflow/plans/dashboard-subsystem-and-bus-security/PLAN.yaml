@@ -7,5 +7,13 @@ created_at: "2026-07-18T16:48:25Z"
 updated_at: "2026-07-18T17:52:27Z"
 owner: dot-agents
 success_criteria: da dashboard subsystem replaces the standalone root; runtime build-boundary guard passes; bus is default-deny/one-way/loopback/bounded with clean payloads; done-criteria in the spec are met.
-verification_strategy: go test ./...; import-guard build check; broker DoS + default-deny + loopback tests; docs link-check; CI green.
+verification_strategy: |-
+  Every task is verified by a LIVE smoke against the actually-built shipped artifact, not a
+  passing *_test.go alone: build the binary, spin it up (da dashboard serve / the slim release
+  entrypoint / da service), exercise the real path, and assert MACHINE-CHECKABLE output - HTTP
+  status, jq on JSON, SSE first-byte, lsof bind, go-list-deps closure, exit codes. Reference
+  harness proven at evidence/dashboard-live-smoke-baseline.md (6/6 green vs shipped
+  cmd/da-dashboard). Unit/race tests, the import-guard, docs link-check, and CI stay; a task is
+  DONE only when the shipped artifact demonstrably does the thing. t12 runs the full harness
+  live end-to-end.
 current_focus_task: da dashboard subsystem (serve/open/status) over the shared core

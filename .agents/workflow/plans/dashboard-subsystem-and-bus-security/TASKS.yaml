@@ -18,6 +18,10 @@ tasks:
         in-process against local iter-log roots. Verifies spec done-criterion
         "dashboard invocable via the da root subsystem": `da dashboard --help` lists
         the subcommands and `go test ./commands/dashboard/...` passes.
+        Live smoke: build da, run `da dashboard serve --iter-log-dir <real> --addr
+        127.0.0.1:PORT`; assert /api/health==200, /observability/health .data.status==ok,
+        /runs a non-empty array (evidence/dashboard-live-smoke-baseline.md); `da dashboard
+        status` reports the live server. Not go test alone.
     - id: t2-retire-standalone-root
       title: Retire the standalone da-dashboard separate root
       status: pending
@@ -33,6 +37,8 @@ tasks:
         behavior is preserved by `da dashboard serve`. Verifies done-criterion "the
         standalone separate-root entry point is no longer a supported/tested path"
         (its tests target the subsystem/runtime composition).
+        Live smoke: `go build ./cmd/da-dashboard` no longer resolves (dir removed) AND
+        `da dashboard serve` serves the identical baseline API smoke (re-run the harness).
     - id: t3-boundary-mechanism-decision
       title: Resolve D3 slim-runtime boundary mechanism (ideation-cycle)
       status: completed
@@ -75,6 +81,9 @@ tasks:
         surface". Isolation claim is STATIC-import-only, provisional; the real-artifact
         measurement is t4a. Evidence:
         specs/dashboard-subsystem-and-bus-security/evidence/d3-boundary-mechanism.md.
+        Live smoke: build the actual slim runtime binary + run it -> the baseline API smoke
+        passes against it; inject a forbidden import -> the guard exits non-zero (red);
+        revert -> green.
     - id: t4a-release-artifact-measurement
       title: Measure the fully-wired slim release artifact transitive closure
       status: pending
@@ -95,6 +104,9 @@ tasks:
         over the real release artifact and fails on a forbidden import. Settles STATIC import
         isolation only; network attack surface needs the separate bus-security review (spec
         Open Questions D3 axis B), covered by t5/t6/t7/t9.
+        Live smoke: build the fully-wired release artifact; `go list -deps -json <target>`
+        shows the fat surface absent (jq assert); run the artifact -> baseline smoke passes;
+        the CI guard runs over THAT exact target.
     - id: t5-capability-writepaths
       title: Deny-by-default capability + registered write-operation paths
       status: pending
@@ -112,6 +124,9 @@ tasks:
         Establish the registry + default-deny gate; no concrete write paths are added
         now. Verifies done-criterion "the bus refuses any mutation attempt that is not
         a registered write-operation path (default-deny), covered by a test".
+        Live smoke: against the running server, POST a mutation -> 405/403 (baseline already
+        shows POST /runs -> 405); a registered write path returns 2xx while an unregistered
+        one stays denied. Assert status codes.
     - id: t6-oneway-egress-bridge
       title: One-way runtime->broker bridge; egress-only / GET-only
       status: pending
@@ -129,6 +144,9 @@ tasks:
         (the dashboard cannot publish or inject upstream), SSE is egress-only, ingress
         is GET-only, and the bus exposes no mutation endpoints. Verifies the D4
         requirement via a test that the bridge cannot inject upstream.
+        Live smoke: against the running server, SSE /events delivers first byte <5s (egress);
+        every mutating verb on a bus route -> denied; a test proves the bridge has no upstream
+        publish path.
     - id: t7-loopback-failclosed
       title: Loopback-default bind; fail-closed beyond loopback
       status: pending
@@ -145,6 +163,8 @@ tasks:
         interface implicitly; beyond-loopback exposure is explicit opt-in fronted by a
         reverse proxy per the cf-worker-auth-gate-fail-closed checklist. Verifies
         done-criterion "a test asserts no public bind occurs without the explicit opt-in".
+        Live smoke: run the server; `lsof -nP -iTCP:PORT -sTCP:LISTEN` shows 127.0.0.1 only,
+        no wildcard (baseline 1:0); with the opt-in flag unset a non-loopback bind is refused.
     - id: t8-dos-cap-coalescing
       title: DoS governance - subscriber cap + high-freq coalescing
       status: pending
@@ -161,6 +181,9 @@ tasks:
         (spec open question) - measure expected event rates before locking the policy.
         Verifies done-criterion "a burst/slow-client test that neither blocks the
         publisher nor grows memory unboundedly" plus a documented subscriber cap.
+        Live smoke: run the server; open cap+1 SSE subscribers -> the last is refused; flood N
+        source events in a window -> delivered count < N (coalesced); a stuck subscriber ->
+        disconnected and process RSS stays bounded (measure before/after).
     - id: t9-payload-hygiene
       title: Payload hygiene - no secrets in browser-bound events
       status: pending
@@ -176,6 +199,8 @@ tasks:
         Spec D8. Events crossing to browser clients carry no secrets, tokens, or PII;
         payloads are shaped and audited at the bridge boundary. Verifies done-criterion
         "a payload-hygiene check verifies browser-bound events omit sensitive fields".
+        Live smoke: run the server; inject a source event carrying a known secret token,
+        subscribe via SSE, grep the streamed bytes for the token -> ABSENT.
     - id: t10-multiuser-authz-gate
       title: Multi-user stream authz precondition (fail-closed gate)
       status: pending
@@ -192,6 +217,9 @@ tasks:
         r5-review-labeling-access. This task installs only the fail-closed guard so
         multi-user exposure cannot silently ship without the authz layer. Verifies: a
         test that multi-user exposure is refused absent the authz gate.
+        Live smoke: run the server; attempt multi-user exposure without the authz gate
+        configured -> refused (assert status/behavior); the gate stub blocks exposure
+        fail-closed.
     - id: t11-docs-align
       title: Align dashboard docs with the shipped subsystem + posture
       status: pending
@@ -210,6 +238,8 @@ tasks:
         r2 #423 refresh) to describe the SHIPPED `da dashboard` subsystem, the retired
         standalone root, and the realized security posture. Verifies: docs match the
         shipped command surface and the docs-site link-check stays green.
+        Live smoke: execute the doc's own run commands verbatim against the shipped da binary
+        -> they succeed (docs are copy-pasteable); docs-site link-check 0 errors.
     - id: t12-verify-close
       title: Verify spec done-criteria and close the plan
       status: pending
@@ -238,3 +268,8 @@ tasks:
         route/data-flow bus-security review — NOT by the import guard alone, which settles
         static import isolation only. Verifies: all spec done-criteria pass; `go test ./...`
         and CI are green.
+        Live smoke (end-to-end): spin up the shipped runtime (da service / da dashboard serve)
+        and run the FULL machine-checkable harness live + every task's added assertion
+        (health, deny-405, loopback-only, SSE, subscriber cap, coalescing, payload-hygiene) +
+        the t4a artifact-closure check + `go test ./...` + CI green. The end-to-end proof,
+        not a test-file summary.

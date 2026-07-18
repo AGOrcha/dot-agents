@@ -73,6 +73,18 @@ Sequential concurrency (PLAN.yaml) — the D3 fork gates the seam.
   (coordination-plane) — this plan owns the observability read-plane.
 - **Defers** in-service authn/z + multi-user stream authz to `r5-review-labeling-access`.
 
+## Verification standard (live smoke, not test-files-only)
+
+Every task is DONE only when the **actually-built shipped artifact** is spun up and exercised,
+with machine-checkable assertions (HTTP status, `jq` on JSON, SSE first-byte, `lsof` bind,
+`go list -deps` closure, exit codes) — never a "tests passed" prose claim. The reference
+harness is proven: `evidence/dashboard-live-smoke-baseline.md` records a 6/6-green run against
+the shipped `cmd/da-dashboard` (health 200, health.status=ok, runs array, **POST->405
+deny-by-default**, **loopback-only bind**, SSE first-byte<5s). Each task's `notes` carry a
+concrete "Live smoke:" clause extending that harness with its own assertion; `t12` runs the
+full set live end-to-end. Unit/race tests, the import-guard, docs link-check, and CI remain in
+support of — not in place of — the live smoke.
+
 ## Phase 4 — execution handoff
 
 `kg-ideate` produces no code. Direct-vs-fanout: `t3` runs through **ideation-cycle**
