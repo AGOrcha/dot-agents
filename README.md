@@ -4,6 +4,11 @@
 
 One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and OpenCode — and a set of composable primitives (dynamic loops, bounded workflows, agent teams) you assemble into your own agentic orchestration, not a closed set of commands.
 
+The read-only R2 observability dashboard surfaces workflow runs, iteration
+scores, rubric details, and live scoring updates; see the
+[Observability Dashboard guide](docs/OBSERVABILITY_DASHBOARD.md) to run and
+configure it.
+
 ```bash
 # Install
 brew tap AGOrcha/tap && brew install da
