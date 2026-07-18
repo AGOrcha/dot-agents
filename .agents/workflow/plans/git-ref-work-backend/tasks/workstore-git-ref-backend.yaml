@@ -4,7 +4,7 @@ order: 5
 task:
     id: workstore-git-ref-backend
     title: Expose git-ref as a WorkStore backend + work_tracking.backend config value
-    status: pending
+    status: completed
     depends_on:
         - per-task-state-files
         - decouple-coordination-commits
