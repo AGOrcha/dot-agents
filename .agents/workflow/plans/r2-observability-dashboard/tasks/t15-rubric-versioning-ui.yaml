@@ -4,7 +4,7 @@ order: 15
 task:
     id: t15-rubric-versioning-ui
     title: Rubric explainer view (read /api/rubric, render weights + bands)
-    status: pending
+    status: completed
     depends_on:
         - t08-frontend-skeleton
         - t03-handlers-rest
