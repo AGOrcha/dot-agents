@@ -1,0 +1,45 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 6
+task:
+    id: t7-app-type-profiles-wiring
+    title: Wire graph_backend adapter-ref selection into app-type-profiles
+    status: completed
+    depends_on:
+        - t1-none-adapter-end-to-end
+    blocks:
+        - release-minor
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/specs/app-type-profiles/design.md
+        - internal/config/
+        - cmd/da/commands/
+    verification_required: true
+    notes: |-
+        O3 (ACCEPTED 2026-06-24). Applies the app-type-profiles edits §15 of
+        graph-backend-adapter-contract defers (the "wiring" commit): replace the
+        closed graph_backend enum (crg|citation-graph|document-cross-ref|none)
+        with an adapter-ref that resolves via sources/extends and pins in the
+        lockfile (§9). Wire the profile-selection path so a profile declaring
+        `graph_backend: dotagents-builtin:graph/none@^1.0` resolves to the t1
+        none adapter end-to-end.
+
+        COUPLING (do NOT ratify independently of O4's schema): the KG schema
+        models `app_type` as an OPEN/extensible vocabulary (free string +
+        documented known-starter set), the same surface this task wires
+        (graph_backend enum → adapter-ref; app_type ref-form resolution). t7's
+        app-type-profiles edits and the KG schema's app_type /
+        plan.default_app_type / task.app_type fields must agree on the
+        open-vocabulary contract. See
+        work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md.
+
+        Hard test: a profile selecting the none adapter ref resolves, registers
+        in the lockfile, and the no-op impact_radius runs through the profile
+        path (not just the direct adapter path t1 exercised).
+
+        Anti-scope: no new adapters; uses the t1 none adapter as the proof.
+
+        ISP routing:
+          mode: fanout-amenable (bounded write_scope; config/profile surface)
+          verifier: integration tests
+          review: code review

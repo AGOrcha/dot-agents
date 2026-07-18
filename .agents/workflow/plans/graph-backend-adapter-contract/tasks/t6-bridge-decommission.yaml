@@ -1,0 +1,45 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 5
+task:
+    id: t6-bridge-decommission
+    title: Bridge decommissioning — close §11.4 gate
+    status: blocked
+    depends_on:
+        - t4-crg-dual-read
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/graphstore/ (deletions)
+        - internal/adapters/builtin/crg/ (full feature parity)
+        - .github/workflows/ci.yml (parity test promotion)
+    verification_required: true
+    notes: |-
+        Flip `da` core to prefer new CRG namespace. Decommission the
+        Python subprocess bridge once §11.4 gate passes.
+
+        Spec references:
+          §11.1 (full parity matrix — flows/communities/postprocess
+                  remain)
+          §11.4 (decommissioning gate)
+
+        Delivers:
+          * flows/communities/postprocess parity (named queries OR
+            materialized views OR adapter MCP server per §11.1 — log
+            budget signal if MCP server is used)
+          * 3 consecutive weeks of CI green on the parity matrix
+          * Behavior-preservation gate (§6.2 of app-type-profiles)
+            passes on 100-task corpus
+          * `workflow drift` reports zero consumers still using bridge
+          * crg-bridge adapter removed from `da` core
+          * Python subprocess machinery deleted
+
+        Hard test:
+          After deletion, `kg build|update|impact|flows|communities|
+          postprocess|changes` commands all work end-to-end against
+          new kg-native namespace only.
+
+        Anti-scope:
+          Do NOT delete bridge until ALL §11.4 gate conditions are
+          met. If even one consumer's lockfile still has
+          `reads_from: [crg-bridge]`, keep the bridge.

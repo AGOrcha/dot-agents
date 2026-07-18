@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 9
+task:
+    id: t9-sdk-materializeview-readsfrom-gate
+    title: Wire reads_from enforcement into SDK.MaterializeView
+    status: completed
+    depends_on:
+        - t4-crg-dual-read
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/adapters/sdk/
+    verification_required: true
+    notes: Codex review of t4 (#172) found SDK.MaterializeView accepts arbitrary readsFrom without consulting the registry, so the migration_only reads_from gate (registry.EnforceReadsFrom, wired at load in t4) does not cover the materialized-view path. Wire EnforceReadsFrom (or an equivalent registry consult) into SDK.MaterializeView so a view reading a migration_only adapter is rejected. Add an integration test; mutation-verify the gate.
+    app_type: go-cli

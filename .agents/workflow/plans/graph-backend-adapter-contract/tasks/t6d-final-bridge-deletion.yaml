@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 13
+task:
+    id: t6d-final-bridge-deletion
+    title: Delete CRG bridge after parity soak and consumer migration
+    status: pending
+    depends_on:
+        - t6a-parity-surfaces
+        - t6b-gate-automation
+        - t6c-consumer-audit
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/graphstore/
+        - internal/adapters/builtin/crg-bridge/
+        - internal/adapters/builtin/crg/
+    verification_required: true
+    notes: 'Destructive final stage only after native parity, CI soak evidence, and consumer migration proof are complete. Remove bridge registration/callers + delete Python subprocess machinery; docs/gates stop referencing the bridge as an active surface. Precondition: t6a+t6b+t6c landed and their evidence gates satisfied.'
+    app_type: go-cli

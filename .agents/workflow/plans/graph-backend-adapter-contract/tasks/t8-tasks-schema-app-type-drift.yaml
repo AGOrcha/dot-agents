@@ -1,0 +1,30 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 7
+task:
+    id: t8-tasks-schema-app-type-drift
+    title: Fix workflow-tasks.schema.json app_type drift (schema rejects a field code uses)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - schemas/workflow-tasks.schema.json
+    verification_required: true
+    notes: |-
+        O4 schema-v3 flagged drift (NOT fixed in #136). Real bug, not doc-lag:
+        schemas/workflow-tasks.schema.json sets `additionalProperties: false`
+        on each task item and does NOT list `app_type`, so a TASKS.yaml that
+        carries `app_type` — which CanonicalTask.AppType marshals
+        (commands/workflow/types.go, `app_type,omitempty`) and live plans like
+        docs-starlight-migration already write (`app_type: docs`/`go-cli`) —
+        FAILS schema validation.
+
+        Fix: add an optional open-string `app_type` property to the task-item
+        `properties` so the schema matches CanonicalTask + the live artifacts.
+        Scope: schemas/workflow-tasks.schema.json ONLY.
+        Verify: a TASKS.yaml carrying `app_type` validates.
+
+        Independent of the adapter pipeline (depends_on: []); can run any time.
+        Route via `da workflow` — recorded here per the O4 dossier
+        recommendation; intentionally NOT fixed in the docs-only coherence PR.

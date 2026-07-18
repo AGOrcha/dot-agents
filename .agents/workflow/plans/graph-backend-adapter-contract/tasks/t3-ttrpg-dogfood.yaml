@@ -1,0 +1,40 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 2
+task:
+    id: t3-ttrpg-dogfood
+    title: TTRPG dogfood adapter — first real adapter author UX
+    status: completed
+    depends_on:
+        - t1-none-adapter-end-to-end
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/sandbox/ttrpg-adapter/
+        - oci packages for ttrpg-campaign-bootstrap skill
+    verification_required: true
+    notes: |-
+        Real bootstrap skill parsing session logs. Validates Tier 2 OCI
+        distribution, SDK contract (§8.4), real adapter author UX.
+        First DM friend onboarded for live dogfood.
+
+        Spec references:
+          §13.3 (TTRPG worked example)
+          §8.4 (SDK contract)
+          §9 (Tier 2 OCI distribution)
+
+        Delivers:
+          * Bootstrap skill packaged as OCI artifact
+          * SDK (`da-adapter-sdk`) for Go; bootstrap uses it exclusively
+          * TTRPG adapter loads from sandbox local source; queries.yaml
+            runs against session-log corpus
+          * DM friend(s) provide initial wishlist signal
+
+        Hard test:
+          Bootstrap on a 10-session corpus produces expected note/edge
+          counts; named queries return DM-validated results.
+
+        Anti-scope:
+          No grammar extensions (§5.1) — TTRPG works within v1.
+          Wishlist accumulates §12 budget signals; do NOT pre-emptively
+          extend grammar.

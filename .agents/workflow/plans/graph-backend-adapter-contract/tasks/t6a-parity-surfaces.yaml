@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 10
+task:
+    id: t6a-parity-surfaces
+    title: CRG native parity surfaces for flows communities and postprocess
+    status: completed
+    depends_on:
+        - t4-crg-dual-read
+    blocks:
+        - t6b-gate-automation
+        - t6d-final-bridge-deletion
+    owner: dot-agents
+    write_scope:
+        - internal/adapters/builtin/crg/
+        - testdata/crg-parity/
+    verification_required: true
+    notes: 'First buildable bridge-decommission slice: implement the remaining kg-native CRG parity surfaces still owned by the bridge (flows, communities, postprocess) with focused dual-read/parity tests. No bridge deletion, router preference flip, or CI soak policy in this slice. Open decision: postprocess parity oracle (byte-for-byte vs structural ranking) — default to preserving current bridge behavior unless a narrower spec citation overrides.'
+    app_type: go-cli

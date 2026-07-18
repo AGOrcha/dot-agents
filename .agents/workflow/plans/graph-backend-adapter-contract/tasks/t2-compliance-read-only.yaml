@@ -1,0 +1,54 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 1
+task:
+    id: t2-compliance-read-only
+    title: Compliance register adapter (read-only / stub bootstrap)
+    status: completed
+    depends_on:
+        - t1-none-adapter-end-to-end
+    blocks:
+        - t5-cross-adapter-reads-from
+    owner: dot-agents
+    write_scope:
+        - internal/adapters/builtin/compliance-register/
+        - internal/kg/dsl/
+        - testdata/compliance/
+    verification_required: true
+    notes: |-
+        Hand-author the schema; populate via a stub bootstrap; run the
+        named queries. Validates DSL parser, ref-joins, env_predicates,
+        materialized views. Spec reference:
+        graph-backend-adapter-contract §13.2.
+
+        Delivers:
+          * Full DSL parser with §5.4 ref-joins, §5.4.2 OPTIONAL+WHERE
+            lowering, §5.1.1 allowed-functions-in-WHERE
+          * env_predicates wiring (§7) — time_after + webhook predicate
+            kinds
+          * Conformance tests T6-T22, T23-T31 passing (full v1 DSL)
+          * Compliance worked example loads and named queries return
+            expected results on a sample corpus
+
+        Hard test:
+          impact_radius query returns regulations/risks/findings/evidence
+          + owner on control status change; policy_review_due_impact
+          surfaces controls when policy.review_due fires.
+
+        Common false positive:
+          coalesce in WHERE accepted but only for params (T23 passes,
+          T24 must reject — guard against accidentally allowing
+          field-level computation).
+
+        O5 resolution (staleness drivers) folded: this task exercises all five
+        scoped-KG drivers with the pinned semantics — source mutation =
+        content-hash change; revocation = new note `revokes: <id>`; code-graph
+        derivation depth 1 hop (note→note unbounded, opt-in via §7.3
+        `derivation: true`); taint persists until `kg refresh --scope`;
+        edge-type allowlist = `documents`/`implements`/`decided_on` (not
+        `mentions`). Canonical: O5 + scoped-knowledge-graphs §4.1/§4.2.
+
+        STATE NOTE: the DSL package (internal/kg/dsl/) is NOT yet built as of
+        t1; this task delivers the first real DSL parser. Decision-complete
+        (O5 pins driver semantics) — activatable once t1's completion is
+        confirmed.

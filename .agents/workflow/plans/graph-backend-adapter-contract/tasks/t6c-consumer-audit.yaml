@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 12
+task:
+    id: t6c-consumer-audit
+    title: Audit bridge consumers and cutover readiness
+    status: completed
+    depends_on:
+        - t4-crg-dual-read
+    blocks:
+        - t6d-final-bridge-deletion
+    owner: dot-agents
+    write_scope:
+        - internal/graphstore/
+        - docs/
+        - scripts/
+    verification_required: true
+    notes: 'Prove what still depends on the CRG bridge; enumerate managed + named out-of-tree consumer sets; make the drift audit reproducible. Anti-scope: no final deletion; if any consumer still needs reads_from:[crg-bridge], keep the bridge.'
+    app_type: go-cli

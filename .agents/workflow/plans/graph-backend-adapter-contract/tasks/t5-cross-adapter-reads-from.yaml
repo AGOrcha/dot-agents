@@ -1,0 +1,54 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 4
+task:
+    id: t5-cross-adapter-reads-from
+    title: Cross-adapter `reads_from` — compliance view from CRG
+    status: completed
+    depends_on:
+        - t2-compliance-read-only
+        - t4-crg-dual-read
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/adapters/builtin/compliance-register/views/
+        - internal/kg/dsl/cross-namespace/
+        - testdata/cross-adapter/
+    verification_required: true
+    notes: |-
+        Compliance adapter declares a view that reads from CRG.
+        Validates namespace-token set derivation (§8.2), multi-namespace
+        query plans, lockfile cross-adapter coordination (§10).
+
+        Spec references:
+          §8.3 (cross-adapter reads via reads_from)
+          §10.3 (cross-adapter cutover)
+          §10.1.3 (fail-closed reconciliation)
+
+        Delivers:
+          * Multi-namespace token derivation per N3-N4 conformance tests
+          * Cross-namespace SQL plan validation per N6-N9
+          * View `controls_with_changed_function_evidence` from §8.3
+            example loads and refreshes correctly
+          * Lockfile state machine transitions through full
+            pending-recompat-check → pending-rebuild → ready cycle
+            when CRG schema is bumped
+
+        Hard test:
+          Bump CRG to a backward-compatible new schema; the dependent
+          view transitions through the state machine and rebuilds.
+          Then bump CRG to an incompatible schema; the view enters
+          dsl-update-required and blocks dependee activation until
+          compliance adapter ships an updated view query.
+
+        Common false positive:
+          Cross-adapter writes attempted via materialized view —
+          must be storage-layer rejected (N8).
+
+        O1 resolution (cutover gate) folded: NO `accepts_breaking_changes`
+        opt-out — the cutover gate is mechanical (§10.3). The hard test above
+        (incompatible CRG bump → view enters `dsl-update-required` and blocks
+        dependee activation until a fixed query ships) IS the mechanical-gate
+        behavior. Do NOT build an ack-command surface or an
+        `accepts_breaking_changes` lockfile field. Canonical: O1 + §14 Q2
+        (resolved). The recoverable case falls through via §10.3.3.

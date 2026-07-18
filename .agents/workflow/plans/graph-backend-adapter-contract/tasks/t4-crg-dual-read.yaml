@@ -1,0 +1,65 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 3
+task:
+    id: t4-crg-dual-read
+    title: CRG migration — dual-read mode with crg-bridge adapter
+    status: completed
+    depends_on:
+        - t1-none-adapter-end-to-end
+    blocks:
+        - t6-bridge-decommission
+    owner: dot-agents
+    write_scope:
+        - internal/adapters/builtin/crg/
+        - internal/adapters/builtin/crg-bridge/
+        - internal/graphstore/
+        - testdata/crg-parity/
+    verification_required: true
+    notes: |-
+        Bootstrap writes to new kg-native namespace; bridge remains
+        active for tools without parity; crg-bridge adapter exposes
+        legacy bridge state as read-only mirror namespace.
+
+        Spec references:
+          §11 (CRG migration path)
+          §11.2 (crg-bridge adapter)
+          §11.3 (dual-read mode)
+          §11.6 (parity test corpus)
+
+        Delivers:
+          * crg-bridge adapter shipping inside `da`, marked
+            `migration_only: true`
+          * CRG adapter bootstrap skill performing Tree-sitter
+            ingestion to kg_crg.* namespace
+          * Parity test corpus (100 commits) with passing thresholds
+            for build/update/status/impact-radius rows (§11.1)
+          * `workflow drift` flags consumers not yet migrated
+
+        Hard test:
+          For 10 pinned commits, both bridge and kg-native adapter
+          produce equivalent node/edge counts and impact-radius results
+          for a 100-symbol corpus.
+
+        Anti-scope:
+          NO decommissioning in this task — bridge stays active.
+          flows/communities/postprocess parity is t6.
+
+        O5 resolution folded: the `staleness_drivers: [source_mutation]` slice
+        fires on note content-hash change (per O5, not any-upsert).
+
+        O6 resolution (parity-matrix) folded: fold proposals A/C/D (the §11.1/
+        §11.6 testability-gap refinements) into the parity matrix BEFORE
+        building this task's parity surface, so t6's multi-week parity clock is
+        tested against the corrected matrix. REJECT G (SQL-callable views break
+        the §2.2/§5.2 no-raw-SQL invariant). OWNER-GATE: the exact §11.1/§11.6
+        edits A/C/D imply must be re-read against
+        .agents/proposals/crg-dual-read-parity-surface-2026-05.md before
+        ratification — the posture is resolved (O6) but A/C/D's specific
+        content was outside the dossier read set.
+
+        STATE NOTE: CRG ships today as a Python-subprocess provider behind the
+        `Store` seam (internal/graphstore/crg.go), NOT as an adapter. This task
+        builds the kg-native CRG adapter + crg-bridge mirror adapter. The
+        long-range Python→Go architecture question is owned here + §11
+        (go-native-code-graph-analysis is superseded-in-part by §11).

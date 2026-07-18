@@ -1,0 +1,64 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+order: 0
+task:
+    id: t1-none-adapter-end-to-end
+    title: Built-in `none` adapter end-to-end pipeline
+    status: completed
+    depends_on: []
+    blocks:
+        - t2-compliance-read-only
+        - t3-ttrpg-dogfood
+        - t4-crg-dual-read
+        - t7-app-type-profiles-wiring
+    owner: dot-agents
+    write_scope:
+        - internal/adapters/builtin/none/
+        - internal/kg/registry/
+        - internal/kg/lockfile/
+        - cmd/da/commands/kg/
+    verification_required: true
+    notes: |-
+        COMPLETED (#136 merge wave). SHIPPED reality:
+          * `none` adapter at internal/adapters/builtin/none/ (null backend)
+          * Adapter registry + ref resolver (internal/kg/registry/)
+          * Lockfile state machine + fail-closed reconciliation
+            (internal/kg/lockfile/)
+          * `da kg lockfile show` / `da kg lockfile reconcile`
+            (commands/kg/lockfile.go)
+          * graphstore C-Hybrid `Store` family (CodeGraphReader/Writer/
+            KGNoteStore/NoteSymbolLinkStore/Closer) + Path A ephemeral/bounded
+            provider; Path B daemon deferred (CONTRACT.md)
+
+        Smallest possible adapter; exercises the whole pipeline (schema
+        validation, namespace provisioning, lockfile init, query routing)
+        with no real domain logic. Spec reference:
+        graph-backend-adapter-contract §13.1.
+
+        O2 resolution (token signing) folded: namespace-token integrity uses
+        in-process HMAC with a per-process/per-daemon ephemeral key (N13);
+        asymmetric (Ed25519) deferred to the `http`-backend milestone. The MAC
+        is computed over the in-memory token (no lockfile-format change). NOTE
+        vs SHIPPED: namespace-token issuance/signing is NOT yet implemented in
+        internal/kg — it is design-resolved (O2) but unbuilt; the storage-layer
+        namespace check (N6-N9) remains the primary capability boundary. Any
+        follow-up that delivers the token path must implement HMAC per O2.
+
+        O7 resolution (executor vs Store seam) folded: query routing goes
+        THROUGH the role-segregated `Store` family (never around it); the
+        executor tier (§2.7) sits above the gcc `Store` seam. See the
+        executor-tier reconciliation note in graphstore-concurrency-contract.
+
+        Hard test:
+          A profile selecting `graph_backend: dotagents-builtin:graph/none@^1.0`
+          resolves, lockfile registers, no-op impact_radius runs.
+
+        Anti-scope:
+          NO domain-specific logic; NO real bootstrap skill; NO real DSL
+          beyond basic MATCH/RETURN.
+
+        ISP routing:
+          mode: fanout-amenable (bounded write_scope; integration tests
+                clear-cut)
+          verifier: integration tests
+          review: code review
