@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 23
+task:
+    id: t17-lifecycle-interface-di
+    title: Convert commands/internal/lifecycle/ from func-var seams to interface-DI (deferred from t15)
+    status: in_progress
+    depends_on:
+        - t15-direct-followup-interface-di
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/internal/lifecycle/
+    verification_required: true
+    notes: |-
+        Convert `commands/internal/lifecycle/` from func-var seams to
+        interface-DI as ONE unit (deferred from t15 — 13.9k LOC, ~8 seams
+        entangled with the init-time/import-cycle wiring from t13a/t13b).
+        Large; own PR.
+    app_type: go-cli

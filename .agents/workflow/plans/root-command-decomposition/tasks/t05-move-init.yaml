@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 5
+task:
+    id: t05-move-init
+    title: Move init command into commands/lifecycle/
+    status: completed
+    depends_on:
+        - t02-introduce-lifecycle-skeleton
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/init.go
+        - commands/lifecycle/init_test.go
+        - commands/init.go
+        - commands/init_test.go
+    verification_required: true
+    notes: |-
+        init.go is the only root file importing internal/scaffold/home
+        and internal/scaffold/hooks. After this move, package commands
+        should no longer import those at all. The importguard built
+        in t14 enforces it permanently.

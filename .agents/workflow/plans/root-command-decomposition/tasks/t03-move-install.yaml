@@ -1,0 +1,29 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 3
+task:
+    id: t03-move-install
+    title: Move install command into commands/lifecycle/
+    status: completed
+    depends_on:
+        - t02-introduce-lifecycle-skeleton
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/install.go
+        - commands/lifecycle/install_test.go
+        - commands/install.go
+        - commands/install_test.go
+    verification_required: true
+    notes: |-
+        Pure move. install.go has no incoming cross-file calls from
+        other root commands EXCEPT seams_test.go's
+        TestRegisterInstallProject_*, TestRunInstall_GetwdError,
+        TestRunInstallGenerate_*, TestWriteKGMCPConfigs*,
+        TestScaffoldWorkflowAssets_*. seams_test.go split is deferred
+        to t11; this task does NOT touch it. For this task, leave
+        commands/install.go in place (still wiring NewInstallCmd) so
+        go test stays green; t13 deletes it and switches root.go to
+        lifecycle.NewInstallCmd directly. Run go test ./... and
+        verify no new internal/projectsync or internal/platform
+        imports appear in commands/install.go.

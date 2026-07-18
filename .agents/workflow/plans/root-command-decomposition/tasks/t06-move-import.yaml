@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 6
+task:
+    id: t06-move-import
+    title: Move import command + import_plugins into commands/lifecycle/
+    status: completed
+    depends_on:
+        - t02-introduce-lifecycle-skeleton
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/import.go
+        - commands/lifecycle/import_plugins.go
+        - commands/lifecycle/import_test.go
+        - commands/lifecycle/import_plugins_test.go
+        - commands/lifecycle/import_pure_test.go
+        - commands/import.go
+        - commands/import_plugins.go
+        - commands/import_test.go
+        - commands/import_plugins_test.go
+        - commands/import_pure_test.go
+    verification_required: true
+    notes: |-
+        Heaviest move in the cluster (5 files). Same pattern as t03 —
+        root files stay in place until t13.
+        - (fb:t06-import-helper-coupling) t06 import move blocks on cross-file helper coupling not declared in TASKS.yaml depends_on. commands/import.go calls mirrorBackup, isBackupArtifact, isManagedProjectOutput (all from add.go, owned by t04) and mapResourceRelToDest (from refresh.go, owned by t07). Lifecycle subpackage cannot reach these unexported root helpers without a cycle (commands/import.go shim imports commands/lifecycle, so commands/lifecycle cannot import commands/). lifecycle.Deps (commands/lifecycle/deps.go) does not carry these helpers, and deps.go is outside t06 write_scope. Three viable resolutions: (a) extend lifecycle.Deps with mirrorBackup/isManagedProjectOutput/isBackupArtifact/mapResourceRelToDest function fields (cleanest; matches Deps pattern but expands t02 deliverable), (b) duplicate the four helpers into commands/lifecycle/import.go as private copies until t04+t07 land (OD-2-style transitional duplication), (c) re-order: gate t06 on completion of t04 AND t07, then have lifecycle/import.go call the freshly-moved lifecycle.mirrorBackup etc. Worker stopped before any edits to avoid scope expansion.

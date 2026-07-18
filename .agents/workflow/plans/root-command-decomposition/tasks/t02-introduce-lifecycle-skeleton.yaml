@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 1
+task:
+    id: t02-introduce-lifecycle-skeleton
+    title: Create commands/lifecycle/ skeleton
+    status: completed
+    depends_on:
+        - t01-design-subpackage-shape
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/doc.go
+        - commands/lifecycle/deps.go
+    verification_required: true
+    notes: |-
+        Add empty package with doc.go and a deps.go that mirrors the
+        pattern in commands/agents/deps.go / commands/skills/deps.go
+        (Deps struct + NewDeps()). No command moves yet. go test ./...
+        must stay green. This task exists so all subsequent move tasks
+        have a settled target package and can run in parallel.

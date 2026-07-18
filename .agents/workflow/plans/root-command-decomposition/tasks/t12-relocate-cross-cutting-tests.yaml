@@ -1,0 +1,39 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 15
+task:
+    id: t12-relocate-cross-cutting-tests
+    title: 'Re-home cross-cutting tests: coverage / parity / wiring / hook-norm / agentsrc-mutations'
+    status: completed
+    depends_on:
+        - t10a-create-mcp-subpackage
+        - t10b-create-settings-subpackage
+        - t10c-create-rules-subpackage
+        - t11-split-seams-tests
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/coverage_test.go
+        - commands/resource_parity_test.go
+        - commands/wiring_test.go
+        - commands/hook_normalization_roundtrip_test.go
+        - commands/agentsrc_mutations_test.go
+        - commands/lifecycle/coverage_test.go
+        - commands/lifecycle/agentsrc_mutations_test.go
+        - commands/lifecycle/hook_normalization_roundtrip_test.go
+        - commands/mcp/coverage_test.go
+        - commands/mcp/resource_parity_test.go
+        - commands/settings/coverage_test.go
+        - commands/settings/resource_parity_test.go
+        - commands/rules/coverage_test.go
+        - commands/rules/resource_parity_test.go
+    verification_required: true
+    notes: |-
+        For each file, split the table tests across the appropriate
+        subpackages. wiring_test.go (KG + Workflow) stays in root.
+        Prefer dropping tests rather than copy-paste duplicating
+        helpers; testutil_test.go's exports may need to be promoted
+        to a small commands/testutil package if multiple subpackages
+        need them. Cross-package resource-parity tests likely need a
+        new home or to be folded into resource-specific parity tests
+        per subpackage.

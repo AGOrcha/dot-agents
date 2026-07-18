@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 9
+task:
+    id: t09-move-doctor
+    title: Move doctor command into commands/lifecycle/
+    status: completed
+    depends_on:
+        - t08-move-status
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/doctor_test.go
+        - commands/lifecycle/doctor_repair_e2e_test.go
+        - commands/doctor.go
+        - commands/doctor_test.go
+        - commands/doctor_repair_e2e_test.go
+    verification_required: true
+    notes: |-
+        Depends on t08 because doctor uses the linkcount helpers that
+        move with status. After this, the lifecycle cluster is
+        complete.

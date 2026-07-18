@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 7
+task:
+    id: t07-move-refresh
+    title: Move refresh command into commands/lifecycle/
+    status: completed
+    depends_on:
+        - t02-introduce-lifecycle-skeleton
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/refresh.go
+        - commands/lifecycle/refresh_test.go
+        - commands/lifecycle/refresh_idempotency_test.go
+        - commands/refresh.go
+        - commands/refresh_test.go
+        - commands/refresh_idempotency_test.go
+    verification_required: true
+    notes: |-
+        refresh_test.go was just refactored by t5 (PR #49 MERGED) to
+        consume internal/testutil.WriteScopeFile. The move preserves
+        those call sites — verify they still compile after the
+        package change.

@@ -1,0 +1,26 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 4
+task:
+    id: t04-move-add-remove
+    title: Move add and remove commands into commands/lifecycle/
+    status: completed
+    depends_on:
+        - t02-introduce-lifecycle-skeleton
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/add.go
+        - commands/lifecycle/add_test.go
+        - commands/lifecycle/remove.go
+        - commands/lifecycle/remove_test.go
+        - commands/add.go
+        - commands/add_test.go
+        - commands/remove.go
+        - commands/remove_test.go
+    verification_required: true
+    notes: |-
+        Paired because remove.go's tests reference add helpers via
+        agentsrc_mutations_test.go. Keep that test in root for now
+        (cross-cutting; relocated in t12). Same staging as t03 — root
+        files remain in place until t13 strips them.

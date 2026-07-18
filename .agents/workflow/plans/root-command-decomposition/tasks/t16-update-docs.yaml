@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 19
+task:
+    id: t16-update-docs
+    title: Update docs to reflect new package layout
+    status: completed
+    depends_on:
+        - t14-import-graph-assertion
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/ARCHITECTURE.md
+        - docs/RESOURCE_COMMAND_CONTRACT.md
+        - CLAUDE.md
+    verification_required: false
+    notes: |-
+        Final mechanical task. Update any architecture diagrams or
+        boundary docs that still describe the old "root commands is
+        also lifecycle home" shape. Cross-link the proposal at
+        .agents/proposals/root-command-decomposition.md and mark it
+        resolved.
+
+        Landed: merged to master via PR #137 (docs reconcile new package layout) (wave-2 state sync).

@@ -1,0 +1,36 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 12
+task:
+    id: t10b-create-settings-subpackage
+    title: Move settings command into commands/settings/ (per agents/skills file convention)
+    status: completed
+    depends_on:
+        - t10pre-extract-canonical-cmd-helpers
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/settings/cmd.go
+        - commands/settings/cmd_test.go
+        - commands/settings/deps.go
+        - commands/settings/example.go
+        - commands/settings/list.go
+        - commands/settings/show.go
+        - commands/settings/remove.go
+        - commands/settings/seams.go
+        - commands/settings/seams_test.go
+        - commands/settings/coverage_test.go
+        - commands/settings/settings_test.go
+        - commands/settings.go
+        - commands/settings_test.go
+    verification_required: true
+    notes: |-
+        Same file convention as t10a — mirror commands/agents/ +
+        commands/skills/ layout (cmd.go / deps.go / example.go /
+        list.go / show.go / remove.go / seams.go / seams_test.go /
+        coverage_test.go / settings_test.go). cmdutil imports use
+        the helpers extracted in t10pre.
+
+        settings_test.go landed via t5 PR #49 — preserve every
+        testutil call site through the move. findSettingsSpec stays
+        package-private (used by TestFindSettingsSpecNotFound).

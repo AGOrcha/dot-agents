@@ -1,0 +1,37 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 13
+task:
+    id: t10c-create-rules-subpackage
+    title: Move rules command into commands/rules/ (per agents/skills file convention)
+    status: completed
+    depends_on:
+        - t10pre-extract-canonical-cmd-helpers
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/rules/cmd.go
+        - commands/rules/cmd_test.go
+        - commands/rules/deps.go
+        - commands/rules/example.go
+        - commands/rules/list.go
+        - commands/rules/show.go
+        - commands/rules/remove.go
+        - commands/rules/seams.go
+        - commands/rules/seams_test.go
+        - commands/rules/coverage_test.go
+        - commands/rules/rules_test.go
+        - commands/rules.go
+        - commands/rules_test.go
+    verification_required: true
+    notes: |-
+        Same file convention as t10a/b — mirror commands/agents/ +
+        commands/skills/ layout. After t10pre, commands/rules.go no
+        longer hosts the shared canonical helpers; this subpackage
+        just imports them from cmdutil.
+
+        rulesShowFrontmatterExtra (file-scope helper in current
+        rules.go) belongs in show.go alongside the show runner.
+        findRuleSpec stays package-private. rules_test.go landed
+        via t5 PR #49 — preserve testutil call sites through the
+        move.

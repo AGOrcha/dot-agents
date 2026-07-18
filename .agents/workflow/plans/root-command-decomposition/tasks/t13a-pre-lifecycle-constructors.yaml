@@ -1,0 +1,75 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 21
+task:
+    id: t13a-pre-lifecycle-constructors
+    title: 'Precursor for t13b: land lifecycle.NewInitCmd + absorb syncLifecycleGlobals into Deps threading'
+    status: completed
+    depends_on:
+        - t13a-strip-resource-subpackage-shims
+    blocks:
+        - t13b-strip-lifecycle-cluster-shims
+        - t14-import-graph-assertion
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/init.go
+        - commands/lifecycle/init_test.go
+        - commands/lifecycle/install.go
+        - commands/lifecycle/install_test.go
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/doctor_test.go
+        - commands/lifecycle/status.go
+        - commands/lifecycle/status_test.go
+        - commands/lifecycle/deps.go
+    verification_required: true
+    notes: |-
+        Surfaced by t13a worker's second fold-back. The lifecycle
+        subpackage has NewInstallCmd / NewDoctorCmd / NewRefreshCmd
+        (all `(deps Deps) *cobra.Command`) and NewStatusCmd
+        (`(deps Deps, jsonOutput func() bool)`) — but the t02b/t03-t09
+        moves left the cobra-builder shape in place such that:
+          1. lifecycle.NewInitCmd DOES NOT EXIST. init.go builds cobra
+             locally via lifecycle.SetInitFlags(...) + the package-var
+             lifecycle.InitUsageErrorFn = UsageError. To remove the
+             root-side init.go shim, lifecycle must own a complete
+             NewInitCmd(deps) constructor.
+          2. install.go + doctor.go wrap cobra.RunE with
+             syncLifecycleGlobals() that copies live
+             commands.Flags/Version/Commit/Describe/ErrorWithHintsFn
+             into lifecycle's parallel package vars. Direct root.go
+             rewire (skipping the wrap) silently regresses runtime
+             behavior (lifecycle reads stale globals). Absorb that
+             wrap into Deps construction so callers don't need to
+             remember the sync.
+          3. status.go overrides RunE with a jsonFlag() closure so
+             globalflagcov sees Flags.JSON (the analyzer doesn't load
+             ./commands/lifecycle). Decide between (a) passing
+             jsonOutput func() bool through Deps, (b) lifecycle owning
+             its own globalflagcov registration, or (c) keeping the
+             status constructor's second arg shape.
+
+        Deliverables:
+          * lifecycle.NewInitCmd(deps Deps) *cobra.Command — full
+            constructor; absorb lifecycle.SetInitFlags + InitUsageErrorFn
+            into Deps fields or the constructor body. UsageError plumbing
+            via deps.UsageErrorFn.
+          * Deps gains the absorbed fields from syncLifecycleGlobals
+            (Version, Commit, Describe, ErrorWithHintsFn, Flags access).
+            Document the threading contract.
+          * Decide status's jsonOutput signature; if changing, fix the
+            existing single call site in commands/status.go BEFORE this
+            task lands (or add to write_scope).
+          * Update lifecycle's own tests to construct Deps via the new
+            shape. No regressions in lifecycle/*_test.go.
+
+        Hard gate: go build ./... clean; go test ./... -race -count=1
+        green; lifecycle constructor signatures self-consistent
+        (NewInstallCmd/NewDoctorCmd/NewInitCmd/NewStatusCmd all
+        accept Deps as first arg, with status optionally taking a
+        second jsonOutput arg).
+
+        Anti-scope: do NOT touch commands/{install,doctor,init,status}.go
+        in the root package (t13b owns the root shim deletion +
+        root.go AddCommand rewire). Do NOT touch any per-command
+        *_test.go in the root commands/ package (t13b).
+    app_type: code-fix

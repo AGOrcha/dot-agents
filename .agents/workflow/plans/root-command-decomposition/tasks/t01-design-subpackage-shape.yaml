@@ -1,0 +1,64 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 0
+task:
+    id: t01-design-subpackage-shape
+    title: Design target subpackage shape + shared-symbol contract
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/root-command-decomposition/design/SHAPE.md
+    verification_required: false
+    notes: |-
+        Read-mostly design pass. Produce SHAPE.md capturing:
+          - Final subpackage list: commands/lifecycle/ (8 deep
+            importers) + commands/mcp/, commands/settings/,
+            commands/rules/ (three individual subpackages per the
+            existing agents/skills/kg/hooks/sync/workflow convention).
+          - cmdutil home: keep at commands/internal/cmdutil for now
+            since the three new resource subpackages all sit under
+            commands/. Revisit promotion to commands/cmdutil only if
+            a cross-cluster consumer appears.
+          - Which root-level symbols stay exported and where (Flags,
+            ConfigureRootCommandUX, CLIError, ErrorWithHints,
+            UsageError, ExactArgsWithHints, RenderCommandError,
+            Version, linkcount helpers, plus the helper free
+            functions in status.go / install.go that seams_test.go
+            references).
+          - For each cluster command, the run* helpers and unexported
+            symbols that must become exported (or re-homed into a
+            shared lifecycle/internal helper) because seams_test.go
+            reaches them today: RunRefresh, RunRemove, RunStatus,
+            RunAdd, RegisterInstallProject, FindProjectByPath,
+            ProcessImportCandidate, BackupExistingConfigsList,
+            LinkResourceFromSources, CloneGitSource,
+            WriteKGMCPConfigFile, WriteKGMCPConfigs,
+            ScaffoldWorkflowAssets, RunInstall, RunInstallGenerate,
+            RunDoctor, RunInit, ReplaceImportContentCandidate,
+            ImportMissingContentCandidate,
+            ImportPreservedConflictCandidate,
+            WriteImportConflictReviewNote, ShouldUseCachedGitSource,
+            PrintSymlinkDirAudit, CountClaudeRules,
+            RestoreLegacyResourceFile.
+          - DI handling decision: PRESERVE current package-var seams
+            during the moves. Plain code move. A direct follow-up
+            (task t15) lands per-file interface-DI for the new
+            subpackages. Rationale: doing both at once doubles the
+            diff per move and entangles two plans; landing
+            decomposition first gives interface-DI a clean per-file
+            target.
+          - Root shim policy: DELETE root re-export shims as part of
+            t13. End-state: commands/root.go imports lifecycle.New*Cmd
+            and the three resource subpackages' constructors
+            directly. No backwards-compat shims kept. Justification:
+            single composition root, cleaner module boundary,
+            unambiguous import-graph assertion in t14.
+          - Per-cluster commit cadence: per-command commits inside
+            each cluster, one PR per cluster.
+        KG: query for callers of every commands.NewXxxCmd /
+        commands.Run* symbol via mcp__code-review-graph to confirm no
+        external callers beyond commands/root.go and intra-package
+        tests. Any external caller surfaced becomes an OD entry that
+        must resolve before t13's shim deletion.

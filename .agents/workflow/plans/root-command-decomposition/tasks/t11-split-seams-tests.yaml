@@ -1,0 +1,30 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 14
+task:
+    id: t11-split-seams-tests
+    title: Split commands/seams_test.go into per-cluster files
+    status: completed
+    depends_on:
+        - t03-move-install
+        - t04-move-add-remove
+        - t05-move-init
+        - t06-move-import
+        - t07-move-refresh
+        - t08-move-status
+        - t09-move-doctor
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/seams_test.go
+        - commands/seams_test.go
+    verification_required: true
+    notes: |-
+        Move every TestXxx in seams_test.go (873 LOC) that targets a
+        lifecycle symbol (install/import/refresh/remove/status/add/
+        doctor/init/kg-mcp-write helpers) into
+        commands/lifecycle/seams_test.go. The split is mechanical
+        because each Test* name encodes its target. If any leftover
+        tests target no specific cluster, leave them in root
+        seams_test.go (or delete that file if empty).
+        - (fb:t11-shim-coverage-defers-full-split) Full move of lifecycle-targeted seams_test.go tests into commands/lifecycle/seams_test.go regresses the commands-package coverage gate. The 22 tests in commands/seams_test.go that route through lifecycle do so via root-package shim forwarders in commands/install.go, commands/status.go, commands/doctor.go, commands/init_test.go (runInstall, runInstallGenerate, registerInstallProject, findProjectByPath, linkResourceFromSources, cloneGitSource, shouldUseCachedGitSource, runStatus, printSymlinkDirAudit, countClaudeRules, runDoctor, runInit, scaffoldWorkflowAssets shim). These shims are 1-line forwarders to lifecycle.X and are slated for deletion in t13. While they exist, only seams_test.go exercises them. Master baseline commands coverage is 95.30 percent; moving all 22 tests drops it to 94.39 percent, below the 95 percent gate. Resolution chosen for this PR: keep the 22 shim-covering tests in commands/seams_test.go (no move), add only the 3 tests that exercise lifecycle branches not already covered by the cluster-specific lifecycle test files (TestPrintSymlinkDirAudit_NonexistentDir, TestCountClaudeRules_ReadlinkFails, TestRunInstallGenerate_CorruptExistingManifest) to commands/lifecycle/seams_test.go. Full split lands as a follow-up after t13 deletes the shims, at which point the shim-coverage constraint vanishes.

@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 8
+task:
+    id: t08-move-status
+    title: Move status command (incl. linkcount build-tagged helpers) into commands/lifecycle/
+    status: completed
+    depends_on:
+        - t02-introduce-lifecycle-skeleton
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/status.go
+        - commands/lifecycle/status_test.go
+        - commands/lifecycle/linkcount_unix.go
+        - commands/lifecycle/linkcount_windows.go
+        - commands/status.go
+        - commands/status_test.go
+        - commands/linkcount_unix.go
+        - commands/linkcount_windows.go
+    verification_required: true
+    notes: |-
+        Move linkcount_{unix,windows}.go alongside status — doctor.go
+        also uses them, so make the helpers exported in lifecycle and
+        have doctor.go (still in root before t09) import them. After
+        t09 lands, the cross-package import collapses into intra-
+        lifecycle calls.

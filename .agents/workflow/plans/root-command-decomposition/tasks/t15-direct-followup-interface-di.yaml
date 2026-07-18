@@ -1,0 +1,31 @@
+schema_version: 1
+plan_id: root-command-decomposition
+order: 18
+task:
+    id: t15-direct-followup-interface-di
+    title: 'Direct follow-up: land interface-DI on the new lifecycle + mcp/settings/rules subpackages'
+    status: completed
+    depends_on:
+        - t14-import-graph-assertion
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/lifecycle/
+        - commands/mcp/
+        - commands/settings/
+        - commands/rules/
+    verification_required: true
+    notes: |-
+        Per user decision: the move tasks (t02-t13) PRESERVE the
+        current package-var seams. This task lands the per-file
+        interface-DI shape (per the convention doc shipped with
+        seam-interface-di-migration) across the new subpackages as a
+        direct follow-up. Either fold into seam-interface-di-migration
+        as new tasks (preferred — single plan owns the shape) or
+        author as a sibling plan. Decide based on whether seam-
+        interface-di's existing leaves (kg-pkg, skills-pkg, agents-
+        pkg, platform-pkg) have shipped by the time this opens.
+
+        Landed: merged to master via PR #140 (interface-DI on mcp/settings/rules
+        subpackages). The lifecycle-cluster conversion was deferred to a separate
+        unit (see t17-lifecycle-interface-di) (wave-2 state sync).
