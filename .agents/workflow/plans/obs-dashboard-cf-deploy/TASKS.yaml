@@ -1,8 +1,8 @@
 schema_version: 1
 plan_id: obs-dashboard-cf-deploy
 tasks:
-    - id: o1-obs-deploy-spec
-      title: Formalize the obs CF-Worker+DO+D1 deploy into a canonical spec
+    - id: o1-obs-deploy-spec-and-contracts
+      title: Spec + provider contracts (credential pair, D1 schema, outbox, SPA/transport)
       status: pending
       depends_on: []
       blocks: []
@@ -10,19 +10,30 @@ tasks:
       write_scope:
         - .agents/workflow/specs/obs-dashboard-cf-deploy/
       notes: |-
-        Promote the obs deploy design (maintainer-reviewed proposal
-        agorcha-public-vs-internal-and-obs-deploy §3-§6) into a canonical spec via
-        spec-scaffold, WITH the maintainer's correction: obs.agorcha.dev is SINGLE-TENANT
-        (dot-agents only), NOT the proposal's central multi-tenant hub. Routing is per-project
-        and client-side - each repo's .agentsrc.json observability.endpoint points at ITS OWN
-        backend (dot-agents -> obs.agorcha.dev; payout -> payout's configured backend). The
-        ingest schema + da observability CLI + config stay generic/self-hostable so any project
-        stands up its own backend; obs.agorcha.dev is the reference instance for dot-agents.
-        Records decisions + done criteria + still-open items as open questions; notes
-        coexistence with dashboard-subsystem-and-bus-security (local SSE) vs remote (WebSocket).
-        Verify: spec exists with the single-tenant + per-project-routing decision explicit.
+        Promote the obs deploy design (proposal agorcha-public-vs-internal-and-obs-deploy §3-§6)
+        into a canonical spec via spec-scaffold WITH the maintainer correction: obs.agorcha.dev
+        is SINGLE-TENANT (dot-agents only), routing is client-side per-project (each repo's
+        .agentsrc.json observability.endpoint -> its own backend; payout -> payout's), the
+        ingest schema + CLI + config stay generic/self-hostable. This task must DECIDE the
+        provider contracts every consumer needs (review found these left open):
+        (1) credential-ref auth JSON - the exact `{kind, id ...}` shape and how one entry yields
+            a CF Access service-token pair (client_id + client_secret): pair naming/atomicity,
+            the self-hosted-provider mapping, and which spec/task OWNS it (reconcile with
+            external-agent-sources; drop the dm6 claim unless its provisioner is actually reused).
+        (2) D1 schema at SQL level - columns, PK/unique/foreign constraints, migration ownership,
+            the event-kind -> row mapping, and the read-model mapping the SPA DTOs consume.
+        (3) obs-outbox contract - atomic/versioned per-file format, ordering, retry + success
+            deletion, corruption handling, retention.
+        (4) shared SPA contract - the EXISTING versioned routes (/api/v1/observability/*) and DTO
+            shapes the reused SPA hard-codes, plus an injectable SSE/WebSocket transport adapter
+            so a WS swap does not fork the SPA (its client opens EventSource today).
+        (5) local-dev auth seam - signed-JWT/test fixtures so no secret is needed against
+            wrangler dev (the real service-token pair is validated only against the
+            Access-protected hostname).
+        Verify: spec exists with single-tenant + per-project-routing decision explicit and each
+        of (1)-(5) decided as a concrete contract downstream tasks cite.
     - id: o2-obs-cf-access-app
-      title: CF Access app for obs.agorcha.dev (dual-auth) via Terraform
+      title: CF Access app for obs.agorcha.dev - single bound maintainer token
       status: pending
       depends_on: []
       blocks: []
@@ -31,20 +42,21 @@ tasks:
         - infra/cloudflare/
         - docs/cf-access-bootstrap.md
       notes: |-
-        Proposal §3.4 App2 + §2.4. Extend infra/cloudflare/ (analog of the landed App1
-        agorcha-internal-docs) with the agorcha-obs Access app on obs.agorcha.dev: an
-        obs-maintainers email policy (browser) + a non_identity Service-Auth policy admitting
-        any valid Access service token (CLI). Emit the audTag output; set the team auth domain
-        to .agorcha.dev (apex) so the cookie spans both subdomains (§8). Document in
-        docs/cf-access-bootstrap.md. Maintainer-must for `terraform apply` (needs
-        CLOUDFLARE_API_TOKEN + account/zone ids). Live smoke: `terraform init -backend=false
-        && terraform validate && terraform fmt -check` pass; after apply, `curl -o/dev/null -w
-        %{http_code}` an obs route with NO token -> 401/302-to-Access (gate active); audTag
-        output non-empty.
+        Proposal §3.4 App2 + §2.4, single-tenant. Extend infra/cloudflare/ (analog of the landed
+        App1) with the agorcha-obs Access app on obs.agorcha.dev: an obs-maintainers email policy
+        (browser) + a Service-Auth policy bound to the SINGLE dot-agents obs service token - NOT
+        `any valid service token` (review: any account token would otherwise inject under the
+        allowed project_id). Emit audTag output; set the team auth domain to .agorcha.dev (apex)
+        so the cookie spans both subdomains. Document in docs/cf-access-bootstrap.md.
+        Maintainer-must for `terraform apply` (needs CLOUDFLARE_API_TOKEN + account/zone ids).
+        Live smoke: `terraform init -backend=false && validate && fmt -check` pass; after apply,
+        an obs route with NO creds -> 401/302-to-Access; the bound token -> passes; a DIFFERENT
+        valid account service token -> REJECTED (negative smoke); audTag output non-empty.
     - id: o3-obs-agentsrc-schema
-      title: .agentsrc.json observability block (endpoint + credential-ref)
+      title: .agentsrc.json observability block (endpoint + auth + throttle + retention)
       status: pending
-      depends_on: []
+      depends_on:
+        - o1-obs-deploy-spec-and-contracts
       blocks: []
       verification_required: true
       write_scope:
@@ -52,56 +64,38 @@ tasks:
         - internal/config/agentsrc_test.go
         - schemas/agentsrc.schema.json
       notes: |-
-        Proposal §5.4/§8. Add the `observability` block ({enabled, endpoint, auth:
-        credential-ref}) reusing the external-agent-sources auth shape (auth references a
-        credential id; secret lives in ~/.config/da/credentials.json 0600 - NOT the repo).
-        Follow the schema-usage AgentsRC field lifecycle: struct + core mirror + UnmarshalJSON
-        + MarshalJSON + agentsRCKnown map + schemas/agentsrc.schema.json. Cross-plan: the auth
-        block schema is owned by external-agent-sources (pass-through here). Live smoke:
-        `go test ./internal/config/...`; a fixture .agentsrc.json with an observability block
-        round-trips (marshal->unmarshal equal) and validates against the schema; an unknown
-        field is rejected.
+        Proposal §5.4/§6.2b/§8. Add the COMPLETE v1 `observability` block (review: all fields
+        live here, not scattered): {enabled, endpoint, auth (the o1 credential-ref contract),
+        push_throttle_seconds (default 0), retention (scope-tiered, solo=keep-local-indefinitely
+        default)} with validation + default semantics. Reuse the external-agent-sources auth
+        shape per o1; secret lives in ~/.config/da/credentials.json (0600), NOT the repo. Follow
+        the schema-usage AgentsRC lifecycle: struct + core mirror + UnmarshalJSON + MarshalJSON +
+        agentsRCKnown + schemas/agentsrc.schema.json. Live smoke: `go test ./internal/config/...`;
+        a fixture with the full observability block (endpoint+auth+throttle+retention) round-trips
+        (marshal->unmarshal equal) and validates; an unknown field is rejected.
     - id: o4-obs-worker-scaffold
-      title: obs/ Worker scaffold - wrangler, DO+D1 bindings, ingest endpoint
+      title: obs/ Worker scaffold - wrangler, DO + D1 bindings, routing skeleton
       status: pending
       depends_on:
-        - o1-obs-deploy-spec
+        - o1-obs-deploy-spec-and-contracts
         - o2-obs-cf-access-app
       blocks: []
       verification_required: true
       write_scope:
         - obs/
       notes: |-
-        Proposal §7 wave5 + §8 (obs/ at repo root - distinct deploy target from docs/web).
-        New obs/ dir: wrangler.jsonc for obs.agorcha.dev (apex custom_domain, DO + D1 bindings),
-        Worker entry with `run_worker_first: true` fail-closed, POST /api/ingest accepting the
-        §5.3 payload and rejecting every other route. Live smoke: `wrangler dev` (miniflare)
-        -> POST /api/ingest with a fixture body -> 200 {accepted,deduped,rejected}; GET /nope
-        -> 404; then `wrangler deploy` to a PREVIEW (<name>.<acct>.workers.dev) and curl the
-        preview URL for the same. YAML/wrangler config validates.
-    - id: o5-obs-ingest-do-d1
-      title: Single-tenant (dot-agents) ingest store - DO + D1, idempotent write-through
-      status: pending
-      depends_on:
-        - o4-obs-worker-scaffold
-      blocks: []
-      verification_required: true
-      write_scope:
-        - obs/
-      notes: |-
-        Proposal §4.5 adapted to SINGLE-TENANT (maintainer correction): obs.agorcha.dev serves
-        ONLY dot-agents, so drop the DO-per-project fan-out and per-project token issuance. Use
-        a single DO for live state (iteration buffer + WebSocket subscriber list, Hibernation
-        API) + D1 (iterations/sessions/scores/observations). Keep project_id as a column +
-        idempotency key component (project_id, plan_id, task_id, iteration, schema_hash) for
-        portability and defensive validation, but this deployment only ever holds one
-        project_id (dot-agents' canonical git-remote form). Ingest writes DO -> D1; re-POST
-        dedupes. Live smoke (wrangler dev + miniflare D1): POST the same event twice ->
-        {accepted:1, deduped:1}; a foreign project_id -> rejected (o6); query D1 -> one row.
+        Proposal §7 wave5 (obs/ at repo root - distinct deploy target). New obs/ dir:
+        wrangler.jsonc for obs.agorcha.dev (apex custom_domain, DO + D1 bindings),
+        `run_worker_first: true` fail-closed, and route skeleton only (NO write-capable ingest
+        path enabled yet - that arrives gated in o5 behind o6's auth). Unknown routes -> 404.
+        Live smoke: `wrangler dev` boots; GET an unknown route -> 404; `wrangler deploy` to a
+        PREVIEW succeeds and the config validates. No unauthenticated write path exists at this
+        stage.
     - id: o6-obs-auth-gate
-      title: Dual-mode auth on the obs Worker (CF Access JWT + service token), fail-closed
+      title: Auth gate - validate the Access-issued JWT (browser + service token), fail-closed
       status: pending
       depends_on:
+        - o1-obs-deploy-spec-and-contracts
         - o4-obs-worker-scaffold
         - o2-obs-cf-access-app
       blocks: []
@@ -109,18 +103,42 @@ tasks:
       write_scope:
         - obs/
       notes: |-
-        Proposal §2.4/§3 + lesson cf-worker-auth-gate-fail-closed. Browser/XHR routes verify
-        the CF Access JWT (aud == audTag from o2, JWKS+iss derived from the team domain, pin
-        RS256/reject none+HS); CLI POST /api/ingest accepts the Cf-Access-Client-Id/Secret
-        service-token pair. Fail-closed: decode+normalize before classify, allowlist not
-        carve-out, HTTPS-only credentials. Live smoke (preview deploy): no creds -> 401/403;
-        valid service token -> 200; JWT with wrong aud -> reject; encoded-path variants
-        (/api%2f.., //api, /API) all gate; assert status codes for each.
-        Single-tenant guard: the obs Worker also REJECTS any ingest whose project_id is not
-        dot-agents' (belt-and-suspenders atop the client-side per-project endpoint routing) ->
-        assert a foreign project_id POST returns 4xx.
+        Proposal §2.4/§3 + lesson cf-worker-auth-gate-fail-closed. CORRECTED auth model (review):
+        Cloudflare ACCESS validates the service-token Client-Id/Secret pair and the browser login
+        and injects `Cf-Access-Jwt-Assertion`; the WORKER validates THAT Access-issued JWT for
+        BOTH browser and service-token (non-identity) requests - it never validates the raw pair
+        itself and no secret is ever copied into Worker config. Verify aud == audTag (o2),
+        JWKS+iss from the team domain, pin RS256/reject none+HS. Fail-closed: decode+normalize
+        before classify, allowlist not carve-out, HTTPS-only. Live smoke: the real service-token
+        pair proven ONLY through the Access-protected hostname (obs.agorcha.dev or an explicitly
+        Access-protected preview) -> 200; raw handler unit tests use SIGNED JWT FIXTURES (per o1
+        seam), never the secret; no assertion header -> 401; wrong aud -> reject; encoded-path
+        variants (/api%2f.., //api, /API) all gate.
+    - id: o5-obs-ingest-do-d1
+      title: Single-tenant (dot-agents) ingest store - DO + D1, idempotent, gated behind auth
+      status: pending
+      depends_on:
+        - o1-obs-deploy-spec-and-contracts
+        - o4-obs-worker-scaffold
+        - o6-obs-auth-gate
+      blocks: []
+      verification_required: true
+      write_scope:
+        - obs/
+      notes: |-
+        Proposal §4.5 adapted to SINGLE-TENANT. obs.agorcha.dev serves ONLY dot-agents: a single
+        DO for live state (iteration buffer + WebSocket subscriber list, Hibernation API) + D1
+        per the o1 SQL schema; NO DO-per-project fan-out, NO per-project tokens. project_id is a
+        column + idempotency-key component (project_id, plan_id, task_id, iteration, schema_hash)
+        for portability + defensive validation; this deployment holds only dot-agents' project_id.
+        POST /api/ingest is write-capable ONLY behind o6's auth + the foreign-project reject
+        (dependency-gated: no write path is exposed until o6 lands - review BLOCKER). Ingest
+        writes DO -> D1; re-POST dedupes. Live smoke (wrangler dev + miniflare D1, signed-JWT
+        fixture per o1 seam): an UNAUTHENTICATED POST -> 401 and DO+D1 UNCHANGED; a FOREIGN
+        project_id (authed) -> 4xx and unchanged; a valid dot-agents event -> {accepted:1}; the
+        same event again -> {deduped:1}; D1 -> exactly one row.
     - id: o7-obs-dashboard-frontend
-      title: obs.agorcha.dev UI - read D1 + WebSocket live updates
+      title: obs.agorcha.dev UI - reuse the shared SPA (versioned API + injectable transport)
       status: pending
       depends_on:
         - o5-obs-ingest-do-d1
@@ -131,17 +149,23 @@ tasks:
         - obs/
         - web/dashboard/
       notes: |-
-        Proposal §4.1/§7 wave6. Serve the dashboard SPA at obs.agorcha.dev/ (reuse the
-        web/dashboard build), reading /api/runs + /api/iterations from D1, with a WebSocket
-        channel (DO Hibernation API) for live updates. Cross-plan: the SPA/core is
-        dashboard-subsystem-and-bus-security's shared UI - reuse, do not fork. Live smoke
-        (preview deploy, authed): load /api/runs -> the ingested runs render; open the
-        WebSocket, POST a new ingest event -> the UI/WS receives it in < 2s (assert the WS
-        frame arrives with the event).
+        Proposal §4.1/§7 wave6. Serve the EXISTING dashboard SPA at obs.agorcha.dev/, preserving
+        its versioned contract (review): the Worker exposes /api/v1/observability/* + the DTO
+        shapes the SPA hard-codes, and live updates use the o1 injectable SSE/WebSocket transport
+        adapter so reuse does NOT fork the SPA (its client opens EventSource today; a WS swap goes
+        through the adapter). Cross-plan: the SPA/core + the bus security contract come from
+        dashboard-subsystem-and-bus-security - this SEPARATE Worker/DO path does NOT inherit the
+        Go/SSE bridge's protections, so RESTATE + enforce them here: browser-bound payload shaping
+        (no secrets), subscriber cap, burst coalescing, bounded slow-consumer. Live smoke (authed,
+        driving the REAL SPA against the preview): the SPA fetches /api/v1/observability/runs and
+        renders; a pushed event reaches the SPA via the transport adapter < 2s; a source event
+        with a sentinel secret -> secret ABSENT from the browser frame; cap+1 subscribers -> last
+        refused; a burst -> coalesced; a stuck subscriber -> disconnected, memory bounded.
     - id: o8-da-observability-cli
-      title: da observability login|sync|status commands
+      title: da observability login|sync|status - HTTPS-only credential handling
       status: pending
       depends_on:
+        - o1-obs-deploy-spec-and-contracts
         - o3-obs-agentsrc-schema
         - o4-obs-worker-scaffold
       blocks: []
@@ -150,69 +174,77 @@ tasks:
         - commands/observability/
         - commands/root.go
       notes: |-
-        Proposal §5.2/§5.4/§6.3. New `da observability login|sync|status`: endpoint from the
-        .agentsrc.json observability block (o3), credential from ~/.config/da/credentials.json
-        via the external-agent-sources credential-ref loader. `sync` POSTs obs-outbox +
-        (--full) history; idempotent (server dedupes). login (v1) = --from-env
-        CF_OBS_CLIENT_ID/SECRET writing the credential store. Cross-plan: external-agent-sources
-        (credential loader), dm6-da-sso-autowire (service-token provisioning). Live smoke:
-        against `wrangler dev` obs, `da observability status` reports reachable + authed;
-        `da observability sync` posts a fixture event -> server {accepted:1}; go test the
-        command wiring.
+        Proposal §5.2/§5.4/§6.3. New `da observability login|sync|status`: endpoint from the o3
+        observability block, credential via the o1 credential-ref contract from
+        ~/.config/da/credentials.json. HTTPS-ONLY (review): REJECT a non-HTTPS endpoint BEFORE
+        resolving or transmitting the credential (the fail-closed HTTPS rule lives with the code
+        that reads the secret - here, not the Worker). Local dev uses the o1 secret-free
+        signed-JWT/test seam, not an http:// weakening. `sync` POSTs obs-outbox + (--full) sources
+        idempotently. login (v1) = --from-env CF_OBS_CLIENT_ID/SECRET writing the credential
+        store. Cross-plan: external-agent-sources (credential loader). Live smoke: against a
+        wrangler-dev obs behind the local seam, `da observability status` reports reachable+authed;
+        an injected-loader test proves the credential is NEVER read when endpoint is http://;
+        `da observability sync` of a fixture -> server {accepted:1}; go test the command wiring.
     - id: o9-workflow-push-hook
-      title: Best-effort obs push on checkpoint / verify record
+      title: Best-effort obs push on checkpoint / verify record (crash-safe outbox)
       status: pending
       depends_on:
+        - o1-obs-deploy-spec-and-contracts
         - o8-da-observability-cli
       blocks: []
       verification_required: true
       write_scope:
         - commands/workflow/
       notes: |-
-        Proposal §5.2. Wire `da workflow checkpoint` + `da workflow verify record` to POST the
-        new event when .agentsrc.json observability.enabled; BEST-EFFORT - a failed POST logs
-        a warning and queues to .agents/active/obs-outbox/, and NEVER fails the local command.
-        Add observability.push_throttle_seconds (default 0) to coalesce at high iteration rates
-        (§8). Live smoke: with obs UNREACHABLE, `da workflow checkpoint` still exits 0 and an
-        outbox file appears; with `wrangler dev` obs up, the event posts and the server receives
-        it (assert both the exit code and the server receipt).
+        Proposal §5.2. Wire `da workflow checkpoint` + `verify record` to POST the new event when
+        observability.enabled; BEST-EFFORT - a failed POST logs a warning and enqueues to
+        .agents/active/obs-outbox/ per the o1 outbox contract (atomic write, versioned format),
+        and NEVER fails the local command. Honors observability.push_throttle_seconds (o3). Live
+        smoke: with obs UNREACHABLE, `da workflow checkpoint` exits 0 and a well-formed atomic
+        outbox file appears (crash-safe: no partial file on interrupt); with wrangler-dev obs up,
+        the event posts and the server receives it (assert exit code + outbox format + receipt).
     - id: o10-obs-historical-backfill
-      title: da observability sync --full (history replay, dedup)
+      title: da observability sync --full (active log + history + outbox; rebuild proof)
       status: pending
       depends_on:
-        - o8-da-observability-cli
+        - o1-obs-deploy-spec-and-contracts
         - o5-obs-ingest-do-d1
+        - o8-da-observability-cli
+        - o9-workflow-push-hook
       blocks: []
       verification_required: true
       write_scope:
         - commands/observability/
       notes: |-
-        Proposal §5.2/§6.1. `da observability sync --full` walks .agents/history/<plan>/ +
-        obs-outbox and replays every event; server dedupes by the §5.3 idempotency key. Proves
-        local-canonical/remote-cache (§6.1): the remote can be rebuilt entirely from local.
-        Live smoke: sync --full a repo -> server {accepted:N}; re-run -> {accepted:0,
-        deduped:N}; wipe remote D1 + re-sync --full -> the run set is identical (rebuild proof).
+        Proposal §5.2/§6.1. `da observability sync --full` replays the COMPLETE local set (review):
+        .agents/active/iteration-log/ + score sidecars (active plans) AND .agents/history/<plan>/
+        (archived) AND the obs-outbox - a successfully-pushed active-plan event lives in the active
+        log, not history/outbox, so history-only replay cannot rebuild it. Server dedupes by the
+        o1 idempotency key. Proves local-canonical/remote-cache (§6.1). Live smoke: a fixture repo
+        with BOTH an active and an archived plan; sync --full -> {accepted:N}; re-run ->
+        {deduped:N}; WIPE remote D1 + re-sync --full -> the run set (active + archived) is
+        identical (rebuild proof).
     - id: o11-obs-cf-access-iac-hardening
-      title: obs CF Access IaC + single maintainer token + retention knobs
+      title: obs CF Access IaC (single bound token) + retention wiring
       status: pending
       depends_on:
         - o2-obs-cf-access-app
+        - o3-obs-agentsrc-schema
       blocks: []
       verification_required: true
       write_scope:
         - infra/cloudflare/
         - docs/cf-access-bootstrap.md
       notes: |-
-        Proposal §3.7/§6.2b, single-tenant. Ensure the obs Access app + Service-Auth policy
-        live fully in Terraform (no manual-only drift). Single-tenant means ONE maintainer
-        service token for dot-agents (drop the proposal's per-project token issuance flow -
-        other projects self-host their own backend + own their own tokens). Document the
-        scope-tiered retention/pruning defaults (§6.2b, solo=keep-local-indefinitely as the v1
-        default) as observability.retention config. Live smoke: `terraform validate` +
-        `fmt -check` pass; docs/cf-access-bootstrap.md lists the obs app's audTag + policies;
-        a `da observability` config with a retention block round-trips.
+        Proposal §3.7/§6.2b, single-tenant. Ensure the obs Access app + the SINGLE-bound
+        Service-Auth token (o2) live fully in Terraform (no manual-only drift); drop per-project
+        token issuance (other projects self-host + own their tokens). The retention config schema
+        is owned by o3 (this task only wires/documents behavior, not the config field). Live smoke:
+        `terraform validate` + `fmt -check` pass; docs/cf-access-bootstrap.md lists the obs app's
+        audTag + policies + the bound-token model; the retention behavior is exercised against the
+        o3 config.
     - id: o12-obs-verify-close
-      title: End-to-end live smoke + close the plan
+      title: End-to-end live smoke (incl. per-project routing) + close the plan
       status: pending
       depends_on:
         - o5-obs-ingest-do-d1
@@ -226,10 +258,13 @@ tasks:
       write_scope:
         - .agents/history/obs-dashboard-cf-deploy/
       notes: |-
-        End-to-end LIVE proof against the deployed (preview) obs Worker: `da observability sync`
-        through a real CF Access service token -> events land in DO+D1; the authed UI shows a
-        live WebSocket update < 2s; fail-closed auth (no token -> 401, wrong aud -> reject,
-        encoded-path variants gate); D1 dedup on re-POST; local-canonical rebuild (wipe remote +
-        sync --full reproduces the run set). Plus `go test ./...` + CI green. Then archive/close.
-        Verifies: every success_criterion is demonstrated against the shipped artifact, not a
-        test-file summary.
+        End-to-end LIVE proof against the deployed (Access-protected) obs Worker: `da observability
+        sync` through the real bound CF Access service token -> events land in DO+D1; the authed
+        REAL SPA shows a live update < 2s; fail-closed auth (no assertion -> 401, wrong aud ->
+        reject, encoded-path gate, a different account token -> reject); D1 dedup on re-POST;
+        payload hygiene (sentinel secret absent from browser frames); local-canonical rebuild
+        (wipe remote + sync --full of active + archived reproduces the set). PLUS per-project
+        routing proof (review): a two-repo/two-endpoint smoke - dot-agents -> obs.agorcha.dev and
+        a fixture project -> a separate capture backend; assert NEITHER request reaches the other
+        backend. Plus `go test ./...` + CI green. Then archive/close. Verifies every
+        success_criterion against the shipped artifact, not a test-file summary.
