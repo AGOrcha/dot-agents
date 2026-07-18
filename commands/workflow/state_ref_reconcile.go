@@ -19,6 +19,12 @@ import (
 // cannot be driven by fixturing the filesystem alone.
 var osReadDir = os.ReadDir
 
+// osStat is the file-stat seam for working-copy plan enumeration. Default is
+// os.Stat; tests rebind it to inject a synthetic non-IsNotExist error (EACCES /
+// a TOCTOU race turning a plan dir into a file), which cannot be provoked
+// portably by fixturing the filesystem alone.
+var osStat = os.Stat
+
 // stateRefReconcileOpts carries the flags for `da workflow state-ref reconcile`.
 type stateRefReconcileOpts struct {
 	dryRun bool
@@ -96,10 +102,7 @@ func reconcilePlanUniverse(projectPath string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("enumerate working-copy plans: %w", err)
 	}
-	refIDs, err := stateRefResidentPlanIDs(projectPath)
-	if err != nil {
-		return nil, fmt.Errorf("enumerate ref-resident plans: %w", err)
-	}
+	refIDs := stateRefResidentPlanIDs(projectPath)
 	return unionSortedStrings(wcIDs, refIDs), nil
 }
 
@@ -207,7 +210,7 @@ func workingCopyPlanIDsWithTasks(projectPath string) ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
-		_, statErr := os.Stat(filepath.Join(base, e.Name(), workflowTasksFileName))
+		_, statErr := osStat(filepath.Join(base, e.Name(), workflowTasksFileName))
 		if statErr == nil {
 			ids = append(ids, e.Name())
 			continue
@@ -222,34 +225,28 @@ func workingCopyPlanIDsWithTasks(projectPath string) ([]string, error) {
 // stateRefResidentPlanIDs lists the plan directory names recorded under
 // .agents/workflow/plans on refs/agents/state. A missing ref (or missing plans
 // tree on the ref) yields no ids.
-func stateRefResidentPlanIDs(projectPath string) ([]string, error) {
+func stateRefResidentPlanIDs(projectPath string) []string {
 	head := stateRefHead(projectPath)
 	if head == "" {
-		return nil, nil
+		return nil
 	}
-	rel, err := plansBaseRel(projectPath)
-	if err != nil {
-		return nil, err
-	}
-	out, lsErr := gitStateExec(projectPath, nil, nil, "ls-tree", gitFlagNameOnly, head+":"+rel)
+	out, lsErr := gitStateExec(projectPath, nil, nil, "ls-tree", gitFlagNameOnly, head+":"+plansBaseRel())
 	if lsErr != nil {
-		return nil, nil // plans/ absent on the ref → nothing resident
+		return nil // plans/ absent on the ref → nothing resident
 	}
 	var ids []string
 	for _, name := range splitNonEmptyLines(out) {
 		ids = append(ids, filepath.Base(name))
 	}
-	return ids, nil
+	return ids
 }
 
-// plansBaseRel returns the repo-relative (slash-separated) path of the canonical
-// plans directory, the tree path used to address plans on the state ref.
-func plansBaseRel(projectPath string) (string, error) {
-	rel, err := filepath.Rel(projectPath, plansBaseDir(projectPath))
-	if err != nil {
-		return "", err
-	}
-	return filepath.ToSlash(rel), nil
+// plansBaseRel returns the repo-relative (slash-separated) tree path of the
+// canonical plans directory on the state ref. It is a pure constant derived from
+// plansBaseDir's layout (projectPath + stateAgentsDir/workflow/plans), so it
+// cannot fail.
+func plansBaseRel() string {
+	return filepath.ToSlash(filepath.Join(stateAgentsDir, "workflow", "plans"))
 }
 
 // splitNonEmptyLines splits git output into trimmed, non-empty lines.

@@ -299,10 +299,7 @@ func TestStateRefReconcile_RefResidentPlanWithoutWorkingCopySkipped(t *testing.T
 	}
 
 	// The ref still lists the plan.
-	refPlans, err := stateRefResidentPlanIDs(repo)
-	if err != nil {
-		t.Fatalf("stateRefResidentPlanIDs: %v", err)
-	}
+	refPlans := stateRefResidentPlanIDs(repo)
 	if !contains(refPlans, "gone") {
 		t.Fatalf("ref-resident plans should include 'gone', got %v", refPlans)
 	}
@@ -476,6 +473,23 @@ func TestStateRefReconcile_PlanReadDirErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestStateRefReconcile_PlanStatErrorPropagates drives the plan-stat failure leg
+// via the osStat seam. os.Stat on a plan's TASKS.yaml can fail with a real
+// non-IsNotExist error (EACCES, or a TOCTOU race turning the dir into a file);
+// the error is injected through the seam to cover that leg deterministically.
+func TestStateRefReconcile_PlanStatErrorPropagates(t *testing.T) {
+	repo := seedReconcileRepo(t, "p1", "t1")
+	chdirRepo(t, repo)
+
+	prev := osStat
+	osStat = func(string) (os.FileInfo, error) { return nil, errors.New("stat boom") }
+	t.Cleanup(func() { osStat = prev })
+
+	if err := runWorkflowStateRefReconcile(io.Discard, stateRefReconcileOpts{}); err == nil {
+		t.Fatal("a non-IsNotExist stat error must surface")
+	}
+}
+
 // TestStateRefReconcile_StrayFileInPlansDirIgnored proves a non-directory entry
 // directly under plans/ is skipped during enumeration.
 func TestStateRefReconcile_StrayFileInPlansDirIgnored(t *testing.T) {
@@ -558,10 +572,7 @@ func TestStateRefResidentPlanIDs_RefWithoutPlansTree(t *testing.T) {
 	if stateRefHead(repo) == "" {
 		t.Fatal("precondition: ref must exist")
 	}
-	ids, err := stateRefResidentPlanIDs(repo)
-	if err != nil {
-		t.Fatalf("stateRefResidentPlanIDs: %v", err)
-	}
+	ids := stateRefResidentPlanIDs(repo)
 	if len(ids) != 0 {
 		t.Fatalf("a ref without a plans tree must list no plans, got %v", ids)
 	}
