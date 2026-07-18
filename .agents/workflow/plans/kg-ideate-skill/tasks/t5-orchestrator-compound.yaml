@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+order: 4
+task:
+    id: t5-orchestrator-compound
+    title: Compound orchestrator `kg-ideate` (T2, dispatches the four molecules)
+    status: completed
+    depends_on:
+        - t1-kg-brief-molecule
+        - t2-spec-scaffold-molecule
+        - t3-plan-scaffold-molecule
+        - t4-staged-execution-handoff-molecule
+    blocks:
+        - t6-degraded-mode-e2e
+    owner: AGOrcha
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/SKILL.md
+    verification_required: true
+    notes: |-
+        Author the compound SKILL.md: tier: compound, calls: [kg-brief, spec-scaffold,
+        plan-scaffold, staged-execution-handoff], verifier: batch. Owns only brief ->
+        (spec <-> plan fork) -> handoff. Subagent-planning path documented (briefing is
+        self-contained cold-start context). Spec ref: design.md D1.

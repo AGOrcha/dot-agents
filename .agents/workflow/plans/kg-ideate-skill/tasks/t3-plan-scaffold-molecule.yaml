@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+order: 2
+task:
+    id: t3-plan-scaffold-molecule
+    title: Phase 3 molecule `plan-scaffold` (spec->tasks/write-scopes/dep-order)
+    status: completed
+    depends_on:
+        - t2-spec-scaffold-molecule
+    blocks:
+        - t4-staged-execution-handoff-molecule
+        - t5-orchestrator-compound
+    owner: AGOrcha
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/
+    verification_required: true
+    notes: |-
+        Author plan-scaffold + plan-scaffolding.md instruction + plan-output.md template.
+        Implements the mandatory recorded concurrency decision (sequential default;
+        concurrent/folded only when no open questions change ordering/write-scopes). Derives
+        write-scopes from the Phase 1 impact radius. Authors via `da workflow plan create`;
+        never hand-edits task status. Spec ref: design.md D5, D6; proposal Phase 3.

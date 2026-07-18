@@ -1,0 +1,30 @@
+schema_version: 1
+id: kg-ideate-skill
+title: KG-Ideate Skill — Build + Schedule
+status: active
+summary: |-
+    Build the kg-ideate compound skill (T2 orchestrator over four T1 molecules) and its
+    instruction/template files per the promoted proposal. Phase 1 (degraded-mode briefing) plus
+    Phases 2-4 (spec-scaffold, plan-scaffold, staged-execution-handoff) are activatable now and
+    ship the competing-decisions fallback. The single structural-contradiction step (Phase 2
+    step 7) is gated on the citation adapter shipping `contradicting_claims` end-to-end. Also
+    files the cross-cutting proposal/lesson schema-formalization task so the global
+    proposal/lesson system and the KG typed Proposal/Lesson nodes reference one canonical schema.
+    - (fb:research-chain-ideation-integration) RESOLVED 2026-07-13 (owner-directed design pass) — the research chain and the ideation pipeline interweave beyond a terminal handoff; wiring shipped. (1) Two entrypoints into research-intake — link-drop, and ideation-gather dispatched from kg-brief's new corpus gap trigger (corpus-scan.md + SKILL.md step 2) — extract+appraise into research/articles/ FIRST, then the brief scans corpus files; the chain is the corpus write path, kg-brief the read path. (2) research-evaluate refactored — general systematic-review method (instructions/method.md, meta-analysis spine with evidence grading + KG-assisted current-state comparator) split from the dot-agents overlay (overlays/dot-agents.md — companion-doc parts/tags/extracts/digest formats + repo exploration map). (3) The broad full-pass review is an optional subtree gated by decision class (method §0 — permanent/live-with-it decisions get the full pass; smaller ones run --targeted and lean on kg-brief's focused queries). (4) knowledge-fold-back named the shared sink for research + ideation + loop producers. NOTED, not actioned — spec-scaffold and research-evaluate share the appraise-against-structure shape (competing-decisions fallback ≈ parked-lead adoptables); convergence of their conventions is a future pass once spec-scaffold sees more use.
+    - (fb:kg-ideate-scaffold-home-sync) RESOLVED 2026-07-13 (e2e pipeline audit) — the completed kg-ideate family (t2-t5) existed ONLY in the git-tracked scaffold (internal/scaffold/home/starter/skills/global/) and was never materialized to this machine's live ~/.agents/skills/global/, so the pipeline's authoring front-end was uninstallable for 2 days; spec-scaffold/plan-scaffold live as TOP-LEVEL siblings by design (one-level loader, commit e2bbbcb5). Fixed — compound + spec-scaffold + plan-scaffold + nested kg-brief/staged-execution-handoff materialized scaffold→home, platform links live (verified in loaded skill set). The kg-brief bidirectional fork was reconciled INTO scaffold first (live-only corpus gap trigger + Parts D+ note merged; scaffold-only gotchas.md/subagent-planner content now live). skill-architect provider scripts synced home. ideation-cycle calls frontmatter fixed to match instruction filenames (converge/dogfood) in scaffold+live; kg-ideate conformance test + go build pass. Root-cause mechanism gap tracked separately as scaffold-home-skill-sync-mechanism on agent-ops-hardening.
+created_at: "2026-06-25T00:00:00Z"
+updated_at: "2026-07-13T06:22:05Z"
+owner: AGOrcha
+success_criteria: |-
+    The kg-ideate compound skill + its four molecules + instruction/template files exist and pass
+    the batch verifier; a degraded-mode run (no citation adapter) completes all four phases with
+    the contradiction step no-opping into the competing-decisions fallback; the structural
+    contradiction step lights up once §13.4 `contradicting_claims` ships; canonical
+    proposal.schema.json + lesson.schema.json exist and are referenced by both the global
+    proposal/lesson system and the KG typed nodes.
+verification_strategy: |-
+    Per-molecule batch verifier (skill frontmatter declares verifier: batch); a degraded-mode
+    end-to-end dry-run demonstrating the graceful-degradation contract (D3); schema validation of
+    the new proposal/lesson schemas against existing proposal/lesson artifacts. The
+    structural-contradiction task is verified only after the citation adapter gate clears.
+current_focus_task: ""

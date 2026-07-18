@@ -1,0 +1,29 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+order: 6
+task:
+    id: t7-structural-contradiction-traversal
+    title: 'GATED: Phase 2 step 7 structural contradiction traversal (citation adapter)'
+    status: blocked
+    depends_on:
+        - t2-spec-scaffold-molecule
+        - graph-backend-adapter-contract/t4-crg-dual-read
+    blocks: []
+    owner: AGOrcha
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/spec-scaffold/instructions/contradiction-framing.md
+        - internal/scaffold/home/starter/skills/global/kg-ideate/spec-scaffold/instructions/kg-queries.md
+    verification_required: true
+    notes: |-
+        GATE: this is the single adapter-gated step. It flips from the competing-decisions
+        fallback to structural traversal ONLY WHEN `dotagents-builtin:graph/citation@^1.0`
+        ships the `contradicting_claims` named query end-to-end (build -> query -> MCP) per
+        graph-backend-adapter-contract design.md §13.4. The cross-plan dependency
+        `graph-backend-adapter-contract/t4-crg-dual-read` represents the citation-adapter
+        implementation wave ("~ graph plan t4, end of impl" per the deferral note); the
+        precise trigger is the §13.4 contradicting_claims named query, not t4 in general.
+        Partial-shipping is fine: if the adapter ships only claims_citing_source /
+        claims_supported_by_source, this stays blocked and the rest of the skill is fully
+        functional via t6's fallback. Verify Requirement 3 once the gate clears:
+        `da graph query contradicting_claims` emits explicit spec decision points.
+        status: blocked until the gate clears (do not advance manually).

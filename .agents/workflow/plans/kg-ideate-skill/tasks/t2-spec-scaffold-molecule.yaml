@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+order: 1
+task:
+    id: t2-spec-scaffold-molecule
+    title: Phase 2 molecule `spec-scaffold` (competing-decisions fallback)
+    status: completed
+    depends_on:
+        - t1-kg-brief-molecule
+    blocks:
+        - t3-plan-scaffold-molecule
+        - t5-orchestrator-compound
+    owner: AGOrcha
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/spec-scaffold/
+    verification_required: true
+    notes: |-
+        Author spec-scaffold + instructions (decision-review.md, gap-conversion.md,
+        contradiction-framing.md, done-criteria.md) and spec-output.md template. Implements
+        the graceful-degradation contract: step 7 ships with the competing-decisions fallback
+        path active; the structural-traversal branch is authored as adapter-conditional but
+        verified end-to-end only by the gated task t7. Respects the spec tier (no file paths /
+        function names / task lists). Spec ref: design.md D3, D6; proposal Phase 2.

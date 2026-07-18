@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+order: 0
+task:
+    id: t1-kg-brief-molecule
+    title: Phase 1 molecule `kg-brief` (degraded-mode capable)
+    status: completed
+    depends_on: []
+    blocks:
+        - t2-spec-scaffold-molecule
+        - t5-orchestrator-compound
+    owner: AGOrcha
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/kg-brief/
+    verification_required: true
+    notes: |-
+        Author the kg-brief molecule + its instruction files (kg-queries.md, corpus-scan.md,
+        context-scan.md) and the briefing-output.md template, per the proposal. CLI-first
+        (`da kg query`), MCP fallback; impact-radius only when topic names code. NOT gated:
+        semantic KG search + research corpus + lessons need no citation adapter. The
+        Contradictions section renders [adapter-absent] when contradicting_claims is missing.
+        Spec ref: kg-ideate-skill design.md D2, D3, D4; proposal Phase 1.

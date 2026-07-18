@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+order: 5
+task:
+    id: t6-degraded-mode-e2e
+    title: Degraded-mode end-to-end demonstration (graceful-degradation contract)
+    status: completed
+    depends_on:
+        - t5-orchestrator-compound
+    blocks: []
+    owner: AGOrcha
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/
+    verification_required: true
+    notes: |-
+        Demonstrate Requirements 1-2 + 4-5: a full four-phase run on a profile WITHOUT the
+        citation adapter completes; Contradictions renders [adapter-absent]; the spec still
+        resolves competing decisions explicitly; Phase 4 emits no code. This is the
+        ship-now proof that early shipping does not reintroduce the silent-no-op problem.
+        Spec ref: design.md done-criteria 3.
+        - (fb:kgi-t6-owns-behavioral) t6 is the recorded home for the molecules' behavioral verification (verification_required on t1-t4 behavioral paths). Must demonstrate, on a profile WITHOUT the citation adapter: empty-KG briefing states 'KG has no prior decisions' (not fabricated); Contradictions renders [adapter-absent]; competing-decisions fallback active in spec-scaffold; Phase 4 emits no code. PLUS a conformance assertion that every molecule SKILL.md Load-> instruction/template ref resolves and briefing/spec/plan template headers match the canonical contract. This closes the codex gate finding that degraded-KG/adapter-absent paths had zero captured verification.

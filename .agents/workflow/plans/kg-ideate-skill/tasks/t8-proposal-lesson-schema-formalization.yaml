@@ -1,0 +1,29 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+order: 7
+task:
+    id: t8-proposal-lesson-schema-formalization
+    title: Formalize canonical proposal.schema.json + lesson.schema.json (single-source)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: AGOrcha
+    write_scope:
+        - schemas/proposal.schema.json
+        - schemas/lesson.schema.json
+    verification_required: true
+    notes: |-
+        The kg-ideate proposal mirrors a de-facto proposal shape (schema_version, id, status,
+        type, action, target, rationale, content, ...) with NO canonical schema; lessons share
+        the same gap. Create formal schemas/proposal.schema.json + schemas/lesson.schema.json
+        that BOTH the global proposal/lesson system (`.agents/proposals/`, `.agents/lessons/`)
+        AND the KG typed `Proposal` / `Lesson` nodes reference, so there is one source of truth
+        for each shape. Validate the new schemas against existing proposal + lesson artifacts.
+        Independent of the skill build and the citation gate; can start immediately. Governed by
+        the single-source-per-concern lesson.
+        OWNER RULING 2026-06-25 (meta-loop OQ4 scope expansion): proposals + lessons are
+        first-class refinement-loop artifacts alongside plans + skills, and SCOPED variants are
+        wanted. Both schemas must carry an explicit `scope` discriminator (e.g.
+        global -> ~/.agents/{proposals,lessons}/ vs project-local -> .agents/{proposals,lessons}/,
+        per the proposal-routing rule) so the meta-loop can emit/refine scoped proposals + lessons
+        on the same non-code `docs`-composed profile (meta-loop-operating-model §5A OQ4).

@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+order: 3
+task:
+    id: t4-staged-execution-handoff-molecule
+    title: Phase 4 molecule `staged-execution-handoff` (no implementation)
+    status: completed
+    depends_on:
+        - t3-plan-scaffold-molecule
+    blocks:
+        - t5-orchestrator-compound
+    owner: AGOrcha
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/staged-execution-handoff/
+    verification_required: true
+    notes: |-
+        Author staged-execution-handoff + execution-handoff.md instruction. Produces the
+        direct-vs-fanout decision and hands briefing + spec + plan into
+        [[orchestrator-session-start]] / [[isp]]; feeds layered-pr-fanout. Emits NO code.
+        Spec ref: design.md Requirement 5; proposal Phase 4.
