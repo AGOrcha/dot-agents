@@ -55,7 +55,14 @@ func runWorkflowStatus() error {
 	fmt.Fprintf(os.Stdout, "  active delegations: %d\n", state.ActiveDelegations.ActiveCount)
 	fmt.Fprintf(os.Stdout, "  pending merge-backs: %d\n", state.PendingMergeBacks)
 	fmt.Fprintln(os.Stdout)
-
+	ui.Section("Work Tracking")
+	fmt.Fprintf(os.Stdout, "  backend: %s\n", state.WorkTracking.Backend)
+	if state.WorkTracking.StateRefSOT {
+		fmt.Fprintf(os.Stdout, "  coordination SOT: %s (live)\n", state.WorkTracking.StateRef)
+	} else {
+		fmt.Fprintln(os.Stdout, "  coordination SOT: working copy (local)")
+	}
+	fmt.Fprintln(os.Stdout)
 	ui.Section("Last Checkpoint")
 	if state.Checkpoint == nil {
 		fmt.Fprintln(os.Stdout, "  none")
@@ -229,6 +236,7 @@ type workflowStateInputs struct {
 	proposals         int
 	delegationSummary workflowDelegationSummary
 	pendingMergebacks int
+	workTracking      workflowWorkTrackingSummary
 	warnings          []string
 }
 
@@ -271,6 +279,7 @@ func gatherWorkflowStateInputs() (*workflowStateInputs, error) {
 		proposals:         proposals,
 		delegationSummary: delegationSummary,
 		pendingMergebacks: pendingMergebacks,
+		workTracking:      collectWorkTrackingSummary(project.Path),
 		warnings:          warnings,
 	}, nil
 }
@@ -338,6 +347,7 @@ func collectWorkflowState() (*workflowOrientState, error) {
 		Warnings:          in.warnings,
 		ActiveDelegations: in.delegationSummary,
 		PendingMergeBacks: in.pendingMergebacks,
+		WorkTracking:      in.workTracking,
 	}
 	state.NextAction, state.NextActionSource = deriveWorkflowNextAction(in.gitSummary, in.checkpoint, in.canonicalPlans, in.activePlans)
 	if in.checkpoint != nil && strings.TrimSpace(in.checkpoint.NextAction) != "" && !isCheckpointCurrent(in.gitSummary, in.checkpoint) && state.NextActionSource != "checkpoint" {
@@ -391,6 +401,22 @@ func currentWorkflowProject() (workflowProjectRef, error) {
 		project = strings.TrimSpace(rc.Project)
 	}
 	return workflowProjectRef{Name: project, Path: cwd}, nil
+}
+
+// collectWorkTrackingSummary resolves the ACTIVE coordination-state backend for
+// projectPath from .agentsrc.json via rc.WorkStoreBackend(). A missing or
+// unreadable manifest resolves to the default local plane (byte-for-byte today's
+// behaviour) — LoadAgentsRC returns a nil *AgentsRC on error and the accessors
+// are nil-receiver safe — so status never errors on an unconfigured repo. When
+// the git-ref backend is active, refs/agents/state is the live coordination SOT.
+func collectWorkTrackingSummary(projectPath string) workflowWorkTrackingSummary {
+	rc, _ := config.LoadAgentsRC(projectPath)
+	summary := workflowWorkTrackingSummary{Backend: rc.WorkStoreBackend()}
+	if rc.UseGitRefBackend() {
+		summary.StateRefSOT = true
+		summary.StateRef = stateRefName
+	}
+	return summary
 }
 
 func collectWorkflowGitSummary(projectPath string) (workflowGitSummary, []string) {
@@ -647,6 +673,18 @@ func renderOrientProjectSection(state *workflowOrientState, out io.Writer) {
 	fmt.Fprintln(out)
 }
 
+func renderOrientWorkTrackingSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Work Tracking")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "- backend: %s\n", state.WorkTracking.Backend)
+	if state.WorkTracking.StateRefSOT {
+		fmt.Fprintf(out, "- coordination SOT: %s (live)\n", state.WorkTracking.StateRef)
+	} else {
+		fmt.Fprintln(out, "- coordination SOT: working copy (local)")
+	}
+	fmt.Fprintln(out)
+}
+
 func renderOrientCanonicalPlansSection(state *workflowOrientState, out io.Writer) {
 	fmt.Fprintln(out, "# Canonical Plans")
 	fmt.Fprintln(out)
@@ -859,6 +897,7 @@ func renderOrientWarningsSection(state *workflowOrientState, out io.Writer) {
 
 func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	renderOrientProjectSection(state, out)
+	renderOrientWorkTrackingSection(state, out)
 	renderOrientCanonicalPlansSection(state, out)
 	renderOrientActivePlansSection(state, out)
 	renderOrientLastCheckpointSection(state, out)

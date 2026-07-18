@@ -103,6 +103,41 @@ attendance: unattended
 
 The skill's body becomes: invoke `da workflow close-task --json` with the resolved plan/task, then render the returned `closeTaskResult` (iteration N, score value + band, sidecar path, next focus) back to the operator. The immediate-feedback loop closes inside the skill: the operator sees *"iteration N → score 0.7 fair → here is the breakdown"* the moment the iteration closes, while the context is still hot.
 
+## Coordination-state backend surfacing (`da workflow status`)
+
+Coordination state (a plan's `PLAN.yaml` + the per-task status blobs) has a
+**storage plane** selected by `work_tracking.backend` in `.agentsrc.json`. The
+plane is documented in full under [Work tracking](./LAYERED_CONFIG_GUIDE.md#work-tracking-coordination-state-plane);
+the short version:
+
+- **`local` (default)** — the per-worktree working copy is the source of truth.
+  Byte-for-byte today's behaviour.
+- **`git-ref` (opt-in)** — coordination state is read from and mirrored to
+  `refs/agents/state`, a local, read-your-writes-safe ref that is orthogonal to
+  the code branch. The default stays `local`; flipping the default is a gated
+  cutover tracked by `.agents/active/state-ref-transition.md`.
+
+`da workflow status` (and `da workflow orient`) surface a **Work Tracking**
+block so operators and orchestrators can see which store is authoritative — the
+active `backend` and whether `refs/agents/state` is the live coordination SOT.
+Agents still read the projected working-copy files regardless of backend; the
+surfacing reports the *source of truth* those projections derive from.
+
+```text
+Work Tracking
+  backend: local
+  coordination SOT: working copy (local)
+```
+
+```text
+Work Tracking
+  backend: git-ref
+  coordination SOT: refs/agents/state (live)
+```
+
+`da --json workflow status` carries the same data under the `work_tracking`
+object (`backend`, `state_ref_sot`, `state_ref`) for skills and scripts.
+
 ## Session-handoff journal (`da workflow journal`)
 
 The session-handoff journal is an append-only, crash-survivable event log plus a

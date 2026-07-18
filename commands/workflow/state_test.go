@@ -380,6 +380,9 @@ func TestRunWorkflowStatus_JSON(t *testing.T) {
 	if !strings.Contains(out, `"project"`) {
 		t.Fatalf("expected JSON output, got: %s", out)
 	}
+	if !strings.Contains(out, `"work_tracking"`) || !strings.Contains(out, `"backend": "local"`) {
+		t.Fatalf("expected work_tracking backend in JSON status, got: %s", out)
+	}
 }
 
 func TestListCanonicalPlanIDs_ReadDirError(t *testing.T) {
@@ -582,5 +585,122 @@ func TestRunWorkflowCheckpoint_MarshalError(t *testing.T) {
 	err := runWorkflowCheckpoint("msg", "pass", "summary")
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected marshal sentinel, got %v", err)
+	}
+}
+
+// TestRunWorkflowStatus_ShowsLocalBackendByDefault proves `da workflow status`
+// surfaces the active coordination-state backend and that an unconfigured repo
+// (no work_tracking block) resolves to the default local plane — the working
+// copy is the coordination SOT, byte-for-byte today's behaviour.
+func TestRunWorkflowStatus_ShowsLocalBackendByDefault(t *testing.T) {
+	repo := setupTestProject(t)
+	chdirForCov(t, repo)
+	prev := workflowTestJSON
+	workflowTestJSON = false
+	t.Cleanup(func() { workflowTestJSON = prev })
+
+	out, err := captureCovStdout(t, runWorkflowStatus)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !strings.Contains(out, "Work Tracking") {
+		t.Fatalf("expected a Work Tracking section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "backend: local") {
+		t.Fatalf("expected default backend local, got:\n%s", out)
+	}
+	if !strings.Contains(out, "coordination SOT: working copy (local)") {
+		t.Fatalf("expected working-copy SOT for local backend, got:\n%s", out)
+	}
+	if strings.Contains(out, "refs/agents/state") {
+		t.Fatalf("local backend must not claim the state ref is the SOT, got:\n%s", out)
+	}
+}
+
+// TestRunWorkflowStatus_ShowsGitRefBackend proves that with
+// work_tracking.backend=git-ref, status reports the git-ref backend and that
+// refs/agents/state is the live coordination source of truth.
+func TestRunWorkflowStatus_ShowsGitRefBackend(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"),
+		[]byte(`{"project":"p","version":2,"sources":[{"type":"local"}],"work_tracking":{"backend":"git-ref"}}`),
+		0644); err != nil {
+		t.Fatal(err)
+	}
+	chdirForCov(t, repo)
+	prev := workflowTestJSON
+	workflowTestJSON = false
+	t.Cleanup(func() { workflowTestJSON = prev })
+
+	out, err := captureCovStdout(t, runWorkflowStatus)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !strings.Contains(out, "backend: git-ref") {
+		t.Fatalf("expected git-ref backend, got:\n%s", out)
+	}
+	if !strings.Contains(out, "coordination SOT: refs/agents/state (live)") {
+		t.Fatalf("expected state-ref SOT for git-ref backend, got:\n%s", out)
+	}
+}
+
+// TestCollectWorkTrackingSummary covers the backend-resolution helper across the
+// default (missing manifest), git-ref, and a RESERVED ladder value (kg resolves
+// to local until implemented).
+func TestCollectWorkTrackingSummary(t *testing.T) {
+	t.Run("missing manifest defaults to local", func(t *testing.T) {
+		got := collectWorkTrackingSummary(t.TempDir())
+		if got.Backend != "local" || got.StateRefSOT || got.StateRef != "" {
+			t.Fatalf("missing manifest must resolve to local, got %+v", got)
+		}
+	})
+	t.Run("git-ref backend flags the state ref as SOT", func(t *testing.T) {
+		repo := t.TempDir()
+		if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"),
+			[]byte(`{"project":"p","version":2,"sources":[{"type":"local"}],"work_tracking":{"backend":"git-ref"}}`),
+			0644); err != nil {
+			t.Fatal(err)
+		}
+		got := collectWorkTrackingSummary(repo)
+		if got.Backend != "git-ref" || !got.StateRefSOT || got.StateRef != stateRefName {
+			t.Fatalf("git-ref must flag state-ref SOT, got %+v", got)
+		}
+	})
+	t.Run("reserved backend resolves to local", func(t *testing.T) {
+		repo := t.TempDir()
+		if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"),
+			[]byte(`{"project":"p","version":2,"sources":[{"type":"local"}],"work_tracking":{"backend":"kg"}}`),
+			0644); err != nil {
+			t.Fatal(err)
+		}
+		got := collectWorkTrackingSummary(repo)
+		if got.Backend != "kg" {
+			t.Fatalf("reserved backend should be reported verbatim, got %q", got.Backend)
+		}
+		if got.StateRefSOT || got.StateRef != "" {
+			t.Fatalf("reserved backend must not claim state-ref SOT, got %+v", got)
+		}
+	})
+}
+
+// TestRenderOrientWorkTrackingSection proves the orient markdown renderer emits
+// the backend + coordination-SOT lines for both the local and git-ref planes.
+func TestRenderOrientWorkTrackingSection(t *testing.T) {
+	local := &workflowOrientState{WorkTracking: workflowWorkTrackingSummary{Backend: "local"}}
+	var lb strings.Builder
+	renderOrientWorkTrackingSection(local, &lb)
+	if !strings.Contains(lb.String(), "- backend: local") ||
+		!strings.Contains(lb.String(), "working copy (local)") {
+		t.Fatalf("local orient render missing expected lines:\n%s", lb.String())
+	}
+
+	gitRef := &workflowOrientState{WorkTracking: workflowWorkTrackingSummary{
+		Backend: "git-ref", StateRefSOT: true, StateRef: stateRefName,
+	}}
+	var gb strings.Builder
+	renderOrientWorkTrackingSection(gitRef, &gb)
+	if !strings.Contains(gb.String(), "- backend: git-ref") ||
+		!strings.Contains(gb.String(), stateRefName+" (live)") {
+		t.Fatalf("git-ref orient render missing expected lines:\n%s", gb.String())
 	}
 }
