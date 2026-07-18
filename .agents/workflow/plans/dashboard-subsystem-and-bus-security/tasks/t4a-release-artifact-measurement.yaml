@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 4
+task:
+    id: t4a-release-artifact-measurement
+    title: Measure the fully-wired slim release artifact transitive closure
+    status: pending
+    depends_on:
+        - t4-slim-runtime-seam
+    blocks:
+        - t12-verify-close
+    owner: ""
+    write_scope:
+        - tools/importguard/
+        - .github/workflows/
+    verification_required: true
+    notes: |-
+        Cross-brain gate decisive fix (evidence/d3-boundary-mechanism.md GATE-2): the
+        package-set proxy under-counts. Build the ACTUAL fully-wired slim release entrypoint
+        and measure its transitive closure at real GOOS/GOARCH/CGO/tags (go list -deps -json),
+        then wire THAT exact target as the CI import-policy subject. Verifies: the guard runs
+        over the real release artifact and fails on a forbidden import. Settles STATIC import
+        isolation only; network attack surface needs the separate bus-security review (spec
+        Open Questions D3 axis B), covered by t5/t6/t7/t9.
+        Live smoke: build the fully-wired release artifact; `go list -deps -json <target>`
+        shows the fat surface absent (jq assert); run the artifact -> baseline smoke passes;
+        the CI guard runs over THAT exact target.
