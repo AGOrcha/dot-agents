@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: import-idempotency
+order: 0
+task:
+    id: ii-import-idempotent
+    title: Make da import idempotent (skip-unchanged, no spurious alternates, non-interactive-safe)
+    status: completed
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/import.go
+        - commands/import_test.go
+    verification_required: true
+    notes: Make da import idempotent. Symptom -- da import (auto-run by da refresh) re-imports every source each run, never skipping identical already-imported content, and mints base-N alternates on conflict (commands/import.go ~826/846); re-import stacks -2 -> -2-2, bloating ~/.agents/hooks; also prompts interactively (import.go line 520) which breaks non-interactive refresh. Fix so re-import of an unchanged source is a no-op (no rewrite, no alternate, no prompt), alternates only on a genuine NEW conflict, and non-interactive runs never block (deterministic safe default). Verify import-twice is a no-op with stable store fingerprint under isolated HOME+AGENTS_HOME (internal/testutil).
+    app_type: go-cli

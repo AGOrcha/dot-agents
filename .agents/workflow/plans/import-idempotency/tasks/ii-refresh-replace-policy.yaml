@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: import-idempotency
+order: 1
+task:
+    id: ii-refresh-replace-policy
+    title: Reconcile da refresh auto-replace policy with content-management rules
+    status: completed
+    depends_on:
+        - ii-import-idempotent
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/import.go
+        - commands/refresh.go
+        - internal/ui/confirm.go
+    verification_required: true
+    notes: |-
+        Policy decided and locked. Auto-replace is the canonical refresh behavior: sources are
+        truth (uv-style auto-sync); non-hook managed files are replaced when source content has
+        changed. The ii-import-idempotent fix ensures unchanged sources are no-ops so only genuine
+        updates reach the replace path. Backup sidecars are written before replacement for recovery.
+        Policy comment added to runImportFromRefresh; regression test
+        TestRunImportFromRefresh_Policy locks both the auto-replace (refresh) and
+        preserve-on-non-interactive (da import) behaviors.
+    app_type: go-cli
