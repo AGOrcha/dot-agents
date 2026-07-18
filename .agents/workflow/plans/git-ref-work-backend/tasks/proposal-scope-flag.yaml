@@ -10,4 +10,4 @@ task:
     owner: dot-agents
     write_scope: []
     verification_required: true
-    notes: ""
+    notes: PROBE structural-write A
