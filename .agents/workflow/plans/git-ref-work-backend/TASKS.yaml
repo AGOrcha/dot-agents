@@ -56,7 +56,7 @@ tasks:
       app_type: go-cli
     - id: decouple-coordination-commits
       title: Stop staging .agents/workflow/** into code-branch commits (fold commit-scope)
-      status: pending
+      status: completed
       depends_on:
         - git-ref-state-ref-write
       blocks: []
@@ -69,7 +69,7 @@ tasks:
       app_type: go-cli
     - id: workstore-git-ref-backend
       title: Expose git-ref as a WorkStore backend + work_tracking.backend config value
-      status: pending
+      status: completed
       depends_on:
         - per-task-state-files
         - decouple-coordination-commits
@@ -85,7 +85,7 @@ tasks:
       app_type: go-cli
     - id: document-and-default-git-ref
       title: 'Adoption: document + recommend git-ref, surface the active backend so consumers know to use it'
-      status: pending
+      status: completed
       depends_on:
         - workstore-git-ref-backend
       blocks: []
