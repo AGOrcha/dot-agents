@@ -458,19 +458,21 @@ func TestStateRefReconcile_GetwdErrorPropagates(t *testing.T) {
 	}
 }
 
-// TestStateRefReconcile_PlansPathIsFileErrors drives the working-copy plan
-// enumeration failure leg: when .agents/workflow/plans is a FILE, os.ReadDir
-// fails with a non-not-exist error that must surface (not be swallowed).
-func TestStateRefReconcile_PlansPathIsFileErrors(t *testing.T) {
-	repo := t.TempDir()
-	testutil.InitGitRepo(t, repo, map[string]string{
-		testAgentsRCName:         testAgentsRCLocal,
-		".agents/workflow/plans": "i am a file, not a directory",
-	})
+// TestStateRefReconcile_PlanReadDirErrorPropagates drives the working-copy plan
+// enumeration failure leg via the osReadDir seam. os.ReadDir on a non-directory
+// path does NOT error portably (Windows diverges from POSIX), so the error is
+// injected through the seam to cover the non-IsNotExist leg deterministically on
+// all OSes.
+func TestStateRefReconcile_PlanReadDirErrorPropagates(t *testing.T) {
+	repo := seedReconcileRepo(t, "p1", "t1")
 	chdirRepo(t, repo)
 
+	prev := osReadDir
+	osReadDir = func(string) ([]os.DirEntry, error) { return nil, errors.New("readdir boom") }
+	t.Cleanup(func() { osReadDir = prev })
+
 	if err := runWorkflowStateRefReconcile(io.Discard, stateRefReconcileOpts{}); err == nil {
-		t.Fatal("a non-directory plans path must surface an error")
+		t.Fatal("a non-IsNotExist ReadDir error must surface")
 	}
 }
 

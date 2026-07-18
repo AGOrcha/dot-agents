@@ -12,6 +12,13 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// osReadDir is the directory-read seam for working-copy plan enumeration.
+// Default is os.ReadDir; tests rebind it to inject a synthetic non-IsNotExist
+// error, because os.ReadDir on a non-directory path does not error portably
+// (Windows diverges from POSIX), so the workingCopyPlanIDsWithTasks error leg
+// cannot be driven by fixturing the filesystem alone.
+var osReadDir = os.ReadDir
+
 // stateRefReconcileOpts carries the flags for `da workflow state-ref reconcile`.
 type stateRefReconcileOpts struct {
 	dryRun bool
@@ -188,7 +195,7 @@ func stateRefPlanTaskIDs(projectPath, planID string) (map[string]bool, error) {
 // working-copy directory holds a TASKS.yaml.
 func workingCopyPlanIDsWithTasks(projectPath string) ([]string, error) {
 	base := plansBaseDir(projectPath)
-	entries, err := os.ReadDir(base)
+	entries, err := osReadDir(base)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
