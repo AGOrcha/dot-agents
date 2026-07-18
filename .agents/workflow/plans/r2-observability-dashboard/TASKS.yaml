@@ -492,7 +492,7 @@ tasks:
       app_type: go-cli
     - id: t14-documentation
       title: Documentation — operator guide, API reference, frontend dev guide
-      status: pending
+      status: in_progress
       depends_on:
         - t12-e2e-smoke-live-iteration
         - t13-r3-mount-integration
@@ -537,7 +537,7 @@ tasks:
       app_type: web
     - id: t16-coverage-gate-and-ci
       title: Coverage gate + CI wiring for new dashboard packages
-      status: pending
+      status: in_progress
       depends_on:
         - t12-e2e-smoke-live-iteration
       blocks:
