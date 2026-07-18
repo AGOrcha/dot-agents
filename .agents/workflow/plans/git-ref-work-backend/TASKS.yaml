@@ -98,3 +98,21 @@ tasks:
       verification_required: true
       notes: Closes the 'as long as they know to use it' condition. (1) Document enabling work_tracking.backend=git-ref + read_from=master in LAYERED_CONFIG_GUIDE + the workflow docs; recommend git-ref as the default upgrade from local (D9). (2) da workflow status/health surface the ACTIVE work_tracking backend + state-ref so operators/orchestrators see which SOT is live (agents still just read the projected file per §3B — zero new semantics; this is operator-facing discoverability). (3) Seed the config default recommendation in the starter. Concurrency-safety ('safe concurrent updates') is gated separately by git-ref-state-ref-write (CAS) + per-task-state-files + the concurrent-transition regression test.
       app_type: go-cli
+    - id: proposal-scope-flag
+      title: Add proposal scope/write_scope field routing into available diff-scopes/sources
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: ref-back-managed-artifacts
+      title: Ref-back managed .agents/active artifacts (delegation/merge-back, verification, review) under backend=git-ref
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
