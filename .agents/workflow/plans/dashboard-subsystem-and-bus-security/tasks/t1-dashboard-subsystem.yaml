@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 0
+task:
+    id: t1-dashboard-subsystem
+    title: da dashboard subsystem (serve/open/status) over the shared core
+    status: pending
+    depends_on: []
+    blocks:
+        - t2-retire-standalone-root
+    owner: ""
+    write_scope:
+        - commands/dashboard/
+        - commands/root.go
+    verification_required: true
+    notes: |-
+        Spec D1/D2. Add a first-class `da dashboard` subsystem wired into the root
+        command tree (dev: serve/open/status), running the shared dashboard core
+        in-process against local iter-log roots. Verifies spec done-criterion
+        "dashboard invocable via the da root subsystem": `da dashboard --help` lists
+        the subcommands and `go test ./commands/dashboard/...` passes.

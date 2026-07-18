@@ -1,0 +1,11 @@
+schema_version: 1
+id: dashboard-subsystem-and-bus-security
+title: Dashboard subsystem consolidation + event-bus security posture
+status: draft
+summary: Make the dashboard a da subsystem, seam a slim separately-deployable prod runtime, and harden the event bus per the dashboard-subsystem-and-bus-security spec.
+created_at: "2026-07-18T16:48:25Z"
+updated_at: "2026-07-18T17:52:27Z"
+owner: dot-agents
+success_criteria: da dashboard subsystem replaces the standalone root; runtime build-boundary guard passes; bus is default-deny/one-way/loopback/bounded with clean payloads; done-criteria in the spec are met.
+verification_strategy: go test ./...; import-guard build check; broker DoS + default-deny + loopback tests; docs link-check; CI green.
+current_focus_task: da dashboard subsystem (serve/open/status) over the shared core

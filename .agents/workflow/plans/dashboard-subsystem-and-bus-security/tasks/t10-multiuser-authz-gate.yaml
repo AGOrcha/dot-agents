@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 9
+task:
+    id: t10-multiuser-authz-gate
+    title: Multi-user stream authz precondition (fail-closed gate)
+    status: pending
+    depends_on:
+        - t7-loopback-failclosed
+    blocks: []
+    owner: ""
+    write_scope:
+        - internal/dashboard/server/
+    verification_required: true
+    notes: |-
+        Spec Deferred item. Per-subscriber stream authorization is a HARD precondition
+        before any multi-user exposure; implementation is deferred to
+        r5-review-labeling-access. This task installs only the fail-closed guard so
+        multi-user exposure cannot silently ship without the authz layer. Verifies: a
+        test that multi-user exposure is refused absent the authz gate.

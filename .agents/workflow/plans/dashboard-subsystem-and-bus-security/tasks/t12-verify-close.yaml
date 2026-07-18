@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 11
+task:
+    id: t12-verify-close
+    title: Verify spec done-criteria and close the plan
+    status: pending
+    depends_on:
+        - t2-retire-standalone-root
+        - t4-slim-runtime-seam
+        - t5-capability-writepaths
+        - t6-oneway-egress-bridge
+        - t7-loopback-failclosed
+        - t8-dos-cap-coalescing
+        - t9-payload-hygiene
+        - t10-multiuser-authz-gate
+        - t11-docs-align
+    blocks: []
+    owner: ""
+    write_scope:
+        - .agents/history/dashboard-subsystem-and-bus-security/
+    verification_required: true
+    notes: |-
+        Confirm every spec done-criterion is met (subsystem invocation, import guard,
+        default-deny mutation, DoS cap+coalescing, loopback-default, payload hygiene),
+        run the full suite + CI green, and archive the plan. Verifies: all spec
+        done-criteria pass; `go test ./...` and CI are green.

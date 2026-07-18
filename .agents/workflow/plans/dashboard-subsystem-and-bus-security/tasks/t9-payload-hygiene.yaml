@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 8
+task:
+    id: t9-payload-hygiene
+    title: Payload hygiene - no secrets in browser-bound events
+    status: pending
+    depends_on:
+        - t6-oneway-egress-bridge
+    blocks: []
+    owner: ""
+    write_scope:
+        - internal/dashboard/events/
+        - internal/dashboard/handlers/
+    verification_required: true
+    notes: |-
+        Spec D8. Events crossing to browser clients carry no secrets, tokens, or PII;
+        payloads are shaped and audited at the bridge boundary. Verifies done-criterion
+        "a payload-hygiene check verifies browser-bound events omit sensitive fields".

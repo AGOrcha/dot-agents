@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 10
+task:
+    id: t11-docs-align
+    title: Align dashboard docs with the shipped subsystem + posture
+    status: pending
+    depends_on:
+        - t1-dashboard-subsystem
+        - t2-retire-standalone-root
+    blocks: []
+    owner: ""
+    write_scope:
+        - docs/OBSERVABILITY_DASHBOARD.md
+        - docs/DASHBOARD_API.md
+        - web/dashboard/README.md
+    verification_required: false
+    notes: |-
+        Update the dashboard docs from the forward-looking spec-direction framing (the
+        r2 #423 refresh) to describe the SHIPPED `da dashboard` subsystem, the retired
+        standalone root, and the realized security posture. Verifies: docs match the
+        shipped command surface and the docs-site link-check stays green.

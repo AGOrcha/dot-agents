@@ -1,0 +1,23 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 2
+task:
+    id: t3-boundary-mechanism-decision
+    title: Resolve D3 slim-runtime boundary mechanism (ideation-cycle)
+    status: completed
+    depends_on: []
+    blocks:
+        - t4-slim-runtime-seam
+    owner: ""
+    write_scope:
+        - .agents/workflow/specs/dashboard-subsystem-and-bus-security/
+    verification_required: true
+    notes: |-
+        Spec D3 open question. HARD fork: build-tag vs separate-module vs dedicated
+        minimal entrypoint for the slim, separately-deployable prod runtime. Resolved
+        via ideation-cycle (empirical prototype under the fidelity gate + cross-harness
+        audit) measuring binary size, import-graph/attack-surface breadth, and
+        maintenance cost against the current fat binary as negative control. Verifies:
+        a ratified decision + per-fork evidence sidecar recorded; the spec's D3 open
+        question is closed. Gates t4 (the seam's write_scope is unknowable until this
+        lands).

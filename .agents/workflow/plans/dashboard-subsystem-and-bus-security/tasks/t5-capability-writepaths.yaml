@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 4
+task:
+    id: t5-capability-writepaths
+    title: Deny-by-default capability + registered write-operation paths
+    status: pending
+    depends_on:
+        - t1-dashboard-subsystem
+    blocks: []
+    owner: ""
+    write_scope:
+        - internal/dashboard/handlers/
+        - internal/dashboard/server/
+    verification_required: true
+    notes: |-
+        Spec D5. Read-only by default; state mutates ONLY through an explicitly
+        registered, individually-justified write-operation path (no ambient write).
+        Establish the registry + default-deny gate; no concrete write paths are added
+        now. Verifies done-criterion "the bus refuses any mutation attempt that is not
+        a registered write-operation path (default-deny), covered by a test".

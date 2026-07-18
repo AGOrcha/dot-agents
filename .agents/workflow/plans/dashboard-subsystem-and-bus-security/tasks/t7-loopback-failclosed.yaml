@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 6
+task:
+    id: t7-loopback-failclosed
+    title: Loopback-default bind; fail-closed beyond loopback
+    status: pending
+    depends_on:
+        - t1-dashboard-subsystem
+    blocks:
+        - t10-multiuser-authz-gate
+    owner: ""
+    write_scope:
+        - internal/dashboard/server/
+    verification_required: true
+    notes: |-
+        Spec D6. The runtime binds loopback by default and never binds a public
+        interface implicitly; beyond-loopback exposure is explicit opt-in fronted by a
+        reverse proxy per the cf-worker-auth-gate-fail-closed checklist. Verifies
+        done-criterion "a test asserts no public bind occurs without the explicit opt-in".

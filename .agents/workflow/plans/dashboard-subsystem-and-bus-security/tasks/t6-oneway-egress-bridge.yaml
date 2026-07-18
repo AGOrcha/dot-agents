@@ -1,0 +1,21 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 5
+task:
+    id: t6-oneway-egress-bridge
+    title: One-way runtime->broker bridge; egress-only / GET-only
+    status: pending
+    depends_on:
+        - t1-dashboard-subsystem
+    blocks:
+        - t9-payload-hygiene
+    owner: ""
+    write_scope:
+        - internal/dashboard/events/
+        - internal/dashboard/server/
+    verification_required: true
+    notes: |-
+        Spec D4. Enforce/verify the runtime->broker bridge is strictly one-directional
+        (the dashboard cannot publish or inject upstream), SSE is egress-only, ingress
+        is GET-only, and the bus exposes no mutation endpoints. Verifies the D4
+        requirement via a test that the bridge cannot inject upstream.

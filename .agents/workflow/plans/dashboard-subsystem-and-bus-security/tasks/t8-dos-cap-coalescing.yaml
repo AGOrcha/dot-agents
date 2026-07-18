@@ -1,0 +1,20 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 7
+task:
+    id: t8-dos-cap-coalescing
+    title: DoS governance - subscriber cap + high-freq coalescing
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: ""
+    write_scope:
+        - internal/dashboard/events/
+    verification_required: true
+    notes: |-
+        Spec D7. Add a bound on concurrent subscribers and coalesce/debounce bursty
+        high-frequency source events, atop the existing bounded-buffer drop=>disconnect
+        policy. The coalescing window/count policy needs a rate measurement first
+        (spec open question) - measure expected event rates before locking the policy.
+        Verifies done-criterion "a burst/slow-client test that neither blocks the
+        publisher nor grows memory unboundedly" plus a documented subscriber cap.

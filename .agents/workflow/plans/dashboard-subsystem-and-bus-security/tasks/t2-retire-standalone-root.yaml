@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 1
+task:
+    id: t2-retire-standalone-root
+    title: Retire the standalone da-dashboard separate root
+    status: pending
+    depends_on:
+        - t1-dashboard-subsystem
+    blocks: []
+    owner: ""
+    write_scope:
+        - cmd/da-dashboard/
+    verification_required: true
+    notes: |-
+        Spec D1. Retire cmd/da-dashboard as a distinct entry point; its local-serve
+        behavior is preserved by `da dashboard serve`. Verifies done-criterion "the
+        standalone separate-root entry point is no longer a supported/tested path"
+        (its tests target the subsystem/runtime composition).

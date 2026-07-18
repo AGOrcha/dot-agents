@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: dashboard-subsystem-and-bus-security
+order: 3
+task:
+    id: t4-slim-runtime-seam
+    title: Implement the slim-runtime import/build boundary + guard
+    status: pending
+    depends_on:
+        - t3-boundary-mechanism-decision
+    blocks: []
+    owner: ""
+    write_scope:
+        - tools/importguard/
+    verification_required: true
+    notes: |-
+        Spec D3. Implement the boundary mechanism ratified by t3 so the network-facing
+        runtime builds WITHOUT the fat agent command surface, and add/extend an
+        import-guard that fails the build if the runtime target imports outside the
+        permitted set. write_scope is FINALIZED by t3's decision (build-tag files, a
+        new module dir, or a dedicated entrypoint may be added). Verifies done-criterion
+        "a build/import guard fails when the runtime target's dependency graph includes
+        the disallowed fat-command surface". Artifact/packaging remains DEFERRED (spec).
