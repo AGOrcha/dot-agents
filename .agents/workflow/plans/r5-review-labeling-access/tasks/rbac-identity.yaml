@@ -1,0 +1,34 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 1
+task:
+    id: rbac-identity
+    title: RBAC identity layer (users file, token issuance, Authenticator interface)
+    status: completed
+    depends_on:
+        - design-doc
+    blocks:
+        - collection-endpoint
+        - audit-log
+        - review-ui
+        - admin-cli
+    owner: dot-agents
+    write_scope:
+        - internal/review/auth/
+    verification_required: true
+    notes: |-
+        Implement Authenticator interface + LocalUsersAuthenticator
+        backed by the local users file (argon2id-hashed token, role
+        enum reviewer|admin|readonly). Token issuance helper. No HTTP
+        yet — pure package, unit-tested. Decision D5.3.
+        Users-file path = ~/.config/da/review/users.yaml honoring
+        $XDG_CONFIG_HOME (per spec D5.3 "secrets never live in
+        AGENTS_HOME"); NOT ~/.agents/review/ (the earlier draft path
+        would git-sync hashed secrets). Hash = argon2id, NOT bcrypt.
+        SHIPPED (coherence 2026-06-25): internal/review/auth/ landed
+        (authenticator.go + token.go + users.go + role.go + tests);
+        commit 854821bc moved users.yaml out of AGENTS_HOME to
+        ~/.config/da; commit e3995d80 swapped bcrypt→argon2id. Marked
+        completed. Earlier ~/.agents/review + bcrypt note was stale;
+        spec D5.3 + shipped code are the single source.
+    app_type: go-cli

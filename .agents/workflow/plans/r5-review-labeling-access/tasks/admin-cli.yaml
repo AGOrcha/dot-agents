@@ -1,0 +1,56 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 7
+task:
+    id: admin-cli
+    title: '`da review` CLI for user/audit administration'
+    status: completed
+    depends_on:
+        - rbac-identity
+        - audit-log
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/review_admin.go
+        - commands/review_admin_test.go
+        - commands/root.go
+    verification_required: true
+    notes: |-
+        Distinct from the existing `da review` (review-mode).
+        NAME CLASH IS REAL (verified 2026-06-25): commands/review.go
+        already registers `da review` with subcommands show|approve|
+        reject (NewReviewCmd). The admin surface (users add|list|
+        remove --role; audit tail|verify|repair|prune --before-year) therefore CANNOT
+        nest under `da review` without colliding. Resolution: nest the
+        admin subtree under the existing `da review` group as
+        `da review users ...` / `da review audit ...` ONLY if those
+        subcommand names do not collide with show/approve/reject
+        RATIFIED 2026-07-02 (admin-cli review): the audit surface is
+        `tail|verify|repair|prune --before-year`. `tail` (not `view`) is the
+        canonical recent-entries verb (spec appendix line 174). `--before-year`
+        (not bare `--before`) is the operator flag — rotation is year-keyed
+        (spec: "compact older years") so a 4-digit year cutoff is the natural,
+        unambiguous granularity. `repair` is an authorized addition exposing
+        audit.RepairHead for the torn-append recovery case (#250); it is not an
+        R6 mutating action (prune/repair are archive maintenance, not live-chain
+        mutations).
+        (they don't) — i.e. extend NewReviewCmd with new subcommands
+        rather than a second top-level group. Otherwise use
+        `da review-admin` or `da workflow review-admin`. Pick one and
+        pin it before opening; update write_scope (commands/review.go
+        if extending the existing group, vs commands/review_admin.go
+        if a new group). Admin-only; operates on local YAML/JSONL —
+        no network.
+        RATIFIED 2026-07-02: prune uses --before-year (year-keyed
+        rotation), superseding the earlier --before <date> sketch.
+        Audit log rotation is year-keyed (archive names encode year),
+        so year-granular prune is the correct contract. The
+        internal/review/audit/ prune implementation uses this flag.
+        RATIFIED 2026-07-02 (audit surface): the full `da review audit`
+        command set is tail | verify | repair | prune. `repair`
+        (RepairHead) advances the head anchor to the actual log tail
+        after an operator has manually confirmed a torn-append tail
+        record is legitimate. It is admin-only (mutates the head
+        sidecar) and intentionally separate from verify (which is
+        token-free) so that the CI gate cannot self-heal.
+    app_type: go-cli

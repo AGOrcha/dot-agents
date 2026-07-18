@@ -1,0 +1,29 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 0
+task:
+    id: design-doc
+    title: Resolve R5 open question (audit log format + retention) in design.md
+    status: completed
+    depends_on: []
+    blocks:
+        - rbac-identity
+        - label-model
+        - audit-log
+        - r1-integration
+    owner: dot-agents
+    write_scope:
+        - .agents/workflow/plans/r5-review-labeling-access/design.md
+    verification_required: false
+    notes: |-
+        Landed via the R5 planner output 2026-05-25: D5.1 YAML sidecar
+        storage; D5.2 major RubricVersion bump with new human_label
+        signal (weight ~0.15) — version resolved at task time, NOT
+        hardcoded 3.0.0 (R1.5 shipped 2.1.0 since this was written; see
+        r1-integration task notes); D5.3 Bearer-token RBAC via local
+        users file at ~/.config/da/review/users.yaml, argon2id-hashed
+        (Authenticator interface for OIDC swap-out); D5.4 JSON-lines
+        audit log with SHA-256 prev_hash chain, indefinite retention;
+        D5.5 5-route HTTP mount surface into R3; D5.6 only R2 base
+        shell needed (not real-time push).
+    app_type: research

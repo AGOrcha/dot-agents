@@ -1,0 +1,22 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 3
+task:
+    id: audit-log
+    title: Append-only chained JSON-lines audit log + verifier
+    status: completed
+    depends_on:
+        - rbac-identity
+    blocks:
+        - collection-endpoint
+        - admin-cli
+    owner: dot-agents
+    write_scope:
+        - internal/review/audit/
+    verification_required: true
+    notes: |-
+        Implements D5.4: JSON-lines under
+        .agents/active/review/audit.log.jsonl with prev_hash chaining
+        (SHA-256). Append + Verify. Yearly rotation hook. Pure file
+        IO; no HTTP yet.
+    app_type: go-cli

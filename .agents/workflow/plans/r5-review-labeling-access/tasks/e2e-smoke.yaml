@@ -1,0 +1,25 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 8
+task:
+    id: e2e-smoke
+    title: End-to-end test — reviewer labels run, label feeds R1 on next recompute
+    status: pending
+    depends_on:
+        - collection-endpoint
+        - r1-integration
+        - review-ui
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - tests/review_e2e/
+    verification_required: true
+    notes: |-
+        Per umbrella verification: spin up R3 service in-process,
+        seed two users (reviewer + admin), POST a label via HTTP,
+        run scoring.ScoreIteration on the affected iteration, assert
+        PersistedScore.Breakdown contains a human_label row with the
+        expected value. Second case: readonly POST → 403. Third:
+        tamper with the audit log → `da review audit verify` reports
+        it.
+    app_type: go-cli

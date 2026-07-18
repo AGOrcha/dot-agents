@@ -1,0 +1,46 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 4
+task:
+    id: collection-endpoint
+    title: HTTP route handlers + auth/audit middleware (mounts into R3 server)
+    status: completed
+    depends_on:
+        - rbac-identity
+        - label-model
+        - audit-log
+    blocks:
+        - review-ui
+        - e2e-smoke
+    owner: dot-agents
+    write_scope:
+        - internal/review/http/
+    verification_required: true
+    notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): these review routes are
+        browser-facing / external-tool-consumed, so they take the
+        HTTP arm of r3's §2A surface→transport map — they mount on
+        R3's HTTP/SSE edge via the stdlib
+        RegisterMount(prefix, handler) surface (net/http; NO
+        chi/router dep — the earlier "func Mount(r chi.Router, deps
+        Deps)" sketch is superseded; R3's server is framework-free).
+        They do NOT ride the UDS control plane. No EventBus access is
+        needed for v1 (r3 §D4.3: R5 mounts an HTTP handler that does
+        not need bus access); if a later slice subscribes to events,
+        it binds to the §D4.1 EventBus INTERFACE, never *events.Bus.
+
+        Defines an HTTPMount that R3 imports and mounts under
+        /api/reviews. Handlers: POST/PATCH
+        /api/runs/:iteration/labels, GET /api/runs/:iteration/labels,
+        GET /api/review/audit (admin), users CRUD (admin).
+        AuthMiddleware reads Bearer token via Authenticator;
+        AuditMiddleware emits one record per mutating call. Route
+        ownership stays in this package (spec D5.5); R3 owns the
+        host, middleware chain, and lifecycle.
+
+        Cross-plan dep: r3 http-server — now the §2A transport-layer
+        task (UDS control plane + HTTP/SSE edge, RegisterMount on the
+        edge) — must ship before this can be wired in-process. Until
+        then, this package ships a standalone http.Handler usable in
+        tests.
+    app_type: go-cli

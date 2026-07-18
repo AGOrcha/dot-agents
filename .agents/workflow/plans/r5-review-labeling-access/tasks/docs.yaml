@@ -1,0 +1,24 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 9
+task:
+    id: docs
+    title: Documentation — REVIEW_LABELING_GUIDE.md, RBAC_AND_AUDIT.md, rubric v3 changelog
+    status: pending
+    depends_on:
+        - collection-endpoint
+        - r1-integration
+        - admin-cli
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/REVIEW_LABELING_GUIDE.md
+        - docs/REVIEW_RBAC_AND_AUDIT.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+    verification_required: false
+    notes: |-
+        Operator-facing: how to add a reviewer, how to issue a token,
+        label form semantics, how the label feeds the score, how to
+        verify the audit chain. Cross-reference from the umbrella
+        spec.
+    app_type: docs

@@ -1,0 +1,40 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 10
+task:
+    id: release-minor
+    title: 'Release: bump VERSION + finalize CHANGELOG for the review/labeling minor'
+    status: pending
+    depends_on:
+        - design-doc
+        - rbac-identity
+        - label-model
+        - audit-log
+        - collection-endpoint
+        - r1-integration
+        - review-ui
+        - admin-cli
+        - e2e-smoke
+        - docs
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - VERSION
+        - CHANGELOG.md
+    verification_required: true
+    notes: |-
+        Release-gated tail task (hybrid convention, MINOR path). This plan
+        delivers new user-visible surfaces — the review/labeling UI in the
+        R2 dashboard, the admin CLI, RBAC roles, and the feedback-to-R1
+        reward signal. New surfaces + new capability, MINOR not MAJOR (RBAC
+        is additive; no existing public surface removed or incompatibly
+        changed).
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode). VERSION is 0.4.1 today (R1.5's minor
+        shipped), so the next minor is 0.5.0; resolve from VERSION when this
+        task becomes ready; serialize at the VERSION bump if another minor
+        ships first.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, moving the review/labeling
+        entries out of Unreleased. Merge to master fires auto-release.yml.
+    app_type: release

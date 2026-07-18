@@ -1,0 +1,30 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 2
+task:
+    id: label-model
+    title: Label data model + persistence (iter-N.labels.yaml sidecars)
+    status: completed
+    depends_on:
+        - design-doc
+    blocks:
+        - collection-endpoint
+        - r1-integration
+    owner: dot-agents
+    write_scope:
+        - internal/review/labels/
+    verification_required: true
+    notes: |-
+        Define Label struct (structured fields per spec D5.7 —
+        correctness 0-3, scope_judgement, hallucination, free_text;
+        plus label_schema_version per OQ3), atomic YAML sidecar
+        reader/writer mirroring internal/scoring/persist.go style.
+        Multi-label per iteration; each label carries id (uuid),
+        actor, role, timestamps, edit-history. Pure package.
+        SHIPPED (coherence 2026-06-25): internal/review/labels/
+        (label.go + persist.go + tests) landed via PR #177
+        (feature/r5-label-model); persist writes
+        iter-N.labels.yaml adjacent to iter-N.yaml. The shared
+        atomic writer was later extracted to internal/fsops
+        (WriteFileAtomic, commit ed978961). Marked completed.
+    app_type: go-cli

@@ -1,0 +1,46 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 5
+task:
+    id: r1-integration
+    title: Human-label signal + RubricVersion major/minor bump (resolve at task time)
+    status: completed
+    depends_on:
+        - label-model
+    blocks:
+        - e2e-smoke
+    owner: dot-agents
+    write_scope:
+        - internal/scoring/signal_human_label.go
+        - internal/scoring/signal_human_label_test.go
+        - internal/scoring/rubric.go
+        - internal/scoring/signals.go
+        - internal/scoring/signals_test.go
+        - docs/OUTCOME_SCORING_RUBRIC.md
+    verification_required: true
+    notes: |-
+        Per D5.2: add SignalHumanLabel (weight ~0.15, re-balance the
+        existing SEVEN signals down — note the shipped rubric now has
+        seven, not six: R1.5 added hook_outcomes at 2.1.0), extend
+        SignalSet with HumanLabel SignalValue, add
+        ExtractHumanLabelSignals(iterLogDir, n) reading
+        iter-N.labels.yaml, wire it through AssembleSignalSet and
+        BuildSignalSets. Update docs/OUTCOME_SCORING_RUBRIC.md with
+        the new signal + new weight table + rationale. Multi-label
+        aggregation rule: mean of latest-per-reviewer.
+
+        RUBRIC VERSION (resolve at task time, do NOT hardcode 3.0.0):
+        R1.5 shipped first and bumped to 2.1.0 (confirmed in
+        internal/scoring/rubric.go: `const RubricVersion = "2.1.0"`).
+        Per the R1.5 design D5 / OUTCOME_SCORING_RUBRIC.md ordering
+        policy, R5 (the FIRST signal depending on external human input)
+        owns the next MAJOR bump → target 3.0.0 only if the constant is
+        still 2.1.0 at task time; if another rubric mutation lands
+        first, rebase to the next available major/minor per that
+        policy. The earlier "3.0.0" plan text predated R1.5 shipping
+        2.1.0 — read the constant, do not assume.
+
+        Note: this task touches R1's shipped surface area
+        (RubricVersion is global). Coordinate via the umbrella spec
+        and the R1.5 ordering policy before opening.
+    app_type: go-cli

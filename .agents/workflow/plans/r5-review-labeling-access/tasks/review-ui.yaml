@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: r5-review-labeling-access
+order: 6
+task:
+    id: review-ui
+    title: Review surface in R2 (list, inspect, label form, role-aware controls)
+    status: pending
+    depends_on:
+        - collection-endpoint
+    blocks:
+        - e2e-smoke
+    owner: dot-agents
+    write_scope:
+        - web/dashboard/src/review/
+    verification_required: true
+    notes: |-
+        Two routes /review (filterable list, unlabeled-first sort) +
+        /review/:iteration (detail + label form). API client wraps
+        fetch to inject Bearer token from localStorage; 401/403
+        surfaces friendly errors. Role-aware: readonly hides label
+        form; admin sees /review/users + /review/audit subroutes.
+
+        Cross-plan dep: R2 must have shipped its base React app
+        skeleton + run-detail page (NOT R2's real-time push surface).
+        The exact write_scope path is locked once R2's frontend
+        layout exists.
+    app_type: web
