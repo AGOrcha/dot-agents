@@ -376,6 +376,40 @@ func TestFoldBackCreate_ProposeWritesProposal(t *testing.T) {
 	}
 }
 
+func TestFoldBackCreate_ProposeCarriesWriteScope(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--observation", "scoped change", "--propose",
+		"--write-scope", "internal/config/", "--write-scope", "commands/workflow/types.go"); err != nil {
+		t.Fatalf("expected scoped propose flow to succeed: %v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(agentsHome, "proposals", "obs-*.md"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("expected one proposal, err=%v matches=%v", err, matches)
+	}
+	fm, _, err := readFoldBackProposalFile(matches[0])
+	if err != nil {
+		t.Fatalf("readFoldBackProposalFile: %v", err)
+	}
+	if len(fm.WriteScope) != 2 || fm.WriteScope[0] != "internal/config/" || fm.WriteScope[1] != "commands/workflow/types.go" {
+		t.Fatalf("frontmatter did not carry write_scope: %v", fm.WriteScope)
+	}
+}
+
+func TestFoldBackCreate_RejectsInvalidWriteScope(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--observation", "x", "--propose",
+		"--write-scope", "/absolute/path")
+	if err == nil || !strings.Contains(err.Error(), "--write-scope") {
+		t.Fatalf("expected --write-scope validation error, got %v", err)
+	}
+}
+
 func TestFoldBackCreate_DispatchWriteError(t *testing.T) {
 	repo := setupFoldBackProject(t)
 

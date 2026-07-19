@@ -442,6 +442,7 @@ type foldBackUpsertInputs struct {
 	observation string
 	propose     bool
 	slug        string
+	writeScope  []string
 }
 
 func parseFoldBackUpsertInputs(cmd *cobra.Command, updateOnly bool) (*foldBackUpsertInputs, error) {
@@ -452,6 +453,7 @@ func parseFoldBackUpsertInputs(cmd *cobra.Command, updateOnly bool) (*foldBackUp
 	in.propose, _ = cmd.Flags().GetBool("propose")
 	in.slug, _ = cmd.Flags().GetString("slug")
 	in.slug = strings.TrimSpace(in.slug)
+	in.writeScope = trimStringSlice(mustGetStringSlice(cmd, "write-scope"))
 
 	if strings.TrimSpace(in.observation) == "" {
 		return nil, fmt.Errorf("observation text is required")
@@ -463,6 +465,9 @@ func parseFoldBackUpsertInputs(cmd *cobra.Command, updateOnly bool) (*foldBackUp
 		if err := validateFoldBackSlug(in.slug); err != nil {
 			return nil, err
 		}
+	}
+	if err := validateRepoRelativePathList("--write-scope", in.writeScope); err != nil {
+		return nil, err
 	}
 	return in, nil
 }
@@ -612,6 +617,7 @@ func createProposalFoldBack(in *foldBackUpsertInputs, ts int64, createdAt string
 		Title:       fmt.Sprintf("Fold-back: %s", in.planID),
 		Observation: in.observation,
 		PlanID:      in.planID,
+		WriteScope:  in.writeScope,
 		CreatedAt:   createdAt,
 	}
 	if artifact.TaskID != "" {
