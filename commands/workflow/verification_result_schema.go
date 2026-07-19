@@ -136,5 +136,5 @@ func writeVerificationResultYAML(projectPath string, doc *VerificationResultDoc)
 	if err := osWriteFile(path, out, 0644); err != nil {
 		return fmt.Errorf("write verification result: %w", err)
 	}
-	return nil
+	return mirrorArtifactToStateRef(projectPath, verificationResultRel(doc.TaskID, doc.VerifierType), out)
 }

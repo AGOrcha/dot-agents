@@ -137,5 +137,5 @@ func writeReviewDecisionYAML(projectPath string, doc *ReviewDecisionDoc) error {
 	if err := osWriteFile(path, out, 0644); err != nil {
 		return fmt.Errorf("write review decision: %w", err)
 	}
-	return nil
+	return mirrorArtifactToStateRef(projectPath, iterLogReviewDecisionPath(doc.TaskID), out)
 }
