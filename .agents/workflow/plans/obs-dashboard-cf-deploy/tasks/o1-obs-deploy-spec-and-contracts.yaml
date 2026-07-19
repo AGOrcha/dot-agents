@@ -4,7 +4,7 @@ order: 0
 task:
     id: o1-obs-deploy-spec-and-contracts
     title: Spec + provider contracts (credential pair, D1 schema, outbox, SPA/transport)
-    status: pending
+    status: in_progress
     depends_on: []
     blocks: []
     owner: ""
