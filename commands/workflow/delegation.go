@@ -151,7 +151,10 @@ func saveDelegationContract(projectPath string, c *DelegationContract) error {
 	if err != nil {
 		return err
 	}
-	return osWriteFile(filepath.Join(dir, c.ParentTaskID+".yaml"), data, 0644)
+	if err := osWriteFile(filepath.Join(dir, c.ParentTaskID+".yaml"), data, 0644); err != nil {
+		return err
+	}
+	return mirrorArtifactToStateRef(projectPath, delegationContractRel(c.ParentTaskID), data)
 }
 
 // listDelegationContracts loads every delegation contract file in the
@@ -271,7 +274,10 @@ func saveMergeBack(projectPath string, s *MergeBackSummary) error {
 	}
 	content := fmt.Sprintf("---\n%s---\n\n## Summary\n\n%s\n\n## Integration Notes\n\n%s\n",
 		string(frontmatter), s.Summary, s.IntegrationNotes)
-	return osWriteFile(filepath.Join(dir, s.TaskID+".md"), []byte(content), 0644)
+	if err := osWriteFile(filepath.Join(dir, s.TaskID+".md"), []byte(content), 0644); err != nil {
+		return err
+	}
+	return mirrorArtifactToStateRef(projectPath, mergeBackRel(s.TaskID), []byte(content))
 }
 
 func loadMergeBack(projectPath, taskID string) (*MergeBackSummary, error) {
@@ -1231,7 +1237,10 @@ func saveDelegationBundleWithBase(projectPath string, b *delegationBundleYAML, r
 	if err != nil {
 		return err
 	}
-	return osWriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644)
+	if err := osWriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644); err != nil {
+		return err
+	}
+	return mirrorArtifactToStateRef(projectPath, delegationBundleRel(b.DelegationID), data)
 }
 
 type fanoutInputs struct {
@@ -1584,7 +1593,10 @@ func saveDelegationBundle(projectPath string, b *delegationBundleYAML) error {
 	if err != nil {
 		return err
 	}
-	return osWriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644)
+	if err := osWriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644); err != nil {
+		return err
+	}
+	return mirrorArtifactToStateRef(projectPath, delegationBundleRel(b.DelegationID), data)
 }
 
 // fanoutDispatch is the scope-merged, fold-normalized config the fanout verifier

@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	wf "github.com/AGOrcha/dot-agents/commands/workflow"
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/review/audit"
@@ -108,7 +109,11 @@ func (stdReviewAdminDeps) WriteFileAtomic(path string, data []byte) error {
 }
 func (stdReviewAdminDeps) Remove(path string) error { return fsops.Remove(path) }
 func (stdReviewAdminDeps) AuditAppend(logPath string, e audit.Event) (audit.Record, error) {
-	return audit.Open(logPath).Append(e)
+	rec, err := audit.Open(logPath).Append(e)
+	if err != nil {
+		return rec, err
+	}
+	return rec, wf.MirrorReviewAuditLogToStateRef(logPath)
 }
 func (stdReviewAdminDeps) AuditRecords(logPath string) ([]audit.Record, error) {
 	return audit.Open(logPath).Records()
