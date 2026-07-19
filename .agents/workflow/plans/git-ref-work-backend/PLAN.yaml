@@ -4,8 +4,8 @@ title: git-ref coordination-state backend + read-from-master shim (decouple stat
 status: active
 summary: 'Implement the git-native shared SOT for coordination state (work-tracking-storage-abstraction §9 D9/D10): a git-ref WorkStore backend on refs/agents/state (read via git, write via update-ref CAS, per-task state files), the sane default upgrade between the local and kg backends. Ship the read-from-master shim first (kills the worktree re-dispatch storm cheaply). Decouples task-state from code-branch commits (folds worker-bundle-authoring commit-scope).'
 created_at: "2026-07-11T12:37:13Z"
-updated_at: "2026-07-18T22:53:12Z"
+updated_at: "2026-07-19T00:29:04Z"
 owner: NikashPrakash
 success_criteria: read_from=master makes loadCanonicalTasks + scout eligibility read the canonical ref (no re-dispatch under worktree isolation — the 5xp1c regression); state transitions commit to refs/agents/state via atomic CAS; per-task state files avoid line-conflicts; coordination commits no longer stage .agents/workflow/** into code branches; git-ref selectable via work_tracking.backend on the scope ladder; agent still reads a plain projected file (§3B).
 verification_strategy: 'Go tests: read-from-master resolves TASKS.yaml from a ref fixture; CAS write ret/conflict test; per-task-file no-conflict concurrent-transition test; a worktree-isolation regression test reproducing then fixing the re-dispatch storm (done-criterion #2). No merge-to-default-branch anywhere (D10).'
-current_focus_task: ""
+current_focus_task: Add proposal scope/write_scope field routing into available diff-scopes/sources

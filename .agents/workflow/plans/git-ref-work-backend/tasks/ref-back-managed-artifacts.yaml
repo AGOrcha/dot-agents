@@ -4,7 +4,7 @@ order: 8
 task:
     id: ref-back-managed-artifacts
     title: Ref-back managed .agents/active artifacts (delegation/merge-back, verification, review) under backend=git-ref
-    status: pending
+    status: completed
     depends_on: []
     blocks: []
     owner: dot-agents
