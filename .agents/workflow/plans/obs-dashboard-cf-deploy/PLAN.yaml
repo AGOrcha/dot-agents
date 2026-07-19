@@ -1,26 +1,17 @@
 schema_version: 1
 id: obs-dashboard-cf-deploy
 title: 'Observability dashboard: Cloudflare Worker deploy at obs.agorcha.dev'
-status: draft
-summary: Deploy the dashboard as a SINGLE-TENANT (dot-agents only) CF Worker+DO+D1 at obs.agorcha.dev with CF Access dual-auth and a da observability CLI push/sync path. Routing is per-project and client-side (each repo's observability.endpoint -> its own backend); the mechanism is generic/self-hostable, obs.agorcha.dev is dot-agents' reference instance.
+status: active
+summary: Deploy the dashboard as a CF Worker+DO+D1 at obs.agorcha.dev with CF Access dual-auth and a da observability CLI push/sync path, per the agorcha-public-vs-internal-and-obs-deploy proposal (obs waves 4-10).
 created_at: "2026-07-18T18:49:55Z"
-updated_at: "2026-07-18T18:49:55Z"
+updated_at: "2026-07-19T08:00:54Z"
 owner: dot-agents
-spec_ref: .agents/proposals/agorcha-public-vs-internal-and-obs-deploy.md
-concurrency_mode: concurrent-folded
-concurrency_rationale: |-
-  Concurrent/folded. The design forks are already decided in the maintainer-reviewed
-  proposal (agorcha-public-vs-internal-and-obs-deploy, §3.4 App2 / §4 DO+D1 / §5 push+sync /
-  §6 local-canonical) - RECOMMENDED decisions with feedback folded (PR #156), not yet
-  da-review-ratified but ratified-to-build by the maintainer's request. Remaining §8 items are
-  deferred/impl-time and do not reorder tasks. o1 formalizes the proposal into a canonical
-  spec concurrently; the impl tasks proceed against the proposal decisions.
-success_criteria: obs.agorcha.dev serves ONLY dot-agents behind CF Access; POST /api/ingest accepts dot-agents CLI service-token pushes into DO+D1 and dedupes, and rejects foreign project_ids; per-project routing works (a repo's observability.endpoint targets its own backend - payout -> payout's, not obs.agorcha.dev); da observability login/sync/status work; live events reach the UI via WebSocket; local .agents/history stays canonical.
+success_criteria: obs.agorcha.dev serves the dashboard behind CF Access; POST /api/ingest accepts CLI service-token pushes into DO+D1 and dedupes; da observability login/sync/status work; live events reach the UI via WebSocket; local .agents/history stays canonical.
 verification_strategy: |-
-  LIVE smoke against the shipped Worker, not test-files alone: `wrangler dev` (miniflare
-  DO+D1) and a `wrangler deploy` PREVIEW, then curl the real endpoints and assert
-  machine-checkable output - POST /api/ingest -> {accepted,deduped}; auth 401-without /
-  200-with a CF Access service token; a wrong-aud JWT rejected; a WebSocket live update <2s;
-  D1 dedup on re-POST; local-canonical rebuild (wipe remote + `da observability sync --full`).
-  go test for the CLI/config; the fail-closed exposure checklist (cf-worker-auth-gate). CI green.
-current_focus_task: ""
+    LIVE smoke against the shipped Worker, not test-files alone: `wrangler dev` (miniflare
+    DO+D1) and a `wrangler deploy` PREVIEW, then curl the real endpoints and assert
+    machine-checkable output - POST /api/ingest -> {accepted,deduped}; auth 401-without /
+    200-with a CF Access service token; a wrong-aud JWT rejected; a WebSocket live update <2s;
+    D1 dedup on re-POST; local-canonical rebuild (wipe remote + `da observability sync --full`).
+    go test for the CLI/config; the fail-closed exposure checklist (cf-worker-auth-gate). CI green.
+current_focus_task: Spec + provider contracts (credential pair, D1 schema, outbox, SPA/transport)
