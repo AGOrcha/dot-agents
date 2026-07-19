@@ -3,7 +3,7 @@ plan_id: obs-dashboard-cf-deploy
 tasks:
     - id: o1-obs-deploy-spec-and-contracts
       title: Spec + provider contracts (credential pair, D1 schema, outbox, SPA/transport)
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: ""
