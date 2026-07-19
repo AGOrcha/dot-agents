@@ -1,0 +1,36 @@
+schema_version: 1
+plan_id: obs-dashboard-cf-deploy
+order: 0
+task:
+    id: o1-obs-deploy-spec-and-contracts
+    title: Spec + provider contracts (credential pair, D1 schema, outbox, SPA/transport)
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: ""
+    write_scope:
+        - .agents/workflow/specs/obs-dashboard-cf-deploy/
+    verification_required: true
+    notes: |-
+        Promote the obs deploy design (proposal agorcha-public-vs-internal-and-obs-deploy §3-§6)
+        into a canonical spec via spec-scaffold WITH the maintainer correction: obs.agorcha.dev
+        is SINGLE-TENANT (dot-agents only), routing is client-side per-project (each repo's
+        .agentsrc.json observability.endpoint -> its own backend; payout -> payout's), the
+        ingest schema + CLI + config stay generic/self-hostable. This task must DECIDE the
+        provider contracts every consumer needs (review found these left open):
+        (1) credential-ref auth JSON - the exact `{kind, id ...}` shape and how one entry yields
+            a CF Access service-token pair (client_id + client_secret): pair naming/atomicity,
+            the self-hosted-provider mapping, and which spec/task OWNS it (reconcile with
+            external-agent-sources; drop the dm6 claim unless its provisioner is actually reused).
+        (2) D1 schema at SQL level - columns, PK/unique/foreign constraints, migration ownership,
+            the event-kind -> row mapping, and the read-model mapping the SPA DTOs consume.
+        (3) obs-outbox contract - atomic/versioned per-file format, ordering, retry + success
+            deletion, corruption handling, retention.
+        (4) shared SPA contract - the EXISTING versioned routes (/api/v1/observability/*) and DTO
+            shapes the reused SPA hard-codes, plus an injectable SSE/WebSocket transport adapter
+            so a WS swap does not fork the SPA (its client opens EventSource today).
+        (5) local-dev auth seam - signed-JWT/test fixtures so no secret is needed against
+            wrangler dev (the real service-token pair is validated only against the
+            Access-protected hostname).
+        Verify: spec exists with single-tenant + per-project-routing decision explicit and each
+        of (1)-(5) decided as a concrete contract downstream tasks cite.

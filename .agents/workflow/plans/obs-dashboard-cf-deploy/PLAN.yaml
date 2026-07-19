@@ -4,7 +4,7 @@ title: 'Observability dashboard: Cloudflare Worker deploy at obs.agorcha.dev'
 status: active
 summary: Deploy the dashboard as a CF Worker+DO+D1 at obs.agorcha.dev with CF Access dual-auth and a da observability CLI push/sync path, per the agorcha-public-vs-internal-and-obs-deploy proposal (obs waves 4-10).
 created_at: "2026-07-18T18:49:55Z"
-updated_at: "2026-07-19T08:00:36Z"
+updated_at: "2026-07-19T08:00:54Z"
 owner: dot-agents
 success_criteria: obs.agorcha.dev serves the dashboard behind CF Access; POST /api/ingest accepts CLI service-token pushes into DO+D1 and dedupes; da observability login/sync/status work; live events reach the UI via WebSocket; local .agents/history stays canonical.
 verification_strategy: |-
