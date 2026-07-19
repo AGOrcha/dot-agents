@@ -14,18 +14,19 @@ import (
 )
 
 type Proposal struct {
-	SchemaVersion int    `yaml:"schema_version"`
-	ID            string `yaml:"id"`
-	Status        string `yaml:"status"`
-	Type          string `yaml:"type"`
-	Action        string `yaml:"action"`
-	Target        string `yaml:"target"`
-	Rationale     string `yaml:"rationale"`
-	Content       string `yaml:"content"`
-	CreatedAt     string `yaml:"created_at"`
-	CreatedBy     string `yaml:"created_by"`
-	ReviewedAt    string `yaml:"reviewed_at"`
-	ReviewReason  string `yaml:"review_reason"`
+	SchemaVersion int      `yaml:"schema_version"`
+	ID            string   `yaml:"id"`
+	Status        string   `yaml:"status"`
+	Type          string   `yaml:"type"`
+	Action        string   `yaml:"action"`
+	Target        string   `yaml:"target"`
+	WriteScope    []string `yaml:"write_scope,omitempty"`
+	Rationale     string   `yaml:"rationale"`
+	Content       string   `yaml:"content"`
+	CreatedAt     string   `yaml:"created_at"`
+	CreatedBy     string   `yaml:"created_by"`
+	ReviewedAt    string   `yaml:"reviewed_at"`
+	ReviewReason  string   `yaml:"review_reason"`
 }
 
 var (
@@ -132,6 +133,12 @@ func ValidateProposal(proposal *Proposal) error {
 	if err := ValidateProposalTarget(proposal.Target); err != nil {
 		return err
 	}
+	if err := validateProposalWriteScope(proposal.WriteScope); err != nil {
+		return err
+	}
+	if !proposalTargetInScope(proposal.Target, proposal.WriteScope) {
+		return fmt.Errorf("target %q does not route into any write_scope entry %v", proposal.Target, proposal.WriteScope)
+	}
 	if strings.TrimSpace(proposal.Rationale) == "" {
 		return fmt.Errorf("rationale is required")
 	}
@@ -175,6 +182,63 @@ func ValidateProposalTarget(target string) error {
 		return fmt.Errorf("%w: parent-directory traversal is not allowed", ErrInvalidProposalTarget)
 	}
 	return nil
+}
+
+// isWellFormedProposalPath reports whether p is a well-formed, AgentsHome-relative
+// proposal path: non-empty after trim, no leading slash / volume, no `..`
+// traversal. Namespace-agnostic well-formedness — the SAME namespace as
+// Proposal.Target (which ProposalTargetPath joins onto AgentsHome()).
+func isWellFormedProposalPath(p string) bool {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return false
+	}
+	slashed := strings.ReplaceAll(p, `\`, "/")
+	if filepath.IsAbs(p) || filepath.VolumeName(p) != "" || strings.HasPrefix(slashed, "/") {
+		return false
+	}
+	for _, seg := range strings.Split(slashed, "/") {
+		if seg == ".." {
+			return false
+		}
+	}
+	clean := path.Clean(slashed)
+	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
+// validateProposalWriteScope enforces that every declared scope entry is a
+// well-formed AgentsHome-relative path. An empty scope is valid (unconstrained,
+// preserving pre-scope behavior).
+func validateProposalWriteScope(scope []string) error {
+	for i, s := range scope {
+		if !isWellFormedProposalPath(s) {
+			return fmt.Errorf("write_scope[%d]=%q must be an AgentsHome-relative path (no leading slash, no `..` traversal)", i, s)
+		}
+	}
+	return nil
+}
+
+// proposalTargetInScope reports whether target routes into one of the declared
+// scope entries via clean-path prefix (target == entry, or target under
+// entry+"/"), compared in the shared AgentsHome-relative namespace. An empty
+// scope is unconstrained. A target that does not resolve to a well-formed
+// AgentsHome-relative path (e.g. a non-file/non-path scheme) is treated as
+// scope-inapplicable — never rejected on scope grounds.
+func proposalTargetInScope(target string, scope []string) bool {
+	if len(scope) == 0 {
+		return true
+	}
+	if !isWellFormedProposalPath(target) {
+		return true
+	}
+	t := path.Clean(strings.ReplaceAll(strings.TrimSpace(target), `\`, "/"))
+	for _, s := range scope {
+		c := path.Clean(strings.ReplaceAll(strings.TrimSpace(s), `\`, "/"))
+		if t == c || strings.HasPrefix(t, c+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func ProposalTargetPath(target string) (string, error) {

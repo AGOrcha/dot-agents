@@ -297,11 +297,12 @@ type delegationBundleYAML struct {
 }
 
 type foldBackProposalFrontmatter struct {
-	Title       string `yaml:"title"`
-	Observation string `yaml:"observation"`
-	PlanID      string `yaml:"plan_id"`
-	TaskID      string `yaml:"task_id,omitempty"`
-	CreatedAt   string `yaml:"created_at"`
+	Title       string   `yaml:"title"`
+	Observation string   `yaml:"observation"`
+	PlanID      string   `yaml:"plan_id"`
+	TaskID      string   `yaml:"task_id,omitempty"`
+	WriteScope  []string `yaml:"write_scope,omitempty"`
+	CreatedAt   string   `yaml:"created_at"`
 }
 
 // workflowCanonicalPlanSummary is a compact view used in orient/status output

@@ -141,6 +141,13 @@ func TestValidateProposal_Failures(t *testing.T) {
 		}, "must be empty"},
 		{"empty created_at", func(p *Proposal) { p.CreatedAt = "" }, "created_at"},
 		{"empty created_by", func(p *Proposal) { p.CreatedBy = "" }, "created_by"},
+		{"abs scope entry", func(p *Proposal) { p.WriteScope = []string{"/abs"} }, "write_scope[0]"},
+		{"traversal scope entry", func(p *Proposal) { p.WriteScope = []string{"../escape"} }, "write_scope[0]"},
+		{"empty scope entry", func(p *Proposal) { p.WriteScope = []string{" "} }, "write_scope[0]"},
+		{"target outside scope", func(p *Proposal) {
+			p.Target = "rules/global/x.md"
+			p.WriteScope = []string{"skills/"}
+		}, "does not route into"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,6 +172,74 @@ func TestValidateProposal_RemoveEmptyContentOK(t *testing.T) {
 	}
 	if err := ValidateProposal(p); err != nil {
 		t.Errorf("remove with empty content should be valid, got %v", err)
+	}
+}
+
+const scopeTestTarget = "rules/foo.md"
+
+func scopedProposal(scope []string, target string) *Proposal {
+	return &Proposal{
+		SchemaVersion: 1, ID: "x", Status: "pending", Type: "rule", Action: "add",
+		Target: target, WriteScope: scope, Rationale: "r", Content: "c",
+		CreatedAt: "2026-04-01T00:00:00Z", CreatedBy: "t",
+	}
+}
+
+func TestValidateProposal_WriteScopeRoutesTargetIntoScope(t *testing.T) {
+	// Directory-prefix entry contains a nested target.
+	if err := ValidateProposal(scopedProposal([]string{"rules/"}, scopeTestTarget)); err != nil {
+		t.Errorf("target under scope dir should be valid, got %v", err)
+	}
+	// Exact-path entry.
+	if err := ValidateProposal(scopedProposal([]string{scopeTestTarget}, scopeTestTarget)); err != nil {
+		t.Errorf("target equal to scope entry should be valid, got %v", err)
+	}
+	// One of several entries contains the target.
+	if err := ValidateProposal(scopedProposal([]string{"skills/", "rules/"}, scopeTestTarget)); err != nil {
+		t.Errorf("target under one of several scopes should be valid, got %v", err)
+	}
+	// A sibling prefix must NOT count as containment (rules-x vs rules/).
+	if err := ValidateProposal(scopedProposal([]string{"rules"}, "rules-extra/foo.md")); err == nil {
+		t.Error("sibling-prefix target should not route into scope")
+	}
+}
+
+func TestValidateProposal_EmptyWriteScopeIsUnconstrained(t *testing.T) {
+	// Back-compat: absent scope leaves target unconstrained (pre-scope behavior).
+	if err := ValidateProposal(scopedProposal(nil, "rules/global/x.md")); err != nil {
+		t.Errorf("nil scope should be unconstrained, got %v", err)
+	}
+}
+
+func TestProposalTargetInScope_NonPathTargetInapplicable(t *testing.T) {
+	// A target that does not resolve to a well-formed AgentsHome-relative path
+	// (embedded traversal here) is scope-inapplicable: never rejected on scope.
+	if !proposalTargetInScope("a/../b", []string{"skills/"}) {
+		t.Error("unresolvable target should be treated as scope-inapplicable")
+	}
+	// Empty scope is always satisfied.
+	if !proposalTargetInScope(scopeTestTarget, nil) {
+		t.Error("empty scope should be unconstrained")
+	}
+}
+
+func TestProposal_WriteScopeRoundTripsThroughSaveLoad(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	p := scopedProposal([]string{"rules/", "skills/foo/"}, scopeTestTarget)
+	p.ID = "scoped"
+	if err := SaveProposal(p, ProposalPath(p.ID)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadProposal(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.WriteScope) != 2 || loaded.WriteScope[0] != "rules/" || loaded.WriteScope[1] != "skills/foo/" {
+		t.Fatalf("write_scope did not round-trip: %v", loaded.WriteScope)
+	}
+	if err := ValidateProposal(loaded); err != nil {
+		t.Fatalf("round-tripped scoped proposal should validate: %v", err)
 	}
 }
 

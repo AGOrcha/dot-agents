@@ -284,3 +284,50 @@ func TestRenderFoldBackList_RendersRows(t *testing.T) {
 		t.Errorf("expected em-dash for blank task col:\n%s", out)
 	}
 }
+
+// ── foldBackProposalFrontmatter write_scope round-trip ───────────────────────
+
+func TestFoldBackProposalFile_WriteScopeRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "obs.md")
+	fm := foldBackProposalFrontmatter{
+		Title:       "Fold-back: p1",
+		Observation: "obs",
+		PlanID:      "p1",
+		WriteScope:  []string{"internal/config/", "commands/workflow/types.go"},
+		CreatedAt:   "2026-04-15T00:00:00Z",
+	}
+	if err := writeFoldBackProposalFile(path, fm, "obs"); err != nil {
+		t.Fatalf("writeFoldBackProposalFile: %v", err)
+	}
+	got, _, err := readFoldBackProposalFile(path)
+	if err != nil {
+		t.Fatalf("readFoldBackProposalFile: %v", err)
+	}
+	if len(got.WriteScope) != 2 || got.WriteScope[0] != "internal/config/" || got.WriteScope[1] != "commands/workflow/types.go" {
+		t.Fatalf("write_scope did not round-trip: %v", got.WriteScope)
+	}
+}
+
+func TestFoldBackProposalFile_EmptyWriteScopeOmitted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "obs.md")
+	fm := foldBackProposalFrontmatter{Title: "t", Observation: "o", PlanID: "p1", CreatedAt: "2026-04-15T00:00:00Z"}
+	if err := writeFoldBackProposalFile(path, fm, "o"); err != nil {
+		t.Fatalf("writeFoldBackProposalFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "write_scope") {
+		t.Errorf("empty write_scope should be omitted from frontmatter:\n%s", string(data))
+	}
+	got, _, err := readFoldBackProposalFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.WriteScope) != 0 {
+		t.Errorf("expected empty write_scope, got %v", got.WriteScope)
+	}
+}
