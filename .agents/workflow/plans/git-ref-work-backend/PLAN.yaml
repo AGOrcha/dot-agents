@@ -8,4 +8,4 @@ updated_at: "2026-07-19T00:29:04Z"
 owner: NikashPrakash
 success_criteria: read_from=master makes loadCanonicalTasks + scout eligibility read the canonical ref (no re-dispatch under worktree isolation — the 5xp1c regression); state transitions commit to refs/agents/state via atomic CAS; per-task state files avoid line-conflicts; coordination commits no longer stage .agents/workflow/** into code branches; git-ref selectable via work_tracking.backend on the scope ladder; agent still reads a plain projected file (§3B).
 verification_strategy: 'Go tests: read-from-master resolves TASKS.yaml from a ref fixture; CAS write ret/conflict test; per-task-file no-conflict concurrent-transition test; a worktree-isolation regression test reproducing then fixing the re-dispatch storm (done-criterion #2). No merge-to-default-branch anywhere (D10).'
-current_focus_task: Add proposal scope/write_scope field routing into available diff-scopes/sources
+current_focus_task: ""

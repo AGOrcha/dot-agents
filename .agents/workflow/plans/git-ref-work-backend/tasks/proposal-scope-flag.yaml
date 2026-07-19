@@ -4,7 +4,7 @@ order: 7
 task:
     id: proposal-scope-flag
     title: Add proposal scope/write_scope field routing into available diff-scopes/sources
-    status: pending
+    status: completed
     depends_on: []
     blocks: []
     owner: dot-agents
