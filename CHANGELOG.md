@@ -7,23 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-20
+
+A large feature release: a git-backed workflow WorkStore, a first-class worktree
+platform, an observability dashboard, an evaluation harness (`da eval`) and recipe
+runner (`da run`), a session-handoff journal, and a review/admin surface — plus a
+broad "loud failures" hardening pass.
+
 ### Added
 
-- **Observability dashboard deployment + `da observability`.** Ships the workflow
-  observability dashboard as a single-tenant Cloudflare Worker (reference deployment
-  `obs.agorcha.dev`) — Durable Objects + D1 for durable iteration/score history,
-  fail-closed CF Access JWT auth, and the existing dashboard SPA served with a live
-  WebSocket transport. New `da observability login | sync | status` publishes local
-  workflow telemetry to the endpoint configured in the `.agentsrc.json`
-  `observability` block, resolving a `credential-ref` from the credential store over
-  HTTPS only. Events queue crash-safe in `.agents/active/obs-outbox/` and drain
-  idempotently (server dedupes; `sync --full` rebuilds the remote from local
-  `.agents/history/`); publishing is wired best-effort into `workflow checkpoint` /
-  `verify record` and never changes a local command's exit. See
-  `docs/cf-access-bootstrap.md` and `obs/`.
-- **`observability` block in `.agentsrc.json`.** Configures the endpoint and a
-  strict `credential-ref` auth reference (`{kind, id}`); an enabled non-loopback
-  endpoint requires auth and must be absolute `https:`.
+- **git-ref WorkStore backend.** Opt-in `work_tracking.backend=git-ref` stores canonical plan/task coordination state as per-task blobs on `refs/agents/state` (CAS-guarded), decoupled from code-branch commits, with graceful working-copy fallback, `da workflow state-ref reconcile` to seed the ref, managed-artifact mirroring (delegation / merge-back / verification / review), and a `read_from=master` additive stopgap (#410, #413, #418, #419, #424, #425, #426, #432, #435, #439, #441).
+- **Worktree platform.** `da worktree create` / `merge-back` with resolved agent-config loading, shared-git-dir admin resolution, registry isolation, and an eval sandbox worktree (#268, #381, #409, #411, #412, #414).
+- **Evaluation harness + `da eval`.** Sandbox, agent runners (claude/codex/copilot), a KG-derived task generator and language verifiers (Go/Python/TS) over shared generator + verifier cores, a harness driver (generate→provision→run→verify→score), a scoring bridge into R1 records, and atomic run persistence (#268, #274, #279, #280, #285, #287, #288, #292, #297, #299–#302, #306, #311, #315, #322, #328).
+- **`da run` recipe execution.** Parser/tokenizer + in-process dispatch with env-substitution, fail-fast, and acceptance checks (#293, #316, #323, #327, #330, #378, #380).
+- **Observability dashboard.** An SSE broker, a read-through store projection with recompute-on-miss + fswatch bridge, REST handlers on a pinned API contract, a Vite/React SPA (rubric view, R3 mount), and a Cloudflare deploy path (#251, #260, #269, #275, #286, #398, #404, #406, #421–#423, #428, #430, #443, #444).
+- **Observability dashboard deployment + `da observability`.** The dashboard also ships as a single-tenant Cloudflare Worker (reference deployment `obs.agorcha.dev`) — Durable Objects + D1 for durable iteration/score history, fail-closed CF Access JWT auth, and the SPA served over a live WebSocket transport. `da observability login | sync | status` publishes local workflow telemetry to the endpoint configured in the `.agentsrc.json` `observability` block (a `credential-ref` resolved from the credential store over HTTPS only); events queue crash-safe in `.agents/active/obs-outbox/` and drain idempotently (server dedupes; `sync --full` rebuilds the remote from local `.agents/history/`), wired best-effort into `workflow checkpoint` / `verify record` without changing a local command's exit. See `docs/cf-access-bootstrap.md` and `obs/`.
+- **`observability` block in `.agentsrc.json`.** Configures the endpoint and a strict `credential-ref` auth reference (`{kind, id}`); an enabled non-loopback endpoint requires auth and must be absolute `https:`.
+- **Session-handoff journal.** An append-only journal of workflow/KG/review mutations with typed schemas, a live-state snapshot, verified replay-and-recover (`da workflow journal` + PreCompact / SessionStart hooks), and agent-handoff cadence (#205–#212, #216–#218, #220).
+- **Review / admin surface.** A review collection endpoint, a `human_label` scoring signal, the `da review` admin CLI, and an append-only SHA-256-chained audit log (#250, #261, #270, #277, #282).
+- **KG-ideate (`kgi`).** A KG-brief → staged-handoff → spec/plan-scaffold ideation flow with a verification model and typed schemas (#317–#320, #324, #326, #329, #331).
+- **App-type profiles + full-loop orchestration runtime.** Explicit app-type → verifier/reviewer profile resolution and a staged loop runtime (#388, #389).
+- **Graph-backend / CRG.** A cross-adapter `reads_from` compliance view and a named CRG parity gate (#207, #396, #397, #416).
+- **KG query layer + difficulty derivation** for task generation (#248, #259).
+- **Proposal `write_scope`.** Validated scope routing on proposals + fold-back CLI threading (#440).
+- **Antigravity** shipped as the sixth projection platform, with onboarding docs (#204, #223, #240).
+- **Config v2** layered model + docs and the git-source install smoke path (#228, #253, #313, #314).
+- **da-managed `.gitignore` autofill** for generated wiring (#382–#384), and a package/OCI artifact install path (#407).
+
+### Changed
+
+- Dashboard API ETags are content-derived (the mtime sketch was unimplementable) and recompute-on-miss aligns to the store contract (#276).
+- Platform docs, decks, and the README realigned to the shipped six-platform model and the `PLATFORM_DIRS_DOCS.md` matrix (#240, #241, #334).
+- `da workflow plan archive` commits the move by default so archives persist through the fresh-clone / worktree loop (#246).
+
+### Fixed
+
+- **Loud-failure hardening train.** Config detectors, platform prune, graphstore atomic writes, sync git checks, user-home preflight, delegation / registration visibility, and workflow closeout now fail loudly / atomically instead of silently degrading (#351–#369, #408).
+- **git-ref structural-write clobber.** All canonical writes mirror at the save choke point so structural writes stay ref-visible (#434, #435).
+- **Windows reliability.** `agentslock` acquire/release races + transient hardlink retries, `fsops` remove retries, and KG seam path normalization (#219, #221, #255, #264, #308).
+- Fold-back `--dry-run` no longer has side effects (#305); `da run` / eval dry-run paths propagate correctly (#321, #325, #380).
+- Git SSH auth fallback + schema URL host correction (#348, #349).
+
+### Removed
+
+- The unsafe initial `backend=git-ref` cutover was rolled back mid-flight while a clobber bug was open, then re-cut over after the fix (#433 → #434 → #439).
+- Presenter-only ASDLC material no longer renders on the public docs site (still in the repo / decks) (#234).
+
+### Internal
+
+- Extensive workflow-state reconciliations, plan closeouts, and proposal retirements across the r2–r5 / git-ref / graph-backend / worktree lanes; dependency bumps; Sonar-debt cleanups; a mandatory release-docs-refresh step and the 0.5.0 docs refresh (#333, #334); pipeline-craft / transcript-analysis research and the lesson index (#390, #393, #405, #442, #446). A full per-PR coverage index (223 merged PRs since v0.4.2) is in the PR description.
+
+## [0.4.2] - 2026-06-29
+
+A patch re-release fixing the macOS Developer ID signing chain (the v0.4.1 artifact failed Gatekeeper on a clean install).
+
+### Fixed
+
+- **macOS signing chain.** Re-released with a corrected Developer ID signing + notarization flow; the fsguard `agentslock` allowlist line moved with the lock primitive (#213, #214, #215).
 
 ## [0.4.1] - 2026-06-24
 
@@ -380,7 +420,11 @@ plus test-structure hygiene.
 - Windows support deferred to future release
 - Tasks and History features are opt-in and not yet implemented
 
-[Unreleased]: https://github.com/NikashPrakash/dot-agents/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/NikashPrakash/dot-agents/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/NikashPrakash/dot-agents/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/NikashPrakash/dot-agents/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/NikashPrakash/dot-agents/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/NikashPrakash/dot-agents/compare/v0.3.4...v0.4.0
 [0.3.3]: https://github.com/NikashPrakash/dot-agents/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/NikashPrakash/dot-agents/releases/tag/v0.3.2
 [0.1.8]: https://github.com/dot-agents/dot-agents/compare/v0.1.8...v0.1.9
