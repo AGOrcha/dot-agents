@@ -138,6 +138,20 @@ Work Tracking
 `da --json workflow status` carries the same data under the `work_tracking`
 object (`backend`, `state_ref_sot`, `state_ref`) for skills and scripts.
 
+## Coordination-state reconcile (`da workflow state-ref reconcile`)
+
+Under the `git-ref` backend, `refs/agents/state` must hold every plan's canonical
+coordination state. `da workflow state-ref reconcile` re-mirrors each plan's
+working-copy `TASKS.yaml`/`PLAN.yaml` onto `refs/agents/state` — idempotent and
+tree-equality guarded, so a consistent run writes no ref commit. Use it to bring a
+ref that was seeded before some plans existed (or a plan mutated while the backend
+was `local`) back into sync, and always run it before flipping
+`work_tracking.backend` to `git-ref` repo-wide so the ref is a complete mirror
+rather than a stale subset of the active plans.
+
+- `--dry-run` — report which plans would be seeded without writing to the ref.
+- `--json` — emit the reconcile report as JSON.
+
 ## Session-handoff journal (`da workflow journal`)
 
 The session-handoff journal is an append-only, crash-survivable event log plus a
