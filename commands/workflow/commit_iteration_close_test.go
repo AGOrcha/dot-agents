@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -44,12 +45,12 @@ func TestAdvanceCommitStateFiresClosePathCommit(t *testing.T) {
 	// invocation; we only care that the hook fires on success and skips
 	// when the flag is absent.
 	var calls int
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error {
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error {
 		calls++
 		return nil
 	}
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	// Without --commit-state: zero calls.
 	cmd := newWorkflowAdvanceCmd()
@@ -87,9 +88,9 @@ func TestAdvanceCommitStateSkippedOnAdvanceFailure(t *testing.T) {
 	// "plan not found" before reaching the close-path hook.
 
 	calls := 0
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { calls++; return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { calls++; return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	cmd := newWorkflowAdvanceCmd()
 	cmd.SetOut(&bytes.Buffer{})
@@ -112,9 +113,9 @@ func TestAdvanceCommitStateSurfacesCommitError(t *testing.T) {
 	t.Chdir(repo)
 	seedSimplePlanForAdvance(t, repo, "sample-plan", "t1")
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { return errors.New("commit boom") }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { return errors.New("commit boom") }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	cmd := newWorkflowAdvanceCmd()
 	cmd.SetOut(&bytes.Buffer{})
@@ -170,5 +171,81 @@ func TestCommitStateFlagWiredOnAdvanceAndMergeBack(t *testing.T) {
 func TestIterationCloseCommitDefaultPath(t *testing.T) {
 	if iterationCloseCommit == nil {
 		t.Fatal("iterationCloseCommit default value is nil")
+	}
+}
+
+// (a) advance --commit-state names the CURRENT iteration's on-disk artifacts as
+// includes, and those named paths reach the staged set. advance writes no
+// iter-log, so the fixture seeds iter-3.yaml + iter-3.hook-outcomes.yaml (score
+// sidecar absent → skipped, exercising (d)). The commit seam is routed through
+// runWorkflowCommit with a fakeGit so the staged set is observable.
+func TestAdvanceCommitStateStagesCurrentIterationArtifacts(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+	seedSimplePlanForAdvance(t, repo, "sample-plan", "t1")
+
+	iterDir := filepath.Join(repo, ".agents", "active", "iteration-log")
+	if err := os.MkdirAll(iterDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"iter-3.yaml", "iter-3.hook-outcomes.yaml"} {
+		if err := os.WriteFile(filepath.Join(iterDir, name), []byte("x: 1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	priorSkip := planStateSkipped
+	planStateSkipped = func() bool { return false }
+	t.Cleanup(func() { planStateSkipped = priorSkip })
+
+	var captured, staged []string
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error {
+		captured = includes
+		g := &fakeGit{status: []StatusEntry{
+			{Path: ".agents/active/iteration-log/iter-3.yaml", XY: ".M"},
+			{Path: ".agents/active/iteration-log/iter-3.hook-outcomes.yaml", XY: ".M"},
+		}}
+		if err := runWorkflowCommit(out, g, false, includes); err != nil {
+			return err
+		}
+		staged = g.addedPaths
+		return nil
+	}
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
+
+	cmd := newWorkflowAdvanceCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"sample-plan", "--task", "t1", "--status", "completed", "--commit-state"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("advance --commit-state: %v", err)
+	}
+	wantInc := []string{
+		".agents/active/iteration-log/iter-3.yaml",
+		".agents/active/iteration-log/iter-3.hook-outcomes.yaml",
+	}
+	if !reflect.DeepEqual(captured, wantInc) {
+		t.Errorf("advance includes = %v, want %v (absent score sidecar must be skipped)", captured, wantInc)
+	}
+	assertIncludesStaged(t, staged, wantInc)
+}
+
+// assertIncludesStaged fails the test for every want path missing from staged.
+// Extracted so the (a) acceptance tests stay under the S3776 complexity budget.
+func assertIncludesStaged(t *testing.T, staged, want []string) {
+	t.Helper()
+	for _, p := range want {
+		found := false
+		for _, s := range staged {
+			if s == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("include %q did not reach the staged set %v", p, staged)
+		}
 	}
 }

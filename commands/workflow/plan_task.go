@@ -2919,6 +2919,16 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool)
 		return err
 	}
 
+	// Capture the plan-dir files BEFORE the merge relocates or removes them: the
+	// merge fast-path RENAMES srcDir into history, so a capture taken afterwards
+	// would see nothing. Each captured path becomes a tracked git deletion that
+	// must be named as an explicit include so it stages even under the git-ref
+	// backend, where DerivePathSet excludes .agents/workflow/ from the
+	// auto-managed set. The matching history/<id> additions land under the
+	// still-auto-managed .agents/history/ root. (In dry-run the capture is a
+	// harmless read; the commit that consumes it never runs.)
+	removedPaths := planDirIncludePaths(projectPath, srcDir)
+
 	// Merge or rename into history.
 	if err := mergeWorkflowPlanDir(planID, srcDir, dstDir, dryRun); err != nil {
 		return fmt.Errorf("merge plan dir: %w", err)
@@ -2941,17 +2951,17 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool)
 		// Persist the archive move by default. At this point the working tree is
 		// in its final archived state — plans/<id> is gone (tracked deletions),
 		// history/<id> is populated (untracked additions), and PLAN.yaml is
-		// stamped archived. iterationCloseCommit stages the workflow-managed
-		// path set (DerivePathSet covers both .agents/workflow/ and
-		// .agents/history/, so the deletion AND the addition land as ONE commit)
-		// and commits, exactly like advance --commit-state. Without this the
-		// fresh-clone / worktree loop model discards the uncommitted move and the
-		// plan never actually archives. runWorkflowCommit honors the
+		// stamped archived. iterationCloseCommitWithIncludes stages the
+		// workflow-managed path set plus the named plan-dir deletions, so the
+		// deletion AND the addition land as ONE commit — exactly like advance
+		// --commit-state — under BOTH the local and git-ref backends. Without this
+		// the fresh-clone / worktree loop model discards the uncommitted move and
+		// the plan never actually archives. runWorkflowCommit honors the
 		// commit.disable opt-out internally; --no-commit is the explicit operator
 		// opt-out for batching several archives into one manual commit.
 		if noCommit {
 			fmt.Printf("  archive: --no-commit set; skipping workflow-state commit for %q\n", planID)
-		} else if err := iterationCloseCommit(os.Stdout); err != nil {
+		} else if err := iterationCloseCommitWithIncludes(os.Stdout, removedPaths); err != nil {
 			return fmt.Errorf("commit archive move for %q: %w", planID, err)
 		}
 	} else {
@@ -2959,6 +2969,28 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool)
 	}
 
 	return nil
+}
+
+// planDirIncludePaths returns the repo-relative (forward-slash) paths of every
+// regular file currently under the plan source dir. archiveSinglePlan calls it
+// before the merge relocates the dir into history: the archive turns each file
+// into a
+// tracked git deletion, and those deletions must be named as explicit --include
+// so they stage even when the git-ref backend excludes .agents/workflow/ from
+// the auto-managed set (planStateSkipped). Best-effort: a walk error yields the
+// paths collected so far — the archive commit still stages the auto-managed set.
+func planDirIncludePaths(projectPath, srcDir string) []string {
+	var includes []string
+	_ = filepath.WalkDir(srcDir, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return nil
+		}
+		if rel, relErr := filepath.Rel(projectPath, p); relErr == nil {
+			includes = append(includes, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	return includes
 }
 
 func stampPlanArchived(projectPath, planID string, plan *CanonicalPlan, dryRun bool) error {

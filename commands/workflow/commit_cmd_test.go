@@ -520,6 +520,20 @@ func TestIterationCloseCommitDefaultRunsRealGit(t *testing.T) {
 	}
 }
 
+// Outside a git worktree the close-path seam surfaces newGogitImpl's open-repo
+// failure wrapped as "workflow commit: ..." — the same wrap the standalone
+// command uses — so triage points at the cause instead of a bare go-git error.
+func TestIterationCloseCommitWithIncludesOutsideRepoWraps(t *testing.T) {
+	t.Chdir(t.TempDir())
+	err := iterationCloseCommitWithIncludes(&bytes.Buffer{}, nil)
+	if err == nil {
+		t.Fatal("expected an error outside a git worktree, got nil")
+	}
+	if !strings.Contains(err.Error(), "workflow commit:") {
+		t.Errorf("error not wrapped by the close-path seam: %v", err)
+	}
+}
+
 // Drive the cobra subcommand through Execute so newWorkflowCommitCmd's
 // RunE closure is covered — including arg validation (NoArgs), flag
 // parsing, and the wire-up of dryRun + includes. Uses --dry-run so the

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -131,5 +132,54 @@ func TestIterationLogDirShape(t *testing.T) {
 	want := filepath.Join("/some/project", ".agents", "active", "iteration-log")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// currentIterationIncludePaths names the CURRENT iteration's on-disk artifacts
+// as repo-relative, forward-slash paths for the workflow-commit include set: the
+// highest iter-N.yaml plus whichever of its hook-outcomes / score sidecars exist.
+// Absent sidecars are skipped (no error), and no iteration → nil.
+func TestCurrentIterationIncludePaths(t *testing.T) {
+	// No iteration-log directory → no active iteration → nil (pre-fix behaviour).
+	if got := currentIterationIncludePaths(t.TempDir()); got != nil {
+		t.Errorf("no iter-log: got %v, want nil", got)
+	}
+
+	proj := t.TempDir()
+	iterDir := filepath.Join(proj, ".agents", "active", "iteration-log")
+	if err := os.MkdirAll(iterDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Two iterations on disk plus both iter-2 sidecars: the helper resolves N=2
+	// (max-scan) and names iter-2.yaml, its hook-outcomes, and its score — in
+	// candidate order — while ignoring iter-1.
+	for _, name := range []string{
+		"iter-1.yaml", "iter-2.yaml",
+		"iter-2.hook-outcomes.yaml", "iter-2.score.yaml",
+	} {
+		if err := os.WriteFile(filepath.Join(iterDir, name), []byte("x: 1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := currentIterationIncludePaths(proj)
+	want := []string{
+		".agents/active/iteration-log/iter-2.yaml",
+		".agents/active/iteration-log/iter-2.hook-outcomes.yaml",
+		".agents/active/iteration-log/iter-2.score.yaml",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("all artifacts present: got %v, want %v", got, want)
+	}
+
+	// Remove both sidecars: an absent sidecar is skipped, leaving just iter-N.yaml.
+	for _, name := range []string{"iter-2.hook-outcomes.yaml", "iter-2.score.yaml"} {
+		if err := os.Remove(filepath.Join(iterDir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got = currentIterationIncludePaths(proj)
+	want = []string{".agents/active/iteration-log/iter-2.yaml"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sidecars absent: got %v, want %v", got, want)
 	}
 }

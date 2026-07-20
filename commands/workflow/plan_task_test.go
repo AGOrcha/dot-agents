@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -468,8 +470,8 @@ func TestArchiveSinglePlan_InvokesCommitByDefault(t *testing.T) {
 
 	var calls int
 	var srcGoneAtCommit, dstPresentAtCommit bool
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(io.Writer) error {
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(io.Writer, []string) error {
 		calls++
 		// The commit hook must fire with the tree already in its final state.
 		if _, err := os.Stat(srcDir); os.IsNotExist(err) {
@@ -480,7 +482,7 @@ func TestArchiveSinglePlan_InvokesCommitByDefault(t *testing.T) {
 		}
 		return nil
 	}
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	if err := archiveSinglePlan(proj, "myplan", false, false, false); err != nil {
 		t.Fatalf("archiveSinglePlan: %v", err)
@@ -502,9 +504,9 @@ func TestArchiveSinglePlan_CommitFailurePropagates(t *testing.T) {
 	proj := t.TempDir()
 	setupArchivePlan(t, proj, "myplan", "completed")
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(io.Writer) error { return errors.New("commit boom") }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(io.Writer, []string) error { return errors.New("commit boom") }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	err := archiveSinglePlan(proj, "myplan", false, false, false)
 	if err == nil || !strings.Contains(err.Error(), "commit archive move") {
@@ -521,9 +523,9 @@ func TestArchiveSinglePlan_NoCommitSkipsCommit(t *testing.T) {
 	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
 
 	var calls int
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(io.Writer) error { calls++; return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(io.Writer, []string) error { calls++; return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("archiveSinglePlan: %v", err)
@@ -601,6 +603,99 @@ func TestArchiveSinglePlan_CommitDisabledLeavesUncommitted(t *testing.T) {
 	// Move still happened, so the tree is dirty (uncommitted).
 	if gitOut(t, dir, "status", "--porcelain") == "" {
 		t.Error("expected dirty tree when commit is disabled (move uncommitted)")
+	}
+}
+
+// Full-path literals reused across the archive path-derivation tests; consts
+// keep them DRY and clear the duplicated-string-literal gate.
+const (
+	arcWorkflowPlanYAML = ".agents/workflow/plans/myplan/PLAN.yaml"
+	arcHistoryPlanYAML  = ".agents/history/myplan/PLAN.yaml"
+)
+
+// (b) Under the git-ref backend planStateSkipped excludes .agents/workflow/ from
+// the auto-managed set, so the plans/<id> deletions stage ONLY because
+// archiveSinglePlan names them as explicit includes (planDirIncludePaths). A
+// clean tree + advanced HEAD proves the deletions AND the .agents/history/
+// additions landed as ONE commit — the live bug this fix closes.
+func TestArchiveSinglePlan_GitRefBackendStagesDeletionsViaIncludes(t *testing.T) {
+	dir := gogitTestRepoWithCommit(t)
+	t.Chdir(dir)
+
+	priorSkip := planStateSkipped
+	planStateSkipped = func() bool { return true }
+	t.Cleanup(func() { planStateSkipped = priorSkip })
+
+	setupArchivePlan(t, dir, "myplan", "completed")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "seed plan")
+	headBefore := gitOut(t, dir, "rev-parse", "HEAD")
+
+	if err := archiveSinglePlan(dir, "myplan", false, false, false); err != nil {
+		t.Fatalf("archiveSinglePlan: %v", err)
+	}
+	if gitOut(t, dir, "rev-parse", "HEAD") == headBefore {
+		t.Error("expected a new archive commit under the git-ref backend; HEAD did not advance")
+	}
+	if status := gitOut(t, dir, "status", "--porcelain"); status != "" {
+		t.Errorf("tree not clean under git-ref backend (plan-dir deletions unstaged?):\n%s", status)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agents", "history", "myplan", "PLAN.yaml")); err != nil {
+		t.Errorf("history PLAN.yaml should exist after archive: %v", err)
+	}
+}
+
+// (b)/(c) The archive path-derivation contract across both backends, framed by
+// the archive scenario (a plan-dir deletion + its history addition):
+//   - local backend (skipPlanState=false) auto-stages both even with nil includes
+//     — the unchanged pre-fix behaviour;
+//   - git-ref backend (skipPlanState=true) DROPS the plan-dir deletion without
+//     includes, but stages BOTH sides once archiveSinglePlan names the deletion.
+func TestArchivePlanDirDeletionStagingAcrossBackends(t *testing.T) {
+	status := []StatusEntry{
+		{Path: arcWorkflowPlanYAML, XY: "D "},
+		{Path: arcHistoryPlanYAML, XY: "??", Untracked: true},
+	}
+	includes := []string{arcWorkflowPlanYAML}
+	bothStaged := []string{
+		arcHistoryPlanYAML,
+		arcWorkflowPlanYAML,
+	}
+	historyOnly := []string{arcHistoryPlanYAML}
+
+	if got := DerivePathSet(status, nil, false); !reflect.DeepEqual(got, bothStaged) {
+		t.Errorf("local backend must auto-stage plan-dir deletion + history add: got %v, want %v", got, bothStaged)
+	}
+	if got := DerivePathSet(status, nil, true); !reflect.DeepEqual(got, historyOnly) {
+		t.Errorf("git-ref backend must drop plan-dir deletion without includes: got %v, want %v", got, historyOnly)
+	}
+	if got := DerivePathSet(status, includes, true); !reflect.DeepEqual(got, bothStaged) {
+		t.Errorf("git-ref backend + archive includes must stage both sides: got %v, want %v", got, bothStaged)
+	}
+}
+
+// planDirIncludePaths enumerates every regular file under the plan source dir as
+// a repo-relative, forward-slash path (nested dirs are descended, not emitted).
+func TestPlanDirIncludePaths(t *testing.T) {
+	proj := t.TempDir()
+	srcDir := filepath.Join(proj, ".agents", "workflow", "plans", "myplan")
+	if err := os.MkdirAll(filepath.Join(srcDir, "evidence"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"PLAN.yaml", "TASKS.yaml", "evidence/t1.scope.yaml"} {
+		if err := os.WriteFile(filepath.Join(srcDir, filepath.FromSlash(rel)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := planDirIncludePaths(proj, srcDir)
+	sort.Strings(got)
+	want := []string{
+		arcWorkflowPlanYAML,
+		".agents/workflow/plans/myplan/TASKS.yaml",
+		".agents/workflow/plans/myplan/evidence/t1.scope.yaml",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("planDirIncludePaths: got %v, want %v", got, want)
 	}
 }
 

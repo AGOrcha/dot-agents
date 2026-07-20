@@ -16,6 +16,13 @@ import (
 	"strconv"
 )
 
+// iterationLogRelDir is the repo-relative (forward-slash) iteration-log
+// directory. IterationLogDir joins it beneath a project root; the commit
+// include-path helper needs the relative form because DerivePathSet matches
+// --include entries against git-status paths, which are repo-relative and
+// forward-slashed.
+const iterationLogRelDir = ".agents/active/iteration-log"
+
 // iterLogFileRE matches canonical iteration-log file names (iter-<digits>.yaml)
 // strictly. Anything else in the iter-log dir is ignored — including the R1
 // per-iteration score sidecars (iter-N.score.yaml) which would otherwise look
@@ -85,5 +92,41 @@ func DefaultIterationRole() string {
 // One place to compute it so close-task, the auto-derivers, and the existing
 // runWorkflowCheckpointLogToIter all agree on the path.
 func IterationLogDir(projectPath string) string {
-	return filepath.Join(projectPath, ".agents", "active", "iteration-log")
+	return filepath.Join(projectPath, iterationLogRelDir)
+}
+
+// currentIterationIncludePaths returns the repo-relative (forward-slash),
+// project-relative paths of the CURRENT iteration's iter-log artifacts that
+// exist on disk: iter-N.yaml plus its optional hook-outcomes and score
+// sidecars. N is resolved exactly as the iter-log readers do — the highest
+// existing iter-N.yaml under the iteration-log dir (resolveActiveIterationN).
+//
+// These artifacts live OUTSIDE the auto-managed commit roots (they sit under
+// .agents/active/iteration-log/, not .agents/workflow|history/), so
+// DerivePathSet only stages them when a caller names them explicitly. Threading
+// the returned paths through iterationCloseCommitWithIncludes is what folds the
+// iteration record into the same workflow-state commit as close / advance /
+// start-task.
+//
+// Best-effort: a resolution failure or "no active iteration" yields nil, so the
+// caller behaves exactly as it did before this fix. Absent sidecars are skipped.
+func currentIterationIncludePaths(projectPath string) []string {
+	n, active, err := resolveActiveIterationN(stdHookOutcomeDeps{}, projectPath)
+	if err != nil || !active {
+		return nil
+	}
+	iterDir := IterationLogDir(projectPath)
+	candidates := []string{
+		filepath.Join(iterDir, fmt.Sprintf("iter-%d.yaml", n)),
+		hookOutcomeSidecarPath(projectPath, n),
+		filepath.Join(iterDir, fmt.Sprintf("iter-%d.score.yaml", n)),
+	}
+	var includes []string
+	for _, abs := range candidates {
+		if _, statErr := os.Stat(abs); statErr != nil {
+			continue
+		}
+		includes = append(includes, filepath.ToSlash(filepath.Join(iterationLogRelDir, filepath.Base(abs))))
+	}
+	return includes
 }
