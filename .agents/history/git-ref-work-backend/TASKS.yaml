@@ -100,19 +100,19 @@ tasks:
       app_type: go-cli
     - id: proposal-scope-flag
       title: Add proposal scope/write_scope field routing into available diff-scopes/sources
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
       write_scope: []
       verification_required: true
-      notes: ""
+      notes: Add a scope/write_scope field to Proposal (+ fold-back frontmatter) so proposals route into the available diff-scopes/sources; thread through Validate/Apply, reusing the task write_scope model.
     - id: ref-back-managed-artifacts
       title: Ref-back managed .agents/active artifacts (delegation/merge-back, verification, review) under backend=git-ref
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
       write_scope: []
       verification_required: true
-      notes: ""
+      notes: Mirror managed .agents/active artifacts (delegation/merge-back, verification, review) to refs/agents/state under backend=git-ref; working copy stays fallback/projection.
