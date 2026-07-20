@@ -593,10 +593,15 @@ func newWorkflowAdvanceCmd() *cobra.Command {
 				return nil
 			}
 			// Iteration-close integration: stage + commit the workflow-state
-			// mutation atomically with the status flip. The auto-commit honors
-			// the per-project commit.disable opt-out (handled inside the
-			// close-path runWorkflowCommit, not here).
-			return iterationCloseCommit(cmd.OutOrStdout())
+			// mutation atomically with the status flip. The current iteration's
+			// iter-log artifacts live outside the auto-managed roots, so they are
+			// named as explicit includes to land in the same commit. The
+			// auto-commit honors the per-project commit.disable opt-out (handled
+			// inside the close-path runWorkflowCommit, not here). currentWorkflow
+			// Project only fails on an unresolvable cwd; an empty path degrades to
+			// the pre-fix nil-include behaviour.
+			project, _ := currentWorkflowProject()
+			return iterationCloseCommitWithIncludes(cmd.OutOrStdout(), currentIterationIncludePaths(project.Path))
 		},
 	}
 	advanceCmd.Flags().StringVar(&advanceTask, "task", "", "Task ID to advance (required)")

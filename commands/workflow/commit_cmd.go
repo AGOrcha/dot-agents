@@ -287,19 +287,30 @@ func buildCommitMessage(paths []string) string {
 	return sb.String()
 }
 
-// iterationCloseCommit is the close-path entry point — called by `advance`
-// and `merge-back` when their `--commit-state` flag is set, so the iteration
-// log + verification log + plan-state mutation + the workflow-state commit
-// land together rather than as two separate operator steps. The function-
-// var seam keeps the advance / merge-back tests cheap (no real git, no
-// real prefs) — the actual close-flow integration is exercised by
-// wc-verify-close.
-var iterationCloseCommit = func(out io.Writer) error {
+// iterationCloseCommitWithIncludes is the close-path entry point that also
+// threads an explicit --include set through DerivePathSet. `advance` and
+// `merge-back --commit-state`, close-task, start-task, and plan archive drive
+// it so the iteration log + its sidecars (and, for archive, the removed
+// plan-dir files) land in the same workflow-state commit as the plan-state
+// mutation — those artifacts live OUTSIDE the auto-managed roots, so without
+// naming them here DerivePathSet would silently drop them. The function-var
+// seam keeps the advance / merge-back / close / start / archive tests cheap
+// (no real git, no real prefs) — the actual close-flow integration is
+// exercised by wc-verify-close.
+var iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error {
 	gg, err := newGogitImpl()
 	if err != nil {
 		return fmt.Errorf(commitErrFmt, err)
 	}
-	return runWorkflowCommit(out, gg, false, nil)
+	return runWorkflowCommit(out, gg, false, includes)
+}
+
+// iterationCloseCommit is the includes-free close-path entry point retained for
+// callers with no extra paths to name (merge-back --commit-state) and for the
+// existing tests that rebind it. It delegates to iterationCloseCommitWithIncludes
+// with a nil include set — byte-identical to the pre-fix behaviour.
+var iterationCloseCommit = func(out io.Writer) error {
+	return iterationCloseCommitWithIncludes(out, nil)
 }
 
 // commitDisabled resolves whether the workflow-commit auto-flow is opted out

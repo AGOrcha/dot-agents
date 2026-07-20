@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -61,9 +62,9 @@ func TestCloseTaskOrchestratesChain(t *testing.T) {
 	t.Chdir(repo)
 
 	commitCalls := 0
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { commitCalls++; return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { commitCalls++; return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	var buf bytes.Buffer
 	err := runWorkflowCloseTask(&buf, closeTaskOpts{
@@ -99,9 +100,9 @@ func TestCloseTaskNoCommitSkipsCommit(t *testing.T) {
 	t.Chdir(repo)
 
 	commitCalls := 0
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { commitCalls++; return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { commitCalls++; return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	var buf bytes.Buffer
 	if err := runWorkflowCloseTask(&buf, closeTaskOpts{
@@ -139,9 +140,9 @@ func TestCloseTaskJSONOutput(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 	priorJSON := deps.Flags.JSON
 	jsonOn := true
 	deps.Flags.JSON = func() bool { return jsonOn }
@@ -175,9 +176,9 @@ func TestCloseTaskNextFocusOverride(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	var buf bytes.Buffer
 	if err := runWorkflowCloseTask(&buf, closeTaskOpts{
@@ -335,9 +336,9 @@ func TestCloseTaskErrorWrapsPlanUpdate(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
 
-	priorCommit := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { return nil }
-	t.Cleanup(func() { iterationCloseCommit = priorCommit })
+	priorCommit := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = priorCommit })
 
 	// runWorkflowPlanUpdate is permissive about focus values; stub the
 	// seam so we can prove the wrap.
@@ -364,9 +365,9 @@ func TestCloseTaskErrorWrapsCommit(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { return errors.New("commit boom") }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { return errors.New("commit boom") }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
 		planID: planID, taskID: taskID, scoreRecompute: "current", repoDir: repo,
@@ -387,9 +388,9 @@ func TestCloseTaskUsesCwdWhenRepoDirEmpty(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(io.Writer) error { return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(io.Writer, []string) error { return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	var buf bytes.Buffer
 	if err := runWorkflowCloseTask(&buf, closeTaskOpts{
@@ -412,9 +413,9 @@ func TestCloseTaskJSONEncodeError(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(io.Writer) error { return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(io.Writer, []string) error { return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	priorJSON := deps.Flags.JSON
 	jsonOn := true
@@ -456,9 +457,9 @@ func TestCloseTaskSubcommandExecute(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	cmd := newWorkflowCloseTaskCmd()
 	var buf bytes.Buffer
@@ -470,5 +471,61 @@ func TestCloseTaskSubcommandExecute(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "close-task") {
 		t.Errorf("summary not rendered: %s", buf.String())
+	}
+}
+
+// (a) close-task names the CURRENT iteration's on-disk artifacts as includes,
+// and those named paths reach the staged set. The real checkpoint+score steps
+// write iter-1.yaml + iter-1.score.yaml (hook-outcomes absent → skipped), then
+// the commit seam is routed through runWorkflowCommit with a fakeGit so we see
+// exactly what DerivePathSet staged.
+func TestCloseTaskStagesCurrentIterationArtifacts(t *testing.T) {
+	repo, planID, taskID := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+
+	priorSkip := planStateSkipped
+	planStateSkipped = func() bool { return false }
+	t.Cleanup(func() { planStateSkipped = priorSkip })
+
+	var captured, staged []string
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error {
+		captured = includes
+		g := &fakeGit{status: []StatusEntry{
+			{Path: ".agents/active/iteration-log/iter-1.yaml", XY: ".M"},
+			{Path: ".agents/active/iteration-log/iter-1.score.yaml", XY: "??", Untracked: true},
+		}}
+		if err := runWorkflowCommit(out, g, false, includes); err != nil {
+			return err
+		}
+		staged = g.addedPaths
+		return nil
+	}
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
+
+	if err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
+		planID: planID, taskID: taskID, scoreRecompute: "current", repoDir: repo,
+	}); err != nil {
+		t.Fatalf("runWorkflowCloseTask: %v", err)
+	}
+	wantInc := []string{
+		".agents/active/iteration-log/iter-1.yaml",
+		".agents/active/iteration-log/iter-1.score.yaml",
+	}
+	if !reflect.DeepEqual(captured, wantInc) {
+		t.Errorf("close-task includes = %v, want %v", captured, wantInc)
+	}
+	for _, p := range wantInc {
+		found := false
+		for _, s := range staged {
+			if s == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("include %q did not reach the staged set %v", p, staged)
+		}
 	}
 }

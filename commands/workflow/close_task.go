@@ -149,7 +149,7 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 	if err != nil {
 		return err
 	}
-	committed, err := runCloseTaskCommit(out, opts)
+	committed, err := runCloseTaskCommit(out, opts, setup.project.Path)
 	if err != nil {
 		return err
 	}
@@ -219,14 +219,16 @@ func applyCloseTaskNextFocus(opts closeTaskOpts, projectPath string) (string, er
 	return nextFocus, nil
 }
 
-// runCloseTaskCommit fires the workflow-state commit unless --no-commit
-// is set. Returns (didCommit, err) so the caller can record the outcome
-// in the result snapshot.
-func runCloseTaskCommit(out io.Writer, opts closeTaskOpts) (bool, error) {
+// runCloseTaskCommit fires the workflow-state commit unless --no-commit is set.
+// It names the current iteration's iter-log artifacts as explicit includes so
+// they land in the same commit even though they sit outside the auto-managed
+// roots. Returns (didCommit, err) so the caller can record the outcome in the
+// result snapshot.
+func runCloseTaskCommit(out io.Writer, opts closeTaskOpts, projectPath string) (bool, error) {
 	if opts.noCommit {
 		return false, nil
 	}
-	if err := iterationCloseCommit(out); err != nil {
+	if err := iterationCloseCommitWithIncludes(out, currentIterationIncludePaths(projectPath)); err != nil {
 		return false, fmt.Errorf("close-task: workflow commit: %w", err)
 	}
 	return true, nil

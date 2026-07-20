@@ -89,9 +89,9 @@ func TestStartTaskErrorWrapsCommit(t *testing.T) {
 	startTaskPlanUpdate = func(string, string, string, string, string, string, string) error { return nil }
 	t.Cleanup(func() { startTaskPlanUpdate = priorPU })
 
-	priorCommit := iterationCloseCommit
-	iterationCloseCommit = func(io.Writer) error { return errors.New("commit boom") }
-	t.Cleanup(func() { iterationCloseCommit = priorCommit })
+	priorCommit := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(io.Writer, []string) error { return errors.New("commit boom") }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = priorCommit })
 
 	// noDeriveScope=true so we skip the derive step that would also need stubbing.
 	err := runWorkflowStartTask(&bytes.Buffer{}, startTaskOpts{
@@ -105,7 +105,7 @@ func TestStartTaskErrorWrapsCommit(t *testing.T) {
 // Happy-path start-task: flip status to active, set focus, derive scope
 // (the derive-scope call writes a placeholder sidecar since the test
 // project has no real source for the derivation), fire workflow commit.
-// iterationCloseCommit is stubbed; the existing TestExecGitEndToEnd
+// iterationCloseCommitWithIncludes is stubbed; the existing TestExecGitEndToEnd
 // covers the real-git surface.
 func TestStartTaskOrchestratesChain(t *testing.T) {
 	repo, planID, taskID := closeTaskTestRepo(t)
@@ -113,9 +113,9 @@ func TestStartTaskOrchestratesChain(t *testing.T) {
 	t.Chdir(repo)
 
 	commitCalls := 0
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { commitCalls++; return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { commitCalls++; return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	var buf bytes.Buffer
 	err := runWorkflowStartTask(&buf, startTaskOpts{
@@ -145,9 +145,9 @@ func TestStartTaskNoCommitNoDeriveScope(t *testing.T) {
 	t.Chdir(repo)
 
 	commitCalls := 0
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { commitCalls++; return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { commitCalls++; return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	var buf bytes.Buffer
 	if err := runWorkflowStartTask(&buf, startTaskOpts{
@@ -173,9 +173,9 @@ func TestStartTaskJSONOutput(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 	priorJSON := deps.Flags.JSON
 	jsonOn := true
 	deps.Flags.JSON = func() bool { return jsonOn }
@@ -213,9 +213,9 @@ func TestStartTaskSubcommandExecute(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
 
-	prior := iterationCloseCommit
-	iterationCloseCommit = func(out io.Writer) error { return nil }
-	t.Cleanup(func() { iterationCloseCommit = prior })
+	prior := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(out io.Writer, includes []string) error { return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = prior })
 
 	cmd := newWorkflowStartTaskCmd()
 	var buf bytes.Buffer
@@ -297,9 +297,9 @@ func TestStartTaskDryRunMakesNoMutations(t *testing.T) {
 	t.Cleanup(func() { startTaskDeriveScope = priorDS })
 
 	commitCalls := 0
-	priorCommit := iterationCloseCommit
-	iterationCloseCommit = func(io.Writer) error { commitCalls++; return nil }
-	t.Cleanup(func() { iterationCloseCommit = priorCommit })
+	priorCommit := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(io.Writer, []string) error { commitCalls++; return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = priorCommit })
 
 	before := startTaskTreeSnapshot(t, repo)
 
@@ -342,9 +342,9 @@ func TestStartTaskRunsAllFourStepsWhenNotDryRun(t *testing.T) {
 	t.Cleanup(func() { startTaskDeriveScope = priorDS })
 
 	commitCalls := 0
-	priorCommit := iterationCloseCommit
-	iterationCloseCommit = func(io.Writer) error { commitCalls++; return nil }
-	t.Cleanup(func() { iterationCloseCommit = priorCommit })
+	priorCommit := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(io.Writer, []string) error { commitCalls++; return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = priorCommit })
 
 	var buf bytes.Buffer
 	if err := runWorkflowStartTask(&buf, startTaskOpts{planID: "p", taskID: "t1"}); err != nil {
@@ -435,9 +435,9 @@ func TestStartTaskSubcommandDryRunFlag(t *testing.T) {
 	t.Cleanup(func() { startTaskPlanUpdate = priorPU })
 
 	commitCalls := 0
-	priorCommit := iterationCloseCommit
-	iterationCloseCommit = func(io.Writer) error { commitCalls++; return nil }
-	t.Cleanup(func() { iterationCloseCommit = priorCommit })
+	priorCommit := iterationCloseCommitWithIncludes
+	iterationCloseCommitWithIncludes = func(io.Writer, []string) error { commitCalls++; return nil }
+	t.Cleanup(func() { iterationCloseCommitWithIncludes = priorCommit })
 
 	cmd := newWorkflowStartTaskCmd()
 	var buf bytes.Buffer

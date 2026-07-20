@@ -174,7 +174,11 @@ func runWorkflowStartTask(out io.Writer, opts startTaskOpts) error {
 
 	committed := false
 	if !opts.noCommit {
-		if err := iterationCloseCommit(out); err != nil {
+		// Name the current iteration's iter-log artifacts as explicit includes
+		// so they land in the same workflow-state commit despite sitting outside
+		// the auto-managed roots. repoPath is best-effort (empty when the project
+		// cannot be resolved) → nil includes, i.e. the pre-fix behaviour.
+		if err := iterationCloseCommitWithIncludes(out, currentIterationIncludePaths(repoPath)); err != nil {
 			return fmt.Errorf("start-task: workflow commit: %w", err)
 		}
 		committed = true
