@@ -516,16 +516,5 @@ func TestCloseTaskStagesCurrentIterationArtifacts(t *testing.T) {
 	if !reflect.DeepEqual(captured, wantInc) {
 		t.Errorf("close-task includes = %v, want %v", captured, wantInc)
 	}
-	for _, p := range wantInc {
-		found := false
-		for _, s := range staged {
-			if s == p {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("include %q did not reach the staged set %v", p, staged)
-		}
-	}
+	assertIncludesStaged(t, staged, wantInc)
 }

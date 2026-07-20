@@ -229,7 +229,14 @@ func TestAdvanceCommitStateStagesCurrentIterationArtifacts(t *testing.T) {
 	if !reflect.DeepEqual(captured, wantInc) {
 		t.Errorf("advance includes = %v, want %v (absent score sidecar must be skipped)", captured, wantInc)
 	}
-	for _, p := range wantInc {
+	assertIncludesStaged(t, staged, wantInc)
+}
+
+// assertIncludesStaged fails the test for every want path missing from staged.
+// Extracted so the (a) acceptance tests stay under the S3776 complexity budget.
+func assertIncludesStaged(t *testing.T, staged, want []string) {
+	t.Helper()
+	for _, p := range want {
 		found := false
 		for _, s := range staged {
 			if s == p {
