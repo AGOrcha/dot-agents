@@ -2096,6 +2096,294 @@ fold-back report for routes.
 
 ---
 
+## Part N — 2026-07-15 addendum: The Great Flattening (cloud-agentic manifesto, targeted pass)
+
+Targeted pass (§0 small-decision gate): per-source appraisal + relevance only, no batch
+synthesis. Post-freeze discipline applied — `package-artifact-install` is mid-flight and
+untouched by this source; all gap items are additive, gate-neutral, parked with named
+triggers; no wave decision reopened.
+
+### N.1 myprasanna — *The Great Flattening* (2026-07-14)
+
+**Core.** Manifesto + Vorflux product pitch: frontier models are superhuman at coding, so
+development moves to the cloud and the org "flattens" — everything inside the human cell
+boundary collapses into **the harness**; the scarce residual is **judgment**, which must be
+codified into the harness rather than left in heads or decaying docs. Method = "profile the
+bottleneck, drown it in tokens" (tokenmaxxing); walks six bottlenecks (machine, planning,
+orchestration, testing, review, merge). Kernel claims — two things labs structurally cannot
+ship: *your judgment* and *neutrality* ("no lab will ever route your work to a competitor's
+model"); cross-lab adversarial review is "the one check a lab will never ship"; the harness
+is "the shape of your company, written down"; "every model release eats the layer beneath
+it" so betting on mechanics loses every release; sub-agents each in a fresh context because
+"a context window ages." Benchmark table and named-model figures (SWE-bench 88.2% Opus 4.8
+"saturated", Terminal-Bench 91.9% "GPT-5.6 Sol Ultra", "Fable 5 … vanished within days",
+"$1,000/day of tokens" PM, "~10x off" a Codex subscription, "intelligence halves every ~4
+months") are all [UNVERIFIED].
+
+**Evidence grade.** `practitioner-report` for the workflow mechanisms (credible first-hand
+— Rippling co-founder running the described loop), `asserted` for every number and the
+model-DNA table specifics. Genre = vendor manifesto (Vorflux funnel): corroborates *design
+shape*, never effect sizes.
+
+**Pros.** The strongest single-source convergence hit the corpus has taken — one article
+independently reinvents four pillars this repo already runs (cross-lab adversarial review,
+judgment-in-the-harness, per-model routing, fresh-context sub-agents) and hands each a
+citable one-line justification. Its two structural-impossibility arguments (judgment,
+neutrality) are the cleanest strategic framing yet for why dot-agents' layer exists at all.
+Its bottleneck-1/4 sections describe precisely the two lifecycle stages dot-agents is
+weakest on, which makes it a useful gap mirror.
+
+**Cons.** Vendor pitch throughout — the "blind cloud" framing is the product wedge; all
+quantitative color is linkless [UNVERIFIED]; the model-DNA table self-expires ("accurate
+the week we wrote it, June 2026 … parts will be wrong by fall"); org-flattening and
+"backlogs shouldn't exist" claims are futurist color with n=1 grounding; no method or data
+for any benchmark row.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** cross-lab adversarial review = our `cross-harness-adversarial`
+  reviewer lens (gpt-5.4 over claude executors, plus the `-claude` variant for gpt
+  executors, in `.agentsrc.json` stage_profiles). Sharpening = the citable framing "the one
+  check a lab will never ship" + "an author grades itself generously"; our lesson
+  `tests-must-drive-the-production-path` ("caught 3× in one wave by cross-harness review,
+  never by same-model self-review") is the live evidence their claim predicts. Nth
+  independent invention of the cross-family review gate (with Parts J/L convergence).
+  Consume-now digest/citation note.
+- **[OVERLAP-SHARPEN]** judgment-codified-in-the-harness = our rules/lessons/skills +
+  fold-back pipeline; sharpening = "the shape of your company, written down" and "applies
+  that judgment a thousand times without you in the room" as citable framing, plus "every
+  model release eats the layer beneath it" as the strategic argument for investing in
+  judgment artifacts over mechanics (composes with Part M's mechanism-change anchor).
+  Consume-now digest note in the `knowledge-fold-back` routing rationale.
+- **[OVERLAP-SHARPEN]** tokenmaxxing ("profile the bottleneck, drown it in tokens"; "the
+  seat is the wrong unit of compute — the token is") = the premise of the
+  `transcript-analysis-and-pipeline-craft` plan (profile where the loop spends human
+  attention, then spend tokens there). Vocabulary + Nth-invention corroboration; consumer =
+  that plan's external-references digest.
+- **[OVERLAP-SHARPEN — dated reference]** the per-model-DNA routing table (GPT = deep
+  architectural reasoning/planning; Claude = long-horizon autonomy + tool use →
+  orchestration/building; Gemini = fast/cheap multimedia → UI; Kimi/Qwen/GLM = cheap
+  near-frontier volume) is a citable June-2026 snapshot for `pipeline-architect` model
+  assignment and the worker-model-selection memory — **explicitly self-decaying**; cite
+  with the date, never import as current fact. [UNVERIFIED specifics.]
+- **[OVERLAP-SHARPEN]** planning-gets-the-most-tokens + "a plan worth arguing with" torn
+  apart by a different-lab reviewer = kg-ideate → spec-scaffold → ideation-cycle's
+  cross-harness audit; their "plan of plans, sub-tasks each with its own test cases" = our
+  plan-scaffold write-scopes + per-task verification. Vocabulary only; no gap.
+- **[WE-AHEAD]** fresh-context sub-agents ("a context window ages … a team of fresh ones
+  stays sharp") — ours adds bounded write_scopes, per-worktree index isolation, recorded
+  base refs, and typed stage roles (`worktree-platform` + ISP), not just fresh windows.
+  Settled.
+- **[WE-AHEAD]** per-model routing as *mechanism* — theirs is prose; ours is executable
+  config (stage_profiles model + model_family per stage/lens, edited by
+  `pipeline-architect`). The table above is the only piece worth taking. Settled.
+- **[WE-AHEAD]** fully-automatic merge ("nobody rebases anything … flag-flip while asleep")
+  vs our deliberate owner self-merge gate + `worker-owns-pr-readiness-loop` (workers nurse
+  PRs to READY; a human decides the merge). Ours is a chosen trust boundary, not a missing
+  capability — their version presumes trusted unread merges, which our review-gate stack
+  exists to earn first. Settled as policy, not capability.
+- **[GAP-NOTE — parked]** cloud execution that stands up the real multi-service stack
+  (bottleneck 1 — swarm clones repos, brings up every process, asks for secrets/seed-data,
+  snapshots the live machine per session). dot-agents runs single-machine local worktrees;
+  `r3-background-worker-service` is a local scheduler, not a cloud sandbox. Trigger —
+  parallel loop demand exceeds single-machine capacity after r3 + worktree-platform land,
+  or a dedicated cloud-exec spike is scheduled.
+- **[GAP-NOTE — parked]** see-it-run end-to-end testing — browser-driven flow proof leaving
+  a **recording artifact** + a **per-branch live URL** ("running code isn't the bar; seeing
+  it run is"). We have the `verify` skill (drive the affected flow) and a playwright skill,
+  but no recording-as-iteration-evidence discipline in the verifier stage and no per-branch
+  preview URL outside the docs site. Trigger — r2-observability-dashboard's verifier-
+  evidence surface (recording as an iteration artifact), or the first UI-heavy app_type
+  onboarded via pipeline-architect.
+- **[GAP-NOTE — parked]** token allocator ("state your priorities, the system decides how
+  to spend tokens") + recurring intent ("fix every production crash"). Precursors exist
+  (r3 scheduler + recurring background tasks; manual cost-aware model scoping in the
+  worker-model-selection memory) but no priority→spend mechanism. Trigger — R2/R3
+  telemetry exposes per-stage token cost, making an allocator decidable.
+
+### Part N — adoptables table (handoff to knowledge-fold-back)
+
+| item | source (§) | evidence grade | proposed consumer artifact | urgency |
+|---|---|---|---|---|
+| cross-lab-review citable framing ("the one check a lab will never ship") | N.1 bottleneck 5 | practitioner-report | digest note + cross-harness-adversarial lens rationale | now |
+| judgment-in-harness framing ("shape of your company, written down"; "labs eat the layer beneath") | N.1 harness | practitioner-report | knowledge-fold-back routing-rationale digest note | now |
+| tokenmaxxing vocabulary (seat vs token; profile-the-bottleneck) | N.1 tokenmaxxing | practitioner-report | transcript-analysis-and-pipeline-craft external-references digest | now |
+| model-DNA routing table (June-2026 snapshot, self-decaying) | N.1 bottleneck 3a | asserted [UNVERIFIED] | pipeline-architect dated reference + worker-model-selection memory | now |
+| cloud multi-service-stack execution | N.1 bottleneck 1 | practitioner-report (vendor) | parked lead w/ named trigger (fold-back record) | parked |
+| see-it-run testing (recording artifact + per-branch live URL) | N.1 bottleneck 4 | practitioner-report (vendor) | parked lead w/ named trigger on r2-observability-dashboard | parked |
+| token allocator / recurring intent | N.1 where-this-goes | asserted | parked lead w/ named trigger on r3/r2 telemetry | parked |
+
+### Part N — routing note
+
+Three consume-now citation/digest items (cross-lab framing, judgment-in-harness framing,
+tokenmaxxing vocabulary), one dated decaying reference (model-DNA table), three parked
+leads with named triggers (cloud stack execution, see-it-run testing, token allocator).
+Three WE-AHEAD records settle their questions in place. No frozen or mid-flight plan
+(`package-artifact-install`) touched; no gate changed. See the fold-back report for routes.
+
+### Part N — open questions / chase list
+
+1. Do any of the article's benchmark rows (SWE-bench 88.2 "saturated", Terminal-Bench
+   91.9) match primary leaderboards? Chase target — the public SWE-bench Verified and
+   Terminal-Bench leaderboards. Low priority; numbers are color, not inputs. (N.1)
+2. Does Vorflux's "snapshot the live machine" pattern have a self-hostable analogue worth
+   spiking when the cloud-exec trigger fires (e.g. devcontainer/firecracker snapshotting)?
+   (N.1 bottleneck 1 — attach to the parked lead when triggered.)
+
+---
+
+## Part O — 2026-07-15 addendum: Investing in Autonomy — Ten Hypotheses (VC thesis scorecard, targeted pass)
+
+Targeted pass (§0 small-decision gate): per-source appraisal + relevance only, no batch
+synthesis. Post-freeze discipline applied — `package-artifact-install` is mid-flight and
+untouched by this source; the single gap item is additive, gate-neutral, parked with a named
+trigger; no wave decision reopened.
+
+### O.1 Alana Levin & Kayvon Tehranian (Variant Fund) — *Investing in Autonomy: Ten Hypotheses* (2026-07-14)
+
+**Core.** A VC's explicitly dated "public scorecard" of ten working hypotheses on the
+AI/autonomy landscape (early Q3 2026), organized around autonomy = "freedom to build,
+customize, and act on their own terms." Kernel claims for this repo: value accrues to
+whoever orchestrates substitutable models and owns the user experience (H7); "applications,
+not users, will manage the complexity of routing work across many models" (H6); "selecting
+and orchestrating [models] becomes more valuable than building around any single model" (H5);
+and "the hard problem shifts from building individual agents to coordinating shared context,
+permissions, workflows, and collaboration across organizations — defining and owning the
+control plane is a major point of leverage" (H8).
+
+**Evidence grade.** `asserted` throughout — a forward-looking belief scorecard,
+self-acknowledged as possibly "incomplete (or simply wrong)"; no data, no method, no
+deployment report. Genre = investor thesis: corroborates *strategic direction and design
+shape* only, never effect sizes; every market prediction [UNVERIFIED]. The distinct value of
+the genre — a VC's capital-allocation incentives are independent of both vendor funnels
+(N.1 Vorflux) and practitioner essays (I.4, L.6), so where it converges with those, the
+convergence count gains a genuinely independent incentive pool, not just another sample from
+the same one.
+
+**Pros.** First investor-grade statement in the corpus of four theses dot-agents already
+operates (H5/H6/H7/H8-coordination); dated-scorecard framing makes it honestly citable and
+self-expiring; H6's one-liner is the cleanest external phrasing yet of the stage_profiles
+design stance.
+
+**Cons.** Zero evidence — pure assertion; the fund's portfolio incentives shape which
+hypotheses get stated (autonomy framing is also a fundraising lens); H1/H2/H9/H10 are
+macro-market claims with no engineering consumer here; nothing measured, nothing to upgrade
+any prior [UNVERIFIED] anchor.
+
+**Mapping.** (Tags per hypothesis, H1–H10.)
+- **H1 (agents dominant traffic; design for humans AND agents) — [OVERLAP-SHARPEN, thin].**
+  Dual-audience surfaces are already the operating premise (`--json` on workflow commands,
+  machine-readable delegation bundles/artifacts, skills as agent-facing docs). Citation-bank
+  only; no route beyond this part.
+- **H2 (compute-constrained world) — [OUT-OF-SCOPE].** Infra-investment lens. Its practical
+  corollary (tokens scarce → cost-aware routing) is already the worker-model-selection /
+  tokenmaxxing cluster (N.1, I.4) — this adds nothing to it.
+- **H3 (open source across the stack) — [OUT-OF-SCOPE].** Model-layer investment lens; the
+  adjacent shape (harness artifacts as openly distributable packages) is already
+  `package-artifact-install`'s premise — no action, and nothing here touches that in-flight
+  wave.
+- **H4 (frontier access becomes permissioned → demand for permissionless alternatives) —
+  [OVERLAP-SHARPEN].** The VC form of the neutrality argument: permissioned-access risk is a
+  strategic reason dot-agents stays harness-neutral across omp/claude-code/codex/cursor/
+  copilot and runs cross-lab review. Composes with N.1's "no lab will ever route your work
+  to a competitor's model." Citation only.
+- **H5 (10x more models that matter; selection/orchestration > single-model) —
+  [OVERLAP-SHARPEN].** Nth independent invention of orchestration-over-model, now from the
+  investor genre; ours is executable (stage_profiles model + model_family per stage/lens,
+  edited by `pipeline-architect`) with a measured sibling in L.5 (+10–20pt per-model harness
+  profiles). Nothing re-decided.
+- **H6 (multi-model default; "applications, not users, will manage the complexity of
+  routing") — [OVERLAP-SHARPEN].** The cleanest external one-liner for the stage_profiles
+  design stance — routing lives in config, not in per-task user choice. Joins N.1's
+  model-DNA table (dated), K.3, and L.5 in the routing convergence cluster. Citable framing
+  for `pipeline-architect` rationale; no config change.
+- **H7 (harnesses = major value-accrual point; "as models become easier to substitute, the
+  durable relationship shifts to the product that orchestrates models and owns the user
+  experience") — [OVERLAP-SHARPEN].** First investor-thesis statement of the harness-value
+  thesis; joins N.1 ("the shape of your company, written down"; "every model release eats
+  the layer beneath it") and I.4/L.6 (thealexker). Strengthens the strategic rationale for
+  the dot-agents layer itself. Digest/citation note; nothing re-decided.
+- **H8 (single-player → multiplayer; control plane = leverage) — split.**
+  - *Multiplayer-coordination half — [OVERLAP-SHARPEN].* "The hard problem shifts from
+    building individual agents to coordinating shared context, permissions, workflows" is
+    the VC restatement of I.3 (sergeykarayev, "the model is no longer the bottleneck —
+    coordination is") = the `full-loop-orchestration-runtime` thesis, plus the ratified
+    session-handoff-journal spec (shared episodic context) and the orchestrator/worker
+    coordination backend. Corroboration only.
+  - *Cross-organization control plane half — [UNVERIFIED-LEAD, parked].* Shared context +
+    permissions + workflows across *operators and organizations* is a surface dot-agents
+    does not have: today it is single-operator (shared/team home-config adoption via
+    `onboard` from-home and `da init --from` are distribution precursors, not coordination;
+    session-handoff-journal is single-user episodic recovery). Real gap, wrong time — no
+    current demand signal, and the in-flight wave is untouched. Trigger — a second human
+    operator adopts the shared da home-config in day-to-day practice (team-coordination
+    demand materializes), or session-handoff-journal implementation begins post-0.4.0 and a
+    second seat wants shared context. Routed as a parked fold-back proposal.
+- **H9 (AI lowers cost of expensive services) — [OUT-OF-SCOPE].** Vertical-market thesis
+  (healthcare/education/legal); no consumer artifact here.
+- **H10 (previously inaccessible markets become viable) — [OUT-OF-SCOPE].** Startup-market
+  thesis; no consumer artifact here.
+
+### Part O — adoptables table (handoff to knowledge-fold-back)
+
+| item | source (§) | evidence grade | proposed consumer artifact | urgency |
+|---|---|---|---|---|
+| VC-genre corroboration bundle — H4 neutrality, H5 orchestration>model, H6 apps-route one-liner, H7 harness value-accrual, H8-coordination, H1 dual-audience (citation bank; genre-diverse Nth invention) | O.1 H1/H4–H7/H8a | asserted [UNVERIFIED] | digest note in this part's routing note; cite alongside N.1/I.3/I.4/L.5/L.6 where external motivation is useful (findings, not fold-backs) | now |
+| cross-organization control plane / multiplayer shared-context + permissions surface | O.1 H8b | asserted [UNVERIFIED] | parked lead w/ named trigger (fold-back record → proposal, `full-loop-orchestration-runtime`) | parked |
+
+### Part O — routing note
+
+One consume-now digest item — the corroboration bundle — lands HERE as the citation bank:
+H5/H6/H7 (+H4 neutrality, H8-coordination, H1 dual-audience) are findings that corroborate
+already-operating dot-agents theses from a new (investor) incentive pool; they route as
+citations, not records, and re-decide nothing. One parked lead (H8b cross-org control plane)
+routed as a fold-back proposal with a named trigger. Four hypotheses (H2/H3/H9/H10)
+out-of-scope with reasons recorded in the mapping. No frozen or mid-flight plan
+(`package-artifact-install`) touched; no gate changed; no prior knowledge superseded (this
+source adds corroboration, it retires nothing).
+
+### Part O — open questions / chase list
+
+1. Track the scorecard itself — Variant framed it as dated and revisitable; if the firm
+   publishes a follow-up scoring (which hypotheses aged well), that revision is worth a
+   targeted re-pass, since a VC publicly grading its own H5–H8 calls would be rare
+   longitudinal color for the harness/routing convergence cluster. Low priority. (O.1)
+2. H8's "coordinating … across organizations" — does any named product/protocol exist yet
+   for cross-org agent control planes worth a look when the H8b trigger fires? Attach to the
+   parked lead when triggered; no chase now. (O.1 H8b)
+
+## Part P — 2026-07-15 addendum: Secure Scalable Agent Infra (larsencc / Browser Use, targeted pass)
+
+Ingested at owner request to give the re-anchored control-plane lead a concrete architecture
+reference. Practitioner report (shipped at scale) on running untrusted agents behind a
+**control-plane-as-credential-proxy**: zero-secret micro-VMs, per-session token, the control
+plane swaps the token for the real upstream key and forwards, the sandbox never sees a credential.
+
+### Part P.1 — appraisal
+
+- **[OVERLAP-SHARPEN → design reference] control plane = credential proxy.** The service form of
+  `t7-oci-auth`'s H12 secret-non-disclosure — secret refs only, resolved secret lives only in a
+  request header. Maps to the dot-agents daemon/bg-service (`r3-background-worker-service`) growing
+  an **auth proxy** (→ full session proxy) that holds registry/LLM/source creds and hands workers
+  session-scoped tokens.
+- **[OVERLAP-SHARPEN] "control plane = cold-recovery SOT, durable mount = warm cache."** The
+  **kg-as-sot** thesis verbatim (`graph-backend-adapter-contract` + workstore) + the
+  session-handoff-journal cold-recovery model + per-session durable-workspace lifecycle.
+- **[UNVERIFIED-LEAD → parked] multiplayer control plane.** One credential-holding proxy brokering
+  many isolated per-session tokens is the substrate for cross-operator shared context + scoped
+  permissions (Variant H8b). This is why H8b re-homed here.
+- **[WE-AHEAD / OUT-OF-SCOPE]** the AWS-native substrate (AgentCore micro-VMs, IAM/VPC/S3, elastic
+  per-session billing) is Browser-Use's hosting problem — cited for the pattern, never the substrate.
+
+### Part P — routing note
+
+Corroboration + one design-reference, no new gate. The single actionable move is the **re-home**
+of the H8b control-plane lead from `full-loop-orchestration-runtime` to `r3-background-worker-service`
+as fold-back `control-plane-auth-proxy-lead` (proposal), with larsencc as the architecture reference
+and the daemon-auth-proxy work as the primary trigger. The prior `control-plane-multiplayer-lead`
+record is marked SUPERSEDED → points here. No frozen or mid-flight plan touched.
+
+---
+
 *Document status: draft. No changes made to code, specs, or plans. This is evaluation only.
 Second pass (Parts H/I resolution + Part J) completed 2026-07-12 against the inflight
 `transcript-analysis-and-pipeline-craft` and `full-loop-orchestration-runtime` plans.
@@ -2105,4 +2393,16 @@ added 2026-07-13: supplies measured anchors (Cognition L.1, LangChain L.5, ATG p
 clusters Parts J/K corroborated only from linkless sources; frozen-plan items corroboration-
 first, config/pipeline/runtime items routed live to their own plans. Part M (Bilevel Autoresearch
 meta-loop paper) added 2026-07-13: theoretical anchor for the self-improvement/meta-loop thesis
-(mechanism-change ≫ parameter-change) + safety corroboration for the skill-validation gate.*
+(mechanism-change ≫ parameter-change) + safety corroboration for the skill-validation gate.
+Part N (Great Flattening manifesto, targeted pass) added 2026-07-15: four-pillar convergence
+corroboration (cross-lab review, judgment-in-harness, model routing, fresh-context sub-agents)
++ three parked leads (cloud stack execution, see-it-run testing, token allocator); post-freeze
+discipline applied near `package-artifact-install`. Part O (Variant Fund "Investing in
+Autonomy" VC thesis scorecard, targeted pass) added 2026-07-15: investor-genre corroboration
+of the harness-value / multi-model-routing / orchestration>model / multiplayer-coordination
+cluster (H4–H8 vs N.1/I.3/I.4/L.5/L.6) + one parked lead (H8b cross-org control plane);
+post-freeze discipline applied near `package-artifact-install`. Part P (larsencc / Browser Use
+"Secure Scalable Agent Infra", targeted pass) added 2026-07-15 at owner request: architecture
+reference (control-plane-as-credential-proxy, SOT+warm-cache) that re-homes the H8b control-plane
+lead from `full-loop-orchestration-runtime` to `r3-background-worker-service`
+(`control-plane-auth-proxy-lead`), tying it to the daemon auth-proxy + kg-as-sot + workstore.*
