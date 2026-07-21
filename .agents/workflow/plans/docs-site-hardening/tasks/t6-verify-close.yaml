@@ -1,0 +1,19 @@
+schema_version: 1
+plan_id: docs-site-hardening
+order: 5
+task:
+    id: t6-verify-close
+    title: Build + a11y + link-check + re-review; close
+    status: pending
+    depends_on:
+        - t2-internal-content-migration
+        - t3-onboarding-harden
+        - t4-diagram-set
+        - t5-e2e-process-spec
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web
+    verification_required: true
+    notes: Two-pass build green, a11y (web-a11y lens) + link-check clean, and a fresh reviewer confirms the overload is gone; then archive.
+    app_type: docs/web
