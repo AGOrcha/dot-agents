@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -957,23 +958,87 @@ func readPlanTaskRecordsFromCommit(projectPath, commit, planID string) ([]stateR
 	if lsErr != nil {
 		return nil, nil
 	}
-	var records []stateRefTaskRecord
+	var names []string
 	for _, name := range strings.Split(strings.TrimSpace(out), "\n") {
 		name = strings.TrimSpace(name)
 		if name == "" || !strings.HasSuffix(name, ".yaml") {
 			continue
 		}
-		blob, showErr := gitStateExec(projectPath, nil, nil, "show", treeish+"/"+name)
-		if showErr != nil {
-			return nil, showErr
-		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	blobs, err := catFileBatchBlobs(projectPath, treeish, names)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]stateRefTaskRecord, 0, len(names))
+	for _, blob := range blobs {
 		var rec stateRefTaskRecord
-		if err := yaml.Unmarshal([]byte(blob), &rec); err != nil {
+		if err := yaml.Unmarshal(blob, &rec); err != nil {
 			return nil, err
 		}
 		records = append(records, rec)
 	}
 	return records, nil
+}
+
+// catFileBatchBlobs resolves every treeish/name to its blob content in ONE
+// `git cat-file --batch` invocation, returning contents in the SAME order as
+// names. This collapses the prior O(len(names)) `git show` fan-out to a single
+// spawn. cat-file --batch echoes a name it cannot resolve as "<object> missing"
+// (exit 0), so a missing entry is surfaced as an error — mirroring the per-blob
+// `git show` failure the old read path returned. Output is size-framed and
+// binary-safe; gitStateExec returns stdout verbatim, so []byte(out) is exact.
+func catFileBatchBlobs(projectPath, treeish string, names []string) ([][]byte, error) {
+	var stdin bytes.Buffer
+	for _, name := range names {
+		stdin.WriteString(treeish + "/" + name + "\n")
+	}
+	out, err := gitStateExec(projectPath, nil, stdin.Bytes(), "cat-file", "--batch")
+	if err != nil {
+		return nil, err
+	}
+	return parseCatFileBatch([]byte(out), names)
+}
+
+// parseCatFileBatch decodes `git cat-file --batch` stdout into one blob per
+// name, in order. Each found entry is `<oid> SP <type> SP <size> LF` followed
+// by exactly <size> content bytes and a trailing LF; an unresolved name is
+// `<object> SP missing LF`. A missing entry or any framing corruption is an
+// error, matching the old per-`git show` path's error behavior.
+func parseCatFileBatch(data []byte, names []string) ([][]byte, error) {
+	blobs := make([][]byte, 0, len(names))
+	pos := 0
+	for _, name := range names {
+		nl := bytes.IndexByte(data[pos:], '\n')
+		if nl < 0 {
+			return nil, fmt.Errorf("git cat-file --batch: truncated header for %q", name)
+		}
+		header := string(data[pos : pos+nl])
+		pos += nl + 1
+		if strings.HasSuffix(header, " missing") {
+			return nil, fmt.Errorf("git cat-file --batch: object missing for %q", name)
+		}
+		fields := strings.Fields(header)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("git cat-file --batch: malformed header %q", header)
+		}
+		size, err := strconv.Atoi(fields[2])
+		if err != nil {
+			return nil, fmt.Errorf("git cat-file --batch: bad size in header %q: %w", header, err)
+		}
+		if pos+size > len(data) {
+			return nil, fmt.Errorf("git cat-file --batch: truncated content for %q", name)
+		}
+		blobs = append(blobs, data[pos:pos+size])
+		pos += size
+		if pos < len(data) && data[pos] == '\n' {
+			pos++
+		}
+	}
+	return blobs, nil
 }
 
 // planTaskStateRefDirRel returns the repo-relative (slash-separated) ref path of

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/testutil"
+	"go.yaml.in/yaml/v3"
 )
 
 // stateRefTestPlanID is the plan id the git-ref CAS write tests seed.
@@ -645,6 +647,26 @@ func TestReadPlanTaskRecordsFromStateRef_SkipsNonYamlEntries(t *testing.T) {
 	}
 }
 
+// TestReadPlanTaskRecordsFromStateRef_OnlyNonYamlIsEmpty covers the leg where
+// the tasks/ dir exists on the ref but holds no .yaml blob: the batch is
+// skipped entirely and no records are returned.
+func TestReadPlanTaskRecordsFromStateRef_OnlyNonYamlIsEmpty(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	base := ".agents/workflow/plans/" + stateRefTestPlanID + "/tasks/"
+	if err := writeStateRefCAS(repo, []stateRefFile{
+		{relPath: base + "notes.txt", content: []byte("ignore me\n")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := readPlanTaskRecordsFromStateRef(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("only non-.yaml entries must yield no error, got: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("only non-.yaml entries must yield empty records, got %d", len(recs))
+	}
+}
+
 // TestProjectPlanTasksFromStateRef_MalformedBlobErrors covers the unmarshal
 // error leg in readPlanTaskRecordsFromStateRef and its propagation through
 // projectPlanTasksFromStateRef.
@@ -656,6 +678,110 @@ func TestProjectPlanTasksFromStateRef_MalformedBlobErrors(t *testing.T) {
 	}
 	if _, err := projectPlanTasksFromStateRef(repo, stateRefTestPlanID); err == nil {
 		t.Fatal("expected unmarshal error from a malformed per-task blob")
+	}
+}
+
+// TestReadPlanTaskRecordsFromStateRef_MultiTaskMatchesPerShow proves the
+// batched cat-file read returns records byte-identical, and in the SAME order,
+// as the prior per-blob `git show` path it replaced (H3 CAS-safety). It seeds
+// three task blobs whose lexical name order differs from their Order field, so
+// the assertion pins ls-tree name order (what both paths iterate), not Order.
+func TestReadPlanTaskRecordsFromStateRef_MultiTaskMatchesPerShow(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	base := ".agents/workflow/plans/" + stateRefTestPlanID + "/tasks/"
+	names := []string{"t1.yaml", "t2.yaml", "t3.yaml"}
+	orders := []int{2, 0, 1}
+	var files []stateRefFile
+	for i, name := range names {
+		rec := stateRefTaskRecord{
+			SchemaVersion: 1, PlanID: stateRefTestPlanID, Order: orders[i],
+			Task: CanonicalTask{ID: strings.TrimSuffix(name, ".yaml"), Status: "pending"},
+		}
+		blob, err := yamlMarshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, stateRefFile{relPath: base + name, content: blob})
+	}
+	if err := writeStateRefCAS(repo, files); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := readPlanTaskRecordsFromStateRef(repo, stateRefTestPlanID)
+	if err != nil {
+		t.Fatalf("batched read errored: %v", err)
+	}
+
+	// Reconstruct via the old per-`git show` behavior directly from the ref.
+	treeish := stateRefName + ":" + base
+	var want []stateRefTaskRecord
+	for _, name := range names {
+		blob := gitOut(t, repo, "show", treeish+name)
+		var rec stateRefTaskRecord
+		if err := yaml.Unmarshal([]byte(blob), &rec); err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, rec)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("batched read diverged from per-show:\n got=%+v\nwant=%+v", got, want)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 records, got %d", len(got))
+	}
+}
+
+// TestParseCatFileBatch_HappyPreservesOrderAndBinarySafety decodes a hand-built
+// two-entry batch stream where the second blob embeds newlines: size-framing
+// must return exact bytes (a naive line splitter would mangle it) in input
+// order.
+func TestParseCatFileBatch_HappyPreservesOrderAndBinarySafety(t *testing.T) {
+	c0 := []byte("a: 1\n")
+	c1 := []byte("multi\nline\nbody")
+	var data []byte
+	data = append(data, []byte(fmt.Sprintf("oid0 blob %d\n", len(c0)))...)
+	data = append(data, c0...)
+	data = append(data, '\n')
+	data = append(data, []byte(fmt.Sprintf("oid1 blob %d\n", len(c1)))...)
+	data = append(data, c1...)
+	data = append(data, '\n')
+	blobs, err := parseCatFileBatch(data, []string{"t0.yaml", "t1.yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(blobs, [][]byte{c0, c1}) {
+		t.Fatalf("blobs mismatch: %q", blobs)
+	}
+}
+
+// TestParseCatFileBatch_ErrorLegs covers each framing-failure branch that the
+// real ls-tree→cat-file path cannot reach (ls-tree only lists present blobs),
+// mirroring the old per-show error behavior.
+func TestParseCatFileBatch_ErrorLegs(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+	}{
+		{"missing", "srw:tasks/t1.yaml missing\n"},
+		{"truncatedHeader", "oid blob 5"},
+		{"malformedHeader", "oid blob\n"},
+		{"badSize", "oid blob xx\nbody\n"},
+		{"truncatedContent", "oid blob 100\nshort"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseCatFileBatch([]byte(tc.data), []string{"t1.yaml"}); err == nil {
+				t.Fatalf("%s: expected error", tc.name)
+			}
+		})
+	}
+}
+
+// TestCatFileBatchBlobs_GitErrorPropagates covers the gitStateExec error leg:
+// a non-git directory makes `cat-file --batch` fail, which must surface.
+func TestCatFileBatchBlobs_GitErrorPropagates(t *testing.T) {
+	if _, err := catFileBatchBlobs(t.TempDir(), "HEAD:tasks", []string{"t1.yaml"}); err == nil {
+		t.Fatal("expected git error from a non-git dir")
 	}
 }
 
