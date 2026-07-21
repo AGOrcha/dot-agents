@@ -8,4 +8,4 @@ updated_at: "2026-07-21T22:19:44Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: 'Phase 8 (H6+H8): dashboard store — snapshot invalidation (I/O) + sessions() projection memoization (CPU)'
+current_focus_task: 'Phase 5: workflow perf budget + CI bench/timing guard; revert 1200s timeout scaffold once Windows -race fits'

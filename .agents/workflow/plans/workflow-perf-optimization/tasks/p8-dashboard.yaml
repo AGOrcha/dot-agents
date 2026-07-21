@@ -4,7 +4,7 @@ order: 8
 task:
     id: p8-dashboard
     title: 'Phase 8 (H6+H8): dashboard store — snapshot invalidation (I/O) + sessions() projection memoization (CPU)'
-    status: pending
+    status: completed
     depends_on:
         - p0-instrumentation
     blocks: []
