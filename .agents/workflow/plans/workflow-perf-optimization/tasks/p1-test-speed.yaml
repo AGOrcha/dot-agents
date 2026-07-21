@@ -4,7 +4,7 @@ order: 1
 task:
     id: p1-test-speed
     title: 'Phase 1 (H1,H4): shared repo-template fixtures + seam migration + parallelize git-heavy suites'
-    status: pending
+    status: completed
     depends_on:
         - p0-instrumentation
     blocks: []

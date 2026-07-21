@@ -4,8 +4,8 @@ title: Workflow performance optimization (measure-first, hypothesis-proven)
 status: draft
 summary: ""
 created_at: "2026-07-21T05:27:47Z"
-updated_at: "2026-07-21T22:19:17Z"
+updated_at: "2026-07-21T22:19:44Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: 'Phase 1 (H1,H4): shared repo-template fixtures + seam migration + parallelize git-heavy suites'
+current_focus_task: 'Phase 3 (H3): batch/in-process state-ref read+write+commit (cat-file --batch / go-git tree); cut O(tasks) spawns'
