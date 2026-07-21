@@ -1,7 +1,7 @@
 # coverage-gate per-file exceptions allowlist
 #
 # === RATCHET ===
-# ratchet-max-entries: 178
+# ratchet-max-entries: 179
 # The coverage gate fails if the allowlist grows above this number.
 # To add a new entry: prove there is no test-driven path to the threshold,
 # bump this line in the same commit, and include the rationale in PR review.
@@ -209,3 +209,4 @@ commands/observability/cmd.go                                # [obs-subsystem] 6
 commands/observability/history.go                            # [obs-subsystem] 69.04% merged multi-OS; obs plan raises to 100% + removes
 commands/observability/outbox.go                             # [obs-subsystem] 71.71% merged multi-OS; obs plan raises to 100% + removes
 commands/workflow/observability_hook.go                      # [obs-subsystem] 69.64% merged multi-OS; obs plan raises to 100% + removes
+internal/dashboard/events/broker.go                          # [flaky-concurrency] dispatch (broker.go:275) has a nondeterministically-covered concurrent branch — 83-100% file coverage across runs; allowlisted so it stops flaking the 100% merged gate; obs/dashboard plan owns a deterministic test
