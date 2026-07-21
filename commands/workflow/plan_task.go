@@ -563,6 +563,7 @@ func readFileFromCanonicalRef(projectPath, absPath string) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
+	trackGitSpawn()
 	out, err := execabs.Command("git", "-C", projectPath, "show", ref+":"+filepath.ToSlash(rel)).Output()
 	if err != nil {
 		return nil, false
@@ -1130,6 +1131,7 @@ func stateRefCommitEnv(base []string) []string {
 // gitOutput it RETURNS the error and stderr, so the CAS loop can tell a rejected
 // compare-and-swap (ref moved) apart from a successful update.
 func gitStateExec(projectPath string, extraEnv []string, stdin []byte, args ...string) (string, error) {
+	trackGitSpawn()
 	cmd := execabs.Command("git", append([]string{"-C", projectPath}, args...)...)
 	if len(extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), extraEnv...)
@@ -3871,12 +3873,14 @@ func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fro
 // checkScopeGitDiffFiles returns the list of files with uncommitted changes using
 // `git diff --name-only HEAD`. Returns an error on failure (used for graceful degradation).
 func checkScopeGitDiffFiles(projectPath string) ([]string, error) {
+	trackGitSpawn()
 	cmd := execabs.Command("git", "diff", gitFlagNameOnly, "HEAD")
 	cmd.Dir = projectPath
 	cmd.Env = os.Environ()
 	out, err := cmd.Output()
 	if err != nil {
 		// Also try index-only (staged but not committed).
+		trackGitSpawn()
 		cmd2 := execabs.Command("git", "diff", gitFlagNameOnly, "--cached")
 		cmd2.Dir = projectPath
 		cmd2.Env = os.Environ()

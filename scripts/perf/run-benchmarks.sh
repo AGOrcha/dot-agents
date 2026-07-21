@@ -15,6 +15,12 @@
 #   internal/config/ensure_resolved_bench_test.go — §7A.5 auto-sync dispatch
 #   internal/platform/resource_plan_bench_test.go — shared-target projection
 #   commands/internal/lifecycle/install_bench_test.go — pass-2 packages hydrate
+#   commands/workflow/perf_bench_test.go              — workflow git hot paths + state-ref CAS (git-spawn counted)
+#   internal/graphstore/graphstore_bench_test.go      — KG impact/stats/search/edges @5k
+#   internal/dashboard/store/store_bench_test.go      — dashboard projection (sessions() rebuild)
+#   internal/adapters/builtin/crg/postprocess_bench_test.go — CRG derived views
+#   internal/platform/pipeline_projection_bench_test.go + resources_bench_test.go — pipeline emit + resource scan
+#   internal/config/agentsrc_bench_test.go            — manifest load/generate
 #
 # See docs/PERF_BUDGET.md for the documented baseline numbers and the
 # rationale behind each optimization this suite guards against regressing.
@@ -30,6 +36,10 @@ BENCH_PACKAGES=(
   ./internal/config/...
   ./internal/platform/...
   ./commands/internal/lifecycle/...
+  ./commands/workflow/...
+  ./internal/graphstore/...
+  ./internal/dashboard/store/...
+  ./internal/adapters/builtin/crg/...
 )
 
 echo "package-artifact-install t9 perf regression guard — $(date -u)" | tee "${REPORT}"
