@@ -25,6 +25,7 @@
     {
       "binding": "OBS_DB",
       "database_name": "agorcha-obs-db",
+      "database_id": "df2898b7-ea7b-427e-86f9-30647c7468da",
       "migrations_dir": "./migrations"
     }
   ],

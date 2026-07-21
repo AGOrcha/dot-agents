@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AccessJwtVerifier, StaticJwksProvider } from "../src/access-jwt.ts";
+import { AccessJwtVerifier, CloudflareAccessJwksProvider, StaticJwksProvider } from "../src/access-jwt.ts";
 import { enforceAccessGate } from "../src/auth-gate.ts";
 
 const keyPair = await crypto.subtle.generateKey(
@@ -202,4 +202,23 @@ test("the verifier returns the signed subject through the static provider", asyn
   assert.deepEqual(await verifier.verify(await signedAssertion()), {
     subject: "fixture-cli",
   });
+});
+
+test("CloudflareAccessJwksProvider calls fetch with global this, not the provider (illegal-invocation guard)", async () => {
+  // Regression: storing `fetch` on the instance and calling `this.fetcher(...)`
+  // invokes it with the provider as `this`, which the Workers runtime rejects
+  // with "Illegal invocation". The provider must bind fetch to globalThis.
+  let capturedThis: unknown = "unset";
+  function recordingFetch(this: unknown): Promise<Response> {
+    capturedThis = this;
+    return Promise.resolve(
+      new Response(JSON.stringify({ keys: [{ kid: "k1", kty: "RSA" }] }), { status: 200 }),
+    );
+  }
+  const provider = new CloudflareAccessJwksProvider(
+    "team.cloudflareaccess.com",
+    recordingFetch as unknown as typeof fetch,
+  );
+  await provider.getJwks();
+  assert.notEqual(capturedThis, provider);
 });
