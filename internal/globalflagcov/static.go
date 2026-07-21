@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -24,12 +25,12 @@ type staticAnalysis struct {
 	calls map[string][]string
 }
 
-func loadStatic(moduleRoot string) (*staticAnalysis, error) {
+func loadStatic(moduleRoot string, runs []runRecord) (*staticAnalysis, error) {
 	abs, err := filepath.Abs(moduleRoot)
 	if err != nil {
 		return nil, err
 	}
-	okPkgs, err := loadCommandPackages(abs)
+	okPkgs, err := loadCommandPackages(abs, runs)
 	if err != nil {
 		return nil, err
 	}
@@ -45,34 +46,62 @@ func loadStatic(moduleRoot string) (*staticAnalysis, error) {
 	return s, nil
 }
 
-// loadCommandPackages type-checks the explicit command packages used by the
-// CLI and returns only those without errors and with the syntax/types data
-// the analyzer needs.
-func loadCommandPackages(absDir string) ([]*packages.Package, error) {
+// loadCommandPackages derives the packages that define handlers in the live
+// command tree, then returns only those without errors and with the syntax/types
+// data the analyzer needs.
+func loadCommandPackages(absDir string, runs []runRecord) ([]*packages.Package, error) {
+	patterns, err := commandPackagePatterns(absDir, runs)
+	if err != nil {
+		return nil, err
+	}
+	return loadPackagePatterns(absDir, patterns)
+}
+
+// commandPackagePatterns maps each reachable handler's runtime source file to
+// its package directory. This deliberately avoids ./commands/...: packages with
+// no handler wired into the root command tree stay outside the analysis.
+func commandPackagePatterns(absDir string, runs []runRecord) ([]string, error) {
+	seen := make(map[string]struct{})
+	for _, run := range runs {
+		fn := runtime.FuncForPC(run.pc)
+		if fn == nil {
+			return nil, fmt.Errorf("derive command packages: no runtime function for handler %q", run.handlerName)
+		}
+		file, _ := fn.FileLine(run.pc)
+		if file == "" {
+			return nil, fmt.Errorf("derive command packages: no source file for handler %q", run.handlerName)
+		}
+		rel, err := filepath.Rel(absDir, filepath.Dir(file))
+		if err != nil {
+			return nil, fmt.Errorf("derive command packages for %q: %w", run.handlerName, err)
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("derive command packages: handler %q is outside module root", run.handlerName)
+		}
+		pattern := "."
+		if rel != "." {
+			pattern = "./" + filepath.ToSlash(rel)
+		}
+		seen[pattern] = struct{}{}
+	}
+	if len(seen) == 0 {
+		return nil, fmt.Errorf("derive command packages: no reachable handlers")
+	}
+
+	patterns := make([]string, 0, len(seen))
+	for pattern := range seen {
+		patterns = append(patterns, pattern)
+	}
+	sort.Strings(patterns)
+	return patterns, nil
+}
+
+func loadPackagePatterns(absDir string, patterns []string) ([]*packages.Package, error) {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule,
 		Dir:  absDir,
 	}
-	// Load explicit command packages only. A glob like ./commands/... would also
-	// type-check experimental subpackages (e.g. commands/workflow) that are not
-	// yet wired into the root CLI build graph.
-	pkgs, err := packages.Load(cfg,
-		"./commands",
-		"./commands/agents",
-		"./commands/config",
-		"./commands/internal/lifecycle",
-		"./commands/sync",
-		"./commands/hooks",
-		"./commands/skills",
-		"./commands/kg",
-		"./commands/internal/cmdutil",
-		"./commands/internal/mcp",
-		"./commands/internal/rules",
-		"./commands/internal/settings",
-		"./commands/workflow",
-		"./commands/observability",
-		"./commands/worktree",
-	)
+	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
 		return nil, err
 	}

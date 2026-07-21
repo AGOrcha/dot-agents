@@ -1,46 +1,23 @@
-# Register a new command package in the globalflagcov analyzer
+# Command packages are auto-derived by globalflagcov
 
-`internal/globalflagcov` statically analyzes every cobra command's `RunE` closure
-to prove which global persistent flags it reads. It loads an **explicit,
-hand-maintained list** of command packages (`loadCommandPackages` in
-`internal/globalflagcov/static.go` — a literal `packages.Load(cfg, "./commands",
-"./commands/agents", …)` call), deliberately NOT a `./commands/...` glob (the
-comment says the glob would pull in not-yet-wired experimental subpackages).
-
-## The failure
-
-When you add a new command package and wire it into the root command tree
-(`commands/root.go`), but do NOT add it to that explicit list, its `RunE` closures
-resolve as **"unresolved closure …"** and `TestReportNoUnresolvedHandlers` fails:
-
-```
-observability status: unresolved closure observability.NewCmd.newStatusCmd.func1
-observability sync: unresolved closure observability.newSyncCmd.func1
-```
-
-(The analyzer can't find the closure's `FuncLit` because the package isn't in its
-loaded set — compiler inlining of small constructors makes the symbol names look
-odd, e.g. `NewCmd.newStatusCmd.func1`, but the root cause is the missing package.)
+`internal/globalflagcov` statically analyzes every Cobra command's `RunE` or
+`Run` handler to prove which global persistent flags it reads. The analyzer now
+builds the same root command tree as the CLI, walks its reachable commands, maps
+each handler's runtime program counter back to its defining Go package, and
+loads that deduplicated package set.
 
 ## Rule
 
-Adding a command package that lands in the root CLI = add `"./commands/<pkg>",` to
-the `packages.Load` list in `internal/globalflagcov/static.go`, same commit.
+Do **not** manually register new command packages in `globalflagcov`. Wire the
+command into `commands.NewRootCommand`; its handler package is then included
+automatically. Packages without a reachable handler are intentionally excluded,
+so the analyzer retains the old guard against pulling in experimental
+`./commands/...` subpackages.
 
-## Why it bites in fan-out
+## Historical context
 
-This is a **cross-cutting guard outside any one command package's write_scope** — a
-subagent scoped to `commands/observability/` cannot see it, and its focused
-`go test ./commands/observability/...` passes clean. It only fails under
-`go test ./...`. The orchestrator (or whoever runs the full suite at integration)
-catches it, never the slice worker. Budget a full-suite run at plan integration for
-exactly this class of guard. Grounded in obs-dashboard-cf-deploy o8 (fixed in #467);
-sibling of [[lint-check-count-assertion]] (a guard test that needs a manual update
-when you add a surface).
-
-## Durable fix (follow-up)
-
-The analyzer could derive its package set from the actual root command tree
-(walk `root.Commands()` transitively) instead of a hand-maintained literal list,
-which would make this class of miss impossible. Tracked as a proposal
-(`~/.agents/proposals/globalflagcov-derive-command-packages.md`).
+The analyzer formerly used an explicit `packages.Load` list. Missing a newly
+wired package caused `TestReportNoUnresolvedHandlers` to report an "unresolved
+closure" only in the integrated suite, as happened for observability o8 and was
+patched manually in #467. This PR removes that maintenance rule by deriving the
+package set from the live command tree.

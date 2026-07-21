@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/commands"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -191,23 +192,71 @@ func F() {}`
 }
 
 func TestLoadStaticBadRoot(t *testing.T) {
-	if _, err := loadStatic(string([]byte{0})); err == nil {
+	if _, err := loadStatic(string([]byte{0}), nil); err == nil {
 		t.Fatal("expected error from loadStatic with invalid path")
 	}
 }
 
-func TestLoadCommandPackagesNoPackages(t *testing.T) {
-	// A directory with no Go module / command packages yields no ok packages.
-	if _, err := loadCommandPackages(t.TempDir()); err == nil {
+func TestLoadCommandPackagesNoHandlers(t *testing.T) {
+	if _, err := loadCommandPackages(t.TempDir(), nil); err == nil {
+		t.Fatal("expected error when the command tree has no reachable handlers")
+	}
+}
+
+func TestCommandPackagePatternsRejectInvalidHandler(t *testing.T) {
+	runs := []runRecord{{handlerName: "invalid", pc: 0}}
+	if _, err := commandPackagePatterns(t.TempDir(), runs); err == nil {
+		t.Fatal("expected error for a handler with no runtime function")
+	}
+}
+
+func TestCommandPackagePatternsRejectHandlerOutsideModule(t *testing.T) {
+	root := commands.NewRootCommand()
+	var runs []runRecord
+	walkRunHandlers(root, &runs)
+	if _, err := commandPackagePatterns(t.TempDir(), runs); err == nil {
+		t.Fatal("expected error for a handler outside the module root")
+	}
+}
+
+func TestLoadPackagePatternsNoPackages(t *testing.T) {
+	if _, err := loadPackagePatterns(t.TempDir(), []string{"./commands"}); err == nil {
 		t.Fatal("expected error when no command packages load cleanly")
 	}
 }
 
-// TestLoadCommandPackagesLogsPerPackageErrors covers the len(p.Errors) > 0
+func TestCommandPackagePatternsDerivedFromRoot(t *testing.T) {
+	moduleRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := commands.NewRootCommand()
+	var runs []runRecord
+	walkRunHandlers(root, &runs)
+
+	patterns, err := commandPackagePatterns(moduleRoot, runs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]bool, len(patterns))
+	for _, pattern := range patterns {
+		got[pattern] = true
+	}
+	for _, required := range []string{"./commands/observability", "./commands/worktree"} {
+		if !got[required] {
+			t.Errorf("derived packages missing reachable handler package %q: %v", required, patterns)
+		}
+	}
+	if got["./commands/eval"] {
+		t.Errorf("derived packages unexpectedly include commands/eval; its reachable handlers are defined in ./commands: %v", patterns)
+	}
+	t.Logf("derived command packages: %v", patterns)
+}
+
+// TestLoadPackagePatternsLogsPerPackageErrors covers the len(p.Errors) > 0
 // branch specifically: a broken package must be logged (not silently
-// excluded) while a sibling clean package still loads fine -- distinct from
-// TestLoadCommandPackagesNoPackages, where the whole module fails to load.
-func TestLoadCommandPackagesLogsPerPackageErrors(t *testing.T) {
+// excluded) while a sibling clean package still loads fine.
+func TestLoadPackagePatternsLogsPerPackageErrors(t *testing.T) {
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, "go.mod"), "module fixturemod\n\ngo 1.23\n")
 	mustWriteFile(t, filepath.Join(root, "commands", "root.go"),
@@ -220,12 +269,12 @@ func TestLoadCommandPackagesLogsPerPackageErrors(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	pkgs, err := loadCommandPackages(root)
+	pkgs, err := loadPackagePatterns(root, []string{"./commands", "./commands/agents"})
 	if err != nil {
-		t.Fatalf("loadCommandPackages() = %v, want nil (the clean ./commands package should still load)", err)
+		t.Fatalf("loadPackagePatterns() = %v, want nil (the clean ./commands package should still load)", err)
 	}
 	if len(pkgs) == 0 {
-		t.Fatal("loadCommandPackages() returned no packages, want the clean ./commands package")
+		t.Fatal("loadPackagePatterns() returned no packages, want the clean ./commands package")
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("package failed to load")) {
 		t.Errorf("expected a warning log for the broken package, got %q", buf.String())
