@@ -24,3 +24,9 @@ variable "allowed_idp_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "obs_maintainer_emails" {
+  description = "Emails allowed to browse obs.agorcha.dev (single-tenant dot-agents observability)."
+  type        = list(string)
+  default     = ["nikprakash20@gmail.com", "nikashprakash1@gmail.com"]
+}
