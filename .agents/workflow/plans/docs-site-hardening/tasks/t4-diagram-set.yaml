@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: docs-site-hardening
+order: 3
+task:
+    id: t4-diagram-set
+    title: Per-stage drill-down diagrams + wikilink graph
+    status: pending
+    depends_on:
+        - t1-audience-ia
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/src/pages/diagrams
+        - docs/concepts
+    verification_required: true
+    notes: Expand from the single e2e lifecycle map to a drill-down diagram per stage (ideate/plan/execute/verify/observe/fold-back), cross-linked into a wikilink graph from the lifecycle overview.
+    app_type: docs/web
