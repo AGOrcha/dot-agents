@@ -95,6 +95,19 @@ func IterationLogDir(projectPath string) string {
 	return filepath.Join(projectPath, iterationLogRelDir)
 }
 
+// iterRecordPath returns the canonical iter-N.yaml record path for a project.
+// Centralized (with hookOutcomeSidecarPath / scoreSidecarPath) so the
+// "iter-%d.yaml" name lives in exactly one place.
+func iterRecordPath(projectPath string, n int) string {
+	return filepath.Join(IterationLogDir(projectPath), fmt.Sprintf("iter-%d.yaml", n))
+}
+
+// scoreSidecarPath returns the canonical per-iteration score sidecar path
+// (iter-N.score.yaml) for a project — the R1 sibling of hookOutcomeSidecarPath.
+func scoreSidecarPath(projectPath string, n int) string {
+	return filepath.Join(IterationLogDir(projectPath), fmt.Sprintf("iter-%d.score.yaml", n))
+}
+
 // currentIterationIncludePaths returns the repo-relative (forward-slash),
 // project-relative paths of the CURRENT iteration's iter-log artifacts that
 // exist on disk: iter-N.yaml plus its optional hook-outcomes and score
@@ -115,11 +128,10 @@ func currentIterationIncludePaths(projectPath string) []string {
 	if err != nil || !active {
 		return nil
 	}
-	iterDir := IterationLogDir(projectPath)
 	candidates := []string{
-		filepath.Join(iterDir, fmt.Sprintf("iter-%d.yaml", n)),
+		iterRecordPath(projectPath, n),
 		hookOutcomeSidecarPath(projectPath, n),
-		filepath.Join(iterDir, fmt.Sprintf("iter-%d.score.yaml", n)),
+		scoreSidecarPath(projectPath, n),
 	}
 	var includes []string
 	for _, abs := range candidates {

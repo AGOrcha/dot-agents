@@ -28,7 +28,11 @@ defaults:
     shell: bash
 
 env:
-  GO_TEST_FLAGS: -race -count=1 -timeout=300s
+  # commands/workflow is a large git-heavy package (~438s non-race measured on a
+  # real Windows box); -race adds 2-10x, so under -race on windows-latest it
+  # exceeds Go's 600s default. -timeout is PER-PACKAGE, so this only lets the one
+  # slow package finish — fast packages are unaffected and a genuine hang still fails.
+  GO_TEST_FLAGS: -race -count=1 -timeout=1200s
 
 jobs:
   lint-workflows:
