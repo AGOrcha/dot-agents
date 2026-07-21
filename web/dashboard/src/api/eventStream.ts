@@ -83,6 +83,8 @@ export interface EventStreamController {
   close: () => void
   /** Number of consecutive failed connects (0 while healthy). Exposed for tests. */
   attempt: () => number
+  /** Close the active source and schedule a reconnect using the normal backoff. */
+  reconnect: () => void
 }
 
 const DEFAULT_BASE_DELAY_MS = 1000
@@ -139,6 +141,13 @@ export function createEventStream(options: EventStreamOptions): EventStreamContr
     }, delay)
   }
 
+  const disconnectAndReconnect = (failedSource: EventSourceLike): void => {
+    if (closed || source !== failedSource) return
+    failedSource.close()
+    source = null
+    if (reconnectToken === null) scheduleReconnect()
+  }
+
   function connect(): void {
     if (closed) return
     const es = makeSource(url)
@@ -156,9 +165,7 @@ export function createEventStream(options: EventStreamOptions): EventStreamContr
     es.onerror = () => {
       // Tear down the failed socket and back off; the native retry is bypassed
       // so a single, explicit reconnect schedule owns the cadence.
-      es.close()
-      if (source === es) source = null
-      scheduleReconnect()
+      disconnectAndReconnect(es)
     }
 
     for (const topic of topics) {
@@ -178,6 +185,13 @@ export function createEventStream(options: EventStreamOptions): EventStreamContr
       if (source) {
         source.close()
         source = null
+      }
+    },
+    reconnect: () => {
+      if (source) {
+        disconnectAndReconnect(source)
+      } else if (reconnectToken === null) {
+        scheduleReconnect()
       }
     },
     attempt: () => attempt,

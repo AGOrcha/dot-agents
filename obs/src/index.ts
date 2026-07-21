@@ -384,6 +384,10 @@ async function dispatch(request: Request, env: Env): Promise<Response> {
     return handleReadRoute(request, env);
   }
 
+  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+    return errorResponse(404, "not_found", "route not found");
+  }
+
   if (
     (request.method === "GET" || request.method === "HEAD") &&
     !url.pathname.startsWith(`${API_ROOT}/`)
