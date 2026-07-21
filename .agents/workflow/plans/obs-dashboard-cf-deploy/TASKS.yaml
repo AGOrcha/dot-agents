@@ -33,27 +33,9 @@ tasks:
             Access-protected hostname).
         Verify: spec exists with single-tenant + per-project-routing decision explicit and each
         of (1)-(5) decided as a concrete contract downstream tasks cite.
-    - id: o1-obs-deploy-spec
-      title: Formalize the obs CF-Worker+DO+D1 deploy into a canonical spec
-      status: pending
-      depends_on: []
-      blocks: []
-      owner: ""
-      write_scope:
-        - .agents/workflow/specs/obs-dashboard-cf-deploy/
-      verification_required: true
-      notes: |-
-        Promote the obs sections of the maintainer-reviewed proposal
-        (agorcha-public-vs-internal-and-obs-deploy §3.4-App2, §4 DO+D1, §5 push/sync, §6
-        local-canonical) into a canonical spec via spec-scaffold. Records the ratified
-        decisions + done criteria + the still-open §8 items as open questions. Notes the
-        coexistence with dashboard-subsystem-and-bus-security (local SSE, loopback) vs the
-        remote obs deploy (WebSocket, CF Access, multi-project) - not a conflict, a layering.
-        Verify: spec exists at write_scope with decisions tracing to the proposal; open
-        questions carry the §8 unresolved items.
     - id: o2-obs-cf-access-app
       title: CF Access app for obs.agorcha.dev (dual-auth) via Terraform
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: ""
@@ -97,7 +79,7 @@ tasks:
       title: obs/ Worker scaffold - wrangler, DO+D1 bindings, ingest endpoint
       status: pending
       depends_on:
-        - o1-obs-deploy-spec
+        - o1-obs-deploy-spec-and-contracts
         - o2-obs-cf-access-app
       blocks: []
       owner: ""
