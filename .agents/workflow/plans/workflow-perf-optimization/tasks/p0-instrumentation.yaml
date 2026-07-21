@@ -4,7 +4,7 @@ order: 0
 task:
     id: p0-instrumentation
     title: 'Phase 0: workflow benchmark + git-subprocess-counter + pprof harness; capture Mac+Windows baselines'
-    status: pending
+    status: completed
     depends_on: []
     blocks: []
     owner: dot-agents

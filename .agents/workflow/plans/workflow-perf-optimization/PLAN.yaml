@@ -4,8 +4,8 @@ title: Workflow performance optimization (measure-first, hypothesis-proven)
 status: draft
 summary: ""
 created_at: "2026-07-21T05:27:47Z"
-updated_at: "2026-07-21T05:47:02Z"
+updated_at: "2026-07-21T18:40:12Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: ""
+current_focus_task: 'Phase 1 (H1,H4): shared repo-template fixtures + seam migration + parallelize git-heavy suites'
