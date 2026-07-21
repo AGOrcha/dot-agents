@@ -84,6 +84,83 @@
         }
       }
     },
+    "observability": {
+      "type": "object",
+      "description": "Observability publication endpoint and optional credential reference. The credential id resolves through the shared credential store; no resolved secret is committed here.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "format": "uri"
+        },
+        "push_throttle_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Minimum seconds between network pushes. Zero publishes immediately."
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "credential-ref"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["enabled"],
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": ["auth"]
+              },
+              {
+                "required": ["endpoint"],
+                "properties": {
+                  "endpoint": {
+                    "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://(?:[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]|127\\.0\\.0\\.1|\\[::1\\])(?::[0-9]+)?(?:[/?#]|$)"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": ["auth"]
+          },
+          "then": {
+            "required": ["endpoint"],
+            "properties": {
+              "endpoint": {
+                "pattern": "^[Hh][Tt][Tt][Pp][Ss]://[^/?#]+(?:[/?#]|$)"
+              }
+            }
+          }
+        }
+      ]
+    },
     "stage_profiles": {
       "type": "object",
       "additionalProperties": false,
