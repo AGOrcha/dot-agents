@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: workflow-perf-optimization
+order: 6
+task:
+    id: p6-io-caching
+    title: 'Phase 6 (H6): command-scoped I/O caching — LoadAgentsRC manifest cache, platform resources scoped-listing memo, hooks render-hash reuse'
+    status: pending
+    depends_on:
+        - p0-instrumentation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/config/agentsrc.go
+        - internal/platform/resources.go
+        - internal/platform/hooks.go
+    verification_required: true
+    notes: ""
+    app_type: go-cli
