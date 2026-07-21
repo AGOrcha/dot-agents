@@ -1258,6 +1258,15 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	// blank rather than fabricated so `da doctor` can warn (p2+ scope).
 	rc.RepoID = DeriveRepoIDFromGit(projectPath)
 
+	// Default a new git-repo project to the git-ref work-tracking backend — the
+	// shipped, recommended coordination plane (a durable refs/agents/state audit
+	// trail + cross-worktree coordination, written ADDITIVELY over the working
+	// copy). A non-git project has no ref to write, so it stays on the local
+	// default. Existing manifests are untouched (this is generate-time only).
+	if NewGoGitRepo().IsRepo(projectPath) {
+		rc.WorkTracking = &AgentsRCWorkTracking{Backend: WorkTrackingBackendGitRef}
+	}
+
 	scopes := []string{projectName}
 
 	var errs []error
