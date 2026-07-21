@@ -4,6 +4,11 @@
 
 One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and OpenCode — and a set of composable primitives (dynamic loops, bounded workflows, agent teams) you assemble into your own agentic orchestration, not a closed set of commands.
 
+> **Fastest start:** paste one block into your AI agent and it installs `da`, runs
+> the guided onboarding, and tailors a setup to your project — see
+> **[Install & onboard](docs/INSTALL.md)**. New to the model? The
+> [AI development lifecycle](docs/concepts/ai-dev-lifecycle.md) maps the whole loop.
+
 The read-only R2 observability dashboard surfaces workflow runs, iteration
 scores, rubric details, and live scoring updates; see the
 [Observability Dashboard guide](docs/OBSERVABILITY_DASHBOARD.md) for today's
