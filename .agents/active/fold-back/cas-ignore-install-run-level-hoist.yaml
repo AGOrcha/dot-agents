@@ -1,0 +1,8 @@
+schema_version: 1
+id: cas-ignore-install-run-level-hoist
+plan_id: package-artifact-install
+task_id: ""
+observation: t9 perf follow-up (safe structural optimization, replaces the DROPPED per-call CASIgnore fast-path) — EnsureAndVerifyCASIgnore is called per-artifact during pass-2 hydrate and each call takes the inter-process gitignore lock, but the CAS-ignore pattern (cache/) is family/digest-INDEPENDENT, so it is identical for every artifact in a run. The per-call fast-path that tried to skip the redundant lock+write was dropped in t9 round-4 because it gated a fail-closed H14 security decision on an approximation of git's gitignore semantics and could not be proven airtight across three cross-harness review rounds (symlink, leading-whitespace, trailing-tab+negation variants). The SAFE win is structural — hoist the ignore-install+verify to run ONCE per install/refresh (before/around the per-artifact materialize loop in the pass-2 driver) rather than per-artifact, so the lock is taken once and every materialize inherits the verified-ignored store. No git-semantics reimplementation, no approximation — the gate still always canonicalizes+verifies, just once. Recovers most of the ~62%-of-CPU the per-call lock cost, without the divergence risk. Lesson — do NOT approximate an external tool's semantics (git gitignore matching) to gate a security decision; either invoke the tool, constrain the input to an unambiguous shape, or hoist the work so the expensive-but-correct path runs less often.
+classification: proposal
+routed_to: proposal:obs-cas-ignore-install-run-level-hoist.md
+created_at: "2026-07-16T09:01:42Z"

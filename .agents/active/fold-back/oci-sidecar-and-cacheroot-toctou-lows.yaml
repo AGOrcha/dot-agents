@@ -1,0 +1,8 @@
+schema_version: 1
+id: oci-sidecar-and-cacheroot-toctou-lows
+plan_id: package-artifact-install
+task_id: ""
+observation: t6 round-2 cross-harness (Codex) — two LOW defense-in-depth notes. (1) oci-type.json sidecar is plain mutable JSON, forgeable by any actor with direct write access to ~/.agents/cache/packages — but this does not exceed the pre-existing TOFU trust boundary of a digest-addressed cache (such an attacker can already seed an arbitrary new digest with self-chosen content). Action — document the sidecar's actual guarantee (cross-fetcher provenance within one trusted process, not cryptographic attestation vs a local fs attacker). (2) writeConfinedPackagesCacheFile treats packagesCacheRoot() as trusted and creates/opens it path-based before os.Root confinement begins; a symlink/junction planted at the cache root itself (not the digest subdir) is still followed. Higher bar (write access to cache-root parent) and unchanged from before round-2. Action — optional defense-in-depth (anchor at an already-open AgentsHome handle with no-follow) + a Windows junction regression test for os.Root reparse-point handling.
+classification: proposal
+routed_to: proposal:obs-oci-sidecar-and-cacheroot-toctou-lows.md
+created_at: "2026-07-16T02:56:27Z"

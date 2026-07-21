@@ -1,0 +1,8 @@
+schema_version: 1
+id: oci-pin-manifest-digest-deadcode
+plan_id: package-artifact-install
+task_id: ""
+observation: t6 round-2 cross-harness (Codex) — verifyOCIPin's manifest-vs-payload digest distinction is currently dead code. ManifestDigest is never populated anywhere (ociPull is an unwired transport stub), so verifyOCIPin always falls back to comparing the pin against the payload digest — identical to round-1 behavior. Not a regression, but the manifest/payload distinction the round-2 comments describe as fixed never activates. Close when the live OCI manifest-fetch wire protocol is wired to ociPull — require ManifestDigest populated, remove the payload-digest fallback, and add a test seam exercising distinct manifest vs payload digests so silent non-activation is caught. Tie to the ociPull wiring task.
+classification: proposal
+routed_to: proposal:obs-oci-pin-manifest-digest-deadcode.md
+created_at: "2026-07-16T02:56:27Z"

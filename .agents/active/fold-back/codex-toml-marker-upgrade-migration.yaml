@@ -1,0 +1,8 @@
+schema_version: 1
+id: codex-toml-marker-upgrade-migration
+plan_id: package-artifact-install
+task_id: ""
+observation: RESOLUTION DIRECTION (owner) — do NOT refuse or write a manual-remove release note. Route an unmarked colliding .codex/agents render through the EXISTING import mechanism (commands/import.go) and import it to the scope it physically lives at. The machinery already exists — importCandidate carries Origin=codex; runImportFromRefresh hooks import into refresh; on an on-disk conflict RFC section 6 applies non-destructive alternate naming plus an import-conflict review note at ~/.agents/review-notes/import-conflicts/. The t2b fail-closed refuse is a cruder parallel path to this. Seam should be content-aware — a toml whose bytes match what dot-agents WOULD render is provably a prior render, so mark+adopt it silently; a content-diverged toml is imported as a user resource at its scope (repo-local/project-local per its .codex/agents/ location) with alternate naming + review note. Either way it gains a definite provenance instead of ambiguous unmarked-then-refuse. Supersedes the earlier marker-migration-heuristic and release-note options. Follow-up (not this plan) — wire the projector collision path to the import seam; keep it gate-neutral for 0.5.0.
+classification: proposal
+routed_to: proposal:obs-codex-toml-marker-upgrade-migration.md
+created_at: "2026-07-16T01:43:26Z"

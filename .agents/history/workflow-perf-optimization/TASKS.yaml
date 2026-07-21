@@ -1,0 +1,142 @@
+schema_version: 1
+plan_id: workflow-perf-optimization
+tasks:
+    - id: p0-instrumentation
+      title: 'Phase 0: workflow benchmark + git-subprocess-counter + pprof harness; capture Mac+Windows baselines'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+        - scripts/perf/
+        - docs/PERF_BUDGET.md
+      verification_required: true
+      notes: 'Benchmarks + git-subprocess counter + pprof for BOTH the workflow git paths AND the repo-wide surfaces: graphstore impact/query, dashboard/store, workflow iter-log+hook-outcome, CRG postprocess, pipeline emit, agentsrc load/generate, platform resources/hooks. Extend scripts/perf + PERF_BUDGET. Capture Mac+Windows baselines. Gates ALL optimization (P1-P9).'
+      app_type: go-cli
+    - id: p1-test-speed
+      title: 'Phase 1 (H1,H4): shared repo-template fixtures + seam migration + parallelize git-heavy suites'
+      status: completed
+      depends_on:
+        - p0-instrumentation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+        - internal/testutil/
+      verification_required: true
+      notes: ""
+      app_type: go-cli
+    - id: p2-runtime-probes
+      title: 'Phase 2 (H2): collapse duplicate git-summary/isGitRepo probes on status+checkpoint'
+      status: completed
+      depends_on:
+        - p0-instrumentation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/state.go
+        - commands/workflow/iter_log.go
+      verification_required: true
+      notes: ""
+      app_type: go-cli
+    - id: p3-runtime-stateref
+      title: 'Phase 3 (H3): batch/in-process state-ref read+write+commit (cat-file --batch / go-git tree); cut O(tasks) spawns'
+      status: completed
+      depends_on:
+        - p0-instrumentation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/plan_task.go
+        - commands/workflow/state_ref_reconcile.go
+      verification_required: true
+      notes: ""
+      app_type: go-cli
+    - id: p4-cross-package
+      title: 'Phase 4 (H5): apply fixture/batch treatment to score_run, config/materialize, lifecycle, graphstore'
+      status: completed
+      depends_on:
+        - p0-instrumentation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/
+        - internal/config/
+        - internal/graphstore/
+      verification_required: true
+      notes: ""
+      app_type: go-cli
+    - id: p5-regression-gate
+      title: 'Phase 5: workflow perf budget + CI bench/timing guard; revert 1200s timeout scaffold once Windows -race fits'
+      status: completed
+      depends_on:
+        - p1-test-speed
+        - p3-runtime-stateref
+        - p6-io-caching
+        - p7-kg-graphstore
+        - p8-dashboard
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/perf/
+        - docs/PERF_BUDGET.md
+        - .github/workflows/
+      verification_required: true
+      notes: ""
+      app_type: go-cli
+    - id: p6-io-caching
+      title: 'Phase 6 (H6): command-scoped I/O caching — LoadAgentsRC manifest cache, platform resources scoped-listing memo, hooks render-hash reuse'
+      status: completed
+      depends_on:
+        - p0-instrumentation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - internal/platform/resources.go
+        - internal/platform/hooks.go
+      verification_required: true
+      notes: ""
+      app_type: go-cli
+    - id: p7-kg-graphstore
+      title: 'Phase 7 (H7): KG/graphstore query hot paths — impact BFS pre-size, per-row decodeExtra short-circuit, edge-batch args; + CRG postprocess'
+      status: completed
+      depends_on:
+        - p0-instrumentation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/impact.go
+        - internal/graphstore/sqlite.go
+        - internal/adapters/builtin/crg/postprocess.go
+      verification_required: true
+      notes: ""
+      app_type: go-cli
+    - id: p8-dashboard
+      title: 'Phase 8 (H6+H8): dashboard store — snapshot invalidation (I/O) + sessions() projection memoization (CPU)'
+      status: completed
+      depends_on:
+        - p0-instrumentation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/dashboard/store/
+      verification_required: true
+      notes: ""
+      app_type: go-cli
+    - id: p9-quick-wins
+      title: 'Phase 9 (H9): zero-risk wins — hoist per-call regexp.MustCompile (crg.go, paths.go), single-pass iter-log v1 decode, record-granular hook-outcome validation'
+      status: completed
+      depends_on:
+        - p0-instrumentation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/crg.go
+        - internal/config/paths.go
+        - commands/workflow/iter_log.go
+        - commands/workflow/hook_outcome.go
+      verification_required: true
+      notes: ""
+      app_type: go-cli

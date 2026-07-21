@@ -1,0 +1,8 @@
+schema_version: 1
+id: local-sourced-skill-name-collision
+plan_id: package-artifact-install
+task_id: ""
+observation: t5 dogfood — a real da install of dot-agents onto da-agc fails closed with a conflicting-intents error because this machine has a locally-authored ~/.agents/skills/dot-agents/release-docs-refresh/ while da-agc also provides a release-docs-refresh skill. Local-scope discovery is a directory scan in internal/platform/resource_plan.go, independent of .agentsrc.json's skills[] array, so a sourced package colliding with a same-named local resource has no defined precedence — it just errors. Needs a resolution rule (sourced vs local precedence, or an explicit shadow/override) so a package can supersede or coexist with a same-named local resource. Blocks the dogfood on any machine with the local skill.
+classification: proposal
+routed_to: proposal:obs-local-sourced-skill-name-collision.md
+created_at: "2026-07-16T02:28:33Z"

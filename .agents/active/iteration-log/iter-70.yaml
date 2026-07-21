@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 70
+date: "2026-07-16"
+wave: package-artifact-install
+task_id: t2c-codex-import-seam
+commit: 8c15b47d415a87de670bd5b19fe67a8782962ca3
+files_changed: 7
+lines_added: 978
+lines_removed: 436
+agent:
+    session_id: a0ab4351-a3bc-4505-b788-8ed74b7ddd9a
+    harness: claude-code
+    harness_version: 2.1.208
+    model: claude-opus-4-8
+    entrypoint: cli
+checkpoint_at: "2026-07-16T01:58:58Z"
+session_tokens:
+    input_tokens: 3319
+    output_tokens: 3034918
+    cache_read_tokens: 565989394
+    cache_creation_tokens: 8669137
+    cache_hit_rate: 0.9849142812081563
+    message_count: 1786
+impl:
+    item: ""
+    summary: ""
+    scope_note: ""
+    feedback_goal: An unmarked pre-existing .codex/agents render that collides on refresh is no longer refused — it is imported to the scope it physically lives at via the existing import machinery. A byte-identical unmarked toml (== the render we would write) is silently marked+adopted (no error, no data change); a content-diverged unmarked toml is imported as a user resource at its scope with RFC section-6 alternate naming + an import-conflict review note. dot-agents' own first-refresh upgrade completes clean with no manual step.
+    retries: 0
+    focused_tests_added: 0
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/t2c-codex-import-seam/review-decision.yaml
+    verify_record_appended: false
