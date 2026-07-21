@@ -37,14 +37,14 @@ type Row struct {
 
 // Report generates coverage rows for every command with a RunE (or Run) on the default root tree.
 func Report(moduleRoot string) ([]Row, error) {
-	st, err := loadStatic(moduleRoot)
-	if err != nil {
-		return nil, err
-	}
-
 	root := commands.NewRootCommand()
 	var runs []runRecord
 	walkRunHandlers(root, &runs)
+
+	st, err := loadStatic(moduleRoot, runs)
+	if err != nil {
+		return nil, err
+	}
 
 	rows := make([]Row, 0, len(runs))
 	for _, rr := range runs {
