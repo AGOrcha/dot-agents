@@ -49,3 +49,29 @@ the Terraform default (`var.maintainer_email = nikashprakash1@gmail.com`) would 
 full (non-targeted) apply would change App 1's allowed email. Reconcile deliberately: set
 `maintainer_email = "nikprakash20@gmail.com"` in `terraform.tfvars` (matches CF reality) or
 confirm the intended maintainer email before a non-targeted apply.
+
+## Per-project tokens & retention (v1 posture)
+
+Both are **deferred** by the spec (`.agents/workflow/specs/obs-dashboard-cf-deploy/design.md`)
+— documented here so no implementer re-decides them.
+
+- **Per-project service tokens — deferred.** `obs.agorcha.dev` is single-tenant: the Worker
+  pins `OBS_PROJECT_ID=github.com/AGOrcha/dot-agents` and rejects any foreign `project_id`
+  before a DO/D1 write (spec §D1). One bound token (`agorcha-obs-cli`) is sufficient; issuing a
+  token per project inside one backend is on the spec's Deferred list. Other repositories get
+  their own backend via their `.agentsrc.json` `observability.endpoint` (client-side routing),
+  each with its own Terraform + token — never a fan-out from this deployment.
+- **Retention — fixed v1 defaults, configurability deferred.** These are outbox-side constants
+  (spec §D4), not `.agentsrc.json` config in v1 (spec Open Question #4 keeps team/org
+  configurability open; no implementation may pick different v1 defaults):
+
+  | Class | v1 retention |
+  |---|---|
+  | Valid pending outbox events | kept indefinitely (silent telemetry loss is worse than queue growth) |
+  | Quarantine + `.reason.json` files | 30 days, then pruned during sync |
+  | Orphan `.<uuid>.tmp` files | removed after 24h during sync |
+  | Accepted/deduped files | deleted immediately on success |
+
+  Local `.agents/history/` + iteration logs stay canonical; `da observability sync --full`
+  rebuilds a lost/wiped remote from them. There is no `observability.retention` config block in
+  v1 — adding one is a future spec change, not IaC hardening.
