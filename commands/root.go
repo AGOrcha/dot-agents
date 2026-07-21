@@ -12,6 +12,7 @@ import (
 	"github.com/AGOrcha/dot-agents/commands/internal/mcp"
 	"github.com/AGOrcha/dot-agents/commands/internal/rules"
 	"github.com/AGOrcha/dot-agents/commands/internal/settings"
+	"github.com/AGOrcha/dot-agents/commands/observability"
 	"github.com/AGOrcha/dot-agents/commands/worktree"
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/spf13/cobra"
@@ -211,6 +212,10 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(mcp.NewCmd(rootMCPDeps()))
 	root.AddCommand(settings.NewCmd(rootSettingsDeps()))
 	root.AddCommand(config.NewConfigCmd(rootConfigDeps()))
+	root.AddCommand(observability.NewCmd(observability.Deps{
+		Version: Version,
+		JSON:    func() bool { return Flags.JSON },
+	}))
 	root.AddCommand(withReviewAdmin(NewReviewCmd()))
 	root.AddCommand(NewSyncCmd())
 	root.AddCommand(NewExplainCmd())
