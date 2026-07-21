@@ -18,6 +18,11 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
+	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/filemode"
+	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/go-git/go-git/v6/plumbing/storer"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/sys/execabs"
 )
@@ -918,8 +923,13 @@ func writePlanStateRefCAS(projectPath string, overwrite, seed []stateRefFile) er
 	}
 	return casWriteStateRef(projectPath, func(old string) ([]stateRefFile, error) {
 		files := append([]stateRefFile{}, overwrite...)
+		seedPaths := make([]string, len(seed))
 		for i := range seed {
-			if !stateRefPathExists(projectPath, old, seed[i].relPath) {
+			seedPaths[i] = seed[i].relPath
+		}
+		present := stateRefTreeContains(projectPath, old, seedPaths)
+		for i := range seed {
+			if !present[seed[i].relPath] {
 				files = append(files, seed[i])
 			}
 		}
@@ -929,13 +939,39 @@ func writePlanStateRefCAS(projectPath string, overwrite, seed []stateRefFile) er
 
 // stateRefPathExists reports whether relPath is present in commit's tree on the
 // state ref. An empty commit (ref absent — the first write) is always false;
-// any git error is treated as absent, matching stateRefHead's "" tolerance.
+// any resolution error is treated as absent, matching stateRefHead's ""
+// tolerance. Resolved IN-PROCESS via go-git (no git subprocess).
 func stateRefPathExists(projectPath, commit, relPath string) bool {
-	if commit == "" {
-		return false
+	return stateRefTreeContains(projectPath, commit, []string{relPath})[relPath]
+}
+
+// stateRefTreeContains resolves, for every relPath, whether it is present in
+// commit's tree on the state ref, in a SINGLE in-process go-git repo open — the
+// batched seed-presence check that replaces the prior O(seeds) `cat-file -e`
+// subprocess fan-out. An empty commit, an unopenable repo, or any tree-resolution
+// error maps every path to absent (present==false), exactly matching the old
+// per-path "git error ⇒ absent" tolerance so the seed-if-absent policy is
+// behavior-preserving. Membership mirrors `cat-file -e commit:relPath`: a path
+// resolving to any object (blob or tree) counts as present.
+func stateRefTreeContains(projectPath, commit string, relPaths []string) map[string]bool {
+	present := make(map[string]bool, len(relPaths))
+	if commit == "" || len(relPaths) == 0 {
+		return present
 	}
-	_, err := gitStateExec(projectPath, nil, nil, "cat-file", "-e", commit+":"+relPath)
-	return err == nil
+	repo, err := openStateRefRepo(projectPath)
+	if err != nil {
+		return present
+	}
+	tree, err := stateRefCommitTreeObject(repo, commit)
+	if err != nil {
+		return present
+	}
+	for _, rel := range relPaths {
+		if _, err := tree.FindEntry(rel); err == nil {
+			present[rel] = true
+		}
+	}
+	return present
 }
 
 // readPlanTaskRecordsFromStateRef reads planID's per-task state blobs from
@@ -1115,50 +1151,232 @@ func stateRefCommitTree(projectPath, commit string) string {
 }
 
 // buildStateRefCommit builds (but does not install) a commit that carries files
-// on top of parent's tree, using a throwaway temp index so the caller's working
-// tree, index, and HEAD are never touched — the ref is written entirely via
-// plumbing. parent "" produces a root commit (first write). Returns the new
-// commit's object id.
+// on top of parent's tree, entirely IN-PROCESS via go-git — creating the blobs,
+// assembling the tree, and writing the commit object into the repo's shared
+// object store without spawning a single `git` child. parent "" produces a root
+// commit (first write). Returns the new commit's object id.
+//
+// CAS-SAFETY: the objects are byte-canonical git objects. Blobs hash as
+// SHA1("blob <len>\0<content>"), trees encode as sorted `<octal-mode> <name>\0
+// <rawhash>` entries (go-git's TreeEntrySorter applies git's trailing-slash
+// directory sort rule), and directory removal prunes now-empty subtrees just as
+// `write-tree` omits empty directories. So the resulting TREE OID is IDENTICAL
+// to what the old read-tree+hash-object+update-index+write-tree plumbing
+// produced for the same parent and file set — the idempotency-tree guard
+// (stateRefCommitTree) and the compare-and-swap therefore behave unchanged, even
+// across a ref whose earlier commits were written by the plumbing path. The
+// commit reuses the same deterministic dot-agents author/committer identity
+// (stateRefIdentityName/Email) and the fixed stateRefCommitMessage; only the
+// commit timestamp varies, exactly as commit-tree already varied it.
 func buildStateRefCommit(projectPath, parent string, files []stateRefFile) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "da-state-ref-")
+	repo, err := openStateRefRepo(projectPath)
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(tmpDir)
-	env := []string{"GIT_INDEX_FILE=" + filepath.Join(tmpDir, "index")}
+	root := newStateRefTreeNode()
 	if parent != "" {
-		if _, err := gitStateExec(projectPath, env, nil, "read-tree", parent); err != nil {
-			return "", err
-		}
-	}
-	for _, f := range files {
-		if f.remove {
-			if _, err := gitStateExec(projectPath, env, nil, "update-index", "--force-remove", "--", f.relPath); err != nil {
-				return "", err
-			}
-			continue
-		}
-		blob, err := gitStateExec(projectPath, env, f.content, "hash-object", "-w", "--stdin")
+		parentTree, err := stateRefCommitTreeObject(repo, parent)
 		if err != nil {
 			return "", err
 		}
-		if _, err := gitStateExec(projectPath, env, nil, "update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(blob)+","+f.relPath); err != nil {
+		if err := root.loadFrom(repo, parentTree); err != nil {
 			return "", err
 		}
 	}
-	tree, err := gitStateExec(projectPath, env, nil, "write-tree")
+	store := repo.Storer
+	for _, f := range files {
+		parts := strings.Split(f.relPath, "/")
+		if f.remove {
+			root.remove(parts)
+			continue
+		}
+		blobHash, err := writeStateRefBlob(store, f.content)
+		if err != nil {
+			return "", err
+		}
+		root.set(parts, stateRefTreeEntry{hash: blobHash, mode: filemode.Regular})
+	}
+	treeHash, err := root.encode(store)
 	if err != nil {
 		return "", err
 	}
-	args := []string{"commit-tree", strings.TrimSpace(tree), "-m", stateRefCommitMessage}
+	now := time.Now()
+	sig := object.Signature{Name: stateRefIdentityName, Email: stateRefIdentityEmail, When: now}
+	commit := &object.Commit{
+		Author:    sig,
+		Committer: sig,
+		Message:   stateRefCommitMessage + "\n",
+		TreeHash:  treeHash,
+	}
 	if parent != "" {
-		args = []string{"commit-tree", strings.TrimSpace(tree), "-p", parent, "-m", stateRefCommitMessage}
+		commit.ParentHashes = []plumbing.Hash{plumbing.NewHash(parent)}
 	}
-	commit, err := gitStateExec(projectPath, stateRefCommitEnv(env), nil, args...)
+	obj := store.NewEncodedObject()
+	if err := commit.Encode(obj); err != nil {
+		return "", err
+	}
+	commitHash, err := store.SetEncodedObject(obj)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(commit), nil
+	return commitHash.String(), nil
+}
+
+// stateRefIdentityName / stateRefIdentityEmail are the deterministic, hermetic
+// author/committer identity carried on every state-ref commit — the in-process
+// counterpart of stateRefCommitEnv's GIT_AUTHOR_*/GIT_COMMITTER_* so the commit
+// never depends on ambient user.name/user.email config (the ref is
+// machine-owned).
+const (
+	stateRefIdentityName  = "dot-agents"
+	stateRefIdentityEmail = "dot-agents@localhost"
+)
+
+// openStateRefRepo opens the go-git repository at (or above) projectPath. Objects
+// SetEncodedObject writes land in the repo's shared object store — the same store
+// `git update-ref` (the untouched CAS-swap primitive) resolves the new commit
+// against — so a linked worktree writes to the common objects dir, matching the
+// plumbing path's `git -C projectPath` behavior.
+func openStateRefRepo(projectPath string) (*git.Repository, error) {
+	return git.PlainOpenWithOptions(projectPath, &git.PlainOpenOptions{DetectDotGit: true})
+}
+
+// stateRefCommitTreeObject resolves commit's root tree object in repo.
+func stateRefCommitTreeObject(repo *git.Repository, commit string) (*object.Tree, error) {
+	c, err := repo.CommitObject(plumbing.NewHash(commit))
+	if err != nil {
+		return nil, err
+	}
+	return c.Tree()
+}
+
+// writeStateRefBlob writes content as a blob object and returns its hash. The
+// blob hashes exactly as `git hash-object -w --stdin` would.
+func writeStateRefBlob(store storer.EncodedObjectStorer, content []byte) (plumbing.Hash, error) {
+	obj := store.NewEncodedObject()
+	obj.SetType(plumbing.BlobObject)
+	w, err := obj.Writer()
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	if _, err := w.Write(content); err != nil {
+		_ = w.Close()
+		return plumbing.ZeroHash, err
+	}
+	if err := w.Close(); err != nil {
+		return plumbing.ZeroHash, err
+	}
+	return store.SetEncodedObject(obj)
+}
+
+// stateRefTreeEntry is a resolved blob entry (hash + file mode) in an in-process
+// tree node.
+type stateRefTreeEntry struct {
+	hash plumbing.Hash
+	mode filemode.FileMode
+}
+
+// stateRefTreeNode is a mutable in-process representation of a git tree: blob
+// entries by name plus child subtrees by name. It mirrors the overlay semantics
+// of read-tree (load parent) + update-index (set/remove) + write-tree (encode).
+type stateRefTreeNode struct {
+	files   map[string]stateRefTreeEntry
+	subdirs map[string]*stateRefTreeNode
+}
+
+func newStateRefTreeNode() *stateRefTreeNode {
+	return &stateRefTreeNode{
+		files:   map[string]stateRefTreeEntry{},
+		subdirs: map[string]*stateRefTreeNode{},
+	}
+}
+
+func (n *stateRefTreeNode) empty() bool {
+	return len(n.files) == 0 && len(n.subdirs) == 0
+}
+
+// loadFrom recursively populates n from an existing tree object, so subsequent
+// set/remove calls overlay onto the parent's full content.
+func (n *stateRefTreeNode) loadFrom(repo *git.Repository, tree *object.Tree) error {
+	for i := range tree.Entries {
+		e := tree.Entries[i]
+		if e.Mode == filemode.Dir {
+			sub, err := object.GetTree(repo.Storer, e.Hash)
+			if err != nil {
+				return err
+			}
+			child := newStateRefTreeNode()
+			if err := child.loadFrom(repo, sub); err != nil {
+				return err
+			}
+			n.subdirs[e.Name] = child
+			continue
+		}
+		n.files[e.Name] = stateRefTreeEntry{hash: e.Hash, mode: e.Mode}
+	}
+	return nil
+}
+
+// set overlays a blob at the slash-split path, creating intermediate subtrees.
+func (n *stateRefTreeNode) set(parts []string, entry stateRefTreeEntry) {
+	if len(parts) == 1 {
+		delete(n.subdirs, parts[0])
+		n.files[parts[0]] = entry
+		return
+	}
+	child := n.subdirs[parts[0]]
+	if child == nil {
+		child = newStateRefTreeNode()
+		n.subdirs[parts[0]] = child
+	}
+	delete(n.files, parts[0])
+	child.set(parts[1:], entry)
+}
+
+// remove deletes the blob (or subtree) at the slash-split path and prunes any
+// subtree left empty, so the encoded tree omits empty directories just as
+// write-tree does.
+func (n *stateRefTreeNode) remove(parts []string) {
+	if len(parts) == 1 {
+		delete(n.files, parts[0])
+		delete(n.subdirs, parts[0])
+		return
+	}
+	child := n.subdirs[parts[0]]
+	if child == nil {
+		return
+	}
+	child.remove(parts[1:])
+	if child.empty() {
+		delete(n.subdirs, parts[0])
+	}
+}
+
+// encode writes this node and every non-empty descendant as tree objects and
+// returns this node's tree hash. Entries are sorted with git's directory
+// trailing-slash rule so the object bytes — and thus the OID — are canonical.
+func (n *stateRefTreeNode) encode(store storer.EncodedObjectStorer) (plumbing.Hash, error) {
+	entries := make([]object.TreeEntry, 0, len(n.files)+len(n.subdirs))
+	for name, e := range n.files {
+		entries = append(entries, object.TreeEntry{Name: name, Mode: e.mode, Hash: e.hash})
+	}
+	for name, child := range n.subdirs {
+		if child.empty() {
+			continue
+		}
+		h, err := child.encode(store)
+		if err != nil {
+			return plumbing.ZeroHash, err
+		}
+		entries = append(entries, object.TreeEntry{Name: name, Mode: filemode.Dir, Hash: h})
+	}
+	sort.Sort(object.TreeEntrySorter(entries))
+	tree := &object.Tree{Entries: entries}
+	obj := store.NewEncodedObject()
+	if err := tree.Encode(obj); err != nil {
+		return plumbing.ZeroHash, err
+	}
+	return store.SetEncodedObject(obj)
 }
 
 // compareAndSwapStateRef performs the atomic swap: update refs/agents/state to
@@ -1180,16 +1398,6 @@ func compareAndSwapStateRef(projectPath, newCommit, old string) error {
 // perpetual-conflict stub to prove writeStateRefCAS gives up (with a wrapped
 // error) after stateRefCASAttempts instead of spinning forever.
 var casSwapFn = compareAndSwapStateRef
-
-// stateRefCommitEnv appends a deterministic, hermetic author/committer identity
-// so commit-tree never depends on ambient user.name/user.email config (the ref
-// is machine-owned).
-func stateRefCommitEnv(base []string) []string {
-	return append(append([]string{}, base...),
-		"GIT_AUTHOR_NAME=dot-agents", "GIT_AUTHOR_EMAIL=dot-agents@localhost",
-		"GIT_COMMITTER_NAME=dot-agents", "GIT_COMMITTER_EMAIL=dot-agents@localhost",
-	)
-}
 
 // gitStateExec runs a git command in projectPath for the state-ref CAS path,
 // with optional extra environment (e.g. GIT_INDEX_FILE) and stdin. Unlike
