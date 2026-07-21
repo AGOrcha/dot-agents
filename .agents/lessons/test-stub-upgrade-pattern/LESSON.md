@@ -1,6 +1,6 @@
 ---
 name: test-stub-upgrade-pattern
-description: When upgrading a stub implementation to a real one, find and update tests that assert stub behavior (e.g., "expected warning: not yet implemented") before running the full suite
+description: 'When upgrading a stub implementation to a real one, find and update tests that assert stub behavior (e.g., "expected warning: not yet implemented") before running the full suite'
 type: feedback
 ---
 
