@@ -176,3 +176,88 @@ func BenchmarkDiskStoreHealth(b *testing.B) {
 		})
 	}
 }
+
+// Warm-path benchmarks (H8). The four benchmarks above build a fresh DiskStore
+// per timed op, so they measure the cold parse path. The warm variants below
+// reuse ONE store across b.N ops against an UNCHANGED root — the realistic
+// long-lived dashboard-server scenario where the sessions() projection is
+// rebuilt on every request even though the on-disk root has not moved. They
+// isolate the re-group/sort/project cost H8 memoizes; each store is warmed once
+// before ResetTimer so the timed loop is pure cache-hit reuse.
+func BenchmarkDiskStoreListRunsWarm(b *testing.B) {
+	ctx := context.Background()
+	for _, sc := range benchScales {
+		st := benchStore(seedRuns(b, sc.sessions, sc.iters))
+		if _, err := st.ListRuns(ctx, RunFilter{}); err != nil {
+			b.Fatalf("warm ListRuns: %v", err)
+		}
+		b.Run(sc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if _, err := st.ListRuns(ctx, RunFilter{}); err != nil {
+					b.Fatalf("ListRuns: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkDiskStoreGetRunWarm(b *testing.B) {
+	ctx := context.Background()
+	for _, sc := range benchScales {
+		st := benchStore(seedRuns(b, sc.sessions, sc.iters))
+		sid := fmt.Sprintf("sess-%d", sc.sessions/2)
+		if _, err := st.GetRun(ctx, sid); err != nil {
+			b.Fatalf("warm GetRun: %v", err)
+		}
+		b.Run(sc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if _, err := st.GetRun(ctx, sid); err != nil {
+					b.Fatalf("GetRun: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkDiskStoreListIterationsWarm(b *testing.B) {
+	ctx := context.Background()
+	for _, sc := range benchScales {
+		st := benchStore(seedRuns(b, sc.sessions, sc.iters))
+		sid := fmt.Sprintf("sess-%d", sc.sessions/2)
+		if _, err := st.ListIterations(ctx, sid); err != nil {
+			b.Fatalf("warm ListIterations: %v", err)
+		}
+		b.Run(sc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if _, err := st.ListIterations(ctx, sid); err != nil {
+					b.Fatalf("ListIterations: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkDiskStoreHealthWarm(b *testing.B) {
+	ctx := context.Background()
+	for _, sc := range benchScales {
+		st := benchStore(seedRuns(b, sc.sessions, sc.iters))
+		if _, err := st.Health(ctx); err != nil {
+			b.Fatalf("warm Health: %v", err)
+		}
+		b.Run(sc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if _, err := st.Health(ctx); err != nil {
+					b.Fatalf("Health: %v", err)
+				}
+			}
+		})
+	}
+}
