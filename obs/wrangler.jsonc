@@ -30,6 +30,8 @@
   "vars": {
     "OBS_PROJECT_ID": "github.com/AGOrcha/dot-agents",
     "ENVIRONMENT": "production",
-    "OBS_AUTH_MODE": "access"
+    "OBS_AUTH_MODE": "access",
+    "OBS_ACCESS_AUD": "5eeb249ebbc523b5ed10cec93c0b2d6995d991a7e0f6607a3f04e02365b18ea6",
+    "OBS_ACCESS_TEAM_DOMAIN": "usepayout.cloudflareaccess.com"
   }
 }
