@@ -4,7 +4,7 @@ order: 9
 task:
     id: p9-quick-wins
     title: 'Phase 9 (H9): zero-risk wins — hoist per-call regexp.MustCompile (crg.go, paths.go), single-pass iter-log v1 decode, record-granular hook-outcome validation'
-    status: pending
+    status: completed
     depends_on:
         - p0-instrumentation
     blocks: []
