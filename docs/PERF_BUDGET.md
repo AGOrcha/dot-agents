@@ -1,5 +1,7 @@
 # Performance Budget — `da` command chain
 
+> **See also** [`PERF_BUDGET_WORKFLOW.md`](PERF_BUDGET_WORKFLOW.md) — companion budget for the `da workflow` command chain (`workflow-perf-optimization` effort).
+
 Source: package-artifact-install t9 (performance testing + optimization across
 the whole `da` command chain). This document is the regression guard's
 narrative companion: the committed benchmark suite (`go test -bench`) and the
