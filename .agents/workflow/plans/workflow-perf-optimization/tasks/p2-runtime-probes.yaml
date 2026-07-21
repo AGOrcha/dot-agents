@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: workflow-perf-optimization
+order: 2
+task:
+    id: p2-runtime-probes
+    title: 'Phase 2 (H2): collapse duplicate git-summary/isGitRepo probes on status+checkpoint'
+    status: pending
+    depends_on:
+        - p0-instrumentation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/state.go
+        - commands/workflow/iter_log.go
+    verification_required: true
+    notes: ""
+    app_type: go-cli
