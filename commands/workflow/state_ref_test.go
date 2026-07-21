@@ -595,6 +595,225 @@ func TestCasWriteStateRef_BuildErrorPropagates(t *testing.T) {
 	}
 }
 
+// gitPlumbingTreeOID reproduces the ORIGINAL state-ref write's tree assembly via
+// raw git plumbing (read-tree + hash-object + update-index + write-tree in a
+// throwaway index) and returns the resulting tree OID. It is the byte-for-byte
+// reference the in-process go-git builder MUST match — the CAS-safety contract,
+// since a ref may carry commits written by either producer and the idempotency
+// guard compares tree OIDs across them.
+func gitPlumbingTreeOID(t *testing.T, repo, parent string, files []stateRefFile) string {
+	t.Helper()
+	idx := filepath.Join(t.TempDir(), "index")
+	env := append(os.Environ(), "GIT_INDEX_FILE="+idx)
+	run := func(stdin string, args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = env
+		if stdin != "" {
+			cmd.Stdin = strings.NewReader(stdin)
+		}
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if parent != "" {
+		run("", "read-tree", parent)
+	}
+	for _, f := range files {
+		if f.remove {
+			run("", "update-index", "--force-remove", "--", f.relPath)
+			continue
+		}
+		blob := run(string(f.content), "hash-object", "-w", "--stdin")
+		run("", "update-index", "--add", "--cacheinfo", "100644,"+blob+","+f.relPath)
+	}
+	return run("", "write-tree")
+}
+
+// TestBuildStateRefCommit_TreeOIDMatchesPlumbing is the CAS-safety gate: the
+// in-process go-git builder must produce the IDENTICAL tree OID the old
+// read-tree+hash-object+update-index+write-tree plumbing produced, for both a
+// root commit and an overlay-with-removal on top of a parent. If these OIDs ever
+// diverge, the idempotency-tree guard and compare-and-swap break across a
+// mixed-producer ref, so this test defends the whole write half.
+func TestBuildStateRefCommit_TreeOIDMatchesPlumbing(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	base := ".agents/workflow/plans/" + stateRefTestPlanID + "/"
+	root := []stateRefFile{
+		{relPath: base + "PLAN.yaml", content: []byte("plan: srw\n")},
+		{relPath: base + "tasks/t1.yaml", content: []byte("id: t1\n")},
+		{relPath: base + "tasks/t2.yaml", content: []byte("id: t2\n")},
+	}
+	commit, err := buildStateRefCommit(repo, "", root)
+	if err != nil {
+		t.Fatalf("build root commit: %v", err)
+	}
+	if got, want := stateRefCommitTree(repo, commit), gitPlumbingTreeOID(t, repo, "", root); got != want {
+		t.Fatalf("root tree OID mismatch: in-process %s != plumbing %s (CAS-safety broken)", got, want)
+	}
+
+	next := []stateRefFile{
+		{relPath: base + "tasks/t1.yaml", content: []byte("id: t1\nstatus: done\n")},
+		{relPath: base + "tasks/t3.yaml", content: []byte("id: t3\n")},
+		{relPath: base + "tasks/t2.yaml", remove: true},
+	}
+	commit2, err := buildStateRefCommit(repo, commit, next)
+	if err != nil {
+		t.Fatalf("build overlay commit: %v", err)
+	}
+	if got, want := stateRefCommitTree(repo, commit2), gitPlumbingTreeOID(t, repo, commit, next); got != want {
+		t.Fatalf("overlay tree OID mismatch: in-process %s != plumbing %s", got, want)
+	}
+	parent := strings.TrimSpace(mustGitOut(t, repo, "rev-parse", commit2+"^"))
+	if parent != commit {
+		t.Fatalf("child commit parent = %s, want %s", parent, commit)
+	}
+}
+
+// TestBuildStateRefCommit_PrunesEmptiedDirLikePlumbing proves emptied
+// directories vanish from the tree exactly as `write-tree` omits them, so the
+// OID still matches plumbing after removing a directory's sole file.
+func TestBuildStateRefCommit_PrunesEmptiedDirLikePlumbing(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	base := ".agents/workflow/plans/" + stateRefTestPlanID + "/"
+	root := []stateRefFile{
+		{relPath: base + "PLAN.yaml", content: []byte("plan: srw\n")},
+		{relPath: base + "tasks/only.yaml", content: []byte("id: only\n")},
+	}
+	commit, err := buildStateRefCommit(repo, "", root)
+	if err != nil {
+		t.Fatalf("build root commit: %v", err)
+	}
+	rm := []stateRefFile{{relPath: base + "tasks/only.yaml", remove: true}}
+	commit2, err := buildStateRefCommit(repo, commit, rm)
+	if err != nil {
+		t.Fatalf("build removal commit: %v", err)
+	}
+	if got, want := stateRefCommitTree(repo, commit2), gitPlumbingTreeOID(t, repo, commit, rm); got != want {
+		t.Fatalf("pruned tree OID mismatch: in-process %s != plumbing %s", got, want)
+	}
+	if stateRefPathExists(repo, commit2, base+"tasks/only.yaml") {
+		t.Fatal("removed file must be absent from the pruned tree")
+	}
+	if !stateRefPathExists(repo, commit2, base+"PLAN.yaml") {
+		t.Fatal("sibling PLAN.yaml must survive the removal")
+	}
+}
+
+// TestBuildStateRefCommit_DeterministicIdentityAndMessage proves the in-process
+// commit carries the same hermetic dot-agents author/committer identity and the
+// fixed coordination-state message the plumbing path used.
+func TestBuildStateRefCommit_DeterministicIdentityAndMessage(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	base := ".agents/workflow/plans/" + stateRefTestPlanID + "/"
+	commit, err := buildStateRefCommit(repo, "", []stateRefFile{{relPath: base + "PLAN.yaml", content: []byte("plan: srw\n")}})
+	if err != nil {
+		t.Fatalf("build commit: %v", err)
+	}
+	body := mustGitOut(t, repo, "cat-file", "commit", commit)
+	for _, want := range []string{
+		"author dot-agents <dot-agents@localhost>",
+		"committer dot-agents <dot-agents@localhost>",
+		stateRefCommitMessage,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("commit object missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestBuildStateRefCommit_EncodeErrorPropagates covers the tree-encode error
+// legs at BOTH the nested child and its parent: a ".git" directory component
+// makes go-git's fsck-shaped tree Validate reject the object, so the child
+// encode fails and the error propagates up instead of writing a malformed tree.
+func TestBuildStateRefCommit_EncodeErrorPropagates(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	_, err := buildStateRefCommit(repo, "", []stateRefFile{{relPath: "sub/.git/pre-commit", content: []byte("x\n")}})
+	if err == nil {
+		t.Fatal("expected tree-encode error for a .git path component")
+	}
+}
+
+// TestStateRefTreeContains_ToleratesErrors proves the seed-presence lookup maps
+// every path to absent (never a false positive, never a panic) when the repo
+// cannot be opened or the commit cannot be resolved — the "git error ⇒ absent"
+// tolerance the seed-if-absent policy depends on.
+func TestStateRefTreeContains_ToleratesErrors(t *testing.T) {
+	paths := []string{"a.yaml", "b.yaml"}
+	// Unopenable repo (non-git dir): every path absent.
+	if got := stateRefTreeContains(t.TempDir(), "deadbeef", paths); len(got) != 0 {
+		t.Fatalf("non-git dir must yield no present paths, got %v", got)
+	}
+	// Valid repo but a bogus commit OID: tree unresolvable, every path absent.
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	if got := stateRefTreeContains(repo, "0123456789012345678901234567890123456789", paths); len(got) != 0 {
+		t.Fatalf("bogus commit must yield no present paths, got %v", got)
+	}
+}
+
+// TestBuildStateRefCommit_BadParentPropagates covers the parent-tree resolution
+// error leg: a non-existent parent OID surfaces as an error rather than a
+// silently-rooted commit.
+func TestBuildStateRefCommit_BadParentPropagates(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	_, err := buildStateRefCommit(repo, "0123456789012345678901234567890123456789",
+		[]stateRefFile{{relPath: ".agents/workflow/state/x.txt", content: []byte("x\n")}})
+	if err == nil {
+		t.Fatal("expected error resolving a non-existent parent commit")
+	}
+}
+
+// TestBuildStateRefCommit_RemoveUnderAbsentDirIsNoop proves removing a path
+// whose intermediate directory does not exist on the parent tree is a harmless
+// no-op — matching `update-index --force-remove` of an absent path — so the
+// resulting tree OID equals the parent's unchanged tree.
+func TestBuildStateRefCommit_RemoveUnderAbsentDirIsNoop(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	base := ".agents/workflow/plans/" + stateRefTestPlanID + "/"
+	commit, err := buildStateRefCommit(repo, "", []stateRefFile{{relPath: base + "PLAN.yaml", content: []byte("plan: srw\n")}})
+	if err != nil {
+		t.Fatalf("build root commit: %v", err)
+	}
+	// tasks/ never existed on this tree; removing under it must change nothing.
+	rm := []stateRefFile{{relPath: base + "tasks/ghost.yaml", remove: true}}
+	commit2, err := buildStateRefCommit(repo, commit, rm)
+	if err != nil {
+		t.Fatalf("build no-op removal commit: %v", err)
+	}
+	if got, want := stateRefCommitTree(repo, commit2), gitPlumbingTreeOID(t, repo, commit, rm); got != want {
+		t.Fatalf("no-op removal tree OID mismatch: in-process %s != plumbing %s", got, want)
+	}
+	if stateRefCommitTree(repo, commit2) != stateRefCommitTree(repo, commit) {
+		t.Fatal("removing an absent path must leave the tree unchanged")
+	}
+}
+
+// TestGitStateExec_ExtraEnvApplied covers gitStateExec's extra-environment
+// injection leg: a GIT_INDEX_FILE override reaches the child git process, which
+// materializes the index at the injected path (never the repo's real one).
+func TestGitStateExec_ExtraEnvApplied(t *testing.T) {
+	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
+	idx := filepath.Join(t.TempDir(), "custom-index")
+	if _, err := gitStateExec(repo, []string{"GIT_INDEX_FILE=" + idx}, nil, "read-tree", "--empty"); err != nil {
+		t.Fatalf("read-tree --empty with GIT_INDEX_FILE: %v", err)
+	}
+	if _, err := os.Stat(idx); err != nil {
+		t.Fatalf("GIT_INDEX_FILE override not honored (index not at injected path): %v", err)
+	}
+}
+
+// mustGitOut runs git in repo and returns trimmed stdout, failing the test on
+// error. A small local helper for the OID/identity assertions above.
+func mustGitOut(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // TestReadPlanTaskRecordsFromStateRef_NoRefIsEmpty covers the ref-absent leg.
 func TestReadPlanTaskRecordsFromStateRef_NoRefIsEmpty(t *testing.T) {
 	repo := seedStateRefRepo(t, config.WorkTrackingWriteToStateRef)
