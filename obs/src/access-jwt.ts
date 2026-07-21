@@ -85,7 +85,7 @@ export class CloudflareAccessJwksProvider implements AccessJwksProvider {
       throw new Error("invalid Cloudflare Access team domain");
     }
     this.teamDomain = teamDomain;
-    this.fetcher = fetcher;
+    this.fetcher = fetcher.bind(globalThis);
   }
 
   async getJwks(): Promise<JsonWebKey[]> {
