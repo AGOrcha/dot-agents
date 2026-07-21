@@ -15,6 +15,7 @@ export const PUBLIC_PAGES = [
   { src: 'README.md', id: 'index', order: 1 },
 
   // Guides
+  { src: 'docs/INSTALL.md', id: 'guides/install', order: 0 },
   { src: 'docs/GETTING_STARTED.md', id: 'guides/getting-started', order: 0 },
   { src: 'docs/LAYERED_CONFIG_GUIDE.md', id: 'guides/layered-config', order: 1 },
   { src: 'docs/HOOKS.md', id: 'guides/hooks', order: 2 },
@@ -44,6 +45,7 @@ export const PUBLIC_PAGES = [
   { src: 'docs/DASHBOARD_API.md', id: 'reference/dashboard-api', order: 10 },
 
   // Concepts
+  { src: 'docs/concepts/ai-dev-lifecycle.md', id: 'concepts/ai-dev-lifecycle', order: 0 },
   { src: 'docs/PROJECT_DIAGRAMS.md', id: 'concepts/project-diagrams', order: 1 },
   { src: 'docs/concepts/workflow-artifact-model.md', id: 'concepts/workflow-artifact-model', order: 2 },
   { src: 'docs/concepts/config-model.md', id: 'concepts/config-model', order: 3 },

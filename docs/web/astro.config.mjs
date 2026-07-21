@@ -110,7 +110,10 @@ function sectionItems(prefix) {
 const sidebar = [
   {
     label: 'Getting Started',
-    items: [{ label: 'Getting Started', slug: '' }],
+    items: [
+      { label: 'Getting Started', slug: '' },
+      { label: 'Install & onboard (one paste)', slug: 'guides/install' },
+    ],
   },
   { label: 'Guides', items: sectionItems('guides') },
   { label: 'Reference', items: sectionItems('reference') },
