@@ -594,21 +594,11 @@ const stateRefCASAttempts = 16
 // is machine-owned coordination state, not human-authored history.
 const stateRefCommitMessage = "da: coordination-state transition"
 
-// mirrorTransitionToStateRef ADDITIONALLY writes planID's changed
+// mirrorTransitionToStateRef additionally writes planID's changed
 // coordination-state to refs/agents/state via atomic compare-and-swap, but ONLY
-// when the git-ref write backend is active (work_tracking.write_to ==
-// "state-ref"). Status is split into PER-TASK state blobs (§9 D5): the
-// transitioning taskID's blob and PLAN.yaml are overwritten authoritatively
-// while sibling tasks are seeded only when absent, so two workers transitioning
-// DIFFERENT tasks never touch the same ref blob (no line-level TASKS.yaml
-// conflict). It is purely additive: the working-copy write
-// (saveCanonicalTasks/saveCanonicalPlan — the §3B agent-facing projection) has
-// already happened and is never replaced or altered.
-//
-// When the backend is inactive (default / unset config) this is a no-op that
-// touches no git ref, so the default write path is byte-for-byte identical to
-// today — the git-ref mechanism ships here but the default flip is reserved for
-// a later task (document-and-default-git-ref).
+// when the git-ref write backend is active. Status is split into per-task state
+// blobs: taskID's blob and PLAN.yaml are overwritten authoritatively while
+// sibling tasks are seeded only when absent, preserving disjoint transitions.
 func mirrorTransitionToStateRef(projectPath, planID, taskID string) error {
 	if !canonicalWriteToStateRef(projectPath) {
 		return nil
@@ -618,6 +608,71 @@ func mirrorTransitionToStateRef(projectPath, planID, taskID string) error {
 		return fmt.Errorf("collect state files for %s: %w", stateRefName, err)
 	}
 	return writePlanStateRefCAS(projectPath, overwrite, seed)
+}
+
+// mirrorTaskRepointToStateRef applies a structural task-ID mutation to the
+// latest ref snapshot on every CAS attempt. This preserves concurrent status
+// transitions and unrelated task additions while deleting the old task blob in
+// the same ref commit as the rewritten survivors.
+func mirrorTaskRepointToStateRef(projectPath string, tf *CanonicalTaskFile, in taskRepointInputs) error {
+	if !canonicalWriteToStateRef(projectPath) {
+		return nil
+	}
+	planPath := filepath.Join(plansBaseDir(projectPath), tf.PlanID, workflowPlanFileName)
+	planContent, err := os.ReadFile(planPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return casWriteStateRef(projectPath, func(head string) ([]stateRefFile, error) {
+		current, loadErr := readPlanTaskRecordsFromCommit(projectPath, head, tf.PlanID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		refTasks := tf
+		if len(current) > 0 {
+			refTasks = projectCanonicalTaskFile(current)
+			oldIdx, newIdx := taskIndexes(refTasks, in.OldID, in.NewID)
+			if oldIdx >= 0 {
+				if _, applyErr := applyTaskRepoint(refTasks, in, oldIdx, newIdx); applyErr != nil {
+					return nil, applyErr
+				}
+			} else {
+				if newIdx < 0 {
+					return nil, fmt.Errorf(errTaskNotFoundInPlanFmt, in.OldID, in.PlanID)
+				}
+				repointTaskDependencies(refTasks, in)
+			}
+		}
+		return taskRepointStateRefFiles(projectPath, refTasks, in.OldID, planContent)
+	})
+}
+
+func taskRepointStateRefFiles(projectPath string, tf *CanonicalTaskFile, oldID string, planContent []byte) ([]stateRefFile, error) {
+	files := make([]stateRefFile, 0, len(tf.Tasks)+2)
+	for _, rec := range splitCanonicalTaskFile(tf) {
+		content, err := yamlMarshal(rec)
+		if err != nil {
+			return nil, err
+		}
+		rel, err := planTaskStateRefRelPath(projectPath, tf.PlanID, rec.Task.ID)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, stateRefFile{relPath: rel, content: content})
+	}
+	oldRel, err := planTaskStateRefRelPath(projectPath, tf.PlanID, oldID)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, stateRefFile{relPath: oldRel, remove: true})
+	if len(planContent) > 0 {
+		planRel, err := planStateRefRelPath(projectPath, tf.PlanID)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, stateRefFile{relPath: planRel, content: planContent})
+	}
+	return files, nil
 }
 
 // canonicalWriteToStateRef reports whether transitions for projectPath ALSO
@@ -646,11 +701,13 @@ func useGitRefBackend(projectPath string) bool {
 	return rc.UseGitRefBackend()
 }
 
-// stateRefFile is one coordination-state file staged into a state-ref commit:
-// its repo-relative (slash-separated) path and the exact bytes on disk.
+// stateRefFile is one coordination-state path staged into a state-ref commit.
+// A remove entry deletes relPath from the parent tree; otherwise content is
+// written as a regular file.
 type stateRefFile struct {
 	relPath string
 	content []byte
+	remove  bool
 }
 
 // stateRefTasksDir is the ref-only subdirectory under a plan that holds the
@@ -883,18 +940,21 @@ func stateRefPathExists(projectPath, commit, relPath string) bool {
 // refs/agents/state and decodes them into records. A missing ref or plan tasks/
 // directory yields no records (the projection of an empty state).
 func readPlanTaskRecordsFromStateRef(projectPath, planID string) ([]stateRefTaskRecord, error) {
-	head := stateRefHead(projectPath)
-	if head == "" {
+	return readPlanTaskRecordsFromCommit(projectPath, stateRefHead(projectPath), planID)
+}
+
+func readPlanTaskRecordsFromCommit(projectPath, commit, planID string) ([]stateRefTaskRecord, error) {
+	if commit == "" {
 		return nil, nil
 	}
 	dirRel, err := planTaskStateRefDirRel(projectPath, planID)
 	if err != nil {
 		return nil, err
 	}
-	treeish := head + ":" + dirRel
+	treeish := commit + ":" + dirRel
 	out, lsErr := gitStateExec(projectPath, nil, nil, "ls-tree", gitFlagNameOnly, treeish)
 	if lsErr != nil {
-		return nil, nil // tasks/ absent on the ref → empty projection
+		return nil, nil
 	}
 	var records []stateRefTaskRecord
 	for _, name := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -1006,6 +1066,12 @@ func buildStateRefCommit(projectPath, parent string, files []stateRefFile) (stri
 		}
 	}
 	for _, f := range files {
+		if f.remove {
+			if _, err := gitStateExec(projectPath, env, nil, "update-index", "--force-remove", "--", f.relPath); err != nil {
+				return "", err
+			}
+			continue
+		}
 		blob, err := gitStateExec(projectPath, env, f.content, "hash-object", "-w", "--stdin")
 		if err != nil {
 			return "", err
@@ -1185,29 +1251,9 @@ func saveCanonicalTasks(projectPath string, tf *CanonicalTaskFile) error {
 	return osWriteFile(filepath.Join(dir, workflowTasksFileName), content, 0644)
 }
 
-// saveCanonicalTasksMirrored is the canonical-write CHOKE POINT for plan tasks
-// (#433): it writes tf to the working copy (the §3B projection) and, when the
-// coordination-state backend mirrors canonical writes (canonicalWriteToStateRef),
-// ALSO mirrors the plan's per-task blobs + PLAN.yaml to refs/agents/state. Every
-// STRUCTURAL write routed through it (task add, task update, plan-create) becomes
-// immediately ref-visible, not just status transitions — closing the stale-ref
-// read-your-writes clobber the git-ref cutover hit.
-//
-// changedTaskID is the task this write authoritatively mutated: its per-task blob
-// is overwritten while siblings are seeded only-if-absent (D5 disjoint-task
-// concurrency, via mirrorTransitionToStateRef). An empty changedTaskID overwrites
-// no task blob and seeds every task (plan-create, whose task set is empty anyway).
-// Callers MUST write PLAN.yaml (saveCanonicalPlan) BEFORE this call so the single
-// mirror commit captures the fresh plan alongside the fresh tasks.
-//
-// The mirror failure policy is MODE-AWARE (the working-copy write is already
-// durable before the mirror runs, so it is never rolled back): under
-// backend=git-ref the ref IS the read source, so a failed mirror would leave the
-// write invisible to ref-reads (the stale-ref clobber class) — the error is
-// PROPAGATED so the caller retries. Under the additive write_to=state-ref mode
-// reads still hit the worktree, so a mirror failure is non-fatal and only WARNED.
-// The mirror only READS the working copy it just wrote (no call back into save*),
-// so there is no write amplification or re-entrancy.
+// saveCanonicalTasksMirrored is the canonical-write choke point for plan tasks:
+// it writes the working-copy projection, then mirrors the changed task and plan
+// through the configured state-ref failure policy.
 func saveCanonicalTasksMirrored(projectPath string, tf *CanonicalTaskFile, changedTaskID string) error {
 	if err := saveCanonicalTasks(projectPath, tf); err != nil {
 		return err
@@ -1216,12 +1262,26 @@ func saveCanonicalTasksMirrored(projectPath string, tf *CanonicalTaskFile, chang
 		mirrorTransitionToStateRef(projectPath, tf.PlanID, changedTaskID))
 }
 
+// saveCanonicalTaskRepointMirrored uses the same canonical save choke point as
+// other task writers, then performs a structural CAS transform against the
+// latest ref snapshot. JSON mode sends an additive-backend warning to stderr so
+// stdout remains valid JSON.
+func saveCanonicalTaskRepointMirrored(projectPath string, tf *CanonicalTaskFile, in taskRepointInputs) error {
+	if err := saveCanonicalTasks(projectPath, tf); err != nil {
+		return err
+	}
+	mirrorErr := mirrorTaskRepointToStateRef(projectPath, tf, in)
+	if (in.JSON || deps.Flags.JSON()) && mirrorErr != nil && !useGitRefBackend(projectPath) {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: canonical tasks saved but failed to mirror to %s: %v\n", stateRefName, mirrorErr)
+		return nil
+	}
+	return mirrorBestEffortOrPropagate(projectPath, "canonical tasks saved", mirrorErr)
+}
+
 // mirrorBestEffortOrPropagate applies the mode-aware choke-point mirror failure
-// policy. A nil err is a no-op. Under backend=git-ref (the ref is the read
-// source) a mirror failure is PROPAGATED as a wrapped error so the caller learns
-// the ref was not updated and can retry; under the additive write_to=state-ref
-// mode (reads hit the worktree) it is WARNED and swallowed. what names the
-// already-durable working-copy write for the message.
+// policy. Under backend=git-ref the ref is the read source, so failures
+// propagate. Under additive write_to=state-ref mode, reads still hit the
+// worktree, so the failure is warned and swallowed.
 func mirrorBestEffortOrPropagate(projectPath, what string, err error) error {
 	if err == nil {
 		return nil
@@ -3243,6 +3303,254 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope, dependsOn, 
 	}
 	emitWorkflowDelta(project.Path, journal.CmdTaskUpdate, planID, taskID, changed)
 	ui.Success(fmt.Sprintf("Updated task %q in plan %q", taskID, planID))
+	return nil
+}
+
+type taskRepointInputs struct {
+	PlanID    string
+	OldID     string
+	NewID     string
+	Operation string
+	DryRun    bool
+	JSON      bool
+}
+
+type taskRepointDetail struct {
+	TaskID string   `json:"task_id"`
+	Fields []string `json:"fields"`
+}
+
+type taskRepointResult struct {
+	Operation string              `json:"operation"`
+	PlanID    string              `json:"plan_id"`
+	OldID     string              `json:"old_id"`
+	NewID     string              `json:"new_id"`
+	DryRun    bool                `json:"dry_run"`
+	Repointed []taskRepointDetail `json:"repointed"`
+}
+
+func runWorkflowTaskRename(out io.Writer, planID, oldID, newID string, dryRun, asJSON bool) error {
+	return runWorkflowTaskRepoint(out, taskRepointInputs{
+		PlanID: planID, OldID: oldID, NewID: newID, Operation: "rename", DryRun: dryRun, JSON: asJSON,
+	})
+}
+
+func runWorkflowTaskSupersede(out io.Writer, planID, oldID, newID string, dryRun, asJSON bool) error {
+	return runWorkflowTaskRepoint(out, taskRepointInputs{
+		PlanID: planID, OldID: oldID, NewID: newID, Operation: "supersede", DryRun: dryRun, JSON: asJSON,
+	})
+}
+
+func runWorkflowTaskRepoint(out io.Writer, in taskRepointInputs) error {
+	if strings.TrimSpace(in.OldID) == "" || strings.TrimSpace(in.NewID) == "" {
+		return fmt.Errorf("old and new task IDs must not be empty")
+	}
+	if in.OldID == in.NewID {
+		return fmt.Errorf("old and new task IDs must differ")
+	}
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	result := taskRepointResult{
+		Operation: in.Operation,
+		PlanID:    in.PlanID,
+		OldID:     in.OldID,
+		NewID:     in.NewID,
+		DryRun:    in.DryRun,
+		Repointed: []taskRepointDetail{},
+	}
+	lockErr := withTasksLock(project.Path, in.PlanID, func() error {
+		tf, loadErr := loadCanonicalTasks(project.Path, in.PlanID)
+		if loadErr != nil {
+			return fmt.Errorf(errTasksForPlanNotFoundFmt, in.PlanID, loadErr)
+		}
+		oldIdx, newIdx := taskIndexes(tf, in.OldID, in.NewID)
+		repointed, applyErr := applyTaskRepoint(tf, in, oldIdx, newIdx)
+		if applyErr != nil {
+			return applyErr
+		}
+		result.Repointed = repointed
+		if in.DryRun {
+			return nil
+		}
+		plan, planErr := loadCanonicalPlan(project.Path, in.PlanID)
+		if planErr != nil {
+			return planErr
+		}
+		plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		_ = saveCanonicalPlan(project.Path, plan)
+		return saveCanonicalTaskRepointMirrored(project.Path, tf, in)
+	})
+	if lockErr != nil {
+		return lockErr
+	}
+	return emitTaskRepointResult(out, result, in.JSON)
+}
+
+func taskIndexes(tf *CanonicalTaskFile, oldID, newID string) (oldIdx, newIdx int) {
+	oldIdx, newIdx = -1, -1
+	for i := range tf.Tasks {
+		switch tf.Tasks[i].ID {
+		case oldID:
+			oldIdx = i
+		case newID:
+			newIdx = i
+		}
+	}
+	return oldIdx, newIdx
+}
+
+func applyTaskRepoint(tf *CanonicalTaskFile, in taskRepointInputs, oldIdx, newIdx int) ([]taskRepointDetail, error) {
+	if oldIdx < 0 {
+		return nil, fmt.Errorf(errTaskNotFoundInPlanFmt, in.OldID, in.PlanID)
+	}
+	switch in.Operation {
+	case "rename":
+		if newIdx >= 0 {
+			return nil, fmt.Errorf("task %q already exists in plan %q", in.NewID, in.PlanID)
+		}
+		tf.Tasks[oldIdx].ID = in.NewID
+		tf.Tasks[oldIdx].Notes = repointFoldBackNoteTags(tf.Tasks[oldIdx].Notes, in.OldID, in.NewID)
+	case "supersede":
+		if newIdx < 0 {
+			return nil, fmt.Errorf(errTaskNotFoundInPlanFmt, in.NewID, in.PlanID)
+		}
+		tf.Tasks = append(tf.Tasks[:oldIdx], tf.Tasks[oldIdx+1:]...)
+	default:
+		return nil, fmt.Errorf("unsupported task repoint operation %q", in.Operation)
+	}
+	return repointTaskDependencies(tf, in), nil
+}
+
+func repointTaskDependencies(tf *CanonicalTaskFile, in taskRepointInputs) []taskRepointDetail {
+	repointed := []taskRepointDetail{}
+	for i := range tf.Tasks {
+		if in.Operation == "rename" && tf.Tasks[i].ID == in.NewID {
+			continue
+		}
+		fields := []string{}
+		removeOld := in.Operation == "supersede" && tf.Tasks[i].ID == in.NewID
+		if refs, changed := rewriteTaskReferences(tf.Tasks[i].DependsOn, in.PlanID, in.OldID, in.NewID, removeOld); changed {
+			tf.Tasks[i].DependsOn = refs
+			fields = append(fields, "depends_on")
+		}
+		if refs, changed := rewriteTaskReferences(tf.Tasks[i].Blocks, in.PlanID, in.OldID, in.NewID, removeOld); changed {
+			tf.Tasks[i].Blocks = refs
+			fields = append(fields, "blocks")
+		}
+		if len(fields) > 0 {
+			repointed = append(repointed, taskRepointDetail{TaskID: tf.Tasks[i].ID, Fields: fields})
+		}
+	}
+	return repointed
+}
+
+func rewriteTaskReferences(refs []string, planID, oldID, newID string, remove bool) ([]string, bool) {
+	oldQualified := planID + "/" + oldID
+	newQualified := planID + "/" + newID
+	found := false
+	for _, ref := range refs {
+		if ref == oldID || ref == oldQualified {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return refs, false
+	}
+	out := make([]string, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		switch ref {
+		case oldID:
+			if remove {
+				continue
+			}
+			ref = newID
+		case oldQualified:
+			if remove {
+				continue
+			}
+			ref = newQualified
+		}
+		if _, exists := seen[ref]; exists {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	return out, true
+}
+
+func repointFoldBackNoteTags(notes, oldID, newID string) string {
+	var out strings.Builder
+	scan, written := 0, 0
+	changed := false
+	for {
+		startOffset := strings.Index(notes[scan:], "(fb:")
+		if startOffset < 0 {
+			break
+		}
+		start := scan + startOffset
+		slugStart := start + len("(fb:")
+		endOffset := strings.IndexByte(notes[slugStart:], ')')
+		if endOffset < 0 {
+			break
+		}
+		end := slugStart + endOffset
+		slug := notes[slugStart:end]
+		repointedSlug := slug
+		if slug == oldID || strings.HasSuffix(slug, "-"+oldID) || strings.HasSuffix(slug, "_"+oldID) {
+			repointedSlug = strings.TrimSuffix(slug, oldID) + newID
+		}
+		if repointedSlug != slug {
+			out.WriteString(notes[written:slugStart])
+			out.WriteString(repointedSlug)
+			written = end
+			changed = true
+		}
+		scan = end + 1
+	}
+	if !changed {
+		return notes
+	}
+	out.WriteString(notes[written:])
+	return out.String()
+}
+
+func emitTaskRepointResult(out io.Writer, result taskRepointResult, asJSON bool) error {
+	if asJSON || deps.Flags.JSON() {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+	verb := "Renamed"
+	if result.Operation == "supersede" {
+		verb = "Superseded"
+	}
+	if result.DryRun {
+		if result.Operation == "supersede" {
+			verb = "Would supersede"
+		} else {
+			verb = "Would rename"
+		}
+	}
+	if _, err := fmt.Fprintf(out, "%s task %q with %q in plan %q\n", verb, result.OldID, result.NewID, result.PlanID); err != nil {
+		return err
+	}
+	if len(result.Repointed) == 0 {
+		_, err := fmt.Fprintln(out, "Dependents to repoint: none")
+		return err
+	}
+	if _, err := fmt.Fprintln(out, "Dependents to repoint:"); err != nil {
+		return err
+	}
+	for _, detail := range result.Repointed {
+		if _, err := fmt.Fprintf(out, "- %s: %s\n", detail.TaskID, strings.Join(detail.Fields, ", ")); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
