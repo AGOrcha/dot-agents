@@ -4,7 +4,7 @@ order: 5
 task:
     id: p5-regression-gate
     title: 'Phase 5: workflow perf budget + CI bench/timing guard; revert 1200s timeout scaffold once Windows -race fits'
-    status: pending
+    status: completed
     depends_on:
         - p1-test-speed
         - p3-runtime-stateref

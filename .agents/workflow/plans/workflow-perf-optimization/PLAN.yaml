@@ -4,8 +4,8 @@ title: Workflow performance optimization (measure-first, hypothesis-proven)
 status: draft
 summary: ""
 created_at: "2026-07-21T05:27:47Z"
-updated_at: "2026-07-21T22:19:44Z"
+updated_at: "2026-07-21T22:23:45Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: 'Phase 5: workflow perf budget + CI bench/timing guard; revert 1200s timeout scaffold once Windows -race fits'
+current_focus_task: ""
