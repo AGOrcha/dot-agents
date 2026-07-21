@@ -142,6 +142,7 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 	if err != nil {
 		return fmt.Errorf("close-task: persist iter-%d sidecar: %w", setup.n, err)
 	}
+	publishScoreBestEffort(setup.project.Path, setup.n)
 	if err := runWorkflowAdvance(opts.planID, opts.taskID, "completed"); err != nil {
 		return fmt.Errorf("close-task: advance: %w", err)
 	}
