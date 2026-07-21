@@ -8,9 +8,10 @@
     { "pattern": "obs.agorcha.dev", "custom_domain": true }
   ],
   "assets": {
-    "directory": "./public",
+    "directory": "../web/dashboard/dist",
     "binding": "ASSETS",
-    "run_worker_first": true
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application"
   },
   "durable_objects": {
     "bindings": [
