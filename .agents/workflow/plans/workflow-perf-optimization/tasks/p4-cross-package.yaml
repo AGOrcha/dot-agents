@@ -4,7 +4,7 @@ order: 4
 task:
     id: p4-cross-package
     title: 'Phase 4 (H5): apply fixture/batch treatment to score_run, config/materialize, lifecycle, graphstore'
-    status: pending
+    status: completed
     depends_on:
         - p0-instrumentation
     blocks: []
