@@ -4,7 +4,7 @@ order: 2
 task:
     id: p2-runtime-probes
     title: 'Phase 2 (H2): collapse duplicate git-summary/isGitRepo probes on status+checkpoint'
-    status: pending
+    status: completed
     depends_on:
         - p0-instrumentation
     blocks: []
