@@ -41,7 +41,7 @@ func BenchmarkScopedResourceScan(b *testing.B) {
 	for _, n := range []int{10, 50, 200} {
 		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
 			home, names := buildScopedResourceScanFixture(b, n)
-			if got := resolveScopedFile(home, resourceBenchBucket, resourceBenchProject, names...); got == "" {
+			if resolveScopedFile(home, resourceBenchBucket, resourceBenchProject, names...) == "" {
 				b.Fatal("fixture scoped file was not resolved")
 			}
 			if entries, err := listScopedResourceDirs(home, resourceBenchBucket, resourceBenchProject, resourceBenchMarker); err != nil || len(entries) != n {
