@@ -24,6 +24,9 @@ task_id: task-a
 checkpoint_at: "2026-07-20T10:00:00Z"
 agent:
   harness: codex
+impl: {}
+verifiers: []
+review: {}
 `)
 	writeHistoryFile(t, filepath.Join(dir, "iter-2.yaml"), `
 schema_version: 2
@@ -32,12 +35,16 @@ date: "2026-07-20"
 wave: plan-a
 task_id: task-b
 checkpoint_at: "2026-07-20T11:00:00Z"
+impl: {}
+verifiers: []
+review: {}
 `)
 	writeHistoryFile(t, filepath.Join(dir, "iter-2.score.yaml"), `
 iteration: 2
 rubric_version: r1
 scored: true
 value: 0.9
+band: excellent
 breakdown: []
 `)
 	rc := &cfg.AgentsRC{RepoID: "github.com/AGOrcha/dot-agents"}
@@ -45,28 +52,23 @@ breakdown: []
 	if err != nil {
 		t.Fatalf("collectHistoryEvents: %v", err)
 	}
-	if len(events) != 2 {
+	if len(events) != 3 {
 		t.Fatalf("events = %d", len(events))
 	}
-	if events[0].event.Kind != "iteration.checkpointed" || string(events[0].event.ScoreSidecar) != "null" {
-		t.Fatalf("checkpoint event = %#v", events[0].event)
+	assertHistoryEvent(t, events[0], iterationCheckpointedKind, 1)
+	if string(events[0].event.ScoreSidecar) != "null" {
+		t.Fatalf("first checkpoint sidecar = %s", events[0].event.ScoreSidecar)
 	}
 	if events[0].client.AgentRuntime != "codex" || events[0].client.DAVersion != "v1.2.3" {
 		t.Fatalf("client = %#v", events[0].client)
 	}
-	if events[1].event.Kind != "iteration.scored" {
-		t.Fatalf("scored kind = %q", events[1].event.Kind)
-	}
+	assertHistoryEvent(t, events[1], iterationCheckpointedKind, 2)
+	assertHistoryEvent(t, events[2], iterationScoredKind, 2)
 	var score map[string]any
-	if err := json.Unmarshal(events[1].event.ScoreSidecar, &score); err != nil || score["rubric_version"] != "r1" {
-		t.Fatalf("score sidecar = %s err=%v", events[1].event.ScoreSidecar, err)
+	if err := json.Unmarshal(events[2].event.ScoreSidecar, &score); err != nil || score["rubric_version"] != "r1" {
+		t.Fatalf("score sidecar = %s err=%v", events[2].event.ScoreSidecar, err)
 	}
-	for _, event := range events {
-		computed, err := computeEventHash(event.event)
-		if err != nil || computed != event.event.SchemaHash {
-			t.Fatalf("history event hash mismatch: computed=%s stored=%s err=%v", computed, event.event.SchemaHash, err)
-		}
-	}
+	assertHistoryHashes(t, events)
 }
 
 func TestFullReplayAlsoWalksAgentsHistory(t *testing.T) {
@@ -91,6 +93,26 @@ task_id: archived-task
 	}
 	if events[0].event.OccurredAt != "2026-07-19T00:00:00Z" {
 		t.Fatalf("date fallback = %q", events[0].event.OccurredAt)
+	}
+}
+
+func assertHistoryEvent(t *testing.T, event historyEvent, kind string, iteration int) {
+	t.Helper()
+	if event.event.Kind != kind {
+		t.Fatalf("event kind = %q, want %q", event.event.Kind, kind)
+	}
+	if event.event.Iteration != iteration {
+		t.Fatalf("event iteration = %d, want %d", event.event.Iteration, iteration)
+	}
+}
+
+func assertHistoryHashes(t *testing.T, events []historyEvent) {
+	t.Helper()
+	for _, event := range events {
+		computed, err := computeEventHash(event.event)
+		if err != nil || computed != event.event.SchemaHash {
+			t.Fatalf("history event hash mismatch: computed=%s stored=%s err=%v", computed, event.event.SchemaHash, err)
+		}
 	}
 }
 
