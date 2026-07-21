@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { enforceAccessGate } from "./auth-gate";
 import { handleReadRoute, isReadRoute } from "./read-model";
 import {
   commitEventToD1,
@@ -10,6 +11,8 @@ import {
   parseScoreSidecar,
   validateEventContent,
 } from "./validation";
+
+export { verifyAccess } from "./auth-gate";
 
 const INGEST_PATH = "/api/v1/observability/ingest";
 const API_ROOT = "/api/v1/observability";
@@ -74,13 +77,6 @@ interface ProjectDoResponse {
   status: D1CommitResult;
 }
 
-export interface AccessJwksProvider {
-  getJwks(): Promise<JsonWebKey[]>;
-}
-
-export interface AccessJwtVerifier {
-  verify(assertion: string): Promise<{ subject: string }>;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -367,32 +363,6 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
   return json(result);
 }
 
-function isLoopback(hostname: string): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "[::1]" ||
-    hostname === "::1"
-  );
-}
-
-export async function verifyAccess(
-  request: Request,
-  env: Env,
-): Promise<{ subject: string } | null> {
-  const hostname = new URL(request.url).hostname;
-  if (
-    env.OBS_AUTH_MODE === "fixture-jwt" &&
-    env.ENVIRONMENT === "development" &&
-    isLoopback(hostname)
-  ) {
-    // TODO(o6): verify the signed fixture JWT through StaticJwksProvider instead of this scaffold grant.
-    return { subject: "fixture-cli" };
-  }
-
-  // TODO(o6): construct the production AccessJwtVerifier and verify Cf-Access-Jwt-Assertion.
-  return null;
-}
 
 async function dispatchEvents(request: Request, env: Env): Promise<Response> {
   const id = env.PROJECT_DO.idFromName(env.OBS_PROJECT_ID);
@@ -412,6 +382,13 @@ async function dispatch(request: Request, env: Env): Promise<Response> {
 
   if (request.method === "GET" && isReadRoute(url.pathname)) {
     return handleReadRoute(request, env);
+  }
+
+  if (
+    (request.method === "GET" || request.method === "HEAD") &&
+    !url.pathname.startsWith(`${API_ROOT}/`)
+  ) {
+    return env.ASSETS.fetch(request);
   }
 
   return errorResponse(404, "not_found", "route not found");
@@ -574,10 +551,8 @@ export class ProjectDO extends DurableObject<Env> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const assertion = await verifyAccess(request, env);
-    if (assertion === null) {
-      return errorResponse(403, "forbidden", "a verified Cloudflare Access assertion is required");
-    }
-    return dispatch(request, env);
+    return enforceAccessGate(request, env, (authorizedRequest) =>
+      dispatch(authorizedRequest, env),
+    );
   },
 } satisfies ExportedHandler<Env>;
