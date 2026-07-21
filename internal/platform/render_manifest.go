@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
@@ -56,9 +57,78 @@ func manifestKey(dst string) string {
 	return dst
 }
 
+// --- command-scoped render-manifest read cache (H6) ---
+//
+// The managed-hook write path (writeManagedFile → renderManifestHash +
+// recordRenderHash) consults the render-manifest once per destination. Without
+// a cache each consult is a full ReadFile + JSON decode of the whole (growing)
+// manifest, so a single refresh writing N managed files pays O(N) redundant
+// reads/parses of the same file (measured O(N²) allocs as the manifest grows).
+//
+// recordRenderHash is the SOLE in-process writer of the manifest, so it keeps
+// the cache coherent by mutating the cached manifest IN PLACE under the lock and
+// refreshing the on-disk signature after each persist — the "load → record →
+// load sees the new hash" path never relies on filesystem mtime resolution. A
+// path + stat signature (size + mtime + existence) additionally guards against
+// ANY other writer: a test seeding the manifest directly, a different
+// XDG_STATE_HOME between calls (the manifest path changes), or an out-of-process
+// edit all shift the signature and force a reload, so a mutation between reads
+// is always observed and a stale manifest is never served.
+var (
+	renderManifestMu       sync.Mutex
+	renderManifestCache    *renderManifest
+	renderManifestCacheSig renderManifestSig
+	renderManifestReloads  int // instrumentation: disk (re)loads actually served
+)
+
+// renderManifestSig fingerprints the manifest file cheaply (one os.Stat). A
+// change to path/size/mtime/existence between two reads invalidates the cache.
+type renderManifestSig struct {
+	path    string
+	size    int64
+	modNsec int64
+	exists  bool
+}
+
+func renderManifestStatSig(path string) renderManifestSig {
+	sig := renderManifestSig{path: path}
+	if info, err := os.Stat(path); err == nil {
+		sig.size = info.Size()
+		sig.modNsec = info.ModTime().UnixNano()
+		sig.exists = true
+	}
+	return sig
+}
+
+// loadRenderManifest returns the process-cached manifest when the on-disk
+// signature is unchanged, else (re)reads and reparses it.
 func loadRenderManifest() *renderManifest {
+	renderManifestMu.Lock()
+	defer renderManifestMu.Unlock()
+	return loadRenderManifestLocked()
+}
+
+// loadRenderManifestLocked is loadRenderManifest's body; callers MUST hold
+// renderManifestMu. The returned pointer is the LIVE cached value — read-only
+// for every caller except recordRenderHash, which mutates it in place (as the
+// sole in-process writer) under the same lock.
+func loadRenderManifestLocked() *renderManifest {
+	path := renderManifestPath()
+	sig := renderManifestStatSig(path)
+	if renderManifestCache != nil && renderManifestCacheSig == sig {
+		return renderManifestCache
+	}
+	m := readRenderManifest(path)
+	renderManifestCache = m
+	renderManifestCacheSig = sig
+	renderManifestReloads++
+	return m
+}
+
+// readRenderManifest is the uncached disk read + schema-validated decode.
+func readRenderManifest(path string) *renderManifest {
 	m := &renderManifest{SchemaVersion: renderManifestSchemaVersion, Entries: map[string]renderManifestEntry{}}
-	data, err := os.ReadFile(renderManifestPath())
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return m // absent/unreadable → empty (nothing is provably ours yet)
 	}
@@ -84,7 +154,9 @@ func loadRenderManifest() *renderManifest {
 
 // renderManifestHash returns the hash we last recorded for dst, or "".
 func renderManifestHash(dst string) string {
-	return loadRenderManifest().Entries[manifestKey(dst)].SHA256
+	renderManifestMu.Lock()
+	defer renderManifestMu.Unlock()
+	return loadRenderManifestLocked().Entries[manifestKey(dst)].SHA256
 }
 
 // recordRenderHash persists that we rendered dst with the given content
@@ -96,7 +168,9 @@ func renderManifestHash(dst string) string {
 // two best-effort mkdir/write call sites that follow used to be the
 // osMkdirAll / osWriteFile func-var seams.
 func recordRenderHash(io platformIO, dst, hash string) {
-	m := loadRenderManifest()
+	renderManifestMu.Lock()
+	defer renderManifestMu.Unlock()
+	m := loadRenderManifestLocked()
 	m.Entries[manifestKey(dst)] = renderManifestEntry{
 		SHA256:     hash,
 		RenderedAt: time.Now().UTC().Format(time.RFC3339),
@@ -105,10 +179,17 @@ func recordRenderHash(io platformIO, dst, hash string) {
 	if err != nil {
 		return
 	}
-	if io.MkdirAll(filepath.Dir(renderManifestPath()), 0755) != nil {
+	path := renderManifestPath()
+	if io.MkdirAll(filepath.Dir(path), 0755) != nil {
 		return
 	}
-	_ = io.WriteFile(renderManifestPath(), append(data, '\n'), 0644)
+	_ = io.WriteFile(path, append(data, '\n'), 0644)
+	// The cache already holds the mutation (m is the live cached pointer);
+	// refresh the signature to the just-written file so the next read serves
+	// the cache instead of reparsing. A failed write leaves the file (and thus
+	// the signature) unchanged, and the mutated in-memory entry stays
+	// authoritative for this process — matching the best-effort contract.
+	renderManifestCacheSig = renderManifestStatSig(path)
 }
 
 // BackupBeforeOverwrite preserves an existing managed-file destination
