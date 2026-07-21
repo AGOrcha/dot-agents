@@ -968,19 +968,13 @@ func splitWorkflowLogEntries(content string) []string {
 
 // gitSpawnCounter counts child `git` processes this package spawns. It is
 // PASSIVE perf instrumentation: nothing in production logic reads it, and
-// trackGitSpawn is a lone atomic add on the spawn path. Benchmarks (and tests)
-// snapshot it via gitSpawnCount / resetGitSpawnCount to measure how many git
-// exec calls a hot path performs.
+// trackGitSpawn is a lone atomic add on the spawn path. Benchmarks (and
+// tests) snapshot it via the gitSpawnCount / resetGitSpawnCount accessors
+// (spawn_counter_test.go) to measure how many git exec calls a hot path performs.
 var gitSpawnCounter int64
 
 // trackGitSpawn records one git process spawn.
 func trackGitSpawn() { atomic.AddInt64(&gitSpawnCounter, 1) }
-
-// gitSpawnCount returns the number of git spawns recorded so far.
-func gitSpawnCount() int64 { return atomic.LoadInt64(&gitSpawnCounter) }
-
-// resetGitSpawnCount zeroes the git-spawn counter and returns the prior total.
-func resetGitSpawnCount() int64 { return atomic.SwapInt64(&gitSpawnCounter, 0) }
 
 func isGitRepo(projectPath string) bool {
 	trackGitSpawn()
