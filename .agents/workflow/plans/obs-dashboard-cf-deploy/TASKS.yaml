@@ -134,7 +134,7 @@ tasks:
         (/api%2f.., //api, /API) all gate; assert status codes for each.
     - id: o7-obs-dashboard-frontend
       title: obs.agorcha.dev UI - read D1 + WebSocket live updates
-      status: pending
+      status: completed
       depends_on:
         - o5-obs-ingest-do-d1
         - o6-obs-auth-gate
@@ -176,7 +176,7 @@ tasks:
         command wiring.
     - id: o9-workflow-push-hook
       title: Best-effort obs push on checkpoint / verify record
-      status: pending
+      status: completed
       depends_on:
         - o8-da-observability-cli
       blocks: []
@@ -194,7 +194,7 @@ tasks:
         it (assert both the exit code and the server receipt).
     - id: o10-obs-historical-backfill
       title: da observability sync --full (history replay, dedup)
-      status: pending
+      status: completed
       depends_on:
         - o8-da-observability-cli
         - o5-obs-ingest-do-d1
