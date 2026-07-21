@@ -69,9 +69,38 @@ If you verify a JWT with WebCrypto (no library), it MUST:
 Test each rejection path with a hand-built token (alg=none, HS256, missing kid,
 wrong aud/iss, expired) asserting the specific failure reason.
 
+## 6. The JWKS fetcher must be called with global `this` (Workers footgun)
+
+A JWKS provider that stores `fetch` on the instance and calls it as a method —
+`this.fetcher = fetch` then `this.fetcher(url)` — throws **"Illegal invocation:
+function called with incorrect `this` reference"** in the Workers runtime, because
+`fetch` requires its `this` to be the global object. Via §5's fail-closed rule that
+thrown error becomes a **403 on a VALID assertion**: Access injects a correct JWT,
+the Worker rejects it, and the whole gate looks broken for authenticated callers.
+RULE: bind global builtins to the global scope when storing them —
+`this.fetcher = fetcher.bind(globalThis)` (a no-op for arrow/closure test doubles,
+the fix for the real global `fetch`). This applies to any global builtin captured
+as a field then called via `this.`.
+
+This bug is INVISIBLE to fixture/unit smokes: local fixture mode uses a
+`StaticJwksProvider` (no fetch) and unit tests inject an arrow-function fetcher
+(arrows ignore `this`), so both pass green — only the real Cloudflare Access edge,
+hitting the real global `fetch` for the real JWKS endpoint, surfaces it. Caught only
+by the obs-dashboard-cf-deploy real go-live deploy (see §Meta).
+
 ## Meta
 
 A unit suite over a stubbed binding proves the HANDLER logic; it cannot prove the
 RUNTIME routing (assets-vs-worker, base-path, redirects). For an auth gate, add a
 real-runtime smoke (Miniflare/wrangler) — a `serve dist` static server bypasses
 the Worker entirely and would pass a broken gate.
+
+But even a Miniflare/fixture smoke has a blind spot: the **real Cloudflare Access
+edge** (production/preview deploy behind the actual Access app, exercised with a
+**real service token**) is the only test that runs the real global `fetch`, the real
+JWKS fetch, and Access's real assertion injection. §6's `this`-binding bug shipped
+through green unit + green fixture Miniflare smokes and was caught ONLY on the live
+`obs.agorcha.dev` deploy. RULE for edge-auth features: **local-proof THEN go-live** —
+treat a real-edge deploy smoke (no-token → 302/403; real token → 200 + a real write;
+dedupe) as a mandatory verification stage, not optional. Sibling of
+[[live-smoke-must-run-on-every-target-os]] extended to the network-auth edge.
