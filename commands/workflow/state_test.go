@@ -465,6 +465,93 @@ func TestGitModifiedFiles_RealRepo(t *testing.T) {
 	}
 }
 
+func TestParseGitModifiedFiles(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"empty", "", []string{}},
+		{"whitespace only", "   \n  \n", []string{}},
+		{"single untracked", "?? README.md", []string{"README.md"}},
+		{"multiple entries", "?? a.go\nA  c.go\n", []string{"a.go", "c.go"}},
+		{"blank interior line dropped", "?? a.go\n\n?? b.go", []string{"a.go", "b.go"}},
+		{"short line dropped", "?? a.go\nXY\n?? b.go", []string{"a.go", "b.go"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseGitModifiedFiles(tc.in)
+			if got == nil {
+				t.Fatal("parseGitModifiedFiles must return a non-nil slice")
+			}
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("parseGitModifiedFiles(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCollectWorkflowGitSummary_CachesModifiedFiles proves the git summary
+// caches the same modified-file list gitModifiedFiles would compute, so the
+// checkpoint path can reuse it instead of re-spawning git.
+func TestCollectWorkflowGitSummary_CachesModifiedFiles(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	summary, _ := collectWorkflowGitSummary(repo)
+	direct, err := gitModifiedFiles(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(summary.modifiedFiles, "|") != strings.Join(direct, "|") {
+		t.Fatalf("cached modifiedFiles %v != gitModifiedFiles %v", summary.modifiedFiles, direct)
+	}
+	if len(direct) == 0 {
+		t.Fatal("fixture should have at least one modified file")
+	}
+}
+
+// TestCollectWorkflowGitSummary_NonRepoModifiedEmpty guards the non-repo early
+// return: modifiedFiles must be a non-nil empty slice, matching gitModifiedFiles.
+func TestCollectWorkflowGitSummary_NonRepoModifiedEmpty(t *testing.T) {
+	summary, warnings := collectWorkflowGitSummary(t.TempDir())
+	if summary.modifiedFiles == nil || len(summary.modifiedFiles) != 0 {
+		t.Fatalf("expected non-nil empty modifiedFiles, got %#v", summary.modifiedFiles)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected a 'git repo not detected' warning")
+	}
+}
+
+// TestRunWorkflowCheckpoint_ModifiedFilesMatchDirect proves the reuse path
+// persists the identical modified-file list the pre-optimization direct
+// gitModifiedFiles call produced (behavior preservation).
+func TestRunWorkflowCheckpoint_ModifiedFilesMatchDirect(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	chdirRepo(t, repo)
+
+	want, err := gitModifiedFiles(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(want) == 0 {
+		t.Fatal("fixture should have at least one modified file")
+	}
+	if err := runWorkflowCheckpoint("cp", "pass", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	project, err := currentWorkflowProject()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp, _ := loadWorkflowCheckpoint(project.Name)
+	if cp == nil {
+		t.Fatal("expected persisted checkpoint")
+	}
+	if strings.Join(cp.Files.Modified, "|") != strings.Join(want, "|") {
+		t.Fatalf("checkpoint Files.Modified %v != gitModifiedFiles %v", cp.Files.Modified, want)
+	}
+}
+
 func TestRunWorkflowCheckpoint_HappyPath(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	agentsHome := t.TempDir()

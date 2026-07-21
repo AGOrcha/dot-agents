@@ -140,8 +140,12 @@ func runWorkflowCheckpoint(message, verificationStatus, verificationSummary stri
 		NextAction: state.NextAction,
 		Blockers:   []string{},
 	}
-	checkpoint.Files.Modified, err = gitModifiedFiles(project.Path)
-	if err != nil {
+	// Reuse the modified-file list already parsed from `git status --short`
+	// during collectWorkflowState's git summary, instead of re-spawning git
+	// (which would also re-probe isGitRepo). state.Git.modifiedFiles is always
+	// a non-nil slice.
+	checkpoint.Files.Modified = state.Git.modifiedFiles
+	if checkpoint.Files.Modified == nil {
 		checkpoint.Files.Modified = []string{}
 	}
 	checkpoint.Verification.Status = verificationStatus
@@ -425,6 +429,7 @@ func collectWorkflowGitSummary(projectPath string) (workflowGitSummary, []string
 		Branch:         "unknown",
 		SHA:            "unknown",
 		DirtyFileCount: 0,
+		modifiedFiles:  []string{},
 	}
 	var warnings []string
 	if !isGitRepo(projectPath) {
@@ -444,6 +449,7 @@ func collectWorkflowGitSummary(projectPath string) (workflowGitSummary, []string
 	if statusLines != "" {
 		summary.DirtyFileCount = len(strings.Split(statusLines, "\n"))
 	}
+	summary.modifiedFiles = parseGitModifiedFiles(statusLines)
 	commits := strings.TrimSpace(gitOutput(projectPath, "log", "--oneline", "-5"))
 	if commits != "" {
 		summary.RecentCommits = strings.Split(commits, "\n")
@@ -992,13 +998,15 @@ func gitOutput(projectPath string, args ...string) string {
 	return string(out)
 }
 
-func gitModifiedFiles(projectPath string) ([]string, error) {
-	if !isGitRepo(projectPath) {
-		return []string{}, nil
-	}
-	output := strings.TrimSpace(gitOutput(projectPath, "status", "--short"))
+// parseGitModifiedFiles turns `git status --short` output into the list of
+// modified paths (dropping the two-char status code + separator prefix). It is
+// the shared parser behind gitModifiedFiles and the checkpoint reuse path, so
+// both derive an identical list from the same status snapshot. Always returns
+// a non-nil slice.
+func parseGitModifiedFiles(statusOutput string) []string {
+	output := strings.TrimSpace(statusOutput)
 	if output == "" {
-		return []string{}, nil
+		return []string{}
 	}
 	lines := strings.Split(output, "\n")
 	files := make([]string, 0, len(lines))
@@ -1012,7 +1020,14 @@ func gitModifiedFiles(projectPath string) ([]string, error) {
 		}
 		files = append(files, strings.TrimSpace(line[3:]))
 	}
-	return files, nil
+	return files
+}
+
+func gitModifiedFiles(projectPath string) ([]string, error) {
+	if !isGitRepo(projectPath) {
+		return []string{}, nil
+	}
+	return parseGitModifiedFiles(gitOutput(projectPath, "status", "--short")), nil
 }
 
 func isValidVerificationStatus(status string) bool {
