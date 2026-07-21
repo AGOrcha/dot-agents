@@ -41,7 +41,7 @@ what you chose.
 | Step | What happens | Backed by |
 |---|---|---|
 | 1. Install | Gets the `da` binary onto your machine | Homebrew / Go / script |
-| 2. Onboard | Detects your path, scaffolds `~/.agents`, links your editor, health-checks | [`onboard`](https://github.com/AGOrcha/dot-agents/tree/master/.agents/skills) skill (`from-home` / `from-manifest` / `fresh` → verify) |
+| 2. Onboard | Detects your path, scaffolds `~/.agents`, links your editor, health-checks | [`onboard`](https://github.com/AGOrcha/dot-agents/tree/master/internal/scaffold/home/starter/skills/global/onboard) skill (`from-home` / `from-manifest` / `fresh` → verify) |
 | 3. Tailor | Designs your execution profile, skills, and subagents around *your* stack | `pipeline-architect`, `skill-architect` skills |
 | 4. Teach | Shows the primitives + when to use each, in context | `da workflow` / `da review` / `da kg` |
 
