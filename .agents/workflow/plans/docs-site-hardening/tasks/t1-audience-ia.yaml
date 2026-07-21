@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: docs-site-hardening
+order: 0
+task:
+    id: t1-audience-ia
+    title: Audience-based IA + progressive disclosure
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/web/astro.config.mjs
+        - docs/web/src/public-pages.mjs
+        - docs/web/src
+    verification_required: true
+    notes: Restructure nav around audience entry paths (new-user, operator, contributor) with progressive disclosure to fix the overload feedback. Landing routes each audience to its path; the one-paste install stays one screen away.
+    app_type: docs/web
