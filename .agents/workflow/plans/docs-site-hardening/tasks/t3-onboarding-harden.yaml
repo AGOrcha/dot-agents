@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: docs-site-hardening
+order: 2
+task:
+    id: t3-onboarding-harden
+    title: Harden the one-paste onboarding flow
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/INSTALL.md
+        - .agents/skills
+    verification_required: true
+    notes: 'Deepen the tailoring: wire subagent-creator alongside pipeline-architect/skill-architect, sharpen the onboard skill questions, and test the one-paste flow end-to-end with a real fresh agent.'
+    app_type: docs
