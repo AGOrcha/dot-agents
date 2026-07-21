@@ -1,0 +1,8 @@
+INSERT INTO rubrics (project_id, version, active, document_json, created_at)
+VALUES (
+  'github.com/AGOrcha/dot-agents',
+  '3.0.0',
+  1,
+  '{"version":"3.0.0","combination":"weighted_mean_renormalized","signals":[{"id":"landed","label":"Landed on master","weight":0.17,"description":"Did the iteration''s work survive to master.","two_way":true},{"id":"verifier","label":"Verifier results","weight":0.15,"description":"Did the iteration''s verification gates pass.","two_way":true},{"id":"tests","label":"Test outcomes","weight":0.14,"description":"Did the iteration''s focused and total tests pass.","two_way":true},{"id":"human_label","label":"Human review label","weight":0.15,"description":"Structured reviewer judgement (correctness, scope, hallucination) from iter-N.labels.yaml.","two_way":false},{"id":"correction_pressure","label":"Correction pressure","weight":0.11,"description":"How little the iteration had to be corrected (retries, user corrections, tool errors).","two_way":false},{"id":"scope","label":"Scope adherence","weight":0.11,"description":"Did the iteration stay within its declared write-scope.","two_way":true},{"id":"hook_outcomes","label":"Hook-gate outcomes","weight":0.09,"description":"Did the iteration''s hook gates allow, advise, or remediate (objective evidence from iter-N.hook-outcomes.yaml).","two_way":false},{"id":"token_efficiency","label":"Token & cache efficiency","weight":0.08,"description":"How efficiently the iteration used the model and prompt cache.","two_way":false}],"bands":[{"name":"excellent","min":0.85},{"name":"good","min":0.7},{"name":"fair","min":0.5},{"name":"poor","min":0}]}',
+  '2026-07-20T00:00:00Z'
+);

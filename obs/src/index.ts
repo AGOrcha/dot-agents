@@ -1,4 +1,15 @@
 import { DurableObject } from "cloudflare:workers";
+import { handleReadRoute, isReadRoute } from "./read-model";
+import {
+  commitEventToD1,
+  type D1CommitInput,
+  type D1CommitResult,
+} from "./storage";
+import {
+  type HashableIngestEvent,
+  parseScoreSidecar,
+  validateEventContent,
+} from "./validation";
 
 const INGEST_PATH = "/api/v1/observability/ingest";
 const API_ROOT = "/api/v1/observability";
@@ -26,16 +37,7 @@ interface IngestClient {
   agent_runtime: string;
 }
 
-interface IngestEvent {
-  kind: IngestKind;
-  occurred_at: string;
-  plan_id: string;
-  task_id: string;
-  iteration: number;
-  schema_hash: string;
-  payload: Record<string, unknown>;
-  score_sidecar: Record<string, unknown> | null;
-}
+type IngestEvent = HashableIngestEvent;
 
 interface IngestEnvelope {
   schema_version: number;
@@ -66,14 +68,10 @@ interface IngestResponse {
   rejected: RejectedItem[];
 }
 
-interface ProjectDoRequest {
-  project_id: string;
-  client: IngestClient;
-  event: IngestEvent;
-}
+type ProjectDoRequest = D1CommitInput;
 
 interface ProjectDoResponse {
-  status: "accepted" | "deduped";
+  status: D1CommitResult;
 }
 
 export interface AccessJwksProvider {
@@ -187,17 +185,16 @@ function parseEvent(value: unknown): IngestEvent | null {
     return null;
   }
 
-  let parsedScoreSidecar: Record<string, unknown> | null;
+  let parsedScoreSidecar = null;
   if (kind === "iteration.checkpointed") {
     if (score_sidecar !== null) {
       return null;
     }
-    parsedScoreSidecar = null;
   } else {
-    if (!isRecord(score_sidecar)) {
+    parsedScoreSidecar = parseScoreSidecar(score_sidecar, iteration);
+    if (parsedScoreSidecar === null) {
       return null;
     }
-    parsedScoreSidecar = score_sidecar;
   }
 
   return {
@@ -254,7 +251,7 @@ async function dispatchToProjectDo(
   env: Env,
   envelope: IngestEnvelope,
   event: IngestEvent,
-): Promise<"accepted" | "deduped"> {
+): Promise<D1CommitResult> {
   const id = env.PROJECT_DO.idFromName(envelope.project_id);
   const stub = env.PROJECT_DO.get(id);
   const response = await stub.fetch("https://project.internal/ingest", {
@@ -273,7 +270,9 @@ async function dispatchToProjectDo(
   const result: unknown = await response.json();
   if (
     !isRecord(result) ||
-    (result.status !== "accepted" && result.status !== "deduped")
+    (result.status !== "accepted" &&
+      result.status !== "deduped" &&
+      result.status !== "invalid_event")
   ) {
     throw new Error("project DO returned an invalid result");
   }
@@ -333,7 +332,24 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
     }
 
     try {
+      if (!(await validateEventContent(event))) {
+        result.rejected.push(
+          rejection(index, key, "invalid_event", "event payload or schema_hash is invalid"),
+        );
+        continue;
+      }
       const status = await dispatchToProjectDo(env, envelope, event);
+      if (status === "invalid_event") {
+        result.rejected.push(
+          rejection(
+            index,
+            key,
+            "invalid_event",
+            "score recomputation requires an existing logical iteration",
+          ),
+        );
+        continue;
+      }
       result[status === "accepted" ? "accepted" : "deduped"] += 1;
     } catch {
       result.rejected.push(
@@ -378,21 +394,10 @@ export async function verifyAccess(
   return null;
 }
 
-function isReadOrLiveRoute(pathname: string): boolean {
-  if (
-    pathname === `${API_ROOT}/runs` ||
-    pathname === `${API_ROOT}/rubric` ||
-    pathname === `${API_ROOT}/health` ||
-    pathname === `${API_ROOT}/events`
-  ) {
-    return true;
-  }
-
-  return (
-    /^\/api\/v1\/observability\/runs\/[^/]+$/.test(pathname) ||
-    /^\/api\/v1\/observability\/runs\/[^/]+\/iterations$/.test(pathname) ||
-    /^\/api\/v1\/observability\/iterations\/[1-9]\d*$/.test(pathname)
-  );
+async function dispatchEvents(request: Request, env: Env): Promise<Response> {
+  const id = env.PROJECT_DO.idFromName(env.OBS_PROJECT_ID);
+  const internalRequest = new Request("https://project.internal/events", request);
+  return env.PROJECT_DO.get(id).fetch(internalRequest);
 }
 
 async function dispatch(request: Request, env: Env): Promise<Response> {
@@ -401,17 +406,49 @@ async function dispatch(request: Request, env: Env): Promise<Response> {
     return handleIngest(request, env);
   }
 
-  if (request.method === "GET" && isReadOrLiveRoute(url.pathname)) {
-    // TODO(o5): replace this read/live route seam with D1 DTO queries and the project DO transport.
-    return errorResponse(501, "not_implemented", "observability read model is not implemented");
+  if (request.method === "GET" && url.pathname === `${API_ROOT}/events`) {
+    return dispatchEvents(request, env);
+  }
+
+  if (request.method === "GET" && isReadRoute(url.pathname)) {
+    return handleReadRoute(request, env);
   }
 
   return errorResponse(404, "not_found", "route not found");
 }
 
+type DashboardEventType =
+  | "iteration.scored"
+  | "session.updated"
+  | "score.recomputed"
+  | "heartbeat";
+
+interface BufferedEvent {
+  type: DashboardEventType;
+  ts: string;
+  payload: Record<string, unknown>;
+}
+
 export class ProjectDO extends DurableObject<Env> {
+  private eventBuffer: BufferedEvent[] = [];
+  private writeTail: Promise<void> = Promise.resolve();
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    ctx.blockConcurrencyWhile(async () => {
+      const stored = await this.ctx.storage.get<BufferedEvent[]>("event-buffer");
+      this.eventBuffer = Array.isArray(stored) ? stored.slice(-100) : [];
+    });
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/subscriber-count") {
+      return json({ count: this.ctx.getWebSockets().length });
+    }
+    if (request.method === "GET" && url.pathname === "/events") {
+      return this.acceptWebSocket(request);
+    }
     if (request.method !== "POST" || url.pathname !== "/ingest") {
       return errorResponse(404, "not_found", "route not found");
     }
@@ -423,26 +460,115 @@ export class ProjectDO extends DurableObject<Env> {
       return errorResponse(400, "invalid_event", "project DO request must be valid JSON");
     }
     const parsedInput = parseProjectDoRequest(input);
-    if (parsedInput === null) {
+    if (parsedInput === null || parsedInput.project_id !== this.env.OBS_PROJECT_ID) {
       return errorResponse(400, "invalid_event", "project DO request is malformed");
     }
 
-    const status = await this.commitD1Transaction(parsedInput);
-    await this.broadcastAfterCommit(parsedInput.event);
+    const status = await this.serializedWrite(async () => {
+      const committed = await commitEventToD1(this.env.OBS_DB, parsedInput);
+      if (committed === "accepted") {
+        await this.broadcastAfterCommit(parsedInput.event);
+      }
+      return committed;
+    });
     return json({ status } satisfies ProjectDoResponse);
   }
 
-  private commitD1Transaction(
-    _input: ProjectDoRequest,
-  ): Promise<"accepted" | "deduped"> {
-    // TODO(o5): perform the idempotency check and all D1 mutations in one transaction.
-    void this.env.OBS_DB;
-    return Promise.resolve("accepted");
+  async alarm(): Promise<void> {
+    if (this.ctx.getWebSockets().length === 0) {
+      return;
+    }
+    this.publish({
+      type: "heartbeat",
+      ts: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      payload: {},
+    });
+    await this.ctx.storage.setAlarm(Date.now() + 15_000);
   }
 
-  private broadcastAfterCommit(_event: IngestEvent): Promise<void> {
-    // TODO(o5): update the last-100-event buffer and broadcast only after D1 commits.
-    return Promise.resolve();
+  webSocketMessage(socket: WebSocket): void {
+    socket.close(1003, "client frames are not supported");
+  }
+
+  webSocketError(socket: WebSocket): void {
+    socket.close(1011, "websocket error");
+  }
+
+  private async serializedWrite<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.writeTail;
+    let release = (): void => {};
+    this.writeTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  private async acceptWebSocket(request: Request): Promise<Response> {
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+      return errorResponse(426, "upgrade_required", "a WebSocket upgrade is required");
+    }
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    server.serializeAttachment({ seq: 0 });
+    this.ctx.acceptWebSocket(server);
+    await this.ctx.storage.setAlarm(Date.now() + 15_000);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private async broadcastAfterCommit(event: IngestEvent): Promise<void> {
+    const agent = isRecord(event.payload.agent) ? event.payload.agent : {};
+    const sessionId =
+      isNonEmptyString(agent.session_id)
+        ? agent.session_id
+        : `legacy:${event.plan_id}:${event.task_id}`;
+    const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const events: BufferedEvent[] = [];
+    if (event.kind !== "iteration.checkpointed" && event.score_sidecar !== null) {
+      events.push({
+        type: event.kind,
+        ts,
+        payload: {
+          session_id: sessionId,
+          iteration: event.iteration,
+          band: event.score_sidecar.band,
+        },
+      });
+    }
+    events.push({ type: "session.updated", ts, payload: { session_id: sessionId } });
+
+    this.eventBuffer = [...this.eventBuffer, ...events].slice(-100);
+    try {
+      await this.ctx.storage.put("event-buffer", this.eventBuffer);
+    } catch (error) {
+      console.error("project DO event buffer update failed", error);
+    }
+    for (const bufferedEvent of events) {
+      this.publish(bufferedEvent);
+    }
+  }
+
+  private publish(event: BufferedEvent): void {
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = socket.deserializeAttachment();
+      const seq =
+        isRecord(attachment) &&
+        typeof attachment.seq === "number" &&
+        Number.isInteger(attachment.seq)
+          ? attachment.seq
+          : 0;
+      try {
+        socket.send(JSON.stringify({ ...event, seq }));
+        socket.serializeAttachment({ seq: seq + 1 });
+      } catch {
+        socket.close(1011, "broadcast failed");
+      }
+    }
   }
 }
 
