@@ -110,3 +110,48 @@ the win.
 - Not chasing micro-optimizations without a measured hotspot (falsification gate).
 - The `release-docs-refresh` cut is **paused** until this plan's Phase 1
   (test-speed) + Phase 5 (scaffold removal) make the suite fast again.
+
+---
+
+## 6. Repo-wide expansion — file-I/O + other production hot-spots
+
+Scope broadens beyond `commands/workflow` to the file-I/O and CPU/alloc hot-spots
+that run on nearly every `da` invocation or KG/dashboard op. Same methodology
+(§1). Grounded by two read-only audits (CONFIRMED via file:line).
+
+### 6.1 New baseline evidence (hot-spots, not yet benched)
+
+**File-I/O (production):**
+- `internal/config/agentsrc.go:1171-1196,1490-1708` — `LoadAgentsRC` = full-file ReadFile + JSON decode, called by add/refresh/remove/lint/sync/install; `GenerateAgentsRC` re-walks scoped dirs + stats markers. No cache. [CONFIRMED]
+- `internal/platform/resources.go:101-192` — repeated `os.Stat`/`os.ReadDir` across project+global scopes on every projection/status/refresh. [CONFIRMED]
+- `internal/platform/hooks.go:530-1244` — managed-hook read/compare/backup/rewrite loop per file. [CONFIRMED]
+- `internal/dashboard/store/store.go:119-239` — snapshot ReadDir + parse every sidecar/iter-log on cache miss. [CONFIRMED]
+- **Correctness-gate EXCLUSIONS (NOT perf targets):** `internal/config/local_source.go` CAS-ignore verify + `internal/agentslock/lockfile.go` RMW — PERF_BUDGET classifies both as correctness gates; per the `no-external-semantics-approximation-for-security-gate` lesson we do NOT shortcut them.
+
+**CPU/alloc (unbenched surfaces):**
+- `internal/graphstore/impact.go:25-100` + `sqlite.go:424-951` — impact BFS frontier growth, full-set cap/sort/delete, per-row scan + `decodeExtra` JSON unmarshal (5k-node scale bottleneck). [CONFIRMED]
+- `internal/dashboard/store/store.go:146-579` — every request rebuilds `sessions()` (group/sort/project DTOs). [CONFIRMED]
+- `internal/adapters/builtin/crg/postprocess.go:91-252` — flows/communities/risk traversals, append/sort/map churn. [CONFIRMED]
+- `commands/workflow/hook_outcome.go:150-408` — whole-sidecar JSON validate+rewrite per append; `iter_log.go:325-723` — double YAML decode on v1 + token scans. [CONFIRMED]
+- `internal/platform/pipeline_projection.go` + omp/cc emitters — builder + `fmt.Fprintf` + `MarshalIndent` churn. [INFERENCE]
+- **Quick wins [CONFIRMED]:** `internal/graphstore/crg.go:504-511` + `internal/config/paths.go:156-160` compile `regexp.MustCompile` INSIDE the function (recompiled per call) — hoist to package scope.
+
+**Bench-coverage gap:** the harness covers config/platform-projection/lifecycle only. **Zero** coverage for graphstore, dashboard/store, workflow runtime, adapters, pipeline emit.
+
+### 6.2 New hypotheses
+
+- **H6 — Command-scoped I/O caching/memoization.** *Claim:* memoize `LoadAgentsRC` parsed manifest per command; memo scoped resource listings; reuse the known render-hash in `hooks.go` to skip re-reads; finer dashboard snapshot invalidation. *Prediction:* eliminate N−1 redundant reads/parses per command → measurable ms + alloc cut. *Proof:* new agentsrc/resources/hook/dashboard benchmarks before/after. *Kill:* no measurable win, or any correctness change. CAS-ignore + agentslock stay untouched.
+- **H7 — KG/graphstore query hot paths.** *Claim:* pre-size BFS frontier/result slices, short-circuit empty `extra` decode, batch/specialize row scans + edge-batch args. *Prediction:* ≥30% ns/op + alloc cut on impact-radius/search/stats at 5k nodes. *Proof:* new graphstore benchmarks at 5k before/after. *Kill:* <15% or behavior change.
+- **H8 — Dashboard projection memoization.** *Claim:* memoize `sessions()` by root fingerprint; pre-size; avoid per-request re-group/sort. *Prediction:* repeated dashboard reads → O(1) on unchanged roots. *Proof:* new dashboard-store benchmarks (ListRuns/GetRun/ListIterations/Health) before/after. *Kill:* <20% on the warm path.
+- **H9 — Zero-risk quick wins.** *Claim:* hoist per-call `regexp.MustCompile` to package scope; single-pass versioned decode (iter-log v1); record-granular hook-outcome validation. *Prediction:* removes per-call compile + double-decode; small but certain. *Proof:* micro-benchmarks. *Kill:* n/a (unambiguous correctness-preserving cleanups; still measured).
+
+### 6.3 New phases (added to the DAG; all gated on the expanded Phase 0)
+
+- **Phase 0 (EXPANDED)** — instrumentation adds benchmarks for the new surfaces (graphstore impact/query, dashboard/store, workflow iter-log + hook-outcome, CRG postprocess, pipeline emit, agentsrc load/generate, platform resources/hooks) + extends `scripts/perf` + `PERF_BUDGET.md`. Still gates all optimization.
+- **Phase 6 (H6)** — command-scoped I/O caching/memoization (agentsrc, resources, hooks, dashboard snapshot).
+- **Phase 7 (H7)** — KG/graphstore query hot paths (+ CRG postprocess).
+- **Phase 8 (H8)** — dashboard projection memoization.
+- **Phase 9 (H9)** — zero-risk quick wins (regex hoist, single-pass decode, incremental validation).
+- **Phase 5 (BROADENED)** — regression gate + perf budgets now cover every new benchmark, not just workflow.
+
+Scope note: the plan slug stays `workflow-perf-optimization` (historical), but its scope is now **repo-wide performance**. Phases 6-9 run parallel to 1-4 after Phase 0, each independently proven; the correctness-gate exclusions (§6.1) are firm non-goals.
