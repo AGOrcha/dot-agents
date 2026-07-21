@@ -267,7 +267,7 @@ da install
 
 ## Commands
 
-`da` exposes 24 top-level commands (excluding `help` and `completion`).
+`da` exposes 26 top-level commands (excluding `help` and `completion`).
 
 ### Project Management
 
@@ -447,6 +447,24 @@ hand. They are listed for completeness; reach for the end-user commands above fo
 A task may also carry the parameterized status `blocked-on:<ref>` (set via
 `workflow advance --status blocked-on:<ref>`); it is a task *state*, not a standalone command,
 and frees its parallelism slot in the `workflow slots` ledger until the blocker auto-resolves.
+
+### Observability
+
+`da observability` publishes workflow iteration/score telemetry to a remote
+dashboard backend (the reference deployment is `obs.agorcha.dev`) and inspects its
+reachability. The endpoint + credential come from the `.agentsrc.json`
+`observability` block; events queue crash-safe in `.agents/active/obs-outbox/` and
+drain idempotently, so a publish failure never changes a local command's result.
+
+| Command | Description |
+|---------|-------------|
+| `observability status` | Report the configured endpoint's reachability + authentication (resolves the credential-ref; refuses a non-HTTPS endpoint before resolving) |
+| `observability sync` | Drain the observability outbox to the endpoint (server dedupes); `--full` replays local `.agents/history/` to rebuild the remote read model |
+| `observability login --from-env` | Store the service-token credential (`CF_OBS_CLIENT_ID` / `CF_OBS_CLIENT_SECRET`) in the credential store |
+
+Publishing is wired best-effort into `workflow checkpoint` / `verify record`. See
+[docs/cf-access-bootstrap.md](docs/cf-access-bootstrap.md) for the Cloudflare Access
+apps and `obs/` for the Worker deploy target.
 
 ### Knowledge Graph
 

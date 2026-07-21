@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Observability dashboard deployment + `da observability`.** Ships the workflow
+  observability dashboard as a single-tenant Cloudflare Worker (reference deployment
+  `obs.agorcha.dev`) — Durable Objects + D1 for durable iteration/score history,
+  fail-closed CF Access JWT auth, and the existing dashboard SPA served with a live
+  WebSocket transport. New `da observability login | sync | status` publishes local
+  workflow telemetry to the endpoint configured in the `.agentsrc.json`
+  `observability` block, resolving a `credential-ref` from the credential store over
+  HTTPS only. Events queue crash-safe in `.agents/active/obs-outbox/` and drain
+  idempotently (server dedupes; `sync --full` rebuilds the remote from local
+  `.agents/history/`); publishing is wired best-effort into `workflow checkpoint` /
+  `verify record` and never changes a local command's exit. See
+  `docs/cf-access-bootstrap.md` and `obs/`.
+- **`observability` block in `.agentsrc.json`.** Configures the endpoint and a
+  strict `credential-ref` auth reference (`{kind, id}`); an enabled non-loopback
+  endpoint requires auth and must be absolute `https:`.
+
 ## [0.4.1] - 2026-06-24
 
 A cross-platform reliability release: first-run lock acquisition now works on

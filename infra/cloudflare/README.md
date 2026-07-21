@@ -11,6 +11,11 @@ Contract source: `.agents/proposals/agorcha-public-vs-internal-and-obs-deploy.md
 (D5/D8). This module is dm0 of that migration; dm5's Worker verifies the CF Access
 JWT `aud` claim against the `audTag` output here.
 
+> This module also declares **App 2** (`agorcha-obs`, the observability dashboard on
+> `obs.agorcha.dev`) in `obs.tf` — see [App 2](#app-2--obsagorchadev-observability-dashboard)
+> below and [`docs/cf-access-bootstrap.md`](../../docs/cf-access-bootstrap.md) for the
+> combined picture.
+
 ## Per-user service-token model
 
 Terraform owns the **shape** of access, not individual credentials:
@@ -118,3 +123,28 @@ dm6 — but the state should still never be committed. When this graduates beyon
 single operator, move to a remote backend (e.g. an R2-backed `s3` backend or Terraform
 Cloud) and add a `backend` block to `versions.tf`; until then, keep the local state
 file out of version control and back it up out-of-band.
+
+## App 2 — obs.agorcha.dev (observability dashboard)
+
+`obs.tf` declares the CF Access app for the observability dashboard Worker
+(`obs/`). Contract source: spec `obs-dashboard-cf-deploy` (D6) + proposal §3.4 App 2.
+
+| Resource | Purpose |
+|---|---|
+| `cloudflare_zero_trust_access_application.agorcha_obs` | Self-hosted Access app on `obs.agorcha.dev`, 24h session, GitHub IdP. |
+| `cloudflare_zero_trust_access_policy.obs_maintainers` | `allow` by email (`obs_maintainer_emails`) for browser logins. |
+| `cloudflare_zero_trust_access_policy.obs_service_token` | `non_identity` (Service Auth) **bound to the single `agorcha-obs-cli` token** (NOT any-valid). |
+| `cloudflare_zero_trust_access_service_token.obs` | The `agorcha-obs-cli` CLI service token. |
+
+**Key difference from App 1:** App 2 uses a **bound single-token** model, so the token
+IS declared in Terraform and its secret DOES live in state — retrieve it with
+`terraform output -raw obs_service_token_client_secret` (never committed). App 1's
+per-user model keeps no token secret in state. Outputs: `obs_audTag`,
+`obs_service_token_client_id`, `obs_service_token_client_secret` (sensitive).
+
+**Apply discipline:** apply App 2 with `-target` on the four `*.obs*`/`agorcha_obs`
+resources so a shared apply does not touch App 1's `maintainers` policy, which has a
+known email drift (CF has `nikprakash20@gmail.com`; `var.maintainer_email` defaults to
+`nikashprakash1@gmail.com` — a non-targeted apply would flip it). The deploy also needs
+the remote D1 + Worker (Workers Scripts + D1 + zone Routes/DNS/SSL) — see
+[`obs/README.md`](../../obs/README.md).
