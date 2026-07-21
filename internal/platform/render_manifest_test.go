@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
@@ -260,5 +261,129 @@ func TestWriteManagedFile_UnreadableExistingFileBlocksAndPreserves(t *testing.T)
 	// outer test can read the bytes and assert preservation.
 	if b, _ := os.ReadFile(dst); string(b) != precious {
 		t.Errorf("original file must survive an unreadable-destination refresh, got %q", string(b))
+	}
+}
+
+// resetRenderManifestCache clears the process-global render-manifest cache so a
+// test's reload-count assertions are deterministic regardless of test order.
+func resetRenderManifestCache(t *testing.T) {
+	t.Helper()
+	renderManifestMu.Lock()
+	defer renderManifestMu.Unlock()
+	renderManifestCache = nil
+	renderManifestCacheSig = renderManifestSig{}
+	renderManifestReloads = 0
+}
+
+func renderManifestReloadCount() int {
+	renderManifestMu.Lock()
+	defer renderManifestMu.Unlock()
+	return renderManifestReloads
+}
+
+// The H6 cache must serve an unchanged manifest from memory: repeated reads of a
+// stable file trigger exactly one disk read+parse, not one per read (the N-1
+// redundant-read elimination this optimization exists for).
+func TestRenderManifestCache_WarmReuseSkipsReparse(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	resetRenderManifestCache(t)
+	dst := "/proj/.claude/settings.json"
+	writeManifestFile(t, renderManifest{
+		SchemaVersion: renderManifestSchemaVersion,
+		Entries:       map[string]renderManifestEntry{manifestKey(dst): {SHA256: "seeded"}},
+	})
+
+	for range 5 {
+		if got := renderManifestHash(dst); got != "seeded" {
+			t.Fatalf("warm read: want seeded, got %q", got)
+		}
+		if m := loadRenderManifest(); m.Entries[manifestKey(dst)].SHA256 != "seeded" {
+			t.Fatalf("warm load: want seeded entry, got %+v", m.Entries)
+		}
+	}
+	if n := renderManifestReloadCount(); n != 1 {
+		t.Fatalf("10 reads of an unchanged manifest must reload once, reloaded %d times", n)
+	}
+}
+
+// The sole in-process writer (recordRenderHash) must keep the cache coherent:
+// load → record → load must observe the new hash, never a stale parse, and
+// without forcing a disk reparse (the chokepoint updates the cache in place).
+func TestRenderManifestCache_RecordIsObservedWithoutReparse(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	resetRenderManifestCache(t)
+	dst := "/proj/.claude/settings.json"
+
+	if got := renderManifestHash(dst); got != "" {
+		t.Fatalf("absent entry must be empty, got %q", got)
+	}
+	recordRenderHash(stdPlatformIO{}, dst, "hashA")
+	if got := renderManifestHash(dst); got != "hashA" {
+		t.Fatalf("record then read: want hashA, got %q (stale serve)", got)
+	}
+	recordRenderHash(stdPlatformIO{}, dst, "hashB")
+	if got := renderManifestHash(dst); got != "hashB" {
+		t.Fatalf("second record then read: want hashB, got %q (stale serve)", got)
+	}
+	// Only the initial empty load hit the disk; every subsequent read/record
+	// was served/mutated in memory.
+	if n := renderManifestReloadCount(); n != 1 {
+		t.Fatalf("chokepoint updates must not reparse: reloaded %d times, want 1", n)
+	}
+}
+
+// The stat signature must catch a writer that bypasses recordRenderHash (a
+// direct file edit / a different process): a mutation between reads is observed.
+func TestRenderManifestCache_ExternalWriteIsObserved(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	resetRenderManifestCache(t)
+	dst := "/proj/.claude/settings.json"
+
+	recordRenderHash(stdPlatformIO{}, dst, "hashA")
+	if got := renderManifestHash(dst); got != "hashA" {
+		t.Fatalf("want hashA before external write, got %q", got)
+	}
+
+	// External writer replaces the manifest (extra entry ⇒ different size, and
+	// bump mtime so the signature shifts on any filesystem clock resolution).
+	writeManifestFile(t, renderManifest{
+		SchemaVersion: renderManifestSchemaVersion,
+		Entries: map[string]renderManifestEntry{
+			manifestKey(dst):      {SHA256: "hashB"},
+			manifestKey("/other"): {SHA256: "hashC"},
+		},
+	})
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(renderManifestPath(), future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := renderManifestHash(dst); got != "hashB" {
+		t.Fatalf("external write must invalidate the cache: want hashB, got %q (stale serve)", got)
+	}
+}
+
+// The cache is keyed by the manifest path, so a change of XDG_STATE_HOME (a
+// different manifest) never leaks the previous root's entries.
+func TestRenderManifestCache_PathChangeReloads(t *testing.T) {
+	resetRenderManifestCache(t)
+	dst := "/proj/.claude/settings.json"
+
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	writeManifestFile(t, renderManifest{
+		SchemaVersion: renderManifestSchemaVersion,
+		Entries:       map[string]renderManifestEntry{manifestKey(dst): {SHA256: "rootA"}},
+	})
+	if got := renderManifestHash(dst); got != "rootA" {
+		t.Fatalf("root A: want rootA, got %q", got)
+	}
+
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	writeManifestFile(t, renderManifest{
+		SchemaVersion: renderManifestSchemaVersion,
+		Entries:       map[string]renderManifestEntry{manifestKey(dst): {SHA256: "rootB"}},
+	})
+	if got := renderManifestHash(dst); got != "rootB" {
+		t.Fatalf("root B must not serve root A's cache: want rootB, got %q", got)
 	}
 }
