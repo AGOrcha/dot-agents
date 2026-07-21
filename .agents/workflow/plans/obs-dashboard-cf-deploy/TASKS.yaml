@@ -96,7 +96,7 @@ tasks:
         preview URL for the same. YAML/wrangler config validates.
     - id: o5-obs-ingest-do-d1
       title: Per-project DO + D1 schema + idempotent ingest write-through
-      status: pending
+      status: completed
       depends_on:
         - o4-obs-worker-scaffold
       blocks: []
@@ -115,7 +115,7 @@ tasks:
         event -> accepted:1.
     - id: o6-obs-auth-gate
       title: Dual-mode auth on the obs Worker (CF Access JWT + service token), fail-closed
-      status: pending
+      status: completed
       depends_on:
         - o4-obs-worker-scaffold
         - o2-obs-cf-access-app
@@ -154,7 +154,7 @@ tasks:
         frame arrives with the event).
     - id: o8-da-observability-cli
       title: da observability login|sync|status commands
-      status: pending
+      status: completed
       depends_on:
         - o3-obs-agentsrc-schema
         - o4-obs-worker-scaffold
