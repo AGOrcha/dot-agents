@@ -22,9 +22,10 @@ permissions:
   id-token: write
 
 env:
-  # -timeout bumped 300s->1200s: commands/workflow is git-heavy (~438s non-race
-  # on Windows) and -race multiplies it; per-package, so only the slow one uses it.
-  GO_TEST_FLAGS: -race -count=1 -timeout=1200s
+  # commands/workflow's -race wall-clock on Windows was brought back under Go's
+  # 600s default by the workflow-perf-optimization pass (H1 fixtures + H2/H3
+  # git-spawn cuts), so the 1200s scaffold is reverted. -timeout is per-package.
+  GO_TEST_FLAGS: -race -count=1 -timeout=600s
   GO_COVERAGE_FILE: coverage.out
 
 jobs:

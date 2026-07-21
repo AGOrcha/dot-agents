@@ -28,11 +28,12 @@ defaults:
     shell: bash
 
 env:
-  # commands/workflow is a large git-heavy package (~438s non-race measured on a
-  # real Windows box); -race adds 2-10x, so under -race on windows-latest it
-  # exceeds Go's 600s default. -timeout is PER-PACKAGE, so this only lets the one
-  # slow package finish — fast packages are unaffected and a genuine hang still fails.
-  GO_TEST_FLAGS: -race -count=1 -timeout=1200s
+  # commands/workflow was git-heavy (~438s non-race on a real Windows box) and
+  # needed a 1200s scaffold under -race. The workflow-perf-optimization pass
+  # (H1 shared fixtures + H2/H3 git-spawn cuts) brought its -race wall-clock on
+  # windows-latest back under Go's 600s default, so the scaffold is reverted.
+  # -timeout is PER-PACKAGE, so a genuine hang still fails the run.
+  GO_TEST_FLAGS: -race -count=1 -timeout=600s
 
 jobs:
   lint-workflows:
