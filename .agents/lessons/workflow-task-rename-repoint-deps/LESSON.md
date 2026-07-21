@@ -1,10 +1,9 @@
 # Renaming/superseding a workflow task must repoint its dependents
 
-`da workflow task` has no `rename`/`supersede` operation — only `add` and `update`
-(notes/write-scope/title). So a task rename is done by hand: add the new task, mark
-the old one done/removed. The hazard: **dependents still point `depends_on` at the
-OLD task id**, and if the old id lingers as a separate `pending` task, the dependent
-is silently blocked forever.
+Use `da workflow task rename` or `da workflow task supersede` whenever a canonical
+task ID changes. These commands atomically update the task set and repoint every
+other task's `depends_on` and `blocks` references. A hand rename can leave the old
+ID as a separate `pending` task and silently block dependents forever.
 
 ## What happened
 
@@ -17,23 +16,27 @@ canonical graph correctly; the graph itself was wrong.
 
 ## Rule
 
-When you rename or supersede a task:
-1. **Remove** the old entry (don't leave a duplicate pending task shadowing the new one).
-2. **Repoint every dependent's `depends_on`** from the old id to the new id —
-   `grep <old-id>` across the plan's TASKS.yaml; a lone `- <old-id>` under some other
-   task's `depends_on` is the tell.
-3. Re-run `da workflow eligible --plan <plan>` and confirm the expected tasks unblocked
-   (a dependent that DIDN'T appear is the symptom).
+Preview the affected dependents, then perform the structural mutation:
 
-`da workflow task update` has no `--depends-on` flag and there's no `task rm`, so the
-dedup + repoint is a careful hand-edit of TASKS.yaml (structural, not a status edit —
-status still goes through `advance`). Sibling of
-[[consolidate-vestigial-siblings-on-rename]] (rename = consolidate the duplication) and
-[[validate-bundle-against-head]] (the task graph decays between snapshots).
+```sh
+da workflow task rename <plan> --from <old-id> --to <new-id> --dry-run
+da workflow task rename <plan> --from <old-id> --to <new-id>
 
-## Durable fix (follow-up)
+# When the replacement task already exists:
+da workflow task supersede <plan> --old <old-id> --new <new-id> --dry-run
+da workflow task supersede <plan> --old <old-id> --new <new-id>
+```
 
-A `da workflow task rename <plan> --from <old> --to <new>` that atomically renames the
-entry and rewrites every dependent's `depends_on` (+ a `--supersede` that removes the
-old and repoints) would make this safe. Tracked as a proposal
-(`~/.agents/proposals/workflow-task-rename-repoints-deps.md`).
+`rename` changes the task ID and task-keyed `(fb:*)` note tags. `supersede` removes
+the old entry. Both repoint all `depends_on` and `blocks` references through the
+canonical write path, including the `refs/agents/state` mirror when the git-ref
+backend is active. Re-run `da workflow eligible --plan <plan>` and confirm the
+expected task graph.
+
+If the installed `da` predates these commands, use the manual fallback carefully:
+edit TASKS.yaml once, remove or rename the old entry, grep the full file for
+`<old-id>`, repoint every `depends_on` and `blocks` occurrence, update task-keyed
+`(fb:*)` tags, and re-run `eligible`. Do not leave a pending duplicate. This is a
+sibling of [[consolidate-vestigial-siblings-on-rename]] (rename = consolidate the
+duplication) and [[validate-bundle-against-head]] (the task graph decays between
+snapshots).

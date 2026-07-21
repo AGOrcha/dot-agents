@@ -382,13 +382,20 @@ func newWorkflowPlanCheckScopeCmd() *cobra.Command {
 func newWorkflowTaskCmd() *cobra.Command {
 	taskCmd := &cobra.Command{
 		Use:   "task",
-		Short: "Add or update tasks within a canonical plan",
+		Short: "Add, update, rename, or supersede tasks within a canonical plan",
 		Example: deps.ExampleBlock(
 			"  da workflow task add loop-orchestrator-layer --id phase-5 --title \"Transport cleanup\"",
 			"  da workflow task update loop-orchestrator-layer --task phase-5 --write-scope internal/platform",
+			"  da workflow task rename loop-orchestrator-layer --from phase-5 --to phase-5-cleanup",
+			"  da workflow task supersede loop-orchestrator-layer --old phase-5 --new phase-6",
 		),
 	}
-	taskCmd.AddCommand(newWorkflowTaskAddCmd(), newWorkflowTaskUpdateCmd())
+	taskCmd.AddCommand(
+		newWorkflowTaskAddCmd(),
+		newWorkflowTaskUpdateCmd(),
+		newWorkflowTaskRenameCmd(),
+		newWorkflowTaskSupersedeCmd(),
+	)
 	return taskCmd
 }
 
@@ -453,6 +460,56 @@ func newWorkflowTaskUpdateCmd() *cobra.Command {
 	taskUpdateCmd.Flags().StringVar(&taskUpdateBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks (replaces existing)")
 	_ = taskUpdateCmd.MarkFlagRequired("task")
 	return taskUpdateCmd
+}
+
+func newWorkflowTaskRenameCmd() *cobra.Command {
+	var oldID, newID string
+	var dryRun, asJSON bool
+	cmd := &cobra.Command{
+		Use:   "rename <plan-id>",
+		Short: "Rename a task and repoint every dependency that references it",
+		Example: deps.ExampleBlock(
+			"  da workflow task rename loop-orchestrator-layer --from phase-5 --to phase-5-cleanup",
+			"  da workflow task rename loop-orchestrator-layer --from phase-5 --to phase-5-cleanup --dry-run",
+			"  da workflow task rename loop-orchestrator-layer --from phase-5 --to phase-5-cleanup --json",
+		),
+		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowTaskRename(cmd.OutOrStdout(), args[0], oldID, newID, dryRun || deps.Flags.DryRun(), asJSON)
+		},
+	}
+	cmd.Flags().StringVar(&oldID, "from", "", "Existing task ID to rename (required)")
+	cmd.Flags().StringVar(&newID, "to", "", "New task ID (required)")
+	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Print dependents that would be repointed without writing")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit the result as JSON (also honours the global --json flag)")
+	_ = cmd.MarkFlagRequired("from")
+	_ = cmd.MarkFlagRequired("to")
+	return cmd
+}
+
+func newWorkflowTaskSupersedeCmd() *cobra.Command {
+	var oldID, newID string
+	var dryRun, asJSON bool
+	cmd := &cobra.Command{
+		Use:   "supersede <plan-id>",
+		Short: "Remove a superseded task and repoint every dependency to its replacement",
+		Example: deps.ExampleBlock(
+			"  da workflow task supersede loop-orchestrator-layer --old phase-5 --new phase-6",
+			"  da workflow task supersede loop-orchestrator-layer --old phase-5 --new phase-6 --dry-run",
+			"  da workflow task supersede loop-orchestrator-layer --old phase-5 --new phase-6 --json",
+		),
+		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that owns the tasks."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowTaskSupersede(cmd.OutOrStdout(), args[0], oldID, newID, dryRun || deps.Flags.DryRun(), asJSON)
+		},
+	}
+	cmd.Flags().StringVar(&oldID, "old", "", "Task ID to remove (required)")
+	cmd.Flags().StringVar(&newID, "new", "", "Existing replacement task ID (required)")
+	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Print dependents that would be repointed without writing")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit the result as JSON (also honours the global --json flag)")
+	_ = cmd.MarkFlagRequired("old")
+	_ = cmd.MarkFlagRequired("new")
+	return cmd
 }
 
 func newWorkflowTasksCmd() *cobra.Command {
