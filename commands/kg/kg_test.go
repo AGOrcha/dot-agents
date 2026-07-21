@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,14 +145,16 @@ func initGitRepo(t *testing.T, repo string) {
 	if err := os.MkdirAll(repo, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("git", "-C", repo, "init").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
+	// H5: copy the once-built empty-repo template instead of spawning
+	// `git init` + two `git config` per call (see fixture_template_test.go).
+	tmpl, err := kgRepoTemplate()
+	if err != nil {
+		t.Fatalf("build git repo template: %v", err)
 	}
-	for _, kv := range [][2]string{{"user.name", "test"}, {"user.email", "test@example.com"}} {
-		if out, err := exec.Command("git", "-C", repo, "config", kv[0], kv[1]).CombinedOutput(); err != nil {
-			t.Fatalf("git config %s: %v\n%s", kv[0], err, out)
-		}
+	if err := copyGitTemplate(tmpl, repo); err != nil {
+		t.Fatalf("copy git template into %s: %v", repo, err)
 	}
+	atomic.AddInt64(&kgTemplateCopyCount, 1)
 }
 
 func commitFile(t *testing.T, repo, relPath, content, message string) {

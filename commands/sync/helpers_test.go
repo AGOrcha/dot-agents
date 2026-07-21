@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"golang.org/x/sys/execabs"
@@ -47,14 +48,23 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// initEmptyRepo runs `git init` and a config dance so commits succeed.
+// initEmptyRepo hands the caller a byte-faithful copy of the shared seeded
+// repo template (git init + config + one empty seed commit) so HEAD exists,
+// with ZERO new git subprocesses. Drop-in replacement for the old inline
+// init+config+commit sequence (see fixture_template_test.go).
 func initEmptyRepo(t *testing.T, dir string) {
 	t.Helper()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.name", "Test")
-	runGit(t, dir, "config", "user.email", "test@example.com")
-	// Initial empty commit so HEAD exists.
-	runGit(t, dir, "commit", "--allow-empty", "-m", "seed")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmpl, err := syncRepoTemplate()
+	if err != nil {
+		t.Fatalf("build seeded repo template: %v", err)
+	}
+	if err := copyGitTemplate(tmpl, dir); err != nil {
+		t.Fatalf("copy git template into %s: %v", dir, err)
+	}
+	atomic.AddInt64(&syncTemplateCopyCount, 1)
 }
 
 // TestHasGitManifests_NoConfig returns false without a config.
