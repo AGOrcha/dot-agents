@@ -209,7 +209,7 @@ func iterationsForPlan(projectPath, planID string) ([]int, error) {
 // path for a missing/partial index. A missing iteration-log dir yields nil.
 func iterationsForPlanByWaveScan(projectPath, planID string) ([]int, error) {
 	iterDir := IterationLogDir(projectPath)
-	entries, err := os.ReadDir(iterDir)
+	entries, err := nextIterReadDir(iterDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

@@ -306,16 +306,13 @@ func TestIterationsForPlanByWaveScanErrors(t *testing.T) {
 	if got, err := iterationsForPlanByWaveScan(proj, "p1"); got != nil || err != nil {
 		t.Fatalf("missing dir = (%v,%v), want (nil,nil)", got, err)
 	}
-	// iteration-log path is a FILE → ReadDir errors.
-	proj2 := t.TempDir()
-	if err := os.MkdirAll(filepath.Dir(IterationLogDir(proj2)), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(IterationLogDir(proj2), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := iterationsForPlanByWaveScan(proj2, "p1"); err == nil {
-		t.Fatal("expected ReadDir error when iteration-log is a file")
+	// Non-IsNotExist ReadDir error → propagated. Injected via nextIterReadDir
+	// because Windows os.ReadDir does not reliably error on a non-dir path.
+	prior := nextIterReadDir
+	nextIterReadDir = func(string) ([]os.DirEntry, error) { return nil, errIndexTestFault }
+	t.Cleanup(func() { nextIterReadDir = prior })
+	if _, err := iterationsForPlanByWaveScan(proj, "p1"); err == nil {
+		t.Fatal("expected injected ReadDir error")
 	}
 }
 
@@ -476,14 +473,13 @@ func TestArchivePlanIterationsCorruptActiveIndexTolerated(t *testing.T) {
 }
 
 func TestArchivePlanIterationsResolveErrorPropagates(t *testing.T) {
-	// iteration-log path is a file → both index load and wave-scan error out.
+	// A non-IsNotExist ReadDir error in the wave-scan fallback (index absent)
+	// makes iteration resolution fail; injected via the seam for portability
+	// (Windows os.ReadDir does not reliably error on a non-dir path).
 	proj := t.TempDir()
-	if err := os.MkdirAll(filepath.Dir(IterationLogDir(proj)), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(IterationLogDir(proj), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	prior := nextIterReadDir
+	nextIterReadDir = func(string) ([]os.DirEntry, error) { return nil, errIndexTestFault }
+	t.Cleanup(func() { nextIterReadDir = prior })
 	if _, err := archivePlanIterations(proj, "p1", false); err == nil {
 		t.Fatal("expected resolve error to propagate")
 	}
@@ -496,12 +492,9 @@ func TestArchivePlanIterationsResolveErrorPropagates(t *testing.T) {
 func TestArchiveSinglePlanIterLogErrorPropagates(t *testing.T) {
 	proj := t.TempDir()
 	setupArchivePlan(t, proj, "myplan", "completed")
-	if err := os.MkdirAll(filepath.Dir(IterationLogDir(proj)), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(IterationLogDir(proj), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	prior := nextIterReadDir
+	nextIterReadDir = func(string) ([]os.DirEntry, error) { return nil, errIndexTestFault }
+	t.Cleanup(func() { nextIterReadDir = prior })
 	err := archiveSinglePlan(proj, "myplan", false, false, true)
 	if err == nil || !strings.Contains(err.Error(), "archive iteration log") {
 		t.Fatalf("expected wrapped iteration-log error, got %v", err)
