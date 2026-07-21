@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -15,37 +14,14 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/scoring"
 )
 
-// closeTaskTestRepo builds a tiny git repo with a single committed file plus
-// a plan + task ready for close-task to flip. Returns (repo, plan-id,
-// task-id). Centralises the boilerplate so multiple close-task tests stay
-// readable.
+// closeTaskTestRepo hands the test a committed git repo with a plan + task
+// ready for close-task to flip. Returns (repo, plan-id, task-id). The repo is
+// a cheap, isolated COPY of the shared committed-repo template (H1: zero new
+// git subprocesses per call) with the same plan/task files layered on top that
+// the old per-test real-git bootstrap produced.
 func closeTaskTestRepo(t *testing.T) (repo, planID, taskID string) {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	repo = t.TempDir()
-	gitDo := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e",
-			"GIT_AUTHOR_DATE=2026-05-23T00:00:00Z", "GIT_COMMITTER_DATE=2026-05-23T00:00:00Z",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	gitDo("init", "-q")
-	gitDo("config", "user.email", "t@e")
-	gitDo("config", "user.name", "t")
-	gitDo("config", "commit.gpgsign", "false")
-	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitDo("add", "README")
-	gitDo("commit", "-q", "-m", "seed")
+	repo = sharedCommittedRepo(t)
 	planID, taskID = "p", "t1"
 	seedSimplePlanForAdvance(t, repo, planID, taskID)
 	return repo, planID, taskID
