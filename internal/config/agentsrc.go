@@ -1,13 +1,17 @@
 package config
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v6"
@@ -252,6 +256,105 @@ type AgentsRCKG struct {
 	Bridge AgentsRCKGBridge `json:"bridge"`
 }
 
+const observabilityCredentialRefKind = "credential-ref"
+
+var observabilityCredentialIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+// AgentsRCObservabilityAuth references one atomic credential in the shared
+// credential store. The resolved secret shape is intentionally not part of
+// AgentsRC; only the credential reference is committed to the repository.
+type AgentsRCObservabilityAuth struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+// UnmarshalJSON rejects unknown fields and validates the committed
+// credential-reference shape before it can enter the typed AgentsRC surface.
+func (a *AgentsRCObservabilityAuth) UnmarshalJSON(data []byte) error {
+	type wire AgentsRCObservabilityAuth
+	var decoded wire
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return fmt.Errorf("observability auth: %w", err)
+	}
+	if decoded.Kind != observabilityCredentialRefKind {
+		return fmt.Errorf("observability auth kind must be %q", observabilityCredentialRefKind)
+	}
+	if !observabilityCredentialIDPattern.MatchString(decoded.ID) {
+		return fmt.Errorf("observability auth id must match %s", observabilityCredentialIDPattern)
+	}
+	*a = AgentsRCObservabilityAuth(decoded)
+	return nil
+}
+
+// AgentsRCObservability configures publication to an observability backend.
+// PushThrottleSeconds defaults to zero, which publishes immediately.
+type AgentsRCObservability struct {
+	Enabled             bool                       `json:"enabled"`
+	Endpoint            string                     `json:"endpoint"`
+	PushThrottleSeconds int                        `json:"push_throttle_seconds"`
+	Auth                *AgentsRCObservabilityAuth `json:"auth,omitempty"`
+}
+
+// UnmarshalJSON keeps the nested block strict and enforces the transport
+// boundary before any credential-ref can be consumed by a client.
+func (o *AgentsRCObservability) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		Enabled             bool            `json:"enabled"`
+		Endpoint            string          `json:"endpoint"`
+		PushThrottleSeconds int             `json:"push_throttle_seconds"`
+		Auth                json.RawMessage `json:"auth"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return fmt.Errorf("observability: %w", err)
+	}
+
+	var auth *AgentsRCObservabilityAuth
+	if len(decoded.Auth) > 0 {
+		if bytes.Equal(bytes.TrimSpace(decoded.Auth), []byte("null")) {
+			return fmt.Errorf("observability auth must be an object")
+		}
+		var parsed AgentsRCObservabilityAuth
+		if err := json.Unmarshal(decoded.Auth, &parsed); err != nil {
+			return err
+		}
+		auth = &parsed
+	}
+
+	candidate := AgentsRCObservability{
+		Enabled:             decoded.Enabled,
+		Endpoint:            decoded.Endpoint,
+		PushThrottleSeconds: decoded.PushThrottleSeconds,
+		Auth:                auth,
+	}
+	if candidate.PushThrottleSeconds < 0 {
+		return fmt.Errorf("observability push_throttle_seconds must be non-negative")
+	}
+	if candidate.Auth != nil {
+		endpoint, err := url.Parse(candidate.Endpoint)
+		if err != nil || !endpoint.IsAbs() || endpoint.Host == "" || !strings.EqualFold(endpoint.Scheme, "https") {
+			return fmt.Errorf("observability credential-ref endpoint must be an absolute https URL")
+		}
+	}
+	if candidate.Enabled && candidate.Auth == nil && !observabilityEndpointIsLoopback(candidate.Endpoint) {
+		return fmt.Errorf("enabled non-loopback observability endpoint requires auth")
+	}
+	*o = candidate
+	return nil
+}
+
+func observabilityEndpointIsLoopback(raw string) bool {
+	endpoint, err := url.Parse(raw)
+	if err != nil || !endpoint.IsAbs() || endpoint.Host == "" {
+		return false
+	}
+	host := endpoint.Hostname()
+	return strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1"
+}
+
 // WorkTracking read_from values (work-tracking-storage-abstraction §9 read-from-master shim).
 const (
 	// WorkTrackingReadFromWorktree reads coordination state (TASKS.yaml /
@@ -392,17 +495,18 @@ func (a *AgentsRC) UseGitRefBackend() bool {
 //
 // See specs config-distribution-model §3-§5 + org-config-resolution §15.2.
 type AgentsRC struct {
-	Schema   string        `json:"$schema,omitempty"`
-	Version  int           `json:"version"`
-	Project  string        `json:"project,omitempty"`
-	Skills   []string      `json:"skills,omitempty"`
-	Rules    []string      `json:"rules,omitempty"`
-	Agents   []string      `json:"agents,omitempty"`
-	Hooks    StringsOrBool `json:"hooks"`
-	MCP      StringsOrBool `json:"mcp"`
-	Settings bool          `json:"settings"`
-	Sources  []Source      `json:"sources"`
-	KG       *AgentsRCKG   `json:"kg,omitempty"`
+	Schema        string                 `json:"$schema,omitempty"`
+	Version       int                    `json:"version"`
+	Project       string                 `json:"project,omitempty"`
+	Skills        []string               `json:"skills,omitempty"`
+	Rules         []string               `json:"rules,omitempty"`
+	Agents        []string               `json:"agents,omitempty"`
+	Hooks         StringsOrBool          `json:"hooks"`
+	MCP           StringsOrBool          `json:"mcp"`
+	Settings      bool                   `json:"settings"`
+	Sources       []Source               `json:"sources"`
+	KG            *AgentsRCKG            `json:"kg,omitempty"`
+	Observability *AgentsRCObservability `json:"observability,omitempty"`
 
 	// --- v2 additive fields (config-distribution-model §3) ---
 
@@ -834,7 +938,7 @@ var agentsRCKnown = map[string]bool{
 	"$schema": true, "version": true, "project": true,
 	"skills": true, "rules": true, "agents": true,
 	"hooks": true, "mcp": true, "settings": true, "sources": true,
-	"kg": true,
+	"kg": true, "observability": true,
 	// refresh is a legacy pre-refresh-metadata-to-lock manifest key: refresh
 	// metadata now lives in .agentsrc.lock's "refresh" section (RefreshMetadata /
 	// WriteRefreshLock), never the committed manifest. It stays "known" here so a
@@ -876,17 +980,18 @@ var agentsRCKnown = map[string]bool{
 // infinite recursion while still using the standard json encoder.
 // Per [[schema-usage]]: this MUST mirror AgentsRC's typed fields exactly.
 type agentsRCCore struct {
-	Schema   string        `json:"$schema,omitempty"`
-	Version  int           `json:"version"`
-	Project  string        `json:"project,omitempty"`
-	Skills   []string      `json:"skills,omitempty"`
-	Rules    []string      `json:"rules,omitempty"`
-	Agents   []string      `json:"agents,omitempty"`
-	Hooks    StringsOrBool `json:"hooks"`
-	MCP      StringsOrBool `json:"mcp"`
-	Settings bool          `json:"settings"`
-	Sources  []Source      `json:"sources"`
-	KG       *AgentsRCKG   `json:"kg,omitempty"`
+	Schema        string                 `json:"$schema,omitempty"`
+	Version       int                    `json:"version"`
+	Project       string                 `json:"project,omitempty"`
+	Skills        []string               `json:"skills,omitempty"`
+	Rules         []string               `json:"rules,omitempty"`
+	Agents        []string               `json:"agents,omitempty"`
+	Hooks         StringsOrBool          `json:"hooks"`
+	MCP           StringsOrBool          `json:"mcp"`
+	Settings      bool                   `json:"settings"`
+	Sources       []Source               `json:"sources"`
+	KG            *AgentsRCKG            `json:"kg,omitempty"`
+	Observability *AgentsRCObservability `json:"observability,omitempty"`
 
 	// v2 additive fields (config-distribution-model §3)
 	RepoID           string                `json:"repo_id,omitempty"`
@@ -922,6 +1027,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Settings = core.Settings
 	a.Sources = core.Sources
 	a.KG = core.KG
+	a.Observability = core.Observability
 	a.RepoID = core.RepoID
 	a.Extends = core.Extends
 	a.Packages = core.Packages
@@ -993,6 +1099,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Settings:             a.Settings,
 		Sources:              a.Sources,
 		KG:                   a.KG,
+		Observability:        a.Observability,
 		RepoID:               a.RepoID,
 		Extends:              a.Extends,
 		Packages:             a.Packages,
@@ -1214,6 +1321,17 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	}
 	if len(existing.ExtraFields) > 0 {
 		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)
+	}
+	// observability is author-owned endpoint/auth configuration. Preserve it
+	// across generated-manifest rewrites now that it no longer rides in
+	// ExtraFields, and clone the nested auth pointer to avoid aliasing.
+	if existing.Observability != nil {
+		observability := *existing.Observability
+		if existing.Observability.Auth != nil {
+			auth := *existing.Observability.Auth
+			observability.Auth = &auth
+		}
+		out.Observability = &observability
 	}
 	// stage_profiles are author-owned config, not scan-derived, so a committed set
 	// must survive regeneration. Before these were typed fields the profiles rode

@@ -2821,3 +2821,213 @@ func TestWorkTracking_BackendSchemaValidates(t *testing.T) {
 		t.Fatal("schema must reject an out-of-enum backend value")
 	}
 }
+
+const observabilityAgentsRCFixture = `{
+  "version": 2,
+  "project": "dot-agents",
+  "sources": [{"type": "local"}],
+  "observability": {
+    "enabled": true,
+    "endpoint": "https://obs.agorcha.dev",
+    "push_throttle_seconds": 0,
+    "auth": {
+      "kind": "credential-ref",
+      "id": "agorcha-obs"
+    }
+  }
+}`
+
+func TestAgentsRCObservabilityRoundTrip(t *testing.T) {
+	var original AgentsRC
+	if err := json.Unmarshal([]byte(observabilityAgentsRCFixture), &original); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	if original.Observability == nil || original.Observability.Auth == nil {
+		t.Fatalf("observability block did not decode into typed fields: %+v", original.Observability)
+	}
+	if original.Observability.PushThrottleSeconds != 0 {
+		t.Fatalf("push_throttle_seconds = %d, want 0", original.Observability.PushThrottleSeconds)
+	}
+	if _, leaked := original.ExtraFields["observability"]; leaked {
+		t.Fatal("observability leaked into ExtraFields")
+	}
+
+	encoded, err := json.Marshal(&original)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	var roundTripped AgentsRC
+	if err := json.Unmarshal(encoded, &roundTripped); err != nil {
+		t.Fatalf("re-unmarshal fixture: %v", err)
+	}
+	if !reflect.DeepEqual(original, roundTripped) {
+		t.Fatalf("observability round-trip drift:\noriginal: %#v\nround-trip: %#v", original, roundTripped)
+	}
+}
+
+func TestAgentsRCObservabilityRejectsUnknownFields(t *testing.T) {
+	tests := map[string]string{
+		"observability": `{
+			"version": 2,
+			"observability": {
+				"enabled": true,
+				"endpoint": "https://obs.agorcha.dev",
+				"push_throttle_seconds": 0,
+				"auth": {"kind": "credential-ref", "id": "agorcha-obs"},
+				"unexpected": true
+			}
+		}`,
+		"observability auth": `{
+			"version": 2,
+			"observability": {
+				"enabled": true,
+				"endpoint": "https://obs.agorcha.dev",
+				"push_throttle_seconds": 0,
+				"auth": {
+					"kind": "credential-ref",
+					"id": "agorcha-obs",
+					"secret": "must-not-be-accepted"
+				}
+			}
+		}`,
+	}
+	for name, raw := range tests {
+		t.Run(name, func(t *testing.T) {
+			var rc AgentsRC
+			err := json.Unmarshal([]byte(raw), &rc)
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("expected unknown-field rejection, got %v", err)
+			}
+		})
+	}
+}
+
+func TestAgentsRCObservabilityValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{
+			name:    "enabled https credential ref",
+			raw:     observabilityAgentsRCFixture,
+			wantErr: false,
+		},
+		{
+			name:    "enabled remote endpoint without auth",
+			raw:     `{"version":2,"observability":{"enabled":true,"endpoint":"https://obs.example.com","push_throttle_seconds":0}}`,
+			wantErr: true,
+		},
+		{
+			name:    "loopback endpoint without auth",
+			raw:     `{"version":2,"observability":{"enabled":true,"endpoint":"http://127.0.0.1:8787"}}`,
+			wantErr: false,
+		},
+		{
+			name:    "credential ref over http",
+			raw:     `{"version":2,"observability":{"enabled":true,"endpoint":"http://obs.example.com","auth":{"kind":"credential-ref","id":"agorcha-obs"}}}`,
+			wantErr: true,
+		},
+		{
+			name:    "negative throttle",
+			raw:     `{"version":2,"observability":{"enabled":false,"endpoint":"http://localhost","push_throttle_seconds":-1}}`,
+			wantErr: true,
+		},
+		{
+			name:    "invalid credential id",
+			raw:     `{"version":2,"observability":{"enabled":true,"endpoint":"https://obs.example.com","auth":{"kind":"credential-ref","id":"bad id"}}}`,
+			wantErr: true,
+		},
+		{
+			name:    "null auth",
+			raw:     `{"version":2,"observability":{"enabled":true,"endpoint":"https://obs.example.com","auth":null}}`,
+			wantErr: true,
+		},
+		{
+			name:    "missing credential id",
+			raw:     `{"version":2,"observability":{"enabled":true,"endpoint":"https://obs.example.com","auth":{"kind":"credential-ref"}}}`,
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var rc AgentsRC
+			err := json.Unmarshal([]byte(tc.raw), &rc)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+			if !tc.wantErr && rc.Observability.PushThrottleSeconds != 0 {
+				t.Fatalf("default push_throttle_seconds = %d, want 0", rc.Observability.PushThrottleSeconds)
+			}
+		})
+	}
+}
+
+func TestAgentsRCObservabilitySchemaValidation(t *testing.T) {
+	schema := compileAgentsRCSchema(t)
+	parse := func(raw string) any {
+		t.Helper()
+		var document any
+		if err := json.Unmarshal([]byte(raw), &document); err != nil {
+			t.Fatalf("parse schema fixture: %v", err)
+		}
+		return document
+	}
+
+	if err := schema.Validate(parse(observabilityAgentsRCFixture)); err != nil {
+		t.Fatalf("observability fixture must validate against agentsrc schema: %v", err)
+	}
+
+	rejected := map[string]string{
+		"enabled remote endpoint without auth": `{"version":2,"observability":{"enabled":true,"endpoint":"https://obs.example.com","push_throttle_seconds":0}}`,
+		"credential ref over http":             `{"version":2,"observability":{"enabled":true,"endpoint":"http://obs.example.com","auth":{"kind":"credential-ref","id":"agorcha-obs"}}}`,
+		"negative throttle":                    `{"version":2,"observability":{"enabled":false,"endpoint":"http://localhost","push_throttle_seconds":-1}}`,
+		"invalid credential id":                `{"version":2,"observability":{"enabled":true,"endpoint":"https://obs.example.com","auth":{"kind":"credential-ref","id":"bad id"}}}`,
+		"unknown observability field":          `{"version":2,"observability":{"enabled":false,"endpoint":"http://localhost","unexpected":true}}`,
+		"unknown auth field":                   `{"version":2,"observability":{"enabled":true,"endpoint":"https://obs.example.com","auth":{"kind":"credential-ref","id":"agorcha-obs","secret":"no"}}}`,
+		"null auth":                            `{"version":2,"observability":{"enabled":true,"endpoint":"https://obs.example.com","auth":null}}`,
+		"missing credential id":                `{"version":2,"observability":{"enabled":true,"endpoint":"https://obs.example.com","auth":{"kind":"credential-ref"}}}`,
+	}
+	for name, raw := range rejected {
+		t.Run(name, func(t *testing.T) {
+			if err := schema.Validate(parse(raw)); err == nil {
+				t.Fatal("schema unexpectedly accepted invalid observability config")
+			}
+		})
+	}
+}
+
+func TestMergeGenerateAgentsRCPreservesObservability(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 2,
+		Observability: &AgentsRCObservability{
+			Enabled:             true,
+			Endpoint:            "https://obs.agorcha.dev",
+			PushThrottleSeconds: 5,
+			Auth: &AgentsRCObservabilityAuth{
+				Kind: "credential-ref",
+				ID:   "agorcha-obs",
+			},
+		},
+	}
+	generated := &AgentsRC{Version: 2, Sources: []Source{{Type: "local"}}}
+
+	merged := MergeGenerateAgentsRC(existing, generated)
+	if merged.Observability == nil || merged.Observability.Auth == nil {
+		t.Fatalf("observability dropped during generated-manifest merge: %+v", merged.Observability)
+	}
+	if merged.Observability.Endpoint != existing.Observability.Endpoint ||
+		merged.Observability.Auth.ID != existing.Observability.Auth.ID {
+		t.Fatalf("observability changed during generated-manifest merge: %+v", merged.Observability)
+	}
+	if merged.Observability == existing.Observability || merged.Observability.Auth == existing.Observability.Auth {
+		t.Fatal("merged observability config aliases existing config")
+	}
+	existing.Observability.Auth.ID = "mutated"
+	if merged.Observability.Auth.ID != "agorcha-obs" {
+		t.Fatalf("merged auth changed through source alias: %+v", merged.Observability.Auth)
+	}
+}
