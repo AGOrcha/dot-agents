@@ -40,6 +40,15 @@
   "work_tracking": {
     "backend": "git-ref"
   },
+  "observability": {
+    "enabled": true,
+    "endpoint": "https://obs.agorcha.dev",
+    "push_throttle_seconds": 0,
+    "auth": {
+      "kind": "credential-ref",
+      "id": "agorcha-obs"
+    }
+  },
   "mcp": [
     "code-review-graph",
     "sonarqube"
