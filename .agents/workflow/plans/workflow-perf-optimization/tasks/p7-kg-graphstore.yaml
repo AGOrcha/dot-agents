@@ -1,0 +1,18 @@
+schema_version: 1
+plan_id: workflow-perf-optimization
+order: 7
+task:
+    id: p7-kg-graphstore
+    title: 'Phase 7 (H7): KG/graphstore query hot paths — impact BFS pre-size, per-row decodeExtra short-circuit, edge-batch args; + CRG postprocess'
+    status: pending
+    depends_on:
+        - p0-instrumentation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/graphstore/impact.go
+        - internal/graphstore/sqlite.go
+        - internal/adapters/builtin/crg/postprocess.go
+    verification_required: true
+    notes: ""
+    app_type: go-cli
