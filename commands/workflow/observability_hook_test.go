@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -42,43 +43,56 @@ func readyObservabilityRecords(t *testing.T, repo string) []observabilityOutboxR
 	}
 	var records []observabilityOutboxRecord
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".") {
-			t.Fatalf("outbox contains temporary file %q", entry.Name())
+		if rec, ok := readyObservabilityRecord(t, dir, entry); ok {
+			records = append(records, rec)
 		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".obs-v1.json") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm() != 0o600 {
-			t.Fatalf("ready file %s mode = %o, want 600", entry.Name(), info.Mode().Perm())
-		}
-		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var record observabilityOutboxRecord
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&record); err != nil {
-			t.Fatalf("parse %s: %v", entry.Name(), err)
-		}
-		if record.ID+".obs-v1.json" != entry.Name() {
-			t.Fatalf("record id %q does not match filename %q", record.ID, entry.Name())
-		}
-		wantHash, err := hashObservabilityEvent(record.Event)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if record.Event.SchemaHash != wantHash {
-			t.Fatalf("schema_hash = %q, want %q", record.Event.SchemaHash, wantHash)
-		}
-		records = append(records, record)
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
 	return records
+}
+
+// readyObservabilityRecord parses one outbox dir entry, returning (record, true)
+// for a valid `.obs-v1.json` ready file and (zero, false) for a non-match.
+// Extracted from readyObservabilityRecords to keep both under the S3776 budget.
+func readyObservabilityRecord(t *testing.T, dir string, entry os.DirEntry) (observabilityOutboxRecord, bool) {
+	t.Helper()
+	var zero observabilityOutboxRecord
+	if strings.HasPrefix(entry.Name(), ".") {
+		t.Fatalf("outbox contains temporary file %q", entry.Name())
+	}
+	if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".obs-v1.json") {
+		return zero, false
+	}
+	info, err := entry.Info()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows chmod only sets the read-only bit (0600 renders as 0666), so the
+	// owner-only perm assertion is Unix-only (leverage-cross-platform-fs-helpers).
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("ready file %s mode = %o, want 600", entry.Name(), info.Mode().Perm())
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record observabilityOutboxRecord
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&record); err != nil {
+		t.Fatalf("parse %s: %v", entry.Name(), err)
+	}
+	if record.ID+".obs-v1.json" != entry.Name() {
+		t.Fatalf("record id %q does not match filename %q", record.ID, entry.Name())
+	}
+	wantHash, err := hashObservabilityEvent(record.Event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Event.SchemaHash != wantHash {
+		t.Fatalf("schema_hash = %q, want %q", record.Event.SchemaHash, wantHash)
+	}
+	return record, true
 }
 
 func setupObservabilityCheckpoint(t *testing.T, enabled bool, endpoint string, throttle int) string {
