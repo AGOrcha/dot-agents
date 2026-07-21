@@ -273,8 +273,9 @@ it was not touched, per the "never weaken a security gate for speed" rule.
 ## Regression guard
 
 - `go test ./internal/config/... ./internal/platform/...
-  ./commands/internal/lifecycle/... -bench . -benchmem` runs the full
-  benchmark suite this document is based on.
+  ./commands/internal/lifecycle/... ./commands/workflow/... ./internal/graphstore/...
+  ./internal/dashboard/store/... ./internal/adapters/builtin/crg/... -bench . -benchmem`
+  runs the full benchmark suite this document is based on.
 - `scripts/perf/run-benchmarks.sh` wraps the same commands and writes a
   timestamped, diffable report to `scripts/perf/reports/` (gitignored).
 - To compare two runs quantitatively: `go install
@@ -284,3 +285,62 @@ it was not touched, per the "never weaken a security gate for speed" rule.
   full functional suite, not just benchmarks) must stay green — every
   optimization in this document is validated against the existing test suite
   (including the H1/H2/H7/H8/H14/H16 security-gate tests) with zero relaxation.
+
+## Workflow-perf-optimization Phase 0 baselines (2026-07, Apple M4 Pro, -benchtime=10x)
+
+Measure-first baselines for the repo-wide perf plan (spec:
+`.agents/workflow/specs/workflow-perf-optimization/design.md`). **Headline proofs
+are measured on Windows** (git-subprocess cost is ~10x there); the Mac numbers
+below are the fast inner-loop signal + the alloc/spawn regression guard (both
+machine-stable). Each row names the hypothesis it will prove.
+
+### commands/workflow (git-spawn counted)
+| bench | ns/op | allocs/op | git-spawns/op | target |
+|--|--|--|--|--|
+| CollectWorkflowState | 24.0ms | 725 | 5 | H2 |
+| RunWorkflowCheckpoint | 34.1ms | 2768 | 7 (dup isGitRepo probe) | H2 |
+| WritePlanStateRefCAS tasks=1/10/50 | 40.9/86.0/292.3ms | 749/1539/5059 | 8.9/18.8/62.8 (O(tasks)) | H3 |
+| ReadPlanTaskRecordsFromStateRef tasks=1/10/50 | 14.0/55.6/251.0ms | 402/2540/12066 | 3/12/52 (O(tasks)) | H3 |
+| LoadIterLogDocument v1/v2 | 39.9/16.4us | 537/222 | 0 | H9 (single-pass v1 decode) |
+| AppendHookOutcome | 214.7us | 799 | 0 | H9 (record-granular validate) |
+
+### internal/graphstore (@5k nodes)
+| bench | ns/op | allocs/op | target |
+|--|--|--|--|
+| GetImpactRadius | 72.8ms | 575,996 | H7 (BFS + per-row decodeExtra) |
+| GetStats | 1.41ms | 149 (flat) | already efficient |
+| SearchNodes | 2.22ms | 37,830 | H7 |
+| GetEdgesAmong | 13.7ms | 145,399 | H7 (batch/decode) |
+
+### internal/dashboard/store (@100 sessions x 20 iters)
+ListRuns / GetRun / ListIterations / Health all ~170-180ms, ~1.6M allocs/op —
+every query reparses the whole root via `sessions()`. Target: **H8**.
+
+### internal/adapters/builtin/crg (@2k symbols)
+Flows/Communities ~0.73/0.87ms, ~3.9k allocs; RiskIndex 106us, 13 allocs (flat).
+Target: **H7** (postprocess adjacency churn).
+
+### internal/platform + internal/config
+BuildPipelineSpec 3.5us/16 allocs; OMP/CC emit 29.7/79.0us, 94 allocs;
+ScopedResourceScan N200 946us/2428 allocs; LoadAgentsRC N200 513us/1717 allocs;
+GenerateAgentsRC N200 1.71ms/4060 allocs. Targets: **H6** (agentsrc/resources
+caching), pipeline-emit builder churn.
+
+### Windows headline baselines (commands/workflow, pap-home, -benchtime=3x)
+
+The ~10-14x git-spawn amplification vs Mac, measured on a real Windows box — the
+environment the optimization must satisfy (Windows-in-the-loop proof rule).
+
+| bench | Mac ns/op | Windows ns/op | Win/Mac | git-spawns |
+|--|--|--|--|--|
+| CollectWorkflowState | 24.0ms | 254.8ms | 10.6x | 5 |
+| RunWorkflowCheckpoint | 34.1ms | 476.9ms | 14.0x | 7 |
+| WritePlanStateRefCAS tasks=50 | 292ms | **4208ms** | 14.4x | 74 |
+| ReadPlanTaskRecordsFromStateRef tasks=50 | 251ms | 2756ms | 11.0x | 52 |
+| LoadIterLogDocument v1 | 39.9us | 271.8us | 6.8x | 0 |
+| AppendHookOutcome | 214.7us | 5214us | 24x | 0 |
+
+Headline: a single 50-task state-ref write is **4.2s on Windows** (74 git-spawns,
+O(tasks)) — the H3 batch/in-process case in one number. git-spawn counts are
+deterministic across OS (the machine-independent H1-H3 regression metric);
+wall-clock is the Windows headline each optimization re-measures.

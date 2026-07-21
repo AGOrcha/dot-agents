@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
@@ -965,12 +966,24 @@ func splitWorkflowLogEntries(content string) []string {
 	return entries
 }
 
+// gitSpawnCounter counts child `git` processes this package spawns. It is
+// PASSIVE perf instrumentation: nothing in production logic reads it, and
+// trackGitSpawn is a lone atomic add on the spawn path. Benchmarks (and
+// tests) snapshot it via the gitSpawnCount / resetGitSpawnCount accessors
+// (spawn_counter_test.go) to measure how many git exec calls a hot path performs.
+var gitSpawnCounter int64
+
+// trackGitSpawn records one git process spawn.
+func trackGitSpawn() { atomic.AddInt64(&gitSpawnCounter, 1) }
+
 func isGitRepo(projectPath string) bool {
+	trackGitSpawn()
 	cmd := execabs.Command("git", "-C", projectPath, "rev-parse", "--is-inside-work-tree")
 	return cmd.Run() == nil
 }
 
 func gitOutput(projectPath string, args ...string) string {
+	trackGitSpawn()
 	cmd := execabs.Command("git", append([]string{"-C", projectPath}, args...)...)
 	out, err := cmd.Output()
 	if err != nil {
