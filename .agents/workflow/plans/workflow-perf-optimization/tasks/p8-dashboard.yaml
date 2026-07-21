@@ -1,0 +1,16 @@
+schema_version: 1
+plan_id: workflow-perf-optimization
+order: 8
+task:
+    id: p8-dashboard
+    title: 'Phase 8 (H6+H8): dashboard store — snapshot invalidation (I/O) + sessions() projection memoization (CPU)'
+    status: pending
+    depends_on:
+        - p0-instrumentation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - internal/dashboard/store/
+    verification_required: true
+    notes: ""
+    app_type: go-cli
