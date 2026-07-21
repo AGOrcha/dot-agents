@@ -548,7 +548,10 @@ func TestArchiveSinglePlan_NoCommitSkipsCommit(t *testing.T) {
 // is the exact scenario the fresh-clone / worktree loop model requires: without
 // the commit the move is discarded before it lands on master.
 func TestArchiveSinglePlan_RealGitCommitLeavesCleanTree(t *testing.T) {
-	dir := gogitTestRepoWithCommit(t)
+	// sharedCommittedRepo hands us a copy of the committed-repo template (H1:
+	// no per-test real-git bootstrap); it is a valid repo with README committed
+	// and HEAD present, byte-identical to the old gogitTestRepoWithCommit output.
+	dir := sharedCommittedRepo(t)
 	t.Chdir(dir)
 
 	setupArchivePlan(t, dir, "myplan", "completed")
@@ -581,7 +584,7 @@ func TestArchiveSinglePlan_RealGitCommitLeavesCleanTree(t *testing.T) {
 // commit.disable=true flows through to the real commit hook: the move happens
 // but no commit lands, leaving the tree dirty (the operator opted out).
 func TestArchiveSinglePlan_CommitDisabledLeavesUncommitted(t *testing.T) {
-	dir := gogitTestRepoWithCommit(t)
+	dir := sharedCommittedRepo(t)
 	t.Chdir(dir)
 
 	setupArchivePlan(t, dir, "myplan", "completed")
@@ -619,7 +622,7 @@ const (
 // clean tree + advanced HEAD proves the deletions AND the .agents/history/
 // additions landed as ONE commit — the live bug this fix closes.
 func TestArchiveSinglePlan_GitRefBackendStagesDeletionsViaIncludes(t *testing.T) {
-	dir := gogitTestRepoWithCommit(t)
+	dir := sharedCommittedRepo(t)
 	t.Chdir(dir)
 
 	priorSkip := planStateSkipped
