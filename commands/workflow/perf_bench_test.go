@@ -3,10 +3,11 @@ package workflow
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"golang.org/x/sys/execabs"
 )
 
 // perf_bench_test.go — Phase 0 measure-first baselines for the workflow
@@ -43,7 +44,7 @@ var benchGitEnv = []string{
 func benchInitGitRepo(b *testing.B, repo string, files map[string]string) {
 	b.Helper()
 	git := func(args ...string) {
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd := execabs.Command("git", append([]string{"-C", repo}, args...)...)
 		cmd.Env = append(os.Environ(), benchGitEnv...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			b.Fatalf("git %v: %v\n%s", args, err, out)
