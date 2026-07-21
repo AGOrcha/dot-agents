@@ -326,5 +326,21 @@ ScopedResourceScan N200 946us/2428 allocs; LoadAgentsRC N200 513us/1717 allocs;
 GenerateAgentsRC N200 1.71ms/4060 allocs. Targets: **H6** (agentsrc/resources
 caching), pipeline-emit builder churn.
 
-Windows headline baselines (pap-home / CI) are recorded before the Phase 1-9
-optimizations land, per the plan's Windows-in-the-loop proof rule.
+### Windows headline baselines (commands/workflow, pap-home, -benchtime=3x)
+
+The ~10-14x git-spawn amplification vs Mac, measured on a real Windows box — the
+environment the optimization must satisfy (Windows-in-the-loop proof rule).
+
+| bench | Mac ns/op | Windows ns/op | Win/Mac | git-spawns |
+|--|--|--|--|--|
+| CollectWorkflowState | 24.0ms | 254.8ms | 10.6x | 5 |
+| RunWorkflowCheckpoint | 34.1ms | 476.9ms | 14.0x | 7 |
+| WritePlanStateRefCAS tasks=50 | 292ms | **4208ms** | 14.4x | 74 |
+| ReadPlanTaskRecordsFromStateRef tasks=50 | 251ms | 2756ms | 11.0x | 52 |
+| LoadIterLogDocument v1 | 39.9us | 271.8us | 6.8x | 0 |
+| AppendHookOutcome | 214.7us | 5214us | 24x | 0 |
+
+Headline: a single 50-task state-ref write is **4.2s on Windows** (74 git-spawns,
+O(tasks)) — the H3 batch/in-process case in one number. git-spawn counts are
+deterministic across OS (the machine-independent H1-H3 regression metric);
+wall-clock is the Windows headline each optimization re-measures.
