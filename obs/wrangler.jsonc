@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "agorcha-obs",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "obs.agorcha.dev", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "PROJECT_DO", "class_name": "ProjectDO" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProjectDO"] }
+  ],
+  "d1_databases": [
+    {
+      "binding": "OBS_DB",
+      "database_name": "agorcha-obs-db",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "vars": {
+    "OBS_PROJECT_ID": "github.com/AGOrcha/dot-agents",
+    "ENVIRONMENT": "production",
+    "OBS_AUTH_MODE": "access"
+  }
+}
