@@ -1,0 +1,11 @@
+schema_version: 1
+id: docs-site-hardening
+title: Docs site restructure + onboarding hardening
+status: draft
+summary: 'Audience-based IA + progressive disclosure, full internal-content migration to the site, hardened one-paste onboarding, and a formalized+diagrammed e2e AI-dev process. Follow-up to the build-now pieces (INSTALL.md + ai-dev-lifecycle map, #481).'
+created_at: "2026-07-21T17:50:24Z"
+updated_at: "2026-07-21T17:50:25Z"
+owner: dot-agents
+success_criteria: A new visitor reaches the one-paste onboarding within one screen; new-user/operator/contributor each have a clear entry path; all internal docs are reachable on the site; the e2e AI-dev process is a ratified, diagrammed spec; site builds green (a11y + link-check) and the friend re-review is no-longer-overloaded.
+verification_strategy: ""
+current_focus_task: ""

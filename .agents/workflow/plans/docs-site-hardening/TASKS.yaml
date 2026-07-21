@@ -1,0 +1,82 @@
+schema_version: 1
+plan_id: docs-site-hardening
+tasks:
+    - id: t1-audience-ia
+      title: Audience-based IA + progressive disclosure
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/astro.config.mjs
+        - docs/web/src/public-pages.mjs
+        - docs/web/src
+      verification_required: true
+      notes: Restructure nav around audience entry paths (new-user, operator, contributor) with progressive disclosure to fix the overload feedback. Landing routes each audience to its path; the one-paste install stays one screen away.
+      app_type: docs/web
+    - id: t2-internal-content-migration
+      title: Migrate remaining internal content to the site
+      status: pending
+      depends_on:
+        - t1-audience-ia
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs
+        - docs/web/src
+      verification_required: true
+      notes: Audit .agents/ + docs/ for internal content not yet surfaced (put all of it there); migrate lessons/specs/proposals presentation + any dev-facing docs into the internal build partition.
+      app_type: docs/web
+    - id: t3-onboarding-harden
+      title: Harden the one-paste onboarding flow
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/INSTALL.md
+        - .agents/skills
+      verification_required: true
+      notes: 'Deepen the tailoring: wire subagent-creator alongside pipeline-architect/skill-architect, sharpen the onboard skill questions, and test the one-paste flow end-to-end with a real fresh agent.'
+      app_type: docs
+    - id: t4-diagram-set
+      title: Per-stage drill-down diagrams + wikilink graph
+      status: pending
+      depends_on:
+        - t1-audience-ia
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/src/pages/diagrams
+        - docs/concepts
+      verification_required: true
+      notes: Expand from the single e2e lifecycle map to a drill-down diagram per stage (ideate/plan/execute/verify/observe/fold-back), cross-linked into a wikilink graph from the lifecycle overview.
+      app_type: docs/web
+    - id: t5-e2e-process-spec
+      title: Formalize + harden the e2e AI-dev process spec
+      status: pending
+      depends_on:
+        - t4-diagram-set
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/concepts
+        - .agents/workflow/specs
+      verification_required: true
+      notes: 'Promote the lifecycle map into a ratified process spec: each stage''s inputs/outputs/gates, the skills that drive it, and the invariants that harden it end-to-end.'
+      app_type: docs
+    - id: t6-verify-close
+      title: Build + a11y + link-check + re-review; close
+      status: pending
+      depends_on:
+        - t2-internal-content-migration
+        - t3-onboarding-harden
+        - t4-diagram-set
+        - t5-e2e-process-spec
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web
+      verification_required: true
+      notes: Two-pass build green, a11y (web-a11y lens) + link-check clean, and a fresh reviewer confirms the overload is gone; then archive.
+      app_type: docs/web
