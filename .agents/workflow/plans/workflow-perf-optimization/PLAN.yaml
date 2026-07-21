@@ -1,10 +1,10 @@
 schema_version: 1
 id: workflow-perf-optimization
 title: Workflow performance optimization (measure-first, hypothesis-proven)
-status: draft
+status: completed
 summary: ""
 created_at: "2026-07-21T05:27:47Z"
-updated_at: "2026-07-21T22:23:45Z"
+updated_at: "2026-07-21T22:28:53Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
