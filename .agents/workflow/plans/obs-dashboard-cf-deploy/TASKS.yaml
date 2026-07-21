@@ -229,7 +229,7 @@ tasks:
         a `da observability` config with a retention block round-trips.
     - id: o12-obs-verify-close
       title: End-to-end live smoke + close the plan
-      status: pending
+      status: completed
       depends_on:
         - o5-obs-ingest-do-d1
         - o6-obs-auth-gate
