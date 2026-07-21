@@ -2941,6 +2941,17 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool)
 		return fmt.Errorf("archive linked spec: %w", err)
 	}
 
+	// Relocate this plan's iteration-log records (iter-N.yaml + hook-outcomes +
+	// score sidecars) into .agents/history/<plan>/iteration-log/, drop them from
+	// the active index, and write the permanent per-plan history index. The
+	// returned includes name the source deletions + active index (outside the
+	// auto-managed roots) so they stage under BOTH backends; dry-run mutates
+	// nothing and returns nil.
+	iterIncludes, err := archivePlanIterations(projectPath, planID, dryRun)
+	if err != nil {
+		return fmt.Errorf("archive iteration log for %q: %w", planID, err)
+	}
+
 	// Remove the source directory after a successful merge.
 	if !dryRun {
 		if err := removeAllWithRetry(srcDir); err != nil {
@@ -2950,18 +2961,21 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool)
 
 		// Persist the archive move by default. At this point the working tree is
 		// in its final archived state — plans/<id> is gone (tracked deletions),
-		// history/<id> is populated (untracked additions), and PLAN.yaml is
-		// stamped archived. iterationCloseCommitWithIncludes stages the
-		// workflow-managed path set plus the named plan-dir deletions, so the
-		// deletion AND the addition land as ONE commit — exactly like advance
-		// --commit-state — under BOTH the local and git-ref backends. Without this
-		// the fresh-clone / worktree loop model discards the uncommitted move and
-		// the plan never actually archives. runWorkflowCommit honors the
-		// commit.disable opt-out internally; --no-commit is the explicit operator
-		// opt-out for batching several archives into one manual commit.
+		// history/<id> is populated (untracked additions), the iteration-log
+		// records have moved, and PLAN.yaml is stamped archived.
+		// iterationCloseCommitWithIncludes stages the workflow-managed path set
+		// plus the named plan-dir deletions AND the named iter-log moves + index,
+		// so the deletions AND the additions land as ONE commit — exactly like
+		// advance --commit-state — under BOTH the local and git-ref backends.
+		// Without this the fresh-clone / worktree loop model discards the
+		// uncommitted move and the plan never actually archives. runWorkflowCommit
+		// honors the commit.disable opt-out internally; --no-commit is the
+		// explicit operator opt-out for batching several archives into one manual
+		// commit.
+		archiveIncludes := append(append([]string{}, removedPaths...), iterIncludes...)
 		if noCommit {
 			fmt.Printf("  archive: --no-commit set; skipping workflow-state commit for %q\n", planID)
-		} else if err := iterationCloseCommitWithIncludes(os.Stdout, removedPaths); err != nil {
+		} else if err := iterationCloseCommitWithIncludes(os.Stdout, archiveIncludes); err != nil {
 			return fmt.Errorf("commit archive move for %q: %w", planID, err)
 		}
 	} else {

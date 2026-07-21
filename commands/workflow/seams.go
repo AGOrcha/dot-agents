@@ -21,6 +21,7 @@ var (
 	osWriteFile = os.WriteFile
 	osOpenFile  = os.OpenFile
 	osRemoveAll = os.RemoveAll
+	osRename    = os.Rename
 	// osGetwd lets tests inject failures into currentWorkflowProject — the
 	// underlying os.Getwd never fails in TempDir-based tests, but every
 	// handler's `project, err := currentWorkflowProject()` defensive branch

@@ -694,7 +694,7 @@ func runWorkflowCheckpointLogToIter(n int, role, verifierType string) error {
 	if err := os.MkdirAll(iterDir, 0755); err != nil {
 		return fmt.Errorf("create iteration-log dir: %w", err)
 	}
-	iterPath := filepath.Join(iterDir, fmt.Sprintf("iter-%d.yaml", n))
+	iterPath := iterRecordPath(project.Path, n)
 
 	entry, err := loadOrInitIterLogEntry(iterPath, feedbackGoal, taskID)
 	if err != nil {
@@ -713,6 +713,18 @@ func runWorkflowCheckpointLogToIter(n int, role, verifierType string) error {
 	if err := writeIterLogEntry(iterPath, entry); err != nil {
 		return err
 	}
+
+	// Register this iteration in the append-on-close index (fast-path for
+	// per-plan traversal + archival enabler). Upsert-by-N because a checkpoint
+	// re-runs for the same iteration across roles; the index is purely additive
+	// so a write failure never fails the checkpoint (best-effort — max-scan
+	// stays the authoritative source of next-N).
+	_ = upsertIterationIndexEntry(project.Path, iterIndexEntry{
+		N:         n,
+		PlanID:    wave,
+		TaskID:    taskID,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	})
 
 	fmt.Fprintf(os.Stdout, "%s\n", config.DisplayPath(iterPath))
 	return nil
