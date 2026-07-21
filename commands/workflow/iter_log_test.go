@@ -1008,10 +1008,11 @@ func TestLoadIterLogDocument_InvalidYAML(t *testing.T) {
 }
 
 // TestLoadIterLogDocument_V2UnmarshalError drives the v2 yaml.Unmarshal error
-// branch: the schema_version probe succeeds (it only reads an int field) but
-// a type-mismatched field makes the full iterLogEntry unmarshal fail.
+// branch: the single-pass v1 decode ignores the v2-only `impl` block (so
+// schema_version stays 2, not 1), then the native iterLogEntry decode fails
+// because `impl` is a sequence where a mapping is required.
 func TestLoadIterLogDocument_V2UnmarshalError(t *testing.T) {
-	bad := []byte("schema_version: 2\niteration: [not, an, int]\n")
+	bad := []byte("schema_version: 2\nimpl: [not, a, mapping]\n")
 	_, err := loadIterLogDocument(bad)
 	if err == nil {
 		t.Fatal("expected v2 unmarshal error, got nil")

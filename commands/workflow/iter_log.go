@@ -323,17 +323,14 @@ func migrateIterLogV1Legacy(v1 *iterLogV1Legacy) iterLogEntry {
 }
 
 func loadIterLogDocument(data []byte) (*iterLogEntry, error) {
-	var probe struct {
-		SchemaVersion int `yaml:"schema_version"`
-	}
-	if err := yaml.Unmarshal(data, &probe); err != nil {
+	// Decode once into the v1 legacy shape. It carries schema_version, so a v1
+	// document is fully materialized by this single pass (no re-decode). A v2
+	// document ignores the v1-only fields here and is decoded natively below.
+	var v1 iterLogV1Legacy
+	if err := yaml.Unmarshal(data, &v1); err != nil {
 		return nil, fmt.Errorf("parse iteration log: %w", err)
 	}
-	if probe.SchemaVersion == 1 {
-		var v1 iterLogV1Legacy
-		if err := yaml.Unmarshal(data, &v1); err != nil {
-			return nil, fmt.Errorf("parse iteration log v1: %w", err)
-		}
+	if v1.SchemaVersion == 1 {
 		out := migrateIterLogV1Legacy(&v1)
 		return &out, nil
 	}
