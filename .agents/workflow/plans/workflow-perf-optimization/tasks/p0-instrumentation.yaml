@@ -13,5 +13,5 @@ task:
         - scripts/perf/
         - docs/PERF_BUDGET.md
     verification_required: true
-    notes: ""
+    notes: 'Benchmarks + git-subprocess counter + pprof for BOTH the workflow git paths AND the repo-wide surfaces: graphstore impact/query, dashboard/store, workflow iter-log+hook-outcome, CRG postprocess, pipeline emit, agentsrc load/generate, platform resources/hooks. Extend scripts/perf + PERF_BUDGET. Capture Mac+Windows baselines. Gates ALL optimization (P1-P9).'
     app_type: go-cli
