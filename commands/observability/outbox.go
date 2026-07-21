@@ -143,7 +143,16 @@ func syncProject(ctx context.Context, projectDir string, deps Deps, options sync
 		stopped = drainReady(ctx, deps.httpClient, endpoint, headers, files, now, &report)
 	}
 	if options.Full && !stopped {
-		replayHistory(ctx, deps.httpClient, endpoint, headers, projectDir, rc, deps.Version, &report)
+		replayHistory(historyReplayRequest{
+			ctx:        ctx,
+			client:     deps.httpClient,
+			endpoint:   endpoint.String(),
+			headers:    headers,
+			projectDir: projectDir,
+			rc:         rc,
+			version:    deps.Version,
+			report:     &report,
+		})
 	}
 	if options.Explicit && (report.Retained > 0 || report.Quarantined > 0 || len(report.Errors) > 0) {
 		return report, fmt.Errorf("observability sync incomplete: %d retained, %d quarantined%s",
