@@ -621,6 +621,41 @@ func TestGenerateAgentsRCSkills(t *testing.T) {
 	}
 }
 
+// TestGenerateAgentsRCWorkTrackingDefault covers the git-aware work-tracking
+// default: a git-repo project scaffolds the git-ref backend; a non-git project
+// stays on the local default (no ref to write).
+func TestGenerateAgentsRCWorkTrackingDefault(t *testing.T) {
+	home := agentsHomeFixture(t)
+	t.Setenv("AGENTS_HOME", home)
+
+	nonGit := t.TempDir()
+	rc, err := GenerateAgentsRC(testProject, nonGit)
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+	if rc.WorkTracking != nil {
+		t.Errorf("non-git project: WorkTracking should be nil (local default), got %+v", rc.WorkTracking)
+	}
+	if got := rc.WorkStoreBackend(); got != WorkTrackingBackendLocal {
+		t.Errorf("non-git backend = %q, want %q", got, WorkTrackingBackendLocal)
+	}
+
+	gitDir := t.TempDir()
+	if err := NewGoGitRepo().Init(gitDir); err != nil {
+		t.Fatalf("init git repo: %v", err)
+	}
+	rc, err = GenerateAgentsRC(testProject, gitDir)
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+	if rc.WorkTracking == nil || rc.WorkTracking.Backend != WorkTrackingBackendGitRef {
+		t.Errorf("git project: want work_tracking.backend=git-ref, got %+v", rc.WorkTracking)
+	}
+	if !rc.UseGitRefBackend() {
+		t.Error("git project: UseGitRefBackend should be true")
+	}
+}
+
 // TestGenerateAgentsRCSkillsGlobalOnlyNotCaptured covers a project with NO
 // project-scoped skill at all: a global-only skill must not leak into the
 // generated manifest.
