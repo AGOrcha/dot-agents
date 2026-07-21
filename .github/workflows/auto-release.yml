@@ -22,7 +22,9 @@ permissions:
   id-token: write
 
 env:
-  GO_TEST_FLAGS: -race -count=1 -timeout=300s
+  # -timeout bumped 300s->1200s: commands/workflow is git-heavy (~438s non-race
+  # on Windows) and -race multiplies it; per-package, so only the slow one uses it.
+  GO_TEST_FLAGS: -race -count=1 -timeout=1200s
   GO_COVERAGE_FILE: coverage.out
 
 jobs:
