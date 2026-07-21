@@ -8,4 +8,4 @@ updated_at: "2026-07-21T22:19:44Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: 'Phase 3 (H3): batch/in-process state-ref read+write+commit (cat-file --batch / go-git tree); cut O(tasks) spawns'
+current_focus_task: 'Phase 4 (H5): apply fixture/batch treatment to score_run, config/materialize, lifecycle, graphstore'

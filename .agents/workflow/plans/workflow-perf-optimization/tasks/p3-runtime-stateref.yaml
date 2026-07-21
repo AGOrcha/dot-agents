@@ -4,7 +4,7 @@ order: 3
 task:
     id: p3-runtime-stateref
     title: 'Phase 3 (H3): batch/in-process state-ref read+write+commit (cat-file --batch / go-git tree); cut O(tasks) spawns'
-    status: pending
+    status: completed
     depends_on:
         - p0-instrumentation
     blocks: []
