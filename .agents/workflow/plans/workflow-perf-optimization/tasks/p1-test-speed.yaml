@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: workflow-perf-optimization
+order: 1
+task:
+    id: p1-test-speed
+    title: 'Phase 1 (H1,H4): shared repo-template fixtures + seam migration + parallelize git-heavy suites'
+    status: pending
+    depends_on:
+        - p0-instrumentation
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/
+        - internal/testutil/
+    verification_required: true
+    notes: ""
+    app_type: go-cli
