@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: workflow-perf-optimization
+order: 0
+task:
+    id: p0-instrumentation
+    title: 'Phase 0: workflow benchmark + git-subprocess-counter + pprof harness; capture Mac+Windows baselines'
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/workflow/
+        - scripts/perf/
+        - docs/PERF_BUDGET.md
+    verification_required: true
+    notes: ""
+    app_type: go-cli
