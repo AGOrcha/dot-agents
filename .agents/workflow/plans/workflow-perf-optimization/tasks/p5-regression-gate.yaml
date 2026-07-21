@@ -8,6 +8,9 @@ task:
     depends_on:
         - p1-test-speed
         - p3-runtime-stateref
+        - p6-io-caching
+        - p7-kg-graphstore
+        - p8-dashboard
     blocks: []
     owner: dot-agents
     write_scope:
