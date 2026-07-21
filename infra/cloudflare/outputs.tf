@@ -22,3 +22,19 @@ output "zone_id" {
   EOT
   value       = var.zone_id
 }
+
+output "obs_audTag" {
+  description = "obs.agorcha.dev Access app AUD tag; the obs Worker verifies the CF Access JWT `aud` against it."
+  value       = cloudflare_zero_trust_access_application.agorcha_obs.aud
+}
+
+output "obs_service_token_client_id" {
+  description = "Cf-Access-Client-Id for the bound obs CLI service token (not a secret)."
+  value       = cloudflare_zero_trust_access_service_token.obs.client_id
+}
+
+output "obs_service_token_client_secret" {
+  description = "Cf-Access-Client-Secret for the bound obs token. Store in ~/.config/da/credentials.json (0600), NEVER the repo."
+  value       = cloudflare_zero_trust_access_service_token.obs.client_secret
+  sensitive   = true
+}
