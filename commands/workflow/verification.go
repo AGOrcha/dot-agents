@@ -205,6 +205,7 @@ func runWorkflowVerifyRecordReview(in reviewRecordInputs) error {
 	if err := appendVerificationLog(project.Name, rec); err != nil {
 		return err
 	}
+	publishLatestIterationBestEffort(project.Path)
 	ui.Success(fmt.Sprintf("Review decision recorded for task %s: overall=%s (%s)", taskID, overall, strings.TrimSpace(in.Summary)))
 	return nil
 }
@@ -350,6 +351,7 @@ func runWorkflowVerifyRecord(in verifyRecordInputs) error {
 	observed.VerificationLogID = now
 	observed.ResultArtifactPath = artifactRel
 	ok = true
+	publishLatestIterationBestEffort(project.Path)
 	ui.Success(fmt.Sprintf("Verification recorded: %s %s (%s)", in.Kind, in.Status, in.Summary))
 	return nil
 }

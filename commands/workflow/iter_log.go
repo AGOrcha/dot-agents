@@ -726,6 +726,8 @@ func runWorkflowCheckpointLogToIter(n int, role, verifierType string) error {
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	})
 
+	publishCheckpointBestEffort(project.Path, n)
+
 	fmt.Fprintf(os.Stdout, "%s\n", config.DisplayPath(iterPath))
 	return nil
 }
