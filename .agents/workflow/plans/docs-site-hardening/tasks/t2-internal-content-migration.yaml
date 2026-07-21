@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: docs-site-hardening
+order: 1
+task:
+    id: t2-internal-content-migration
+    title: Migrate remaining internal content to the site
+    status: pending
+    depends_on:
+        - t1-audience-ia
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs
+        - docs/web/src
+    verification_required: true
+    notes: Audit .agents/ + docs/ for internal content not yet surfaced (put all of it there); migrate lessons/specs/proposals presentation + any dev-facing docs into the internal build partition.
+    app_type: docs/web
