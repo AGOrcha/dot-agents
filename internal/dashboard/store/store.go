@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,10 @@ const (
 	defaultCacheTTL  = 30 * time.Second
 	defaultLimit     = 50
 	maxLimit         = 500
+	// sessionsKey is the LRU key for the memoized cross-root projection
+	// (sessionsView). It shares the store's read cache with the per-root
+	// snapshots, which key off rootKey's "root:" prefix, so it never collides.
+	sessionsKey = "sessions"
 )
 
 // Filename patterns for the three on-disk artifacts the store reads. The record
@@ -85,8 +90,15 @@ func New(roots []string, opts ...Option) *DiskStore {
 // CacheMetrics exposes the read-cache instrumentation.
 func (s *DiskStore) CacheMetrics() CacheMetrics { return s.cache.metrics() }
 
-// Evict drops the cached snapshot for one root (broker per-root push hook).
-func (s *DiskStore) Evict(root string) { s.cache.evict(rootKey(root)) }
+// Evict drops the cached snapshot for one root and the aggregate projection
+// that folds it in (broker per-root push hook). Dropping the projection too is
+// load-bearing: a same-mtime content rewrite the fingerprint cannot see leaves
+// the combined key unchanged, so without this the memo would keep serving the
+// pre-eviction view even though the root snapshot was force-dropped.
+func (s *DiskStore) Evict(root string) {
+	s.cache.evict(rootKey(root))
+	s.cache.evict(sessionsKey)
+}
 
 // EvictAll drops every cached snapshot (broker whole-cache push hook).
 func (s *DiskStore) EvictAll() { s.cache.clear() }
@@ -119,56 +131,73 @@ type sessionCtx struct {
 	records []scoring.IterationRecord
 }
 
-// snapshot returns the parsed view of root, served from cache while the root's
-// directory fingerprint is unchanged. The fingerprint covers EVERY file's name
-// and mtime — not just the newest — so a backfilled score sidecar on an old
-// iteration, a same-timestamp rewrite with a preserved (backdated) mtime, or a
-// deletion of a non-newest file all invalidate, where a max-mtime key would
-// serve stale data.
-func (s *DiskStore) snapshot(root string) rootSnapshot {
+// snapshotFP returns the parsed view of root and the directory fingerprint it
+// was resolved at, served from cache while the fingerprint is unchanged. The
+// fingerprint covers EVERY file's name and mtime — not just the newest — so a
+// backfilled score sidecar on an old iteration, a same-timestamp rewrite with a
+// preserved (backdated) mtime, or a deletion of a non-newest file all
+// invalidate, where a max-mtime key would serve stale data. Returning the
+// fingerprint lets sessionsView fold it into the aggregate memo key off the
+// same read, with no second directory scan.
+func (s *DiskStore) snapshotFP(root string) (rootSnapshot, int64) {
 	mtimes, newest, fp := s.readDirState(root)
 	if v, ok := s.cache.get(rootKey(root), fp); ok {
-		return v.(rootSnapshot)
+		return v.(rootSnapshot), fp
 	}
 	snap := s.loadRoot(root, mtimes)
 	snap.newestMtime = newest
 	s.cache.put(rootKey(root), snap, fp)
+	return snap, fp
+}
+
+// snapshot is snapshotFP without the fingerprint, for callers that only need
+// the parsed view (GetIteration and the recompute overlay).
+func (s *DiskStore) snapshot(root string) rootSnapshot {
+	snap, _ := s.snapshotFP(root)
 	return snap
 }
 
 // readDirState lists root once, returning per-file mtimes, the newest mtime
 // (for last_update / health), and an FNV-1a fingerprint over every (name,
-// mtime) pair. os.ReadDir returns entries sorted by filename, so the hash is
-// deterministic. A missing root yields an empty map, the zero time, and a
-// zero fingerprint, same as an empty root — legitimately absent. Any other
-// ReadDir error (permission denied, I/O fault) degrades the same way but is
-// logged, matching the decodeYAML/resilientRecords siblings below.
+// mtime) pair. It reads via *File.Readdir, which returns FileInfo directly, so
+// one lstat per entry feeds both the newest-mtime scan and the hash with no
+// intermediate DirEntry wrapper — os.ReadDir would allocate a *unixDirent per
+// file, the dominant read-through allocation the store pays on every request.
+// Readdir does not sort, so entries are name-sorted explicitly to keep the hash
+// deterministic (identical to the os.ReadDir ordering it replaces). A missing
+// root yields an empty map, the zero time, and a zero fingerprint, same as an
+// empty root — legitimately absent. Any other error (permission denied, I/O
+// fault) degrades the same way but is logged, matching the decodeYAML /
+// resilientRecords siblings below.
 func (s *DiskStore) readDirState(root string) (map[string]time.Time, time.Time, int64) {
-	entries, err := os.ReadDir(root)
+	f, err := os.Open(root)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			s.logger.Warn("dashboard/store: skip unreadable root", "root", root, "error", err)
 		}
 		return map[string]time.Time{}, time.Time{}, 0
 	}
-	m := make(map[string]time.Time, len(entries))
+	defer f.Close()
+	infos, err := f.Readdir(-1)
+	if err != nil {
+		s.logger.Warn("dashboard/store: skip unreadable root", "root", root, "error", err)
+		return map[string]time.Time{}, time.Time{}, 0
+	}
+	slices.SortFunc(infos, func(a, b os.FileInfo) int { return strings.Compare(a.Name(), b.Name()) })
+	m := make(map[string]time.Time, len(infos))
 	var newest time.Time
 	h := fnv.New64a()
 	var buf [8]byte
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
+	for _, info := range infos {
+		if info.IsDir() {
 			continue
 		}
 		mt := info.ModTime()
-		m[e.Name()] = mt
+		m[info.Name()] = mt
 		if mt.After(newest) {
 			newest = mt
 		}
-		_, _ = h.Write([]byte(e.Name()))
+		_, _ = h.Write([]byte(info.Name()))
 		binary.LittleEndian.PutUint64(buf[:], uint64(mt.UnixNano()))
 		_, _ = h.Write(buf[:])
 	}
@@ -252,16 +281,59 @@ func (s *DiskStore) resilientRecords(iterFiles []string) []scoring.IterationReco
 	return recs
 }
 
-// sessions groups every addressable session across all roots. Records with an
-// empty session id are unaddressable (no sidecar can be named) and are skipped,
-// matching internal/scoring.AggregateSessions. A session id colliding across
-// roots keeps the first root and warns (API.md §1.6: session ids are globally
-// unique).
-func (s *DiskStore) sessions() map[string]sessionCtx {
-	out := map[string]sessionCtx{}
-	for _, root := range s.roots {
-		snap := s.snapshot(root)
-		groups := map[string][]scoring.IterationRecord{}
+// sessionsView is the memoized cross-root projection: the addressable sessions
+// grouped and sorted, the pre-built list-summary DTOs, and the aggregate counts
+// Health reports. It is a pure function of the roots' snapshots, so it is cached
+// under the combined directory fingerprint and reused verbatim while every root
+// is unchanged — repeated dashboard reads then skip the re-group/sort/project.
+type sessionsView struct {
+	byID      map[string]sessionCtx
+	summaries []Run
+	iterCount int
+	newest    time.Time
+}
+
+// sessionsView returns the memoized projection, rebuilding it only when the
+// combined per-root fingerprint changes. Each root's fingerprint is folded from
+// the same snapshotFP read that resolves its snapshot, so a warm hit costs one
+// directory scan per root and no projection work; any add/change/delete to any
+// root flips a fingerprint, flips the combined key, and forces a rebuild.
+func (s *DiskStore) sessionsView() sessionsView {
+	snaps := make([]rootSnapshot, len(s.roots))
+	h := fnv.New64a()
+	var buf [8]byte
+	for i, root := range s.roots {
+		var fp int64
+		snaps[i], fp = s.snapshotFP(root)
+		binary.LittleEndian.PutUint64(buf[:], uint64(fp))
+		_, _ = h.Write(buf[:])
+	}
+	key := int64(h.Sum64())
+	if v, ok := s.cache.get(sessionsKey, key); ok {
+		return v.(sessionsView)
+	}
+	view := s.buildSessionsView(snaps)
+	s.cache.put(sessionsKey, view, key)
+	return view
+}
+
+// buildSessionsView groups every addressable session across all roots. Records
+// with an empty session id are unaddressable (no sidecar can be named) and are
+// skipped, matching internal/scoring.AggregateSessions. A session id colliding
+// across roots keeps the first root and warns (API.md §1.6: session ids are
+// globally unique). iterCount and newest span EVERY record (including the
+// skipped empty-id ones) so Health reports the same totals as a per-root walk.
+func (s *DiskStore) buildSessionsView(snaps []rootSnapshot) sessionsView {
+	byID := make(map[string]sessionCtx)
+	var iterCount int
+	var newest time.Time
+	for i, root := range s.roots {
+		snap := snaps[i]
+		iterCount += len(snap.records)
+		if snap.newestMtime.After(newest) {
+			newest = snap.newestMtime
+		}
+		groups := make(map[string][]scoring.IterationRecord)
 		for _, rec := range snap.records {
 			sid := rec.Agent.SessionID
 			if sid == "" {
@@ -270,26 +342,31 @@ func (s *DiskStore) sessions() map[string]sessionCtx {
 			groups[sid] = append(groups[sid], rec)
 		}
 		for sid, recs := range groups {
-			if _, dup := out[sid]; dup {
+			if _, dup := byID[sid]; dup {
 				s.logger.Warn("dashboard/store: duplicate session id across roots, keeping first",
 					"session_id", sid, "root", root)
 				continue
 			}
 			sort.Slice(recs, func(i, j int) bool { return recs[i].Iteration < recs[j].Iteration })
-			out[sid] = sessionCtx{root: root, snap: snap, records: recs}
+			byID[sid] = sessionCtx{root: root, snap: snap, records: recs}
 		}
 	}
-	return out
+	summaries := make([]Run, 0, len(byID))
+	for _, ctx := range byID {
+		summaries = append(summaries, s.buildRun(ctx, false))
+	}
+	return sessionsView{byID: byID, summaries: summaries, iterCount: iterCount, newest: newest}
 }
 
 // ListRuns implements Store.
 func (s *DiskStore) ListRuns(_ context.Context, f RunFilter) ([]RunSummary, error) {
 	f = normalizeFilter(f)
-	sess := s.sessions()
-	runs := make([]Run, 0, len(sess))
-	for _, ctx := range sess {
-		runs = append(runs, s.buildRun(ctx, false))
-	}
+	view := s.sessionsView()
+	// Copy the memoized summaries before filter/sort: filterRuns reuses the
+	// backing array (runs[:0]) and sortRuns reorders in place, so handing them
+	// the cached slice would corrupt the memo and race concurrent readers.
+	runs := make([]Run, len(view.summaries))
+	copy(runs, view.summaries)
 	runs = filterRuns(runs, f)
 	sortRuns(runs, f.Sort, f.Order)
 	return paginate(runs, f.Limit, f.Offset), nil
@@ -297,7 +374,7 @@ func (s *DiskStore) ListRuns(_ context.Context, f RunFilter) ([]RunSummary, erro
 
 // GetRun implements Store.
 func (s *DiskStore) GetRun(_ context.Context, sessionID string) (RunDetail, error) {
-	ctx, ok := s.sessions()[sessionID]
+	ctx, ok := s.sessionsView().byID[sessionID]
 	if !ok {
 		return RunDetail{}, ErrNotFound
 	}
@@ -306,7 +383,7 @@ func (s *DiskStore) GetRun(_ context.Context, sessionID string) (RunDetail, erro
 
 // ListIterations implements Store.
 func (s *DiskStore) ListIterations(_ context.Context, sessionID string) ([]IterationSummary, error) {
-	ctx, ok := s.sessions()[sessionID]
+	ctx, ok := s.sessionsView().byID[sessionID]
 	if !ok {
 		return nil, ErrNotFound
 	}
@@ -381,25 +458,16 @@ func (s *DiskStore) Rubric(_ context.Context) (RubricDoc, error) {
 
 // Health implements Store.
 func (s *DiskStore) Health(_ context.Context) (Health, error) {
-	sess := s.sessions()
-	iterCount := 0
-	var newest time.Time
-	for _, root := range s.roots {
-		snap := s.snapshot(root)
-		iterCount += len(snap.records)
-		if snap.newestMtime.After(newest) {
-			newest = snap.newestMtime
-		}
-	}
+	view := s.sessionsView()
 	h := Health{
 		Status:         "ok",
-		RunCount:       len(sess),
-		IterationCount: iterCount,
+		RunCount:       len(view.byID),
+		IterationCount: view.iterCount,
 		RubricVersion:  scoring.DefaultRubric().Version,
 		Roots:          append([]string(nil), s.roots...),
 	}
-	if !newest.IsZero() {
-		h.LastIterLogMtime = rfc3339Ptr(newest)
+	if !view.newest.IsZero() {
+		h.LastIterLogMtime = rfc3339Ptr(view.newest)
 	}
 	if s.subscriberCount != nil {
 		h.SubscriberCount = s.subscriberCount()

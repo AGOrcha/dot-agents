@@ -781,6 +781,137 @@ func TestWithCacheOption(t *testing.T) {
 	}
 }
 
+// --- sessionsView projection memo (H8) -------------------------------------
+
+// TestSessionsViewWarmReuse proves the cross-root projection is memoized: a
+// repeated read on an UNCHANGED root is served from a dedicated sessionsView
+// cache entry (alongside the per-root snapshot) rather than re-grouping,
+// sorting, and projecting on every request.
+func TestSessionsViewWarmReuse(t *testing.T) {
+	root := standardRoot(t)
+	s := testStore(t, root)
+	ctx := context.Background()
+
+	first, err := s.ListRuns(ctx, RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.ListRuns(ctx, RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 || len(second) != 2 {
+		t.Fatalf("both reads must project the 2 addressable sessions, got %d then %d", len(first), len(second))
+	}
+	for i := range first {
+		if first[i].SessionID != second[i].SessionID {
+			t.Fatalf("warm read diverged at %d: %q vs %q", i, first[i].SessionID, second[i].SessionID)
+		}
+	}
+	m := s.CacheMetrics()
+	// Two cache entries: the per-root snapshot AND the aggregate projection memo.
+	if m.Size != 2 {
+		t.Fatalf("expected the root snapshot + sessions-view memo cached, size=%d", m.Size)
+	}
+	// First read misses both entries; the second must hit both.
+	if m.Hits < 2 {
+		t.Fatalf("second read must reuse both cached entries, hits=%d", m.Hits)
+	}
+}
+
+// TestListRunsFilterDoesNotCorruptMemo proves ListRuns copies the memoized
+// summaries before filtering: filterRuns compacts in place (runs[:0]), so a
+// filtered read must not shrink the cached projection a later unfiltered read
+// serves off the same memo entry.
+func TestListRunsFilterDoesNotCorruptMemo(t *testing.T) {
+	root := standardRoot(t)
+	s := testStore(t, root)
+	ctx := context.Background()
+
+	filtered, err := s.ListRuns(ctx, RunFilter{Harness: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 || filtered[0].SessionID != "sess-b" {
+		t.Fatalf("harness filter should keep only sess-b, got %+v", filtered)
+	}
+	// An unfiltered read after the filtered one must still list BOTH sessions —
+	// proof the in-place compaction ran on a copy, not the cached summaries.
+	all, err := s.ListRuns(ctx, RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("unfiltered read after a filtered one must still list both runs, got %d", len(all))
+	}
+}
+
+// TestSessionsViewInvalidatesOnAdd proves the aggregate memo rebuilds when a
+// new session appears: the added file flips the combined fingerprint, so a warm
+// ListRuns and Health both surface it without an explicit eviction.
+func TestSessionsViewInvalidatesOnAdd(t *testing.T) {
+	root := standardRoot(t)
+	s := testStore(t, root)
+	ctx := context.Background()
+	_, _ = s.ListRuns(ctx, RunFilter{}) // warm the projection memo
+	h0, _ := s.Health(ctx)
+	if h0.RunCount != 2 {
+		t.Fatalf("precondition: 2 addressable sessions, got %d", h0.RunCount)
+	}
+
+	plainIter(t, root, 30, "sess-new", "h")
+	runs, _ := s.ListRuns(ctx, RunFilter{})
+	if len(runs) != 3 {
+		t.Fatalf("adding a session must invalidate the projection memo, got %d runs", len(runs))
+	}
+	h1, _ := s.Health(ctx)
+	if h1.RunCount != 3 || h1.IterationCount != h0.IterationCount+1 {
+		t.Fatalf("Health must reflect the addition: run=%d iter=%d (was iter=%d)",
+			h1.RunCount, h1.IterationCount, h0.IterationCount)
+	}
+}
+
+// TestSessionsViewInvalidatesOnDelete proves a deletion flips the fingerprint
+// too: removing sess-b's only record drops it from the warm ListRuns projection
+// and from Health's counts.
+func TestSessionsViewInvalidatesOnDelete(t *testing.T) {
+	root := standardRoot(t)
+	s := testStore(t, root)
+	ctx := context.Background()
+	_, _ = s.ListRuns(ctx, RunFilter{}) // warm the projection memo
+
+	if err := os.Remove(filepath.Join(root, "iter-5.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := s.ListRuns(ctx, RunFilter{})
+	if _, ok := runsByID(t, runs)["sess-b"]; ok {
+		t.Fatal("deleting sess-b's record must invalidate the memo and drop the run")
+	}
+	if len(runs) != 1 {
+		t.Fatalf("only sess-a should remain after the deletion, got %d runs", len(runs))
+	}
+	if h, _ := s.Health(ctx); h.RunCount != 1 {
+		t.Fatalf("Health must reflect the deletion, RunCount=%d", h.RunCount)
+	}
+}
+
+// TestEvictDropsSessionsMemo proves the per-root Evict hook also drops the
+// aggregate projection: without that, a same-mtime rewrite the fingerprint
+// cannot see would keep serving the pre-eviction view off the memo.
+func TestEvictDropsSessionsMemo(t *testing.T) {
+	root := standardRoot(t)
+	s := testStore(t, root)
+	ctx := context.Background()
+	_, _ = s.ListRuns(ctx, RunFilter{})
+	if m := s.CacheMetrics(); m.Size != 2 {
+		t.Fatalf("warm read should cache the snapshot + projection memo, size=%d", m.Size)
+	}
+	s.Evict(root)
+	if m := s.CacheMetrics(); m.Size != 0 {
+		t.Fatalf("Evict(root) must drop BOTH the snapshot and the projection memo, size=%d", m.Size)
+	}
+}
+
 // --- Schema conformance (proves the projection matches the shipped contract) -
 
 func schemaPath(t *testing.T, name string) string {
