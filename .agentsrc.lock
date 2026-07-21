@@ -1,5 +1,5 @@
 {
-  "inputs_digest": "sha256:19cee0e27da2ccaf427e53b08e49d90f84b91c88bbc825248d2eeacd67ef1310",
+  "inputs_digest": "sha256:eb6ca4c5ff5bb0c65aaba31ce05e628de4015dcc76d0461444a401c2e8f49642",
   "install": {
     "project": "dot-agents",
     "version": "dev",
@@ -11,71 +11,62 @@
     "refreshedAt": "2026-07-13T06:21:20Z"
   },
   "units": {
+    "da-agc:dot-agents/base.json": {
+      "kind": "layer",
+      "digest": "5b361e972dbdf63b4ef1eb6774a80b0ba1cd1471",
+      "cache_key": "cachekey/always-revalidate"
+    },
+    "da-agc:dot-agents/base.json:execution-profile:cloudflare-worker": {
+      "kind": "profile",
+      "digest": "sha256:fcf3093bd09d8639238cc3aa83d619a6c16f01fe4b1419b6c0611313cf4dcdb9"
+    },
+    "da-agc:dot-agents/base.json:execution-profile:web-spa": {
+      "kind": "profile",
+      "digest": "sha256:c07dd229cc0e42c6c1b6320ae26c12b5163c3bd933d5f4881f32fcc206b27e8e"
+    },
     "repo-local:execution-profile:daemon": {
       "kind": "profile",
-      "digest": "sha256:d7342235eb97f5c6e963ffb57161e8b882146c4fc12d07c7cf15afecd912f791",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:f7a3618e992e0a0a5c8b3fc2d6a8dadb13f24fdb3ee089977e201f4be9be34e9"
     },
     "repo-local:execution-profile:docs": {
       "kind": "profile",
-      "digest": "sha256:784e935a7078d7234dc9edf9d2737f2cd13e0af678ddfbda35a5f78c2a01c5ad",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:848d991d236370af857b1525f53c7c29238529122e6b1554707fc3cdf9b75be2"
     },
     "repo-local:execution-profile:docs/web": {
       "kind": "profile",
-      "digest": "sha256:d8b73cd883bfd6e953d4159097feb1f83d43a3013f2227f5c1c5672ca108dd1d",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:a3552595fcae2253223d7f59479b9fc14c0adbb57a7c0d1f15638560e412bbc8"
     },
     "repo-local:execution-profile:go-cli": {
       "kind": "profile",
-      "digest": "sha256:9cffbf6ce5f3c2db21ef0086ad60fdaa05d72de3246ac44719740563f445ad4f",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:a469a8a62f28e2acf1c5b42bb1da723e1970ede73a7383ce978f00473355d7e4"
     },
     "repo-local:execution-profile:ideation": {
       "kind": "profile",
-      "digest": "sha256:10afaa7045ef3a3cf0aa613c94b4820c97c35c84d80a5c9063a31c809108d8d4",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:98fab671ef27b4abf80e66fd47cceb3a2f7339a9ec407091ca93ced157dcc8aa"
     },
     "repo-local:execution-profile:meta": {
       "kind": "profile",
-      "digest": "sha256:e2a11167c862ad78e147d68de623aa85c9b6c533cd49576b5976a33e13b3564f",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:d34965a2b2fbf1b989fbac298cf0e74a211a734e38028cb8f902d43813fe0a78"
     },
     "repo-local:execution-profile:web": {
       "kind": "profile",
-      "digest": "sha256:578e196bad9737d485a9f3856cc1f5ccefb5f8a1580bdec89a8137035134c240",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:736b328a68d3a898c38fdb7648bb4202a49faf447d56f770e8e24ec90cb891c2"
     },
     "repo-local:stage-profile:executor": {
       "kind": "profile",
-      "digest": "sha256:99bb47eea0d0eb3a00fcab32c0596c79565cb5a6f65cc13b977813cf7409fd17",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:0822fecbf6f1135d95f710758811d12ddb8ae65b6f6b8730a1b4522bc8795060"
     },
     "repo-local:stage-profile:orchestrator": {
       "kind": "profile",
-      "digest": "sha256:808bdef71f6885c30095e898f969e601e25376db7156a080a6807cdfc0ed6f87",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:d279fd3f4c9f2b6a4ec313cae59174fd630c8acbd1f3aefb8175639384d77bc6"
     },
     "repo-local:stage-profile:reviewer": {
       "kind": "profile",
-      "digest": "sha256:b1c680492f38f626881a6f26c2c3a269b4f248625360eb988e2462602202d9ee",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:50551ae9fb3635e1fe4da951f0cf48551a6dc5388259b50937df23a635227053"
     },
     "repo-local:stage-profile:verifier": {
       "kind": "profile",
-      "digest": "sha256:87f0707cd5cb3d83ee63b5dd54085fda44ead308f6ba88bb98d931143924a69c",
-      "fetched_at": "2026-07-13T06:45:14Z",
-      "last_checked_at": "2026-07-13T06:45:14Z"
+      "digest": "sha256:d2f0ee594b17bf8ea47b13f7447ab74fb5cf60c8b554a57cc9db4ef096b52bae"
     }
   }
 }
