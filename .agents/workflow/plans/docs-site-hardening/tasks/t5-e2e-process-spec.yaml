@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: docs-site-hardening
+order: 4
+task:
+    id: t5-e2e-process-spec
+    title: Formalize + harden the e2e AI-dev process spec
+    status: pending
+    depends_on:
+        - t4-diagram-set
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - docs/concepts
+        - .agents/workflow/specs
+    verification_required: true
+    notes: 'Promote the lifecycle map into a ratified process spec: each stage''s inputs/outputs/gates, the skills that drive it, and the invariants that harden it end-to-end.'
+    app_type: docs
