@@ -25,6 +25,11 @@ type workflowGitSummary struct {
 	SHA            string   `json:"sha" yaml:"sha"`
 	DirtyFileCount int      `json:"dirty_file_count" yaml:"dirty_file_count"`
 	RecentCommits  []string `json:"recent_commits,omitempty" yaml:"-"`
+	// modifiedFiles caches the parsed `git status --short` file list captured
+	// while computing DirtyFileCount, so the checkpoint path can reuse it
+	// instead of re-spawning git via gitModifiedFiles. Unexported => never
+	// serialized into status/orient JSON or the checkpoint YAML.
+	modifiedFiles []string
 }
 
 type workflowPlanSummary struct {
