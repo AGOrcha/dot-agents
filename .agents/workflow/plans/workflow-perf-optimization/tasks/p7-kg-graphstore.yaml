@@ -4,7 +4,7 @@ order: 7
 task:
     id: p7-kg-graphstore
     title: 'Phase 7 (H7): KG/graphstore query hot paths — impact BFS pre-size, per-row decodeExtra short-circuit, edge-batch args; + CRG postprocess'
-    status: pending
+    status: completed
     depends_on:
         - p0-instrumentation
     blocks: []

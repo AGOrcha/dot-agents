@@ -8,4 +8,4 @@ updated_at: "2026-07-21T22:19:44Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: 'Phase 7 (H7): KG/graphstore query hot paths — impact BFS pre-size, per-row decodeExtra short-circuit, edge-batch args; + CRG postprocess'
+current_focus_task: 'Phase 8 (H6+H8): dashboard store — snapshot invalidation (I/O) + sessions() projection memoization (CPU)'
