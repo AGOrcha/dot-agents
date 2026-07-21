@@ -501,18 +501,21 @@ func (b *CRGBridge) gitChangedFiles(base string) ([]string, error) {
 	return files, nil
 }
 
+// crgMutationSummaryRE matches the "N files updated … N nodes … N edges" line
+// the CRG import tool prints. Compiled once at package init rather than per
+// parseCRGMutationSummary call.
+var crgMutationSummaryRE = regexp.MustCompile(`(?i)(\d+)\s+files?(?:\s+updated)?[^0-9]+(\d+)\s+nodes?[^0-9]+(\d+)\s+edges?`)
+
 func parseCRGMutationSummary(out []byte) (filesUpdated, nodesChanged, edgesChanged int, ok bool) {
 	text := string(out)
-	re := strings.NewReplacer("\r", "\n")
-	text = re.Replace(text)
-	summaryRe := regexp.MustCompile(`(?i)(\d+)\s+files?(?:\s+updated)?[^0-9]+(\d+)\s+nodes?[^0-9]+(\d+)\s+edges?`)
+	text = strings.NewReplacer("\r", "\n").Replace(text)
 	lines := strings.Split(text, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "INFO:") || strings.HasPrefix(line, "WARNING:") {
 			continue
 		}
-		if match := summaryRe.FindStringSubmatch(line); len(match) == 4 {
+		if match := crgMutationSummaryRE.FindStringSubmatch(line); len(match) == 4 {
 			var file, node, edge int
 			if _, err := fmt.Sscanf(match[1], "%d", &file); err == nil {
 				_, _ = fmt.Sscanf(match[2], "%d", &node)

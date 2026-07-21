@@ -151,11 +151,15 @@ func UserHomeRoots() []string {
 	return roots
 }
 
+// wslWindowsMountRE matches a WSL Windows-mount repo path (/mnt/c/Users/<user>)
+// and captures the Windows username. Compiled once at package init rather than
+// per SetWindowsMirrorContext call.
+var wslWindowsMountRE = regexp.MustCompile(`^/mnt/c/Users/([^/]+)(/|$)`)
+
 // SetWindowsMirrorContext checks if the repo path is under a WSL Windows mount
 // and sets the relevant env vars.
 func SetWindowsMirrorContext(repoPath string) {
-	re := regexp.MustCompile(`^/mnt/c/Users/([^/]+)(/|$)`)
-	if m := re.FindStringSubmatch(repoPath); len(m) > 1 {
+	if m := wslWindowsMountRE.FindStringSubmatch(repoPath); len(m) > 1 {
 		os.Setenv("DOT_AGENTS_WINDOWS_MIRROR", "true")
 		os.Setenv("DOT_AGENTS_WINDOWS_HOME", "/mnt/c/Users/"+m[1])
 	} else {
