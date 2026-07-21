@@ -8,4 +8,4 @@ updated_at: "2026-07-21T22:19:44Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: 'Phase 6 (H6): command-scoped I/O caching — LoadAgentsRC manifest cache, platform resources scoped-listing memo, hooks render-hash reuse'
+current_focus_task: 'Phase 7 (H7): KG/graphstore query hot paths — impact BFS pre-size, per-row decodeExtra short-circuit, edge-batch args; + CRG postprocess'
