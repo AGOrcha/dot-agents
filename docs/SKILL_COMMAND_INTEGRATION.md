@@ -274,6 +274,6 @@ under `~/.agents/hooks/global/`:
 
 ---
 
-*Skills referenced in earlier drafts of this map but not part of the starter scaffold
-or `.agentsrc.json` — `create-subagent`, `split-reviewable-commits`, `gh-fix-ci` — are
+*Skills referenced in earlier drafts of this map but not part of the starter scaffold —
+`create-subagent`, `split-reviewable-commits`, `gh-fix-ci` — are
 omitted here; this map covers only what ships.*
