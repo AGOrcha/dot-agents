@@ -1,345 +1,279 @@
 # Skill ↔ Command Integration Map
 
 Status: Active
-Last updated: 2026-06-23
+Last updated: 2026-07-22
 Related:
 - `.agents/workflow/specs/scoped-knowledge-graphs/design.md`
-- `.agents/workflow/specs/graph-bridge-contract/design.md` (Wave 5 KG bridge)
-- legacy precursor: `.agents/active/crg-kg-integration.plan.md`
+- `.agents/workflow/specs/graph-bridge-contract/design.md` (KG bridge)
 
-New workflow planning work should use `da workflow` with canonical bundles under `.agents/workflow/plans/` and supporting design docs under `.agents/workflow/specs/`; `.agents/active/` references here are historical lineage only.
+This document maps how the starter skills consume the `da` command surface and the
+knowledge graph. Every skill listed here ships in the starter scaffold
+(`internal/scaffold/home/starter/skills/global/`) and lands in a home on `da init`.
+Skills consume commands and graph data; commands generate, validate, and reference
+skills; the graph serves both.
 
-## Purpose
-
-This document maps the bidirectional integration between shared skills (agent-facing prompts), da commands (CLI surface), and the knowledge graph (data layer). Skills consume commands and graph data. Commands generate, validate, and reference skills. The graph serves both.
+The code graph is reached through `da kg` (the code-review graph, CRG, embedded in
+the KG subsystem). MCP tool parity is available by running `da kg serve` and pointing
+a platform's MCP config at it, but the skills below drive the `da kg` CLI directly.
 
 ## Integration Model
 
 ```
-Skills (agent-facing)                Commands (CLI)               Graph (data)
-┌─────────────────┐              ┌──────────────────┐         ┌──────────────┐
-│  /review-delta  │──calls──────>│ da kg changes    │──reads──>│ nodes, edges │
-│  /review-pr     │              │ da kg impact     │         │ flows, risk  │
-│  /build-graph   │──calls──────>│ da kg            │──writes─>│ communities  │
-│  /agent-start   │              │   build/update   │         │ kg_notes     │
-│  /self-review   │              │ da kg query      │         │ note_symbol  │
-│  /agent-handoff │              │   --intent <n>   │         │   _links     │
-│                 │              │ da workflow orient│──reads──>│              │
-│                 │              │ da review approve │         └──────────────┘
-└─────────────────┘              └──────────────────┘
-        │                                │
-        └──────── hooks ─────────────────┘
-         (session-orient, graph-update,
-          graph-precommit, session-capture)
+Skills (agent-facing)            Commands (CLI)                 Graph (data)
+┌────────────────────┐        ┌────────────────────┐        ┌────────────────┐
+│ /build-graph       │──────> │ da kg build/update │──────> │ nodes, edges   │
+│ /review-delta      │        │ da kg code-status  │        │ communities    │
+│ /review-pr         │──────> │ da kg changes      │──────> │ flows          │
+│ /self-review       │        │ da kg impact       │        │ risk_index     │
+│ /agent-start       │        │ da kg query        │        │ kg_notes       │
+│ /agent-handoff     │──────> │ da kg bridge query │──────> │ note_symbol    │
+│                    │        │ da workflow orient │        │   _links       │
+│ orchestration set  │──────> │ da workflow …      │──────> │ (workflow      │
+│ (isp, delegation-  │        │  eligible/next/    │        │  state, not    │
+│  lifecycle, …)     │        │  fanout/merge-back │        │  the code KG)  │
+└────────────────────┘        └────────────────────┘        └────────────────┘
+        │                              │
+        └─────────── hooks ────────────┘
+      (session-orient, session-capture, graph-orient,
+       graph-update, graph-precommit, and the stage gates)
 ```
 
-## Skill → Command → Graph: Detailed Map
+## Skills
 
-### build-graph
+Each entry is what the skill does today, the `da` commands it calls, and the graph
+tables it touches.
 
-**Purpose**: Build or incrementally update the code knowledge graph.
+### Code-review-graph skills
 
-**Current state**: Drives the `da kg` CLI (`da kg code-status`, `da kg build` / `da kg update`) — see `internal/scaffold/home/starter/skills/global/build-graph/SKILL.md`. MCP parity (`list_graph_stats_tool`, `build_or_update_graph_tool`) is available only via `da kg serve`; the skill prefers the CLI so the same commands work everywhere.
+These drive `da kg` so reviews carry structural context instead of grep output.
 
-**Command flow**:
-- Step 1: `da kg code-status` — check if the code graph exists and is current
-- Step 2: `da kg build` (first time) or `da kg update` (incremental)
-- Step 3: `da kg code-status` — report results
+#### build-graph
 
-**Graph tables touched**: `nodes`, `edges`, `metadata`, `communities`, `flows`, `flow_memberships`
+Builds or incrementally updates the code graph — the foundational skill every other
+graph-consuming skill assumes has run.
 
-**Why this matters**: This is the foundational skill. Every other graph-consuming skill assumes build-graph has run.
+- **Commands:** `da kg code-status` (is the graph present and current?), then
+  `da kg build` (first time) or `da kg update` (incremental).
+- **Graph:** `nodes`, `edges`, `metadata`, `communities`, `flows`, `flow_memberships`.
 
-### review-delta
+#### review-delta
 
-**Purpose**: Token-efficient delta review using impact analysis. Reviews only what changed since last commit.
+Token-efficient review of only what changed since the last commit, with automatic
+blast-radius detection.
 
-**Current state**: Drives the `da kg` CLI (`da kg update`, `da kg changes`, `da kg impact`, `da kg bridge query`) — see `internal/scaffold/home/starter/skills/global/review-delta/instructions/workflow.md`. MCP parity (`build_or_update_graph_tool`, `get_review_context_tool`, `get_impact_radius_tool`, `query_graph_tool`) is available only via `da kg serve`.
+- **Commands:** `da kg update` (freshen), `da kg changes` (risk-scored change
+  analysis), `da kg impact <changed-file>` (blast radius), `da kg bridge query
+  --intent tests_for <fn>` (test coverage), `da kg bridge query --intent
+  symbol_decisions <fn>` (the decisions behind the code, not just the diff).
+- **Graph:** `nodes`, `edges`, `risk_index`, `note_symbol_links`, `kg_notes`.
 
-**Command flow**:
-- Step 1: `da kg update` — ensure graph reflects current state
-- Step 2: `da kg changes` — get risk-scored change analysis (replaces `get_review_context_tool`)
-- Step 3: `da kg impact <changed-file>` — blast radius for flagged files
-- Step 4: `da kg bridge query --intent tests_for <changed-fn>` — check test coverage
-- Step 5: `da kg bridge query --intent symbol_decisions <changed-fn>` — surface linked decisions (NEW: traceability)
+#### review-pr
 
-**Graph tables touched**: `nodes`, `edges`, `risk_index`, `note_symbol_links`, `kg_notes`
+Full PR / branch review with blast-radius analysis — the most graph-intensive skill,
+since PRs span more code and cross module boundaries.
 
-**Why this matters**: review-delta is the most graph-intensive skill. It demonstrates the full value of having structural context vs grep. The addition of `symbol_decisions` is new — it gives reviewers the *why* behind code, not just the *what*.
+- **Commands:** the `review-delta` set, plus `da kg changes --base <ref>` (scope to
+  the PR diff) and `da kg query --intent related_notes <keyword>` (related
+  notes/symbols). Community analysis flags PRs that cross module boundaries.
+- **Graph:** as `review-delta`, plus `communities`.
 
-### review-pr
+#### self-review
 
-**Purpose**: Full PR review with blast-radius analysis.
+Pre-commit quality review; graph awareness is lightweight so it stays fast.
 
-**Current state**: Drives the same `da kg` CLI as review-delta (plus `da kg query --intent related_notes`) — see `internal/scaffold/home/starter/skills/global/review-pr/instructions/workflow.md`. MCP parity (including `semantic_search_nodes_tool`) via `da kg serve` only.
+- **Commands:** `da kg changes --brief` (risk scores + test gaps for changed
+  symbols), `da kg bridge query --intent tests_for <fn>` (structural test coverage).
+- **Graph:** `risk_index`, `note_symbol_links` — alerts when a decision-documented
+  function changed.
 
-**Command flow**: Same as review-delta, plus:
-- Step 2a: `da kg changes --base main` — scope to PR diff
-- Step 6: `da kg query --intent related_notes <keyword>` — find related notes/symbols (replaces `semantic_search_nodes_tool`)
+### Session skills
 
-**Additional graph value**: PR reviews span more code than delta reviews, making community analysis more relevant. `da kg` communities can identify when a PR crosses module boundaries (higher risk).
+#### agent-start
 
-### self-review
+Session initialization: gather current state and context before working.
 
-**Purpose**: Pre-commit quality review.
+- **Commands:** `da workflow orient` (active plan, checkpoints, handoffs, proposals,
+  git and graph-bridge health), `da kg code-status` (code-graph stats), `da kg bridge
+  query --intent decision_lookup <topic>` (prior decisions relevant to the task).
 
-**Current state**: Runs a mandatory **Step 0 (KG context)** before any per-file review — `da kg changes --brief` for the structural change set and `da kg impact <changed-files>` for blast radius, captured verbatim into `reviewer_notes`; degrades gracefully when the KG bridge is unavailable. See `internal/scaffold/home/starter/skills/global/self-review/instructions/kg-context.md`.
+#### agent-handoff
 
-**Further integration** (candidate additions):
-- After step 4 (test coverage): `da kg bridge query --intent tests_for <changed-fn>` — structural test coverage check
-- Surface `note_symbol_links` for changed code — alert if a decision-documented function was modified
+Package session context for the next agent, and recover verified state on resume via
+the session-handoff journal (modes: `recover`, `list`, `update`, `view`).
 
-**Why this matters**: self-review is the most-run review skill. Adding lightweight graph awareness (just `--brief`) keeps it fast while catching impact that git diff alone misses.
+- **Commands:** `da workflow journal` (append-only mutation log + replay-and-recover),
+  `da workflow checkpoint` (file + symbol-level changes), `da kg changes` (which
+  symbols moved this session). Records any `note_symbol_links` created.
 
-### agent-start
+### Workflow-orchestration skills
 
-**Purpose**: Session initialization — gather context before coding.
+These drive the `da workflow` surface — the CLI resolves, gates, and records the
+topology; the skills compose the verifier/review steps on top.
 
-**Current state**: Prefers graph/MCP tooling over manual scans when available. References code-review-graph as optional.
+#### orchestrator-session-start
 
-**Integrated state**:
-- Context gathering step: `da workflow orient` (already includes graph health via bridge when available)
-- New: `da kg code-status` — show code graph stats (files, nodes, edges, staleness)
-- New: `da kg bridge query --intent decision_lookup <current-task-topic>` — surface prior decisions relevant to the task
+The orchestrator turn: pre-flight, eligibility, task pick, KG readback, then the
+fanout-or-direct decision. Does not implement the delegated slice.
 
-**Why this matters**: agent-start sets the context window for the entire session. Getting graph context early means fewer grep fallbacks later.
+- **Commands:** `da workflow eligible`, `da workflow orient`, `da workflow next`,
+  `da workflow task update`, `da workflow fanout`.
 
-### agent-handoff
+#### isp
 
-**Purpose**: Package session context for the next agent.
+Interactive staged pipeline runtime over pre-gathered orchestrator output:
+impl → verifier → review → parent gate.
 
-**Current state**: Gathers git state, plans, and progress, and creates the handoff document. Auto-gather runs the **verified recovery view** `da workflow journal recover` — durable cross-session state re-verified against reality — and on resume the skill starts from that verified view rather than trusting the prose. It also captures a fresh snapshot (`da workflow journal snapshot`) and reasoned deltas (`da workflow journal append`). See `internal/scaffold/home/starter/skills/global/agent-handoff/instructions/auto-gather.md` and `verified-readback.md`.
+- **Commands:** `da workflow fanout`, `da workflow bundle stages`,
+  `da workflow delegation gate`.
 
-**Integrated state** (additions only):
-- New: include `da kg changes` summary in handoff — what symbols were modified this session
-- New: include any `note_symbol_links` created or decisions referenced
-- New: `da workflow checkpoint` already captures file modifications; extend to include symbol-level changes
+#### delegation-lifecycle
 
-**Why this matters**: Handoffs lose structural context. Recording which symbols changed (not just files) helps the next agent understand scope faster.
+Delegate a bounded write-scope task to a sub-agent, track its lifecycle, and merge
+the result back into the canonical plan.
 
-### split-reviewable-commits (not yet shipped)
+- **Commands:** `da workflow fanout`, `da workflow merge-back`,
+  `da workflow delegation closeout`, `da workflow delegation gate`.
 
-**Purpose**: Rewrite branch into semantic commit sequence.
+#### iteration-close
 
-**Status**: Not yet shipped — not registered in `.agentsrc.json` and not part of
-the starter scaffold. The notes below are forward-looking.
+Persist a loop iteration's workflow state (fixes the `persisted_via_workflow_commands:
+no` anti-pattern).
 
-**Potential graph integration** (future):
-- `da kg` community analysis — suggest commit boundaries aligned with code communities
-- When two files are in different communities, they are candidates for separate commits
-- When files are in the same community, they should stay in the same commit
-- Fallback: existing file-level heuristics when graph is unavailable
+- **Commands:** `da workflow verify record`, `da workflow checkpoint`, then
+  `da workflow advance` (direct work) or `da workflow merge-back` (delegated work).
 
-**Why this matters**: Community-aware splits produce more reviewable commits because each commit touches one logical module.
+#### loop-worker
 
-### gh-fix-ci (not yet shipped)
+Legacy / full-slice bounded implementation worker: reads a delegation bundle,
+implements its `write_scope`, runs `iteration-close`, and returns a merge-back. (Typed
+ISP stages use `isp`, not this.)
 
-**Purpose**: Debug failing GitHub Actions checks.
+- **Commands:** `da workflow bundle stages`, plus the `iteration-close` chain.
 
-**Status**: Not yet shipped — not registered in `.agentsrc.json` and not part of
-the starter scaffold. The notes below are forward-looking.
+#### plan-wave-picker
 
-**Potential graph integration** (future):
-- `da kg changes --base <failing-commit>` — scope investigation to symbols changed since the last green build
-- New: `da kg bridge query --intent impact_radius <changed-fn>` — understand what the change might have broken
-- New: `da kg bridge query --intent tests_for <changed-fn>` — which tests should have caught this
+Choose the next wave/phase across active plans without re-reading each plan. (Run
+only when `orchestrator-session-start` has not already run this session.)
 
-**Why this matters**: CI failures are often caused by impact that crosses module boundaries. The graph shows the blast radius directly instead of requiring the agent to grep through test files.
+- **Commands:** `da workflow plan`, `da workflow eligible`, `da workflow next`.
 
-### skill-architect
+#### provider-consumer-pair
 
-**Purpose**: Design, create, transform, audit, eval, improve, optimize, and package skills.
+Sequence two waves that must ship together — one defines a contract, the other
+consumes it — without circular blocking.
 
-**Current state**: Shipped. `skill-architect` is a starter skill
-(`internal/scaffold/home/starter/skills/global/skill-architect/`, registered in
-`.agentsrc.json`), so it lands in every initialized home. It runs seven modes —
-`new`, `transform`, `audit`, `eval`, `improve`, `optimize`, `package` — and is
-provider-pluggable: the `eval`/`improve`/`optimize` modes call an LLM under the
-hood. By default (`claude-cli`) it drives the local CLI of whichever of the five
-dot-agents platforms is present, auto-detecting `claude` / `cursor` / `codex` /
-`opencode` / `copilot` with zero config and no API key, reusing the host
-session's auth. Pin a platform with `SKILL_ARCHITECT_PLATFORM`, or swap in a
-different provider entirely (Anthropic API, an OpenAI-compatible endpoint, or any
-CLI) via `SKILL_ARCHITECT_PROVIDER`.
+- **Commands:** `da workflow plan`, `da workflow tasks`, `da workflow fanout`.
 
-**Graph integration**: None today. Potential future additions: `audit` could
-query the graph to verify skill instructions reference valid commands and tool
-names; `eval` could track graph metrics before/after skill runs; `optimize`
-could use community data to suggest which modules a skill should focus on.
+### Ideation and authoring skills
 
-### Workflow-orchestration skills (shipped)
+#### kg-ideate (with kg-brief and staged-execution-handoff)
 
-The following seven skills are shipped — each is a starter skill under
-`internal/scaffold/home/starter/skills/global/` and registered in `.agentsrc.json`,
-so they land in every initialized home. They drive the `da workflow` /
-`da kg` command surface rather than the code-review-graph review surface.
+KG-grounded front end to the artifact pipeline: idea/proposal → spec → plan →
+concurrent staged execution. Phase 1 (`kg-brief`) queries the knowledge graph, the
+research corpus, and the lessons index to produce a shared briefing block; Phase 4
+(`staged-execution-handoff`) makes the direct-vs-fanout call and hands the spec + plan
+into `orchestrator-session-start` / `isp`.
 
-- **delegation-lifecycle** — delegate a bounded write-scope task to a sub-agent,
-  track its lifecycle, and merge the result back. Commands: `da workflow fanout`,
-  `da workflow merge-back`, `da workflow delegation closeout`, `da workflow delegation gate`.
-- **iteration-close** — persist a loop iteration's workflow state. Commands:
-  `da workflow verify record`, `da workflow checkpoint`, then `da workflow advance`
-  (direct work) or `da workflow merge-back` (delegated work).
-- **loop-worker** — bounded implementation worker that reads a delegation bundle,
-  implements its write scope, and runs `iteration-close`. Commands:
-  `da workflow bundle stages`, plus the `iteration-close` chain.
-- **orchestrator-session-start** — orchestrator turn: pre-flight, eligibility,
-  task pick, fanout-or-direct decision. Commands: `da workflow eligible`,
-  `da workflow orient`, `da workflow next`, `da workflow task update`, `da workflow fanout`.
-- **plan-wave-picker** — choose the next wave/phase across active plans without
-  re-reading every plan. Commands: `da workflow plan`, `da workflow eligible`,
-  `da workflow next`.
-- **provider-consumer-pair** — sequence two waves that must ship together (one
-  defines a contract, the other consumes it) without circular blocking. Commands:
-  `da workflow plan`, `da workflow tasks`, `da workflow fanout`.
-- **isp** — interactive staged pipeline orchestrator (impl → verifier → review →
-  parent gate) over pre-gathered orchestrator output. Commands:
-  `da workflow fanout`, `da workflow bundle stages`, `da workflow delegation gate`.
+- **Commands:** `da kg query` (briefing), then the `da workflow` plan/fanout surface
+  via the orchestration skills.
+- **Graph:** read-only `kg_notes`, `note_symbol_links` at briefing time.
 
-**Graph integration**: these consume `da workflow` state and the `da kg` readback
-at orient time; deeper graph integration (scope derivation, impact-aware fanout)
-is tracked separately.
+#### spec-scaffold, plan-scaffold
 
-### create-subagent (not yet shipped)
+The middle phases of `kg-ideate`: turn a briefing into a stabilized spec, then a spec
+into a plan with bounded tasks, `depends_on` ordering, and impact-radius-grounded
+write-scopes.
 
-**Purpose**: Create custom subagents for specialized tasks.
+- **Commands:** `da workflow plan`, `da workflow tasks`.
 
-**Status**: Not yet shipped — not registered in `.agentsrc.json` and not part of
-the starter scaffold. The notes below are forward-looking.
+#### ideation-cycle
 
-**Potential graph integration** (future):
-- Agent descriptions could reference graph communities for scope — e.g., "this agent owns the `auth` community"
-- `da kg communities` could suggest natural subagent boundaries
+Fork-resolution loop: turn a HARD/OPEN design fork into a ratified, fidelity-audited
+decision via prototype → cross-harness audit → cross-brain review. Composes the
+delegation surface for its prototype/audit workers.
 
-## Command → Skill: Reverse Direction
+### Config and release skills
 
-Commands can reference, inject, or trigger skills:
+#### pipeline-architect
 
-### da init
+Design and maintain full-loop execution pipelines and onboard execution profiles:
+`stage_profiles`, verifier/review chains, model routing, cross-family review gates,
+and per-`app_type` stage granularity.
 
-**What it does**: Initialize a project with dot-agents config.
+- **Commands / config:** edits the canonical `.agentsrc.json` `execution_profile` and
+  `stage_profiles`; reads them back with `da config relevance`. No code-graph
+  integration.
 
-**Skill integration**:
-- Generates skill files from the embedded scaffold templates under `internal/scaffold/templates/`
-- Should include graph-aware skills when CRG is available
-- Should register `kg serve` MCP server config for detected platforms
+#### release-cut
 
-### da add
+Cut a tagged release after docs are reconciled: pin-check the signing toolchain, push
+the version bump / tag, monitor the release workflow, and classify known
+sign/timestamp failures. Runs after the docs refresh. No code-graph integration.
 
-**What it does**: Add agent configurations to a project.
+#### skill-architect
 
-**Skill integration**:
-- Registers MCP server configs for platforms
-- Should offer to register `da kg serve` alongside other MCP servers
+Design, create, transform, audit, eval, improve, optimize, and package skills. The
+`eval`/`improve`/`optimize` modes call an LLM; by default (`claude-cli`) they drive
+whichever of the five platform CLIs is present (`claude`/`cursor`/`codex`/`opencode`/
+`copilot`), auto-detected with no API key. Pin with `SKILL_ARCHITECT_PLATFORM` or swap
+the provider with `SKILL_ARCHITECT_PROVIDER`. No code-graph integration today.
 
-### da refresh
+## Command → Skill: reverse direction
 
-**What it does**: Update configs from sources.
+Commands generate, register, and render skills.
 
-**Skill integration**:
-- Pulls latest skill definitions from git sources
-- Should update graph skill templates when source skills change
+### da init / da add / da refresh
 
-### da review approve
-
-**What it does**: Approve and apply a workflow proposal.
-
-**Skill integration**:
-- Could call `self-review` as a pre-check before applying
-- Could call `da kg changes` to validate proposal impact
+- `da init` scaffolds the starter skills (including the graph and workflow skills
+  above) into `~/.agents/`, and can register the `da kg serve` MCP server for detected
+  platforms.
+- `da add` registers agent and MCP-server configs for a platform.
+- `da refresh` re-fetches skill definitions from their declared sources and relinks
+  them for the active platform.
 
 ### da workflow orient
 
-**What it does**: Render session context.
+Renders the session context — active plan, last checkpoint, verification state,
+handoffs, proposals, git state, and graph-bridge health — that `agent-start` consumes.
 
-**Skill integration**:
-- Already renders plans, checkpoints, handoffs, proposals, git state
-- Should include graph bridge health
-- Should include `da kg code-status` (code graph stats)
-- Feeds context to `agent-start` skill
+### da review
 
-### da doctor
-
-**What it does**: Health check for config state.
-
-**Skill integration**:
-- Should include `da kg health` in diagnostics
-- Should verify graph hooks are installed if graph DB exists
+Applies a queued rule/skill/config proposal (`da review approve`) and drives the
+admin surface (`da review` list/label), backed by the SHA-256-chained audit log.
 
 ### da config explain / sync / lint / verify / relevance
 
-**What they do**: The `da config` subtree introspects and resolves the layered
-config. `da config explain <field-path>` (`commands/config/explain.go`) prints
-the effective value of a single field plus full layer provenance.
-`da config sync` (`commands/config/sync.go`) re-fetches every declared layer
-regardless of TTL, re-resolves, and rewrites the config section of
-`.agentsrc.lock` (the one mutating subcommand). `da config lint`
-(`commands/config/lint.go`) validates the repo-local manifest and each
-`extends` layer against the AgentsRC layer schema. `da config verify`
-(`commands/config/verify.go`) runs offline repo setup-contract checks without
-re-fetching layers. `da config relevance` (`commands/config/relevance.go`)
-resolves a task's execution profile across five facets — units, topology,
-lenses, graph (backend adapter-ref selection), and lessons (repo-local lesson
-relevance) — by `app_type`, sliced via `--filter <facet>|all`.
+The `da config` subtree introspects and resolves the layered config.
+`da config explain <field-path>` prints the effective value plus full layer
+provenance; `da config sync` re-fetches every declared layer and rewrites the config
+section of `.agentsrc.lock` (the one mutating subcommand); `da config lint` validates
+the manifest and each `extends` layer against the AgentsRC layer schema;
+`da config verify` runs offline repo setup-contract checks; `da config relevance`
+resolves a task's execution profile (units, topology, lenses) by `app_type` — the
+readback `pipeline-architect` uses. These are operator-facing introspection commands,
+not skill-invoked.
 
-**Skill integration**: Not skill-invoked today. These are operator-facing
-introspection commands; a future setup or doctor skill could call them to
-confirm the resolved config and contract state before acting.
+## Hooks
 
-## Hooks As The Glue
+Hooks bridge skills and commands by firing on agent events. The starter ships these
+under `~/.agents/hooks/global/`:
 
-Hooks bridge skills and commands by firing on agent events:
+| Hook | Event | What it does |
+|------|-------|--------------|
+| session-orient | session_start | Calls `da workflow orient` (feeds `agent-start`) |
+| session-capture | stop | Calls `da workflow checkpoint` (file + symbol changes) |
+| graph-orient | session_start | `da kg health` — code-graph readiness at session start |
+| graph-update | post_tool_use (Edit/Write/Bash) | `da kg update --skip-flows` — keeps the graph current as code changes |
+| graph-precommit | pre_tool_use (git-commit Bash) | Runs `graph-precommit.sh` (`da kg` change brief) — surfaces risk before a commit (Claude has no native pre-commit event) |
+| session-handoff-snapshot | pre_compact | Snapshots live workflow/KG state to the journal |
+| session-handoff-recover | session_start | Replays the journal to recover verified state |
+| iteration-close-gate / isp-gate / loop-worker-gate | stop | Enforce per-skill stop-gate context for the workflow stages |
+| auto-format | post_tool_use (Write/Edit) | Runs formatters |
+| guard-commands | pre_tool_use (Bash) | Blocks dangerous commands |
+| secret-scan | post_tool_use (Write/Edit) | Warns on credential writes |
 
-### Existing hooks (in ~/.agents/hooks/global/)
+---
 
-| Hook | Event | What it does | Graph connection |
-|------|-------|-------------|-----------------|
-| session-orient | session_start | Calls `da workflow orient` | Should include graph status |
-| session-capture | stop | Calls `da workflow checkpoint` | Should capture symbol-level changes |
-| auto-format | post_tool_use (Write/Edit) | Runs formatters | None |
-| guard-commands | pre_tool_use (Bash) | Blocks dangerous commands | None |
-| secret-scan | post_tool_use (Write/Edit) | Warns on credential writes | None |
-| graph-orient | session_start | Runs `da kg health` (code-graph readiness) | Direct — surfaces graph status at session start (pairs with session-orient) |
-
-### Graph-integration hooks
-
-| Hook | Event | Command | Purpose |
-|------|-------|---------|---------|
-| graph-update | post_tool_use (Edit/Write/Bash) | `da kg update --skip-flows` | Keep graph current as code changes |
-| graph-precommit | pre_tool_use (Bash) | `da kg changes --brief` (via `graph-precommit.sh`, on git-commit-like Bash) | Surface risk before committing |
-
-These replace the hooks that `code-review-graph install` currently writes to `.claude/settings.json`.
-
-## Measurement: How To Know Integration Works
-
-### Graph adoption metrics
-
-Track per session (via session-capture hook):
-- MCP tool calls to graph vs grep/glob fallbacks
-- Bridge query count and hit rate
-- Whether agent used `kg search` or fell back to `Grep`
-
-### Skill effectiveness via graph
-
-- **review-delta/review-pr**: Did risk scores decrease after review? Were test gaps closed?
-- **self-review**: Did it surface impact that git diff alone would miss?
-- **agent-start**: Did the agent ask fewer "what does X do" questions after graph context loading?
-- **split-reviewable-commits**: Were commit boundaries aligned with communities?
-
-### Graph quality over time
-
-- `risk_index.risk_score` trend per community
-- `note_symbol_links` coverage: what percentage of active decisions link to code?
-- Stale note count: are notes being maintained or rotting?
-
-## Implementation Priority
-
-1. **review-delta + review-pr** — highest impact, most graph-intensive, proves the value
-2. **build-graph** — foundational, everything depends on it
-3. **self-review** — most frequently run, lightweight graph addition
-4. **agent-start** — sets session context, compounds over time
-5. **graph hooks** — automates graph freshness
-6. **agent-handoff** — preserves structural context across sessions
-7. **split-reviewable-commits** — community-aware splits are a clear upgrade
-8. **gh-fix-ci** (not yet shipped) — impact scoping is valuable but less frequent
-9. **skill-architect** (shipped) **+ create-subagent** (not yet shipped) — graph integration is future, depends on graph maturity
+*Skills referenced in earlier drafts of this map but not part of the starter scaffold —
+`create-subagent`, `split-reviewable-commits`, `gh-fix-ci` — are
+omitted here; this map covers only what ships.*

@@ -14,7 +14,8 @@ starts. `da` keeps your hooks in one place and wires them into each platform
 that supports them.
 
 > This is the user-facing guide. For a quick command summary see the
-> **Hooks** entry in the [README](../README.md#hooks); this document
+> **Canonical Resource Inspection** entry in the
+> [command reference](./COMMANDS.md#canonical-resource-inspection); this document
 > covers the storage model and per-platform behavior in more detail.
 
 ## The canonical model
@@ -54,10 +55,10 @@ today (consistent with the Hook Wiring Audit in
 
 | Platform | Where hooks land | Status |
 |----------|------------------|--------|
-| Claude Code | `.claude/settings.json` / `.claude/settings.local.json` | Wired |
+| Claude Code | `.claude/settings.local.json` (project) and `~/.claude/settings.json` (user) | Wired |
 | Cursor | `.cursor/hooks.json` (project) and `~/.cursor/hooks.json` (user) | Wired |
-| Codex | `.codex/hooks.json` | Wired (project `.codex/hooks.json` is rendered from the canonical hook spec and removed again on project teardown) |
-| GitHub Copilot | `.github/hooks/*.json` plus Claude-compatible settings | Wired (canonical hooks fan out to `.github/hooks/*.json`; legacy single-file hooks still emit) |
+| Codex | `.codex/hooks.json` (project) and `~/.codex/hooks.json` (user) | Wired (project `.codex/hooks.json` is rendered from the canonical hook spec and removed again on project teardown) |
+| GitHub Copilot | `.github/hooks/*.json` (project) plus Claude-compatible settings, and `~/.copilot/hooks/*.json` (user) | Wired (canonical hooks fan out to `.github/hooks/*.json` project-side and `~/.copilot/hooks/*.json` user-side; legacy single-file hooks still emit) |
 | OpenCode | — | No dedicated hook file is documented upstream, so none is created |
 | Antigravity | `.antigravity/hooks.json` (project) and `~/.antigravity/hooks.json` (user) | Wired (F4/DC0 probe: rendered from the canonical hook spec via `renderAntigravityHookConfig`; managed regular file / hard link, not a symlink) |
 
@@ -268,7 +269,8 @@ validator rejects any record that includes a disallowed field.
 
 Gates never write the sidecar directly. They invoke
 `da workflow hook-outcome write`, which resolves the current iteration N
-from `.agents/active/loop-state.md` and appends to
+as the highest existing `iter-N.yaml` entry in
+`.agents/active/iteration-log/` and appends to
 `.agents/active/iteration-log/iter-N.hook-outcomes.yaml`. Append-only
 semantics and `(sentinel_id, rule_id, lifecycle_point,
 intervention_class)` idempotency mean a recoverable platform retry of
@@ -284,7 +286,7 @@ deduplicate to the more severe result, and which rule-ID families
 contribute to v1 scoring versus which are persisted as audit-only
 observation. See:
 
-- [`OUTCOME_SCORING_RUBRIC.md` — `hook_outcomes` signal](./OUTCOME_SCORING_RUBRIC.md#6-hook_outcomes--hook-gate-outcomes-weight-010-r15)
+- [`OUTCOME_SCORING_RUBRIC.md` — `hook_outcomes` signal](./OUTCOME_SCORING_RUBRIC.md#7-hook_outcomes--hook-gate-outcomes-weight-009-r15)
   for the sub-score mapping and dedup rule.
 - [`OUTCOME_SCORING_RUBRIC.md` — approved rules](./OUTCOME_SCORING_RUBRIC.md#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6)
   for the rule-ID families that vote in v1.
@@ -317,8 +319,10 @@ Loader / render rules (enforced in
 
 - The scalar `when` field is still supported and behaves exactly as
   before; existing manifests need no change.
-- A manifest must specify **exactly one** of `when` or a non-empty
-  `when_events`. Setting both is rejected at load time.
+- A manifest may set **at most one** of `when` or a non-empty
+  `when_events` — setting both is rejected at load time. A manifest with
+  neither remains supported for hooks that rely solely on the
+  `platform_overrides.event` escape hatch.
 - `when_events` entries must be **canonical** event names (the
   snake_case strings in the mapping tables above). Unknown values
   are rejected so typos cannot silently no-op on every platform.
@@ -484,6 +488,6 @@ every platform that supports them.
 
 ## See also
 
-- [README — Hooks](../README.md#hooks) — quick command summary
+- [Command reference — resources](./COMMANDS.md#canonical-resource-inspection) — quick command summary
 - [PLATFORM_DIRS_DOCS.md](./PLATFORM_DIRS_DOCS.md) — full per-platform resource
   locations and the Hook Wiring Audit

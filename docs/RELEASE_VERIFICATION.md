@@ -1,6 +1,6 @@
 ---
 title: Release Verification
-description: How to verify a dot-agents release with Cosign keyless signing before installing it.
+description: How to verify a dot-agents release — Cosign keyless supply-chain signing plus the macOS/Windows OS-native code signatures — before installing it.
 sidebar:
   order: 7
 ---
@@ -165,6 +165,41 @@ Extract the archive and move `da` onto your `PATH`. Verifying after
 download is sufficient — `brew install da` and the install
 script do not currently invoke cosign automatically.
 
+## OS-native code signing (macOS & Windows)
+
+The cosign signature above is a **supply-chain** proof on `checksums.txt`. In
+addition, official releases apply the platform's **OS-native** code signature to
+the `da` binary itself, so it clears Gatekeeper / SmartScreen:
+
+- **macOS** — the darwin binary is Apple **Developer ID**-signed and notarized
+  with a hardened runtime (via `quill` in the release workflow). Verify on macOS
+  from the extracted archive:
+
+  ```bash
+  codesign --verify --strict --verbose=2 ./da
+  codesign -dvv ./da 2>&1 | grep -E 'Authority=Developer ID Application|flags=.*runtime'
+  ```
+
+  A signed binary makes `codesign --verify` exit 0 and reports
+  `Authority=Developer ID Application: …` plus the hardened-runtime flag. This
+  mirrors the `verify-macos-release.yml` check the project runs on every
+  published release.
+
+- **Windows** — `da.exe` is **Authenticode**-signed via Azure Trusted Signing
+  (RFC-3161 timestamped) in the release workflow. Verify in PowerShell:
+
+  ```powershell
+  Get-AuthenticodeSignature .\da.exe | Format-List Status, SignerCertificate
+  # Status : Valid
+  ```
+
+  or with the Windows SDK: `signtool verify /pa /v da.exe`.
+
+If either command reports **no signature**, that release's platform binary was
+not OS-native signed (these steps are gated on the release's signing
+credentials); the cosign + checksum verification above stays the authoritative
+supply-chain check regardless.
+
 ## Transparency log lookup
 
 Every signing event is logged to the public Rekor transparency log.
@@ -185,24 +220,23 @@ You can browse Rekor entries for this project at
 
 ## Scope and limitations
 
-This signing approach (Cosign keyless on `checksums.txt`) provides
-**supply-chain integrity** — proof that the artifacts came from this
-project's official release workflow. It is separate from OS-level
-code-signing trust, which now varies by platform:
+The cosign keyless signature on `checksums.txt` provides **supply-chain
+integrity** — proof the artifacts came from this project's official release
+workflow — independent of OS-level trust. Alongside it, the binaries carry their
+platform's OS-native signature:
 
-- macOS: the darwin `da` binary is Apple Developer ID-signed and notarized
-  (via quill) as of v0.4.0, so it clears Gatekeeper on first run — both via
-  `brew install da` (the Homebrew cask no longer strips the quarantine
-  attribute; that stopgap postflight hook was removed) and when the tarball is
-  downloaded **manually** from the releases page.
-- Windows SmartScreen will warn about an unrecognized publisher.
-- Linux package managers will not pick up the cosign signature
-  automatically.
+- **macOS**: Apple Developer ID-signed + notarized with a hardened runtime (via
+  `quill`), so it clears Gatekeeper on first run — both via `brew install da`
+  (the cask no longer strips the quarantine attribute) and a manual download.
+- **Windows**: Authenticode-signed via Azure Trusted Signing (a valid publisher
+  signature; SmartScreen reputation still accrues over time).
+- **Linux**: no distro-package signature is attached; rely on the cosign +
+  checksum verification above.
 
-OS-native signing (Apple Developer ID + notarization, Windows EV cert,
-Linux distro packaging) requires paid certificates and is a separate
-decision tracked outside this verification recipe. If you need
-seamless Gatekeeper / SmartScreen trust, open an issue.
+See [OS-native code signing](#os-native-code-signing-macos--windows) for the
+per-platform verification commands. The OS-native signing steps are gated on the
+release carrying the signing credentials; the cosign supply-chain signature is
+always present.
 
 ## Troubleshooting
 

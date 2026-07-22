@@ -241,6 +241,37 @@ lowest-common-denominator format.
 
 ---
 
+## Where plugins fit: an upstream bundle, not a projection target
+
+A **plugin** is an installable **bundle of canonical resources** — agents, skills, commands,
+hooks, and MCP config — packaged with ownership metadata in a `PLUGIN.yaml` manifest. It lives in
+the canonical store under `~/.agents/plugins/<scope>/<name>/` (`resources/{agents,skills,commands,hooks,mcp}/`,
+plus `files/` for native OpenCode source and `platforms/<id>/` passthrough), using the **same scope
+model** — `global` or a project id — as every other canonical bucket. See the
+[Plugin Contract](./PLUGIN_CONTRACT.md) for the full manifest schema and storage layout.
+
+The key point for this projection model: **plugins are a storage/ownership layer that sits
+*upstream* of projection, not a per-platform render target.** A plugin does not add a new output
+shape. Instead, once a bundle is in the canonical store, the resources it carries are canonical
+resources like any other, and they project into each platform's layout through the exact same two
+paths described above. Bundles arrive upstream two ways: authored directly under
+`~/.agents/plugins/`, or via `da import`, which detects orphaned platform plugin artifacts
+(`.cursor-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.opencode/plugins/<name>/`, …) and
+scaffolds a canonical `PLUGIN.yaml` from them.
+
+Ownership is single-writer: the canonical bundle is owned once (`shared_repo`), and every
+platform-local plugin output is a **projection owned by the platform adapter** (`platform_repo`) —
+the same ownership split that governs the rest of this model. The `plugins` bucket routes through
+the **shared planner/executor** (Path B): a platform emits plugin bundles by calling
+`BuildSharedPluginBundleIntents` from its `SharedTargetIntents` with its own native target path.
+**Today only OpenCode wires this up** (`.opencode/plugins/`, the `direct_dir`/`symlink` intent in
+[the executor table](#path-b--the-resourceplan-executor-shared-buckets)); the other
+package-manifest platforms declare plugin support in the contract but have no emitter yet, so they
+simply omit the call.
+
+There is **no `da plugins` command family** and no per-platform "plugins target" step: plugins are
+resolved through import and the canonical store, then projected as ordinary canonical resources.
+
 ## See also
 
 - [Platform Resource Locations](./PLATFORM_DIRS_DOCS.md) — the authoritative per-platform path
@@ -248,3 +279,5 @@ lowest-common-denominator format.
 - [Hooks](./HOOKS.md) — the canonical hook model and the per-platform event tables.
 - [Layered Configuration](./LAYERED_CONFIG_GUIDE.md) — the config-layer complement: how
   `.agentsrc.json` resolves down a layer stack.
+- [Plugin Contract](./PLUGIN_CONTRACT.md) — the plugin bundle storage/ownership contract: the
+  upstream layer that packages canonical resources before they project.

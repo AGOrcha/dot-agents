@@ -75,7 +75,7 @@ Add a top-level `kg` key to `agentsrc.json` for project-level KG configuration.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `kg.graph_home` | string | `~/.knowledge-graph` | Path to KG_HOME. Overrides `KG_HOME` env var when set in agentsrc. |
+| `kg.graph_home` | string | `~/.knowledge-graph` | Path to the KG store. Used when the `KG_HOME` env var is unset (env var wins — see Precedence below). |
 | `kg.backend` | `"sqlite"` \| `"postgres"` | `"sqlite"` | Storage backend. `postgres` requires `KG_POSTGRES_URL`. |
 | `kg.bridge.enabled` | bool | `true` | Whether bridge queries are active for this project. |
 | `kg.bridge.allowed_intents` | string[] | `[]` (all) | If non-empty, restrict bridge to this intent set. |

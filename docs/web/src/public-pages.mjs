@@ -33,6 +33,7 @@ export const PUBLIC_PAGES = [
   // (DEMO_LESSONS_NARRATIVE.md — the Q&A / cautionary stories — is public above.)
 
   // Reference
+  { src: 'docs/COMMANDS.md', id: 'reference/commands', order: 0 },
   { src: 'docs/PLATFORM_DIRS_DOCS.md', id: 'reference/platform-dirs', order: 1 },
   { src: 'docs/GLOBAL_FLAG_CONTRACT.md', id: 'reference/global-flag-contract', order: 2 },
   { src: 'docs/ERROR_MESSAGE_CONTRACT.md', id: 'reference/error-message-contract', order: 3 },

@@ -8,21 +8,21 @@ sidebar:
 # Canonical Plugin Contract
 
 Status: Directional
-Last updated: 2026-04-12
-Depends on: `docs/PLATFORM_DIRS_DOCS.md`, `docs/rfcs/resource-intent-centralization-rfc.md`
+Last updated: 2026-07-21
+Depends on: `docs/PLATFORM_DIRS_DOCS.md`; shared planner/executor resource-intent model in `internal/platform/resource_plan.go`
 
 This document defines the canonical plugin bundle contract for `dot-agents` on the current shared planner/executor architecture. It is a storage and ownership contract, not runtime wiring.
 
 ## Platform Plugin Landscape
 
-All five platforms have first-class plugin support at project and user scope (verified 2026-04-12; see `docs/PLATFORM_DIRS_DOCS.md` for source links). The native formats differ significantly:
+All five plugin-capable platforms have first-class plugin support at project and user scope (re-verified 2026-07-21 against `docs/PLATFORM_DIRS_DOCS.md`, which carries the source links). dot-agents ships a sixth platform — Antigravity — but it exposes no native plugin surface and is deliberately absent from the `platforms` enum in `schemas/plugin.schema.json`, so it is out of scope for this contract. The five native formats differ significantly:
 
 | Platform | Plugin kind | Project manifest path | User/global path | Marketplace path |
 |----------|-------------|----------------------|-----------------|-----------------|
 | Cursor | `package` | `.cursor-plugin/plugin.json` | `~/.cursor/plugins/local/<name>/` | `.cursor-plugin/marketplace.json` |
 | Claude Code | `package` | `.claude-plugin/plugin.json` | _(via `enabledPlugins` in settings)_ | `.claude-plugin/marketplace.json` |
 | Codex | `package` | `.codex-plugin/plugin.json` | `~/.codex/plugins/` | `.agents/plugins/marketplace.json` _(canonical!)_ |
-| GitHub Copilot | `package` | `plugin.json` / `.github/plugin/plugin.json` | `~/.copilot/state/installed-plugins/` | `marketplace.json` |
+| GitHub Copilot | `package` | `plugin.json` / `.github/plugin/plugin.json` | `~/.copilot/installed-plugins/` | `marketplace.json` |
 | OpenCode | `native` | `.opencode/plugins/<name>.{js,ts}` | `~/.config/opencode/plugins/` | _(npm-based)_ |
 
 **Two plugin kinds:**
@@ -114,7 +114,7 @@ platform_overrides:
 - `schema_version`: versioned manifest contract; current contract is `1`
 - `kind`: `package` (Cursor/Claude/Codex/Copilot installable bundle) or `native` (OpenCode JS/TS executable)
 - `name`: stable logical plugin identifier; should match the bundle directory name under `plugins/{scope}/`
-- `platforms`: required list of platform IDs this plugin targets; at least one required; controls which emitters run
+- `platforms`: required list of platform IDs this plugin targets (at least one; the schema enum is limited to the five plugin-capable platforms — `claude`, `cursor`, `codex`, `copilot`, `opencode`). Declares the plugin's intended emitter targets and drives `da doctor` readback, which warns for any listed platform whose emitter is not yet implemented. Emission gating on this list is not yet enforced by the shipped emitter — see the note under Emitter Implementation Status.
 - `version`: optional semantic version string; surfaced in marketplace.json listings and platform manifest generation
 - `display_name`: optional human-friendly name for marketplace listings
 - `description`: human-readable summary of the bundle
@@ -130,7 +130,7 @@ platform_overrides:
 
 - `shared_repo`: canonical bundle contents under `~/.agents/plugins/{scope}/{name}/`
 - `platform_repo`: emitted platform-local projections (`~/.cursor/plugins/local/`, `.cursor-plugin/`, `.claude-plugin/`, `.codex-plugin/`, `.github/plugin/`, `.opencode/plugins/`)
-- `user_home`: global plugin directories (`~/.config/opencode/plugins/`, `~/.copilot/state/installed-plugins/`, `~/.cursor/plugins/local/`) — managed by the platform itself after installation; dot-agents writes only to project-scope targets
+- `user_home`: global plugin directories (`~/.config/opencode/plugins/`, `~/.copilot/installed-plugins/`, `~/.cursor/plugins/local/`) — managed by the platform itself after installation; dot-agents writes only to project-scope targets
 
 The canonical bundle is owned once. Platform-specific outputs are projections owned by the platform adapter.
 
@@ -142,13 +142,13 @@ The canonical bundle is owned once. Platform-specific outputs are projections ow
 - Canonical source ownership: `shared_repo`
 - Projection ownership: `platform_repo`
 
-The shared planner dedupes canonical plugin bundles before any platform-local writer runs. Each platform's `SharedTargetIntents` method calls `BuildSharedPluginBundleIntents` with its own native target path. Platforms without an emitter yet simply omit the call — see `internal/platform/resource_plan.go` doc comment on `BuildSharedPluginBundleIntents`.
+The shared planner dedupes canonical plugin bundles before any platform-local writer runs. A platform emits plugin bundles by calling `BuildSharedPluginBundleIntents` from its `SharedTargetIntents` with its own native target path; today only OpenCode does so (`.opencode/plugins/`). Platforms without an emitter yet simply omit the call — see the `BuildSharedPluginBundleIntents` doc comment in `internal/platform/resource_plan.go`.
 
 ## Emitter Implementation Status
 
 | Platform | Emitter implemented | Target path | Notes |
 |----------|--------------------|---------|----|
-| OpenCode | Yes | `.opencode/plugins/{name}/` | Symlinks the whole canonical bundle dir (kind-agnostic today; per-`kind` filtering + selective `files/` / `platforms/opencode/` overlay are the intended refinement, tracked in `plugin-resource-salvage`) |
+| OpenCode | Yes | `.opencode/plugins/{name}/` | Symlinks each canonical bundle dir whole, kind- and `platforms`-agnostic today (every bundle under `~/.agents/plugins/{scope}/` is mirrored regardless of its `kind` or `platforms` list); per-`kind` filtering, `platforms` gating, and selective `files/` / `platforms/opencode/` overlay are the intended refinement. `plugin-resource-salvage` — the plan that landed this emitter — completed and was archived 2026-04-20; no active successor plan tracks the refinement. |
 | Cursor | No | `.cursor-plugin/` | `kind: package`; generate or copy `plugin.json` from `platforms/cursor/` |
 | Claude Code | No | `.claude-plugin/` | `kind: package`; generate or copy `plugin.json` from `platforms/claude/` |
 | Codex | No | `.codex-plugin/` | `kind: package`; generate or copy `plugin.json` from `platforms/codex/` |
@@ -186,8 +186,8 @@ The native `plugin.json` is preserved verbatim at `platforms/{platformID}/plugin
 
 ## Current Architecture Notes
 
-- All five platforms have first-class plugin support; only OpenCode has an emitter today
+- All five plugin-capable platforms have first-class plugin support; only OpenCode has an emitter today
 - The canonical bundle contract intentionally stays platform-neutral so the storage model supports all emitters without format lock-in
 - Codex's native marketplace path (`$REPO_ROOT/.agents/plugins/marketplace.json`) aligns naturally with our canonical storage — a future `da plugins marketplace` command could generate this file from all enabled bundles
 - The donor branch `claude/scalable-skill-syncing-sfxOd` is historical provenance only; the current tree already landed `canonicalPackagePluginManifestOutputs`, `canonicalPluginOutputsFromOpenCodeFile`, `LoadPluginSpec`, and `ListPluginSpecs`, so Stage 2 planning should build from that rebuilt baseline
-- Runtime implementation, multi-platform emitters, and any remaining Stage 2 bucket-expansion slices are tracked in the `plugin-resource-salvage` plan
+- Runtime implementation, multi-platform emitters, and any remaining Stage 2 bucket-expansion slices have no active tracking plan today: `plugin-resource-salvage` (status: completed, archived under `.agents/history/plugin-resource-salvage/`) landed the canonical contract and the OpenCode emitter, then deliberately deferred the remaining package-platform emitters to a future slice without naming a successor plan
