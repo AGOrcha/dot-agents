@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,6 +31,7 @@ import (
 	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v6/storage/memory"
 	cryptossh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 // withPackagesCache points the tier-2 packages cache root (~/.agents/cache) at a
@@ -3650,6 +3652,102 @@ func TestGitSSHAuthFallsBackToDefaultKeyFile(t *testing.T) {
 	}
 	if auth == nil {
 		t.Fatal("expected non-nil auth built from the default id_ed25519 key")
+	}
+}
+
+// TestGitSSHAuthEmptyAgentFallsBackToKeyFile is the omp-session fix: SSH_AUTH_SOCK
+// points at a real but EMPTY agent (the macOS launchd default), and an
+// unencrypted default key exists. The agent-present branch must NOT shadow the
+// key file — gitSSHAuth must skip the empty agent and build file-based auth.
+func TestGitSSHAuthEmptyAgentFallsBackToKeyFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("agent identity probe is unix-socket only; Windows uses Pageant")
+	}
+	// Serve an empty in-memory keyring on a short-path unix socket (macOS caps
+	// sun_path ~104 bytes, so t.TempDir()'s long prefix is avoided).
+	dir, err := os.MkdirTemp("/tmp", "da-agent")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "a.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen agent sock: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	keyring := agent.NewKeyring() // zero identities
+	go func() {
+		for {
+			conn, aerr := ln.Accept()
+			if aerr != nil {
+				return
+			}
+			go func() { _ = agent.ServeAgent(keyring, conn) }()
+		}
+	}()
+	t.Setenv("SSH_AUTH_SOCK", sock)
+
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
+
+	auth, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth with empty agent: %v", err)
+	}
+	if _, ok := auth.(*gogitssh.PublicKeys); !ok {
+		t.Fatalf("expected file-based *gogitssh.PublicKeys (empty agent skipped), got %T", auth)
+	}
+}
+
+// TestAgentHasUsableIdentity covers the probe directly: SSH_AUTH_SOCK unset
+// (cannot prove empty -> true), a real but empty agent (-> false), and a
+// non-empty agent (-> true).
+func TestAgentHasUsableIdentity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-socket agent probe; Windows uses Pageant")
+	}
+	t.Setenv("SSH_AUTH_SOCK", "")
+	if !agentHasUsableIdentity() {
+		t.Fatal("SSH_AUTH_SOCK unset: expected true (cannot prove empty)")
+	}
+
+	dir, err := os.MkdirTemp("/tmp", "da-agent")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	ln, err := net.Listen("unix", filepath.Join(dir, "a.sock"))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	keyring := agent.NewKeyring()
+	go func() {
+		for {
+			conn, aerr := ln.Accept()
+			if aerr != nil {
+				return
+			}
+			go func() { _ = agent.ServeAgent(keyring, conn) }()
+		}
+	}()
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(dir, "a.sock"))
+
+	if agentHasUsableIdentity() {
+		t.Fatal("empty agent: expected false")
+	}
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	if err := keyring.Add(agent.AddedKey{PrivateKey: priv}); err != nil {
+		t.Fatalf("keyring.Add: %v", err)
+	}
+	if !agentHasUsableIdentity() {
+		t.Fatal("non-empty agent: expected true")
 	}
 }
 

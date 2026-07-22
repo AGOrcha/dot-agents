@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v6/plumbing/transport/ssh/sshagent"
 	"github.com/go-git/go-git/v6/storage/memory"
+	"golang.org/x/crypto/ssh/agent"
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
@@ -367,7 +370,9 @@ func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, b
 // `git clone`/`git push` for the same URL work fine).
 //
 // The preference order mirrors OpenSSH's own client:
-//  1. A running SSH agent (SSH_AUTH_SOCK set) — unchanged from before.
+//  1. A running SSH agent that holds at least one identity (SSH_AUTH_SOCK set
+//     AND the agent non-empty) — a present-but-empty agent is skipped so it
+//     does not shadow a usable on-disk key (the macOS launchd default).
 //  2. Default identity files, in the order ssh(1) tries them, with any
 //     ~/.ssh/config `IdentityFile` for the host tried first (a more specific
 //     match than the bare defaults).
@@ -390,13 +395,21 @@ func gitSSHAuth(rawURL string) (client.SSHAuth, error) {
 		}
 	}
 
-	if sshagent.Available() {
+	if sshagent.Available() && agentHasUsableIdentity() {
 		return gogitssh.NewSSHAgentAuth(user)
+	}
+	// The agent was unavailable OR present-but-empty; tailor the error + hint to
+	// which case, so an empty agent is not misreported as "SSH_AUTH_SOCK unset".
+	agentState := "no SSH agent (SSH_AUTH_SOCK unset)"
+	agentHint := "run `eval $(ssh-agent) && ssh-add`, or export SSH_AUTH_SOCK to your running agent"
+	if os.Getenv("SSH_AUTH_SOCK") != "" {
+		agentState = "the SSH agent (SSH_AUTH_SOCK) holds no usable identity"
+		agentHint = "run `ssh-add <key>` to load a key into the agent (e.g. `ssh-add ~/.ssh/id_ed25519`)"
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and $HOME is unavailable to locate a default key: %w; run `eval $(ssh-agent) && ssh-add`, or export SSH_AUTH_SOCK", rawURL, err)
+		return nil, fmt.Errorf("git ssh auth for %s: %s and $HOME is unavailable to locate a default key: %w; %s", rawURL, agentState, err, agentHint)
 	}
 	sshDir := filepath.Join(home, ".ssh")
 	candidates := append(sshConfigIdentityFiles(sshDir, u.Hostname()),
@@ -417,9 +430,39 @@ func gitSSHAuth(rawURL string) (client.SSHAuth, error) {
 		lastErr = fmt.Errorf("%s: %w", path, keyErr)
 	}
 	if lastErr != nil {
-		return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and the default SSH key needs a passphrase da cannot prompt for; run `eval $(ssh-agent) && ssh-add` first, or export SSH_AUTH_SOCK to your running agent: %w", rawURL, lastErr)
+		return nil, fmt.Errorf("git ssh auth for %s: %s and the default SSH key needs a passphrase da cannot prompt for; %s: %w", rawURL, agentState, agentHint, lastErr)
 	}
-	return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and no default SSH key found in %s (looked for id_ed25519, id_rsa, id_ecdsa); run `eval $(ssh-agent) && ssh-add` first, or export SSH_AUTH_SOCK to your running agent", rawURL, sshDir)
+	return nil, fmt.Errorf("git ssh auth for %s: %s and no default SSH key found in %s (looked for id_ed25519, id_rsa, id_ecdsa); %s", rawURL, agentState, sshDir, agentHint)
+}
+
+// agentHasUsableIdentity reports whether the ssh-agent that sshagent.Available()
+// found actually holds at least one identity. A present-but-EMPTY agent
+// (SSH_AUTH_SOCK set, zero keys — the macOS launchd default, and common in
+// daemon/CI sessions) makes go-git's NewSSHAgentAuth hard-fail with
+// "[none, publickey]" without ever trying on-disk keys; when the agent is
+// confirmed empty this returns false so gitSSHAuth falls through to the default
+// key files (matching OpenSSH, which tries the empty agent, then the key files).
+// Any probe error returns true — we cannot prove the agent is empty, so the
+// prior agent-first behavior is preserved. Windows uses Pageant (not
+// SSH_AUTH_SOCK), so we do not probe there.
+func agentHasUsableIdentity() bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return true
+	}
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		return true
+	}
+	defer conn.Close()
+	keys, err := agent.NewClient(conn).List()
+	if err != nil {
+		return true
+	}
+	return len(keys) > 0
 }
 
 // sshConfigIdentityFiles returns the IdentityFile paths <sshDir>/config
