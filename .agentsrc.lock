@@ -1,5 +1,5 @@
 {
-  "inputs_digest": "sha256:eb6ca4c5ff5bb0c65aaba31ce05e628de4015dcc76d0461444a401c2e8f49642",
+  "inputs_digest": "sha256:08ce10d7e3d212c61c50fbc8ba567076fffffafacd5d0ae80429ade079f45fa2",
   "install": {
     "project": "dot-agents",
     "version": "dev",
@@ -13,8 +13,8 @@
   "units": {
     "da-agc:dot-agents/base.json": {
       "kind": "layer",
-      "digest": "5b361e972dbdf63b4ef1eb6774a80b0ba1cd1471",
-      "cache_key": "cachekey/always-revalidate"
+      "digest": "692ab1c5c07aee961188db726fb7576bf9130a6b",
+      "cache_key": "cachekey/git:692ab1c5c07aee961188db726fb7576bf9130a6b"
     },
     "da-agc:dot-agents/base.json:execution-profile:cloudflare-worker": {
       "kind": "profile",
