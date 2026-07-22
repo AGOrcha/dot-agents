@@ -31,11 +31,11 @@ duplicate them.
 
 | File | Use as |
 |---|---|
-| [`LOOP_ORCHESTRATION_SPEC.md`](./LOOP_ORCHESTRATION_SPEC.md) | Authoritative description of the orchestrator → delegation → fold-back loop. |
+| [workflow-parallel-orchestration spec](../.agents/workflow/specs/workflow-parallel-orchestration/design.md) | Authoritative description of the orchestrator → delegation → fold-back loop. |
 | [`RESOURCE_COMMAND_CONTRACT.md`](./RESOURCE_COMMAND_CONTRACT.md) | The `rules/skills/agents/hooks/mcp/settings` resource-command parity contract. |
 | [`PLATFORM_DIRS_DOCS.md`](./PLATFORM_DIRS_DOCS.md) | Per-platform directory conventions (Cursor, Claude, Codex, Copilot, OpenCode). |
-| [`KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md`](./KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md) | KG design + bridge contract. |
-| [`WORKFLOW_AUTOMATION_PRODUCT_SPEC.md`](./WORKFLOW_AUTOMATION_PRODUCT_SPEC.md) | The product framing the demo is selling. |
+| [scoped-knowledge-graphs spec](../.agents/workflow/specs/scoped-knowledge-graphs/design.md) | KG design + bridge contract (see also [graph-bridge-contract](../.agents/workflow/specs/graph-bridge-contract/design.md)). |
+| [DEMO_README.md](./DEMO_README.md) | The product framing the demo is selling. |
 
 ## Proposed (future-prep, not yet authored)
 

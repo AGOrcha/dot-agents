@@ -2245,3 +2245,99 @@ string + documented known-starter set), the same surface t7 wires
 (`graph_backend` enum → adapter-ref; `app_type` ref-form resolution). They must
 be developed together so the profile resolver and the graph nodes agree on the
 open-vocabulary contract; do not ratify t7 independently of O4's schema.
+
+---
+
+## 16. Storage substrate and retrieval backends
+
+*Consolidated from the retired `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md`.*
+
+Adapters write into scoped KG storage (§2.1) and never own the physical
+layout. This section fixes the substrate's physical layering and the
+concrete backend profiles that the role-segregated `Store` family (§2.7)
+presents to adapter code. Per-scope backend *selection* — which of
+`sqlite`/`postgres`/`http` backs each scope, connection targets,
+`writable` — is owned by
+[scoped-knowledge-graphs §2.2/§3.1](../scoped-knowledge-graphs/design.md#22-each-scope-is-independently-backed).
+This section covers only what that selection does not: the hot/warm/cold
+content split, the note archival lifecycle, backend feature profiles, and
+backend-to-backend migration.
+
+### 16.1 Hot/warm/cold model
+
+Substrate content lives in three physical layers:
+
+```
+HOT (filesystem, git-tracked)
+├── Active knowledge notes (markdown + YAML frontmatter)
+├── Current session context, plans, handoffs
+├── Working memory for the current agent session
+└── Authoritative for human-editable content
+
+WARM (database: SQLite or Postgres)
+├── Code structure: nodes, edges, flows, communities
+├── Archived knowledge notes (kg_notes table)
+├── Cross-references: note→symbol links (note_symbol_links)
+├── FTS index, query engine
+└── Authoritative for structural queries
+
+COLD (pre-computed, token-efficient)
+├── Community summaries
+├── Flow snapshots
+├── Risk index
+├── Note digests for archived content
+└── Rebuilt from the warm layer on demand
+```
+
+Code-structure data is **warm-only** — it never exists as individual
+files; it is produced by parsing source and stored directly in the
+backend. Adapter DSL queries (§5) run over the warm layer; the cold
+layer is a derived read-cache rebuilt on demand. The hot layer stays
+authoritative for human-editable content, which is why no adapter state
+may replace canonical note files (§16.5).
+
+### 16.2 Note archival lifecycle
+
+Knowledge notes begin in the hot layer as markdown under
+`KG_HOME/notes/` and move toward the warm layer as they age:
+
+1. **Active** — hot layer only (filesystem); agents read directly.
+2. **Stale** — hot layer, flagged for review (the time-based
+   review-nudge dimension per scoped-knowledge-graphs, *not* a
+   derivation-`stale` tag from §7); lint surfaces these.
+3. **Archived / superseded** — warm layer: note metadata and body land
+   in the `kg_notes` table; the filesystem copy becomes optional.
+
+Decision-to-code traceability is a warm-layer table, `note_symbol_links`,
+relating notes to symbols with relation kinds
+`implements | documents | decides | references`.
+
+### 16.3 Backend feature profiles
+
+Both backends present the same role-segregated `Store` shape (§2.7);
+they differ only in physical characteristics:
+
+| Backend | Profile |
+|---|---|
+| **SQLite** (default, solo dev) | Zero-config file at `.code-review-graph/graph.db`; WAL mode for concurrent reads (agent session + MCP server); FTS5 full-text search with porter stemming; pure-Go `modernc.org/sqlite` (no CGO); suitable up to ~100K symbols. |
+| **Postgres** (teams, CI, cloud) | Shared graph with full MVCC concurrency (parallel CI jobs update different file scopes); `LISTEN/NOTIFY` for live update notifications; `tsvector` + `pg_trgm` in place of FTS5; connection pooling (`pgxpool`, §2.7) for agent fleets; suitable for large monorepos and multi-repo team setups. |
+
+### 16.4 Backend-to-backend migration
+
+`da kg migrate --to postgres --url <connection_string>` exports the
+SQLite graph to Postgres — a one-time operation for teams scaling up.
+This is distinct from §10.2 *schema* migration (adapter schema-version
+upgrades within one backend): backend migration moves the entire
+substrate between engines while preserving scope, provenance, and stale
+tags. The adapter contract and DSL queries are unchanged across the move.
+
+### 16.5 Retrieval-category taxonomy
+
+This contract defines the **structured DSL** retrieval category (§2.2,
+§5) over the warm store. The substrate admits other retrieval categories
+against the same store: **semantic search**, **hybrid BM25/vector
+search**, and the **MCP query bridge** (adapter-owned MCP servers, §8.5;
+CRG bridge decommissioning, §11). No adapter category — structured,
+semantic, hybrid, or MCP — may replace canonical note files as the
+source of truth; adapter state is derived and rebuildable from the hot
+layer (§16.1).

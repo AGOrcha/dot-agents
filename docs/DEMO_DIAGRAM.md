@@ -9,7 +9,7 @@ sidebar:
 
 **Audience:** Leadership / tech leads evaluating an agent-platform investment.
 **Companion docs:** [`DEMO_INDEX.md`](./DEMO_INDEX.md) ·
-[`LOOP_ORCHESTRATION_SPEC.md`](./LOOP_ORCHESTRATION_SPEC.md) ·
+[workflow-parallel-orchestration spec](../.agents/workflow/specs/workflow-parallel-orchestration/design.md) ·
 [`RESOURCE_COMMAND_CONTRACT.md`](./RESOURCE_COMMAND_CONTRACT.md)
 
 Two diagrams + talk tracks suitable for a 5–10 minute live walkthrough:

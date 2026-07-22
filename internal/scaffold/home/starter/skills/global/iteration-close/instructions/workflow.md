@@ -217,7 +217,7 @@ This routes the bug into the proposal queue for orchestrator scheduling rather t
 
 ## Delegation vs direct closeout
 
-The loop orchestrator model (see `docs/LOOP_ORCHESTRATION_SPEC.md`, `loop-orchestrator-layer.plan.md`) splits **worker** vs **parent** responsibilities:
+The loop orchestrator model (see `.agents/workflow/specs/workflow-parallel-orchestration/design.md`) splits **worker** vs **parent** responsibilities:
 
 | Role | After verify + checkpoint | Who moves canonical task to `completed` |
 |------|---------------------------|----------------------------------------|

@@ -15,7 +15,7 @@ The dot-agents `.agents/lessons/` corpus is the project's working memory of
 mistakes that wasted real time. Every lesson has the same shape: a pattern, a
 root cause, a rule, and cross-references. Below are seven of the most
 instructive, presented as short stories. Read them as evidence that the
-operating model in [`LOOP_ORCHESTRATION_SPEC.md`](./LOOP_ORCHESTRATION_SPEC.md)
+operating model in the [meta-loop-operating-model spec](../.agents/workflow/specs/meta-loop-operating-model/design.md)
 was built from scar tissue, not whiteboards.
 
 ---
@@ -191,5 +191,5 @@ Read end-to-end, the corpus tells a consistent story:
 
 For the full set, see [`.agents/lessons/index.md`](../.agents/lessons/index.md).
 For *how* lessons become platform behavior, see
-[`LOOP_ORCHESTRATION_SPEC.md`](./LOOP_ORCHESTRATION_SPEC.md) §"Fold-back +
-proposal review".
+the [meta-loop-operating-model spec](../.agents/workflow/specs/meta-loop-operating-model/design.md) (fold-back +
+proposal review).

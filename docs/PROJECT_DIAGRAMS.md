@@ -10,8 +10,8 @@ sidebar:
 These diagrams are derived from the current repo docs and code structure, primarily:
 
 - `README.md`
-- `docs/WORKFLOW_AUTOMATION_PRODUCT_SPEC.md`
-- `docs/LOOP_ORCHESTRATION_SPEC.md`
+- `.agents/workflow/specs/meta-loop-operating-model/design.md`
+- `.agents/workflow/specs/workflow-parallel-orchestration/design.md`
 - `docs/PLUGIN_CONTRACT.md`
 - `docs/CANONICAL_HOOKS_DESIGN.md`
 - `commands/root.go`

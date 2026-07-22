@@ -512,12 +512,12 @@ func TestKGServeGetDocsSection_NotFound(t *testing.T) {
 }
 
 // TestKGServeGetDocsSection_Found verifies the section is extracted from a
-// markdown file under <workDir>/docs.
+// markdown file under <workDir>/.agents/workflow/specs.
 func TestKGServeGetDocsSection_Found(t *testing.T) {
 	dir := t.TempDir()
-	docsDir := filepath.Join(dir, "docs")
-	_ = os.MkdirAll(docsDir, 0o755)
-	mdPath := filepath.Join(docsDir, "KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md")
+	specDir := filepath.Join(dir, ".agents", "workflow", "specs", "scoped-knowledge-graphs")
+	_ = os.MkdirAll(specDir, 0o755)
+	mdPath := filepath.Join(specDir, "design.md")
 	_ = os.WriteFile(mdPath, []byte("# Top\n\n## Target Section\n\nContent here.\n\n## Next\n"), 0o644)
 
 	srv := &MCPServer{workDir: dir}

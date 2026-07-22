@@ -4,7 +4,7 @@
 **Bundle label:** `workflow fanout --delegate-profile loop-worker` stores this name in the delegation bundle; the CLI does not auto-load this file — agents should read it when acting as a bounded worker.
 **Execution mode:** legacy/full-slice compatibility only. Do not inject this profile into typed ISP `impl`, verifier, or reviewer stages.
 
-This is the **global** layer of the legacy three-layer model (`docs/LOOP_ORCHESTRATION_SPEC.md`): stable across repos. For the legacy worker, **repo-specific** plans, matrices, hooks, and command cheat sheets may be provided through a full-slice **project overlay** (e.g. `.agents/active/active.loop.md`) passed via `--project-overlay`. **Per-delegation** prompts and context belong in the bundle under `.agents/active/delegation-bundles/<delegation_id>.yaml`.
+This is the **global** layer of the legacy three-layer model (`.agents/workflow/specs/workflow-parallel-orchestration/design.md`): stable across repos. For the legacy worker, **repo-specific** plans, matrices, hooks, and command cheat sheets may be provided through a full-slice **project overlay** (e.g. `.agents/active/active.loop.md`) passed via `--project-overlay`. **Per-delegation** prompts and context belong in the bundle under `.agents/active/delegation-bundles/<delegation_id>.yaml`.
 
 Typed staged dispatch is separate: the parent/orchestrator resolves shared bounded-stage instructions, a stage-safe product/project overlay, and a named stage-agent or reviewer definition. Typed stages must not load this profile or the legacy full-slice overlay.
 
@@ -51,4 +51,4 @@ After accepting delegate output: `workflow delegation closeout --plan <id> --tas
 
 ## Reusable verification metadata (bundle / flags)
 
-Prefer setting these via fanout flags or the delegation bundle when used: `feedback_goal`, `scenario_tags`, regression matrix / artifact paths, higher-layer validation queue path, evidence classification expectations, and sandbox policy for mutating checks — see **Phase 8** in `LOOP_ORCHESTRATION_SPEC.md` in the dot-agents repo.
+Prefer setting these via fanout flags or the delegation bundle when used: `feedback_goal`, `scenario_tags`, regression matrix / artifact paths, higher-layer validation queue path, evidence classification expectations, and sandbox policy for mutating checks — see the delegation bundle contract in `.agents/workflow/specs/workflow-parallel-orchestration/design.md` in the dot-agents repo.

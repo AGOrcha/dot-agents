@@ -101,3 +101,36 @@ These depend on code-graph data or bridge components still populated through the
 - This design is a sibling to the executable [Graph Bridge Command Readiness](../../plans/graph-bridge-command-readiness/PLAN.yaml) plan.
 - The bridge readiness plan remains the immediate blocker for planner automation.
 - This broader KG command analysis should feed a later canonical plan for the rest of the code-graph command surface after the narrower bridge/query readiness work lands.
+
+## Product Command Surface Reference
+
+The dependency-oriented inventory above groups commands by their Python-CRG coupling. This reference captures the intended command-to-purpose mapping and the argument signatures that the readiness audit should hold each command against. It also records surfaces that the analytical inventory above does not yet name.
+
+### Knowledge note commands
+
+- `kg setup` — initialize graph home and schema
+- `kg ingest` — ingest raw sources into curated notes
+- `kg query` — query by deterministic intent
+- `kg lint` — check graph integrity
+- `kg health` — inspect combined graph health
+
+### Code structure commands
+
+- `kg build` — full graph parse of source code (replaces `code-review-graph build`)
+- `kg update` — incremental update of changed files (replaces `code-review-graph update`)
+- `kg changes` — detect change impact with risk scores (replaces `code-review-graph detect-changes`)
+- `kg impact <symbol>` — impact radius for a symbol
+- `kg search <query>` — FTS across notes and code symbols
+- `kg status` — combined note + code graph statistics
+
+### Cross-reference commands
+
+- `kg link <note-id> <symbol>` — link a knowledge note to a code symbol
+- `kg bridge query --intent ...` — unified query across both subsystems
+- `kg bridge health` — bridge adapter availability and health
+
+### Server commands
+
+- `kg serve` — start MCP server (stdio transport) for AI coding platforms
+
+Consolidated from the retired docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md.

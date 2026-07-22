@@ -623,3 +623,230 @@ drivers — the diagnostic makes the absence loud.
   `kg trigger --env`.
 - **org-config-resolution** — how org-level config reaches a repo;
   the org scope's DSN likely resolves through the same mechanism.
+
+---
+
+## 9. Knowledge-graph subproject core
+
+*Consolidated from the retired `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md`.* The
+scope-chain and staleness contract above governs *how a query resolves across
+audiences*. This section captures the product framing it presupposes: what the
+knowledge graph **is** as a subproject, its file-native canonical layout, page
+schema, and the operations, health, and provenance guarantees every scope's
+backing must honor. Physical storage backends (SQLite/Postgres, hot/cold
+tiering, migration) live in **graph-backend-adapter-contract**; the AST
+code-structure graph lives in **go-native-code-graph-analysis**; the `kg`
+command inventory lives in **kg-command-surface-readiness**; and query routing
+lives in **graph-bridge-contract**. This section does not restate them.
+
+### 9.1 Subproject framing
+
+The knowledge graph is a **distinct, long-lived knowledge layer that sits
+alongside `dot-agents`**, not a feature of it. `dot-agents` remains the session,
+workflow, and configuration layer; the knowledge graph is the persistent layer
+agents query, maintain, and evolve over time. It has two complementary
+subsystems that share one storage backend and query surface:
+
+1. **Knowledge notes** — human-curated decisions, concepts, entities, and
+   synthesis, held as markdown files with YAML frontmatter. This spec owns the
+   note subsystem.
+2. **Code-structure graph** — auto-parsed AST-level structure (symbols, edges,
+   flows, communities). Owned by **go-native-code-graph-analysis**; referenced
+   here only because `NoteSymbolLink` (§2.6) crosses the two.
+
+The core product idea: raw sources remain available; the graph stores curated,
+structured knowledge *derived* from them; agents query through stable
+operations instead of reconstructing context from scratch. It exists to turn
+scattered context — prior decisions, recurring patterns, research synthesis,
+handoffs — into a local-first, agent-maintained, deterministic system that
+compounds instead of resetting.
+
+### 9.2 Product boundary
+
+**Owns:** the canonical graph layout; graph-native schemas for notes, indexes,
+logs, and operations; ingestion of raw sources into curated notes; deterministic
+query contracts over graph content; linting, contradiction detection, and graph
+maintenance.
+
+**Does not own:** `dot-agents` workflow state, plans, or proposal review;
+platform-specific hook rendering; repo config distribution; generic session
+memory such as `CLAUDE.md` / `AGENTS.md`; cryptographic shared-memory or DKG
+protocols in the first implementation waves.
+
+**Key integration rule:** `dot-agents` integrates with the graph through bridge
+contracts and query intents; it **must not absorb ownership of graph ingestion
+or graph storage.** The graph must remain usable without `dot-agents`, and
+`dot-agents` usable without the graph. The intended stack, most-local to
+most-external: session/workflow layer (`dot-agents`) → knowledge layer (this
+subproject) → external search/retrieval adapters → optional multi-agent
+shared-memory layer (future DKG-style work).
+
+### 9.3 Design principles
+
+- **Local-first** — the graph belongs to the user or team, not a hosted provider.
+- **File-native** — markdown plus frontmatter and predictable indexes are canonical.
+- **Curated over raw retrieval** — the graph stores synthesized knowledge, not only source pointers.
+- **Agent-maintained** — agents do the bookkeeping, cross-linking, and update work.
+- **Deterministic query surface** — access exposes stable intents and response shapes.
+- **Provenance first** — every meaningful claim traces back to one or more sources.
+- **Human-browsable** — a person can inspect the graph without special tooling.
+- **Adapter-friendly** — search, semantic retrieval, and MCP access can vary without changing canonical storage.
+
+### 9.4 Core model
+
+Four logical layers:
+
+1. **Raw sources** — immutable or append-only inputs (articles, docs, PDFs,
+   transcripts, meeting notes, links, codebase summaries, imported workflow
+   artifacts). Preserved so synthesis can be audited or regenerated.
+2. **Curated graph** — the agent-maintained knowledge layer: source summaries,
+   entities, concepts, synthesis notes, decision records, repo/subsystem context
+   pages. The layer agents query most.
+3. **Operations and maintenance** — ingestion queues, operation logs,
+   contradiction/staleness checks, cross-link repair, index rebuilds, schema
+   upgrades.
+4. **Query and adapter surface** — deterministic operations independent of any
+   one retrieval backend.
+
+### 9.5 Canonical storage layout
+
+The graph root is configurable and referenced as `KG_HOME` (recommended default
+`~/knowledge-graph/`). Each scope's on-disk backing (§2.2) follows this layout:
+
+```text
+KG_HOME/
+├── self/                 # system identity, schema, prompts, operating policies
+│   ├── schema/
+│   ├── prompts/
+│   ├── policies/
+│   └── config.yaml
+├── raw/                  # source material before or alongside curation
+│   ├── inbox/
+│   ├── imported/
+│   └── assets/
+├── notes/                # the curated knowledge graph itself
+│   ├── sources/
+│   ├── entities/
+│   ├── concepts/
+│   ├── synthesis/
+│   ├── decisions/
+│   ├── repos/
+│   ├── index.md
+│   └── log.md
+└── ops/                  # queues, logs, runs, maintenance output, adapter state
+    ├── queue/
+    ├── sessions/
+    ├── lint/
+    ├── adapters/
+    └── health/
+```
+
+Required canonical artifacts:
+
+| Path | Purpose |
+|------|---------|
+| `self/config.yaml` | graph root configuration and enabled adapters |
+| `notes/index.md` | content-oriented catalog of graph pages |
+| `notes/log.md` | append-only operation log |
+| `ops/health/graph-health.json` | current graph health snapshot |
+
+Graph pages live under `notes/` as canonical markdown files with frontmatter.
+
+### 9.6 Graph page schema
+
+Every canonical graph page carries frontmatter with at least: `schema_version`
+(required, starts at `1`), `id` (required, stable), `type`, `title` (required),
+`summary` (required), `status`, `source_refs`, `links`, `created_at` /
+`updated_at` (required UTC RFC3339), and `confidence`.
+
+- `type` ∈ `source` | `entity` | `concept` | `synthesis` | `decision` | `repo` | `session`.
+- `status` ∈ `draft` | `active` | `stale` | `superseded` | `archived`.
+- `confidence` ∈ `low` | `medium` | `high`.
+- `source_refs` is required and may be empty **only** for raw-source summaries
+  or temporary drafts.
+- `links` is required and may be empty.
+
+`notes/index.md` is the first page an agent reads: it organizes notes by
+category, gives each a one-line summary, and stays compact enough for fast
+inspection. `notes/log.md` is append-only, recording ingest / query exports /
+lint runs / refactors / schema upgrades under a stable, parseable heading style
+(e.g. `## [2026-04-10] ingest | <label>`).
+
+### 9.7 Operations
+
+Every scope's backing must support four core operations:
+
+- **Ingest** — turn raw material into curated knowledge. Minimum pipeline:
+  record raw input under `raw/`; extract structured claims, entities, decisions;
+  create/update pages under `notes/`; update `index.md`; append to `log.md`;
+  emit unresolved contradictions or review warnings.
+- **Query** — deterministic intents (not prompt folklore). Required initial set:
+  `source_lookup`, `entity_context`, `concept_context`, `decision_lookup`,
+  `repo_context`, `synthesis_lookup`, `related_notes`, `contradictions`,
+  `graph_health`.
+- **Lint** — integrity and quality checks: broken links, orphan pages, missing
+  source references, stale pages, contradictory active claims, index drift,
+  oversize/unsafely-broad pages.
+- **Maintain** — graph-native housekeeping: reweave cross-links, merge
+  duplicates, split broad notes, mark stale/superseded content, upgrade schemas,
+  compact or archive noisy operational artifacts.
+
+### 9.8 Deterministic query contract
+
+Independent of the scope-annotated read behavior in §3.2, every query resolves
+to a normalized response shape so other systems — including `dot-agents` via the
+bridge — can consume it without repo-specific conventions:
+
+```json
+{
+  "schema_version": 1,
+  "intent": "decision_lookup",
+  "query": "What did we decide about workflow graph storage?",
+  "results": [
+    {
+      "id": "decision-local-first-graph",
+      "type": "decision",
+      "title": "Keep the graph local-first and markdown-native",
+      "summary": "The graph should use files as canonical storage and adapters for retrieval.",
+      "path": "notes/decisions/local-first-graph.md",
+      "source_refs": ["source-karpathy-llm-wiki", "source-ars-contexta"]
+    }
+  ],
+  "warnings": [],
+  "provider": "local-index",
+  "timestamp": "2026-04-10T12:30:00Z"
+}
+```
+
+`intent` (from the supported set), `results`, `warnings`, `provider`, and
+`timestamp` are all required; `results`/`warnings` may be empty. Adapters may
+provide richer retrieval (structured metadata, semantic, hybrid BM25/vector,
+MCP bridge) but adapter state **must never replace canonical note files as the
+source of truth.**
+
+### 9.9 Health model
+
+The graph exposes a compact snapshot at `ops/health/graph-health.json` with at
+least: `schema_version`, `timestamp`, `note_count`, `source_count`,
+`orphan_count`, `broken_link_count`, `stale_count`, `contradiction_count`,
+`queue_depth`, `status` (`healthy` | `warn` | `error`), and `warnings`.
+
+### 9.10 Provenance guarantees
+
+The first implementation waves use **provenance, not cryptographic proof**.
+First-wave guarantees: graph pages cite raw or summarized sources; decisions can
+be traced to supporting notes; contradictions are surfaced explicitly;
+maintenance actions are logged. Later shared-memory or DKG-style verification may
+strengthen this but is not required for the core product.
+
+### 9.11 Acceptance standard
+
+The subproject is on track only when:
+
+- agents answer recurring context questions from the graph instead of rereading raw sources;
+- the graph stays inspectable as plain files;
+- knowledge quality improves through maintenance instead of degrading over time;
+- `dot-agents` consumes graph context through deterministic contracts instead of ad hoc prompting;
+- future shared-memory work can layer on top without replacing the local-first graph core;
+- knowledge notes can trace to the code symbols they describe;
+- teams can scale their backing without changing query contracts.

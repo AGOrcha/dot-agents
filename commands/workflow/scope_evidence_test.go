@@ -43,7 +43,7 @@ required_paths:
     because:
       - symbol definition
 optional_paths:
-  - path: docs/LOOP_ORCHESTRATION_SPEC.md
+  - path: .agents/workflow/specs/workflow-parallel-orchestration/design.md
     because:
       - contract wording may need alignment
 excluded_paths:
