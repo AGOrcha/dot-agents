@@ -45,7 +45,7 @@ Every AI coding agent has its own config location and format:
 | Cursor | `.cursor/rules/*.mdc` (also `AGENTS.md`) | MDC / Markdown |
 | Claude Code | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md` | Markdown, JSON |
 | Codex | `AGENTS.md`, `AGENTS.override.md` | Markdown |
-| OpenCode | `AGENTS.md` (also `CLAUDE.md`), `.opencode/agent/*.md` | Markdown |
+| OpenCode | `AGENTS.md` (also `CLAUDE.md`), `.opencode/agents/*.md` | Markdown |
 | GitHub Copilot | `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md` | Markdown |
 
 Beyond the base instruction file, each agent supports more specific rule files —
@@ -609,7 +609,7 @@ da add ~/Github/myproject  # Re-link your projects
 | **Cursor** | ✅ Full | `.cursor/rules/*.mdc` |
 | **Claude Code** | ✅ Full | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `.claude/` |
 | **Codex** | ✅ Full | `AGENTS.md`, `AGENTS.override.md`, `.codex/config.toml`, `.codex/agents/*.toml`, `.codex/hooks.json` |
-| **OpenCode** | ⚠️ Basic | `AGENTS.md`, `opencode.json`, `.opencode/agent/*.md` |
+| **OpenCode** | ⚠️ Basic | `AGENTS.md`, `opencode.json`, `.opencode/agents/*.md` |
 | **GitHub Copilot** | ✅ Full | `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md`, `.github/agents/*.agent.md` |
 | **Antigravity** | 🧪 Probe | `.antigravity/settings.json`, `.antigravity/mcp_config.json`, `.antigravity/hooks.json`, `.antigravity/skills/`, `.antigravity/agents/` |
 

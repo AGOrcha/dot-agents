@@ -36,7 +36,7 @@ You edit **one** file in `~/.agents/`. Every project, every agent picks it up.
 
 | Today | With dot-agents |
 |---|---|
-| Cursor wants `.cursor/rules/`, Claude wants `CLAUDE.md`, Codex wants `AGENTS.md`, Copilot wants `.github/` — you maintain N copies. | One canonical home; the CLI projects it into the right shape per platform. |
+| Cursor wants `.cursor/rules/`, Claude wants `CLAUDE.md` + `.claude/rules/*.md`, Codex wants `AGENTS.md`, Copilot wants `.github/copilot-instructions.md` + `.github/instructions/**/*.instructions.md`, OpenCode wants `AGENTS.md` + `.opencode/agents/` — you maintain N copies. | One canonical home; the CLI projects it into the right shape per platform. |
 | Every session re-explains yesterday's work | `da workflow orient` resumes from canonical state in seconds. |
 | Agents rediscover what's broken every session | Verification state + checkpoints persist in repo. |
 | No safe way to run parallel agents | Bounded `workflow fanout` with explicit write scopes + structured merge-back. |
