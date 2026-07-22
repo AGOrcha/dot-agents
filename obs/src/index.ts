@@ -275,6 +275,71 @@ async function dispatchToProjectDo(
   return result.status;
 }
 
+type EventOutcome =
+  | { rejected: RejectedItem }
+  | { status: "accepted" | "deduped" };
+
+async function ingestEvent(
+  index: number,
+  envelope: IngestEnvelope,
+  rawEvent: unknown,
+  env: Env,
+): Promise<EventOutcome> {
+  const key = eventKey(envelope.project_id, rawEvent);
+
+  if (envelope.schema_version !== 1) {
+    return {
+      rejected: rejection(index, key, "unsupported_schema", "ingest schema version is not supported"),
+    };
+  }
+
+  const kind = isRecord(rawEvent) ? rawEvent.kind : null;
+  if (typeof kind === "string" && !isSupportedKind(kind)) {
+    return { rejected: rejection(index, key, "unsupported_kind", "event kind is not supported") };
+  }
+
+  const event = parseEvent(rawEvent);
+  if (event === null) {
+    return { rejected: rejection(index, key, "invalid_event", "event does not match the v1 ingest shape") };
+  }
+
+  if (envelope.project_id !== env.OBS_PROJECT_ID) {
+    return {
+      rejected: rejection(index, key, "foreign_project", "event project does not match this deployment"),
+    };
+  }
+
+  try {
+    if (!(await validateEventContent(event))) {
+      return {
+        rejected: rejection(index, key, "invalid_event", "event payload or schema_hash is invalid"),
+      };
+    }
+    const status = await dispatchToProjectDo(env, envelope, event);
+    if (status === "invalid_event") {
+      return {
+        rejected: rejection(
+          index,
+          key,
+          "invalid_event",
+          "score recomputation requires an existing logical iteration",
+        ),
+      };
+    }
+    return { status };
+  } catch {
+    return {
+      rejected: rejection(
+        index,
+        key,
+        "storage_unavailable",
+        "event storage is temporarily unavailable",
+        true,
+      ),
+    };
+  }
+}
+
 async function handleIngest(request: Request, env: Env): Promise<Response> {
   let body: unknown;
   try {
@@ -290,73 +355,11 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
 
   const result: IngestResponse = { accepted: 0, deduped: 0, rejected: [] };
   for (const [index, rawEvent] of envelope.events.entries()) {
-    const key = eventKey(envelope.project_id, rawEvent);
-
-    if (envelope.schema_version !== 1) {
-      result.rejected.push(
-        rejection(index, key, "unsupported_schema", "ingest schema version is not supported"),
-      );
-      continue;
-    }
-
-    const kind = isRecord(rawEvent) ? rawEvent.kind : null;
-    if (typeof kind === "string" && !isSupportedKind(kind)) {
-      result.rejected.push(
-        rejection(index, key, "unsupported_kind", "event kind is not supported"),
-      );
-      continue;
-    }
-
-    const event = parseEvent(rawEvent);
-    if (event === null) {
-      result.rejected.push(
-        rejection(index, key, "invalid_event", "event does not match the v1 ingest shape"),
-      );
-      continue;
-    }
-
-    if (envelope.project_id !== env.OBS_PROJECT_ID) {
-      result.rejected.push(
-        rejection(
-          index,
-          key,
-          "foreign_project",
-          "event project does not match this deployment",
-        ),
-      );
-      continue;
-    }
-
-    try {
-      if (!(await validateEventContent(event))) {
-        result.rejected.push(
-          rejection(index, key, "invalid_event", "event payload or schema_hash is invalid"),
-        );
-        continue;
-      }
-      const status = await dispatchToProjectDo(env, envelope, event);
-      if (status === "invalid_event") {
-        result.rejected.push(
-          rejection(
-            index,
-            key,
-            "invalid_event",
-            "score recomputation requires an existing logical iteration",
-          ),
-        );
-        continue;
-      }
-      result[status === "accepted" ? "accepted" : "deduped"] += 1;
-    } catch {
-      result.rejected.push(
-        rejection(
-          index,
-          key,
-          "storage_unavailable",
-          "event storage is temporarily unavailable",
-          true,
-        ),
-      );
+    const outcome = await ingestEvent(index, envelope, rawEvent, env);
+    if ("rejected" in outcome) {
+      result.rejected.push(outcome.rejected);
+    } else {
+      result[outcome.status] += 1;
     }
   }
 

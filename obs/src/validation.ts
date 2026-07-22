@@ -160,14 +160,13 @@ export function parseScoreSidecar(value: unknown, iteration: number): ScoreSidec
 
 function assertValidUnicode(value: string): void {
   for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (next < 0xdc00 || next > 0xdfff) {
-        throw new TypeError("canonical JSON contains an unpaired surrogate");
-      }
+    const code = value.codePointAt(index) ?? 0;
+    if (code > 0xffff) {
+      // A valid surrogate pair: codePointAt combined it, so skip the low half.
       index += 1;
     } else if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new TypeError("canonical JSON contains an unpaired surrogate");
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
       throw new TypeError("canonical JSON contains an unpaired surrogate");
     }
   }

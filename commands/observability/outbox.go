@@ -23,12 +23,13 @@ import (
 )
 
 const (
-	outboxVersion      = 1
-	ingestSchema       = 1
-	maxBatchSize       = 100
-	orphanTempLifetime = 24 * time.Hour
-	quarantineLifetime = 30 * 24 * time.Hour
-	maxRetryAfter      = 24 * time.Hour
+	outboxVersion            = 1
+	ingestSchema             = 1
+	maxBatchSize             = 100
+	orphanTempLifetime       = 24 * time.Hour
+	quarantineLifetime       = 30 * 24 * time.Hour
+	maxRetryAfter            = 24 * time.Hour
+	pruneOutboxFailurePrefix = "prune observability outbox"
 )
 
 var (
@@ -143,8 +144,7 @@ func syncProject(ctx context.Context, projectDir string, deps Deps, options sync
 		stopped = drainReady(ctx, deps.httpClient, endpoint, headers, files, now, &report)
 	}
 	if options.Full && !stopped {
-		replayHistory(historyReplayRequest{
-			ctx:        ctx,
+		replayHistory(ctx, historyReplayRequest{
 			client:     deps.httpClient,
 			endpoint:   endpoint.String(),
 			headers:    headers,
@@ -176,9 +176,28 @@ func pruneOutbox(dir string, now time.Time, report *SyncReport) error {
 	if err != nil {
 		return fmt.Errorf("read observability outbox: %w", err)
 	}
+	failures := pruneStaleFiles(dir, entries, orphanTempLifetime, now, report, func(entry os.DirEntry) bool {
+		return entry.Type().IsRegular() && strings.HasPrefix(entry.Name(), ".") && strings.HasSuffix(entry.Name(), ".tmp")
+	})
+
+	quarantine := filepath.Join(dir, "quarantine")
+	qEntries, qErr := os.ReadDir(quarantine)
+	if qErr != nil && !errors.Is(qErr, os.ErrNotExist) {
+		failures = append(failures, qErr.Error())
+	} else if qErr == nil {
+		failures = append(failures, pruneStaleFiles(quarantine, qEntries, quarantineLifetime, now, report, func(entry os.DirEntry) bool {
+			return entry.Type().IsRegular()
+		})...)
+	}
+	return joinFailures(pruneOutboxFailurePrefix, failures)
+}
+
+// pruneStaleFiles removes files in dir selected by keep that are older than
+// lifetime, counting each removal in report and returning per-file failures.
+func pruneStaleFiles(dir string, entries []os.DirEntry, lifetime time.Duration, now time.Time, report *SyncReport, keep func(os.DirEntry) bool) []string {
 	var failures []string
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || !strings.HasPrefix(entry.Name(), ".") || !strings.HasSuffix(entry.Name(), ".tmp") {
+		if !keep(entry) {
 			continue
 		}
 		info, infoErr := entry.Info()
@@ -186,7 +205,7 @@ func pruneOutbox(dir string, now time.Time, report *SyncReport) error {
 			failures = append(failures, infoErr.Error())
 			continue
 		}
-		if now.Sub(info.ModTime()) <= orphanTempLifetime {
+		if now.Sub(info.ModTime()) <= lifetime {
 			continue
 		}
 		if removeErr := fsops.Remove(filepath.Join(dir, entry.Name())); removeErr != nil {
@@ -195,34 +214,7 @@ func pruneOutbox(dir string, now time.Time, report *SyncReport) error {
 			report.Pruned++
 		}
 	}
-	quarantine := filepath.Join(dir, "quarantine")
-	entries, err = os.ReadDir(quarantine)
-	if errors.Is(err, os.ErrNotExist) {
-		return joinFailures("prune observability outbox", failures)
-	}
-	if err != nil {
-		failures = append(failures, err.Error())
-		return joinFailures("prune observability outbox", failures)
-	}
-	for _, entry := range entries {
-		if !entry.Type().IsRegular() {
-			continue
-		}
-		info, infoErr := entry.Info()
-		if infoErr != nil {
-			failures = append(failures, infoErr.Error())
-			continue
-		}
-		if now.Sub(info.ModTime()) <= quarantineLifetime {
-			continue
-		}
-		if removeErr := fsops.Remove(filepath.Join(quarantine, entry.Name())); removeErr != nil {
-			failures = append(failures, removeErr.Error())
-		} else {
-			report.Pruned++
-		}
-	}
-	return joinFailures("prune observability outbox", failures)
+	return failures
 }
 
 func joinFailures(prefix string, failures []string) error {
@@ -244,49 +236,53 @@ func loadReadyFiles(dir string, now time.Time, explicit bool, report *SyncReport
 	files := make([]queuedFile, 0, len(entries))
 	var failures []string
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), ".obs-v1.json") {
-			continue
+		file, include, entryFailures := loadReadyEntry(dir, entry, explicit, now, report)
+		failures = append(failures, entryFailures...)
+		if include {
+			files = append(files, file)
 		}
-		path := filepath.Join(dir, entry.Name())
-		match := readyFilePattern.FindStringSubmatch(entry.Name())
-		if len(match) == 0 {
-			if quarantineErr := quarantineFile(path, entry.Name(), "corrupt", "corrupt", "ready filename is not a canonical UUIDv7 outbox name", now); quarantineErr != nil {
-				failures = append(failures, quarantineErr.Error())
-				report.Retained++
-			} else {
-				report.Quarantined++
-			}
-			continue
-		}
-		record, parseErr := parseOutboxFile(path, match[1])
-		if parseErr != nil {
-			if quarantineErr := quarantineFile(path, entry.Name(), "corrupt", "corrupt", parseErr.Error(), now); quarantineErr != nil {
-				failures = append(failures, quarantineErr.Error())
-				report.Retained++
-			} else {
-				report.Quarantined++
-			}
-			continue
-		}
-		if !explicit {
-			next, nextErr := time.Parse(time.RFC3339, record.NextAttemptAt)
-			if nextErr != nil {
-				if quarantineErr := quarantineFile(path, entry.Name(), "corrupt", "corrupt", "invalid next_attempt_at", now); quarantineErr != nil {
-					failures = append(failures, quarantineErr.Error())
-					report.Retained++
-				} else {
-					report.Quarantined++
-				}
-				continue
-			}
-			if next.After(now) {
-				report.Skipped++
-				continue
-			}
-		}
-		files = append(files, queuedFile{name: entry.Name(), path: path, record: record})
 	}
 	return files, joinFailures("load observability outbox", failures)
+}
+
+// loadReadyEntry classifies one outbox directory entry: it returns the queued
+// file to enqueue (include=true), or quarantines/skips it and reports why.
+// Non-ready entries yield include=false with no failures.
+func loadReadyEntry(dir string, entry os.DirEntry, explicit bool, now time.Time, report *SyncReport) (queuedFile, bool, []string) {
+	if !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), ".obs-v1.json") {
+		return queuedFile{}, false, nil
+	}
+	path := filepath.Join(dir, entry.Name())
+	match := readyFilePattern.FindStringSubmatch(entry.Name())
+	if len(match) == 0 {
+		return queuedFile{}, false, quarantineCorrupt(path, entry.Name(), "ready filename is not a canonical UUIDv7 outbox name", now, report)
+	}
+	record, parseErr := parseOutboxFile(path, match[1])
+	if parseErr != nil {
+		return queuedFile{}, false, quarantineCorrupt(path, entry.Name(), parseErr.Error(), now, report)
+	}
+	if !explicit {
+		next, nextErr := time.Parse(time.RFC3339, record.NextAttemptAt)
+		if nextErr != nil {
+			return queuedFile{}, false, quarantineCorrupt(path, entry.Name(), "invalid next_attempt_at", now, report)
+		}
+		if next.After(now) {
+			report.Skipped++
+			return queuedFile{}, false, nil
+		}
+	}
+	return queuedFile{name: entry.Name(), path: path, record: record}, true, nil
+}
+
+// quarantineCorrupt quarantines a corrupt ready file, updating report and
+// returning any failure messages produced (nil on success).
+func quarantineCorrupt(path, name, message string, now time.Time, report *SyncReport) []string {
+	if quarantineErr := quarantineFile(path, name, "corrupt", "corrupt", message, now); quarantineErr != nil {
+		report.Retained++
+		return []string{quarantineErr.Error()}
+	}
+	report.Quarantined++
+	return nil
 }
 
 func parseOutboxFile(path, filenameID string) (outboxRecord, error) {
@@ -345,12 +341,7 @@ func drainReady(ctx context.Context, client httpDoer, endpoint interface{ String
 		response, retryAfter, status, err := postBatch(ctx, client, endpoint.String(), headers, batch)
 		if err != nil {
 			message := sanitizeError(err.Error())
-			for i := range batch {
-				if rewriteErr := retainWithBackoff(&batch[i], message, retryAfter, now); rewriteErr != nil {
-					report.Errors = append(report.Errors, sanitizeError(rewriteErr.Error()))
-				}
-				report.Retained++
-			}
+			retainBatch(batch, message, retryAfter, now, report)
 			report.Errors = append(report.Errors, message)
 			return true
 		}
@@ -361,13 +352,8 @@ func drainReady(ctx context.Context, client httpDoer, endpoint interface{ String
 		}
 		if status != http.StatusOK {
 			message := fmt.Sprintf("ingest returned HTTP %d", status)
-			if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500 {
-				for i := range batch {
-					if rewriteErr := retainWithBackoff(&batch[i], message, retryAfter, now); rewriteErr != nil {
-						report.Errors = append(report.Errors, sanitizeError(rewriteErr.Error()))
-					}
-					report.Retained++
-				}
+			if retryableStatus(status) {
+				retainBatch(batch, message, retryAfter, now, report)
 			} else {
 				report.Retained += len(batch)
 			}
@@ -376,47 +362,69 @@ func drainReady(ctx context.Context, client httpDoer, endpoint interface{ String
 		}
 		if validationErr := validateIngestResponse(response, len(batch)); validationErr != nil {
 			message := sanitizeError(validationErr.Error())
-			for i := range batch {
-				if rewriteErr := retainWithBackoff(&batch[i], message, retryAfter, now); rewriteErr != nil {
-					report.Errors = append(report.Errors, sanitizeError(rewriteErr.Error()))
-				}
-				report.Retained++
-			}
+			retainBatch(batch, message, retryAfter, now, report)
 			report.Errors = append(report.Errors, message)
 			return true
 		}
-		rejections := make(map[int]rejection, len(response.Rejected))
-		for _, item := range response.Rejected {
-			rejections[item.Index] = item
-		}
-		for index := range batch {
-			item, rejected := rejections[index]
-			if !rejected {
-				if removeErr := fsops.Remove(batch[index].path); removeErr != nil {
-					report.Retained++
-					report.Errors = append(report.Errors, sanitizeError(fmt.Sprintf("delete %s: %v", batch[index].name, removeErr)))
-				}
-				continue
-			}
-			if item.Retryable || item.Code == "storage_unavailable" {
-				if rewriteErr := retainWithBackoff(&batch[index], item.Message, retryAfter, now); rewriteErr != nil {
-					report.Errors = append(report.Errors, sanitizeError(rewriteErr.Error()))
-				}
-				report.Retained++
-				continue
-			}
-			if quarantineErr := quarantineFile(batch[index].path, batch[index].name, "rejected", item.Code, item.Message, now); quarantineErr != nil {
-				report.Retained++
-				report.Errors = append(report.Errors, sanitizeError(quarantineErr.Error()))
-			} else {
-				report.Quarantined++
-			}
-		}
-		report.Accepted += response.Accepted
-		report.Deduped += response.Deduped
+		settleBatch(batch, response, retryAfter, now, report)
 		start = end
 	}
 	return false
+}
+
+func retryableStatus(status int) bool {
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
+}
+
+// retainBatch reschedules every file in batch with backoff, recording rewrite
+// failures and counting each file as retained.
+func retainBatch(batch []queuedFile, message string, retryAfter retryDelay, now time.Time, report *SyncReport) {
+	for i := range batch {
+		if rewriteErr := retainWithBackoff(&batch[i], message, retryAfter, now); rewriteErr != nil {
+			report.Errors = append(report.Errors, sanitizeError(rewriteErr.Error()))
+		}
+		report.Retained++
+	}
+}
+
+// settleBatch applies the per-file ingest outcome for an accepted response and
+// updates the accepted/deduped tallies.
+func settleBatch(batch []queuedFile, response ingestResponse, retryAfter retryDelay, now time.Time, report *SyncReport) {
+	rejections := make(map[int]rejection, len(response.Rejected))
+	for _, item := range response.Rejected {
+		rejections[item.Index] = item
+	}
+	for index := range batch {
+		item, rejected := rejections[index]
+		settleItem(&batch[index], item, rejected, retryAfter, now, report)
+	}
+	report.Accepted += response.Accepted
+	report.Deduped += response.Deduped
+}
+
+// settleItem resolves a single delivered file: delete on success, retain on a
+// retryable rejection, or quarantine on a terminal rejection.
+func settleItem(file *queuedFile, item rejection, rejected bool, retryAfter retryDelay, now time.Time, report *SyncReport) {
+	if !rejected {
+		if removeErr := fsops.Remove(file.path); removeErr != nil {
+			report.Retained++
+			report.Errors = append(report.Errors, sanitizeError(fmt.Sprintf("delete %s: %v", file.name, removeErr)))
+		}
+		return
+	}
+	if item.Retryable || item.Code == "storage_unavailable" {
+		if rewriteErr := retainWithBackoff(file, item.Message, retryAfter, now); rewriteErr != nil {
+			report.Errors = append(report.Errors, sanitizeError(rewriteErr.Error()))
+		}
+		report.Retained++
+		return
+	}
+	if quarantineErr := quarantineFile(file.path, file.name, "rejected", item.Code, item.Message, now); quarantineErr != nil {
+		report.Retained++
+		report.Errors = append(report.Errors, sanitizeError(quarantineErr.Error()))
+	} else {
+		report.Quarantined++
+	}
 }
 
 func batchEnd(files []queuedFile, start int) int {

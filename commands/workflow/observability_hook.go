@@ -132,24 +132,9 @@ func buildObservabilityRecord(projectPath string, iteration int, kind string, wi
 		return record, err
 	}
 
-	scoreJSON := json.RawMessage("null")
-	if withScore {
-		scoreRaw, readErr := os.ReadFile(scoreSidecarPath(projectPath, iteration))
-		if readErr != nil {
-			return record, readErr
-		}
-		var score map[string]any
-		if err := yaml.Unmarshal(scoreRaw, &score); err != nil {
-			return record, err
-		}
-		scoreIteration, ok := observabilityInteger(score["iteration"])
-		if !ok || scoreIteration != iteration {
-			return record, errors.New("score sidecar does not match event iteration")
-		}
-		scoreJSON, err = json.Marshal(score)
-		if err != nil {
-			return record, err
-		}
+	scoreJSON, err := resolveScoreSidecar(projectPath, iteration, withScore)
+	if err != nil {
+		return record, err
 	}
 
 	checkpointAt, _ := payload["checkpoint_at"].(string)
@@ -174,18 +159,9 @@ func buildObservabilityRecord(projectPath string, iteration int, kind string, wi
 		return record, err
 	}
 
-	projectID := strings.TrimSpace(rc.RepoID)
-	if projectID == "" {
-		projectID = config.DeriveRepoIDFromGit(projectPath)
-	}
-	if projectID == "" {
-		return record, errors.New("observability project_id is empty")
-	}
-	agentRuntime := "unknown"
-	if agent, ok := payload["agent"].(map[string]any); ok {
-		if harness, ok := agent["harness"].(string); ok && strings.TrimSpace(harness) != "" {
-			agentRuntime = strings.TrimSpace(harness)
-		}
+	projectID, err := resolveObservabilityProjectID(rc, projectPath)
+	if err != nil {
+		return record, err
 	}
 	id, err := newObservabilityUUIDv7(now)
 	if err != nil {
@@ -204,10 +180,60 @@ func buildObservabilityRecord(projectPath string, iteration int, kind string, wi
 		Client: observabilityClient{
 			DAVersion:    observabilityDAVersion,
 			HostOS:       runtime.GOOS,
-			AgentRuntime: agentRuntime,
+			AgentRuntime: observabilityAgentRuntime(payload),
 		},
 		Event: event,
 	}, nil
+}
+
+// resolveScoreSidecar returns the canonical score payload for a scored event, or
+// the JSON null literal when the event carries no score.
+func resolveScoreSidecar(projectPath string, iteration int, withScore bool) (json.RawMessage, error) {
+	if !withScore {
+		return json.RawMessage("null"), nil
+	}
+	scoreRaw, readErr := os.ReadFile(scoreSidecarPath(projectPath, iteration))
+	if readErr != nil {
+		return nil, readErr
+	}
+	var score map[string]any
+	if err := yaml.Unmarshal(scoreRaw, &score); err != nil {
+		return nil, err
+	}
+	scoreIteration, ok := observabilityInteger(score["iteration"])
+	if !ok || scoreIteration != iteration {
+		return nil, errors.New("score sidecar does not match event iteration")
+	}
+	scoreJSON, err := json.Marshal(score)
+	if err != nil {
+		return nil, err
+	}
+	return scoreJSON, nil
+}
+
+// resolveObservabilityProjectID resolves the project id from config, falling
+// back to the git-derived id, and fails when neither yields a value.
+func resolveObservabilityProjectID(rc *config.AgentsRC, projectPath string) (string, error) {
+	projectID := strings.TrimSpace(rc.RepoID)
+	if projectID == "" {
+		projectID = config.DeriveRepoIDFromGit(projectPath)
+	}
+	if projectID == "" {
+		return "", errors.New("observability project_id is empty")
+	}
+	return projectID, nil
+}
+
+// observabilityAgentRuntime extracts the agent harness from the iteration
+// payload, defaulting to "unknown" when it is absent or blank.
+func observabilityAgentRuntime(payload map[string]any) string {
+	agentRuntime := "unknown"
+	if agent, ok := payload["agent"].(map[string]any); ok {
+		if harness, ok := agent["harness"].(string); ok && strings.TrimSpace(harness) != "" {
+			agentRuntime = strings.TrimSpace(harness)
+		}
+	}
+	return agentRuntime
 }
 
 func observabilityInteger(value any) (int, bool) {
@@ -363,37 +389,47 @@ func appendCanonicalObservabilityJSON(out *bytes.Buffer, value any) error {
 		}
 		out.WriteString(number)
 	case []any:
-		out.WriteByte('[')
-		for i, item := range value {
-			if i > 0 {
-				out.WriteByte(',')
-			}
-			if err := appendCanonicalObservabilityJSON(out, item); err != nil {
-				return err
-			}
-		}
-		out.WriteByte(']')
+		return appendCanonicalObservabilityArray(out, value)
 	case map[string]any:
-		keys := make([]string, 0, len(value))
-		for key := range value {
-			keys = append(keys, key)
-		}
-		sort.Slice(keys, func(i, j int) bool { return observabilityUTF16Less(keys[i], keys[j]) })
-		out.WriteByte('{')
-		for i, key := range keys {
-			if i > 0 {
-				out.WriteByte(',')
-			}
-			appendCanonicalObservabilityString(out, key)
-			out.WriteByte(':')
-			if err := appendCanonicalObservabilityJSON(out, value[key]); err != nil {
-				return err
-			}
-		}
-		out.WriteByte('}')
+		return appendCanonicalObservabilityObject(out, value)
 	default:
 		return fmt.Errorf("unsupported JSON value %T", value)
 	}
+	return nil
+}
+
+func appendCanonicalObservabilityArray(out *bytes.Buffer, values []any) error {
+	out.WriteByte('[')
+	for i, item := range values {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		if err := appendCanonicalObservabilityJSON(out, item); err != nil {
+			return err
+		}
+	}
+	out.WriteByte(']')
+	return nil
+}
+
+func appendCanonicalObservabilityObject(out *bytes.Buffer, values map[string]any) error {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return observabilityUTF16Less(keys[i], keys[j]) })
+	out.WriteByte('{')
+	for i, key := range keys {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		appendCanonicalObservabilityString(out, key)
+		out.WriteByte(':')
+		if err := appendCanonicalObservabilityJSON(out, values[key]); err != nil {
+			return err
+		}
+	}
+	out.WriteByte('}')
 	return nil
 }
 

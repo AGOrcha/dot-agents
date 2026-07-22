@@ -33,12 +33,12 @@ function decodeBase64Url(value: string): Uint8Array<ArrayBuffer> {
   if (value.length === 0 || !/^[A-Za-z0-9_-]+$/.test(value) || value.length % 4 === 1) {
     throw new Error("invalid Access assertion");
   }
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
   const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
   const decoded = atob(padded);
   const bytes = new Uint8Array(new ArrayBuffer(decoded.length));
   for (let index = 0; index < decoded.length; index += 1) {
-    bytes[index] = decoded.charCodeAt(index);
+    bytes[index] = decoded.codePointAt(index) ?? 0;
   }
   return bytes;
 }
@@ -59,7 +59,7 @@ function audienceContains(audience: unknown, expected: string): boolean {
   if (typeof audience === "string") {
     return audience === expected;
   }
-  return Array.isArray(audience) && audience.some((value) => value === expected);
+  return Array.isArray(audience) && audience.includes(expected);
 }
 
 export class StaticJwksProvider implements AccessJwksProvider {

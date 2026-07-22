@@ -273,34 +273,8 @@ func TestRunWorkflowTaskRename_GitRefBackendPreservesConcurrentTransition(t *tes
 	racingCAS = func(projectPath, newCommit, old string) error {
 		attempts++
 		if attempts == 1 {
-			current, err := projectPlanTasksFromStateRef(projectPath, stateRefTestPlanID)
-			if err != nil {
+			if err := injectConcurrentDependentCompletion(projectPath); err != nil {
 				return err
-			}
-			for i := range current.Tasks {
-				if current.Tasks[i].ID == "dependent" {
-					current.Tasks[i].Status = "completed"
-				}
-			}
-			for _, rec := range splitCanonicalTaskFile(current) {
-				if rec.Task.ID != "dependent" {
-					continue
-				}
-				content, err := yamlMarshal(rec)
-				if err != nil {
-					return err
-				}
-				rel, err := planTaskStateRefRelPath(projectPath, stateRefTestPlanID, "dependent")
-				if err != nil {
-					return err
-				}
-				casSwapFn = compareAndSwapStateRef
-				err = writeStateRefCAS(projectPath, []stateRefFile{{relPath: rel, content: content}})
-				casSwapFn = racingCAS
-				if err != nil {
-					return err
-				}
-				break
 			}
 		}
 		return compareAndSwapStateRef(projectPath, newCommit, old)
@@ -324,4 +298,42 @@ func TestRunWorkflowTaskRename_GitRefBackendPreservesConcurrentTransition(t *tes
 	if !slices.Equal(dependent.DependsOn, []string{"task-new"}) {
 		t.Fatalf("concurrent projection depends_on = %v", dependent.DependsOn)
 	}
+}
+
+// injectConcurrentDependentCompletion simulates a racing writer that marks the
+// "dependent" task completed via a direct CAS write against the state ref. It
+// temporarily restores the real compare-and-swap so its own write is not
+// intercepted by the test's racing hook, then restores the prior hook.
+func injectConcurrentDependentCompletion(projectPath string) error {
+	current, err := projectPlanTasksFromStateRef(projectPath, stateRefTestPlanID)
+	if err != nil {
+		return err
+	}
+	for i := range current.Tasks {
+		if current.Tasks[i].ID == "dependent" {
+			current.Tasks[i].Status = "completed"
+		}
+	}
+	for _, rec := range splitCanonicalTaskFile(current) {
+		if rec.Task.ID != "dependent" {
+			continue
+		}
+		content, err := yamlMarshal(rec)
+		if err != nil {
+			return err
+		}
+		rel, err := planTaskStateRefRelPath(projectPath, stateRefTestPlanID, "dependent")
+		if err != nil {
+			return err
+		}
+		saved := casSwapFn
+		casSwapFn = compareAndSwapStateRef
+		err = writeStateRefCAS(projectPath, []stateRefFile{{relPath: rel, content: content}})
+		casSwapFn = saved
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	return nil
 }

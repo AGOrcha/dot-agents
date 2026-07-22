@@ -617,6 +617,30 @@ func mirrorTransitionToStateRef(projectPath, planID, taskID string) error {
 	return writePlanStateRefCAS(projectPath, overwrite, seed)
 }
 
+// resolveRepointRefTasks reconciles the repoint mutation against the latest ref
+// snapshot: with no prior per-task records it returns tf unchanged; otherwise it
+// projects the records, applies the repoint when the old task still exists, or
+// (when only the new id is present) repoints dependencies. Pure in-memory — it
+// issues no git calls, so it preserves the mirror path's git-spawn behavior.
+func resolveRepointRefTasks(tf *CanonicalTaskFile, current []stateRefTaskRecord, in taskRepointInputs) (*CanonicalTaskFile, error) {
+	if len(current) == 0 {
+		return tf, nil
+	}
+	refTasks := projectCanonicalTaskFile(current)
+	oldIdx, newIdx := taskIndexes(refTasks, in.OldID, in.NewID)
+	if oldIdx >= 0 {
+		if _, applyErr := applyTaskRepoint(refTasks, in, oldIdx, newIdx); applyErr != nil {
+			return nil, applyErr
+		}
+		return refTasks, nil
+	}
+	if newIdx < 0 {
+		return nil, fmt.Errorf(errTaskNotFoundInPlanFmt, in.OldID, in.PlanID)
+	}
+	repointTaskDependencies(refTasks, in)
+	return refTasks, nil
+}
+
 // mirrorTaskRepointToStateRef applies a structural task-ID mutation to the
 // latest ref snapshot on every CAS attempt. This preserves concurrent status
 // transitions and unrelated task additions while deleting the old task blob in
@@ -635,20 +659,9 @@ func mirrorTaskRepointToStateRef(projectPath string, tf *CanonicalTaskFile, in t
 		if loadErr != nil {
 			return nil, loadErr
 		}
-		refTasks := tf
-		if len(current) > 0 {
-			refTasks = projectCanonicalTaskFile(current)
-			oldIdx, newIdx := taskIndexes(refTasks, in.OldID, in.NewID)
-			if oldIdx >= 0 {
-				if _, applyErr := applyTaskRepoint(refTasks, in, oldIdx, newIdx); applyErr != nil {
-					return nil, applyErr
-				}
-			} else {
-				if newIdx < 0 {
-					return nil, fmt.Errorf(errTaskNotFoundInPlanFmt, in.OldID, in.PlanID)
-				}
-				repointTaskDependencies(refTasks, in)
-			}
+		refTasks, resolveErr := resolveRepointRefTasks(tf, current, in)
+		if resolveErr != nil {
+			return nil, resolveErr
 		}
 		return taskRepointStateRefFiles(projectPath, refTasks, in.OldID, planContent)
 	})
@@ -3721,6 +3734,26 @@ func repointTaskDependencies(tf *CanonicalTaskFile, in taskRepointInputs) []task
 	return repointed
 }
 
+// repointRef maps a single reference to its rewritten form for a task repoint.
+// It returns the (possibly rewritten) ref and whether it should be kept: a ref
+// equal to the old (bare or plan-qualified) id is dropped when remove is set,
+// otherwise rewritten to the new id; any other ref is returned unchanged.
+func repointRef(ref, oldID, oldQualified, newID, newQualified string, remove bool) (string, bool) {
+	switch ref {
+	case oldID:
+		if remove {
+			return "", false
+		}
+		return newID, true
+	case oldQualified:
+		if remove {
+			return "", false
+		}
+		return newQualified, true
+	}
+	return ref, true
+}
+
 func rewriteTaskReferences(refs []string, planID, oldID, newID string, remove bool) ([]string, bool) {
 	oldQualified := planID + "/" + oldID
 	newQualified := planID + "/" + newID
@@ -3737,23 +3770,15 @@ func rewriteTaskReferences(refs []string, planID, oldID, newID string, remove bo
 	out := make([]string, 0, len(refs))
 	seen := make(map[string]struct{}, len(refs))
 	for _, ref := range refs {
-		switch ref {
-		case oldID:
-			if remove {
-				continue
-			}
-			ref = newID
-		case oldQualified:
-			if remove {
-				continue
-			}
-			ref = newQualified
-		}
-		if _, exists := seen[ref]; exists {
+		mapped, keep := repointRef(ref, oldID, oldQualified, newID, newQualified, remove)
+		if !keep {
 			continue
 		}
-		seen[ref] = struct{}{}
-		out = append(out, ref)
+		if _, exists := seen[mapped]; exists {
+			continue
+		}
+		seen[mapped] = struct{}{}
+		out = append(out, mapped)
 	}
 	return out, true
 }

@@ -15,32 +15,40 @@ import (
 func BenchmarkManagedHookRefresh(b *testing.B) {
 	for _, n := range []int{10, 50, 200} {
 		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
-			stateHome := b.TempDir()
-			dstRoot := b.TempDir()
-			b.Setenv("XDG_STATE_HOME", stateHome)
-
-			dsts := make([]string, n)
-			contents := make([][]byte, n)
-			for i := range n {
-				dsts[i] = filepath.Join(dstRoot, fmt.Sprintf("managed-%04d.json", i))
-				contents[i] = []byte(fmt.Sprintf(`{"managed":%d,"schema":"bench"}`, i))
-			}
-			// Warm: create every managed file + record provenance once.
-			for i := range n {
-				if err := writeManagedFile(stdPlatformIO{}, dsts[i], contents[i]); err != nil {
-					b.Fatalf("warm writeManagedFile: %v", err)
-				}
-			}
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				for i := range n {
-					if err := writeManagedFile(stdPlatformIO{}, dsts[i], contents[i]); err != nil {
-						b.Fatalf("writeManagedFile: %v", err)
-					}
-				}
-			}
+			benchManagedHookRefresh(b, n)
 		})
+	}
+}
+
+// benchManagedHookRefresh runs one N-sized managed-hook refresh sub-benchmark:
+// it builds N managed fixtures, warms them once, then re-writes the unchanged
+// set inside the measured loop (the steady-state refresh shape).
+func benchManagedHookRefresh(b *testing.B, n int) {
+	b.Helper()
+	stateHome := b.TempDir()
+	dstRoot := b.TempDir()
+	b.Setenv("XDG_STATE_HOME", stateHome)
+
+	dsts := make([]string, n)
+	contents := make([][]byte, n)
+	for i := range n {
+		dsts[i] = filepath.Join(dstRoot, fmt.Sprintf("managed-%04d.json", i))
+		contents[i] = []byte(fmt.Sprintf(`{"managed":%d,"schema":"bench"}`, i))
+	}
+	// Warm: create every managed file + record provenance once.
+	for i := range n {
+		if err := writeManagedFile(stdPlatformIO{}, dsts[i], contents[i]); err != nil {
+			b.Fatalf("warm writeManagedFile: %v", err)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		for i := range n {
+			if err := writeManagedFile(stdPlatformIO{}, dsts[i], contents[i]); err != nil {
+				b.Fatalf("writeManagedFile: %v", err)
+			}
+		}
 	}
 }

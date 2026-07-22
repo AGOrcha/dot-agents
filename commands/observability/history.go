@@ -58,7 +58,6 @@ type historyLogicalKey struct {
 }
 
 type historyReplayRequest struct {
-	ctx        context.Context
 	client     httpDoer
 	endpoint   string
 	headers    http.Header
@@ -68,7 +67,7 @@ type historyReplayRequest struct {
 	report     *SyncReport
 }
 
-func replayHistory(request historyReplayRequest) {
+func replayHistory(ctx context.Context, request historyReplayRequest) {
 	events, err := collectHistoryEvents(request.projectDir, request.rc, request.version)
 	if err != nil {
 		request.report.Errors = append(request.report.Errors, sanitizeError(err.Error()))
@@ -76,14 +75,14 @@ func replayHistory(request historyReplayRequest) {
 	}
 	for start := 0; start < len(events); {
 		end := historyBatchEnd(events, start)
-		if !replayHistoryBatch(request, events[start:end], len(events)-start) {
+		if !replayHistoryBatch(ctx, request, events[start:end], len(events)-start) {
 			return
 		}
 		start = end
 	}
 }
 
-func replayHistoryBatch(request historyReplayRequest, batch []historyEvent, remaining int) bool {
+func replayHistoryBatch(ctx context.Context, request historyReplayRequest, batch []historyEvent, remaining int) bool {
 	envelope := ingestEnvelope{
 		SchemaVersion: ingestSchema,
 		ProjectID:     batch[0].projectID,
@@ -93,7 +92,7 @@ func replayHistoryBatch(request historyReplayRequest, batch []historyEvent, rema
 	for i := range batch {
 		envelope.Events[i] = batch[i].event
 	}
-	response, _, status, postErr := postEnvelope(request.ctx, request.client, request.endpoint, request.headers, envelope)
+	response, _, status, postErr := postEnvelope(ctx, request.client, request.endpoint, request.headers, envelope)
 	if postErr != nil {
 		request.report.Retained += len(batch)
 		request.report.Errors = append(request.report.Errors, sanitizeError(postErr.Error()))

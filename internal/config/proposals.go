@@ -142,6 +142,21 @@ func ValidateProposal(proposal *Proposal) error {
 	if strings.TrimSpace(proposal.Rationale) == "" {
 		return fmt.Errorf("rationale is required")
 	}
+	if err := validateProposalContent(proposal); err != nil {
+		return err
+	}
+	if strings.TrimSpace(proposal.CreatedAt) == "" {
+		return fmt.Errorf("created_at is required")
+	}
+	if strings.TrimSpace(proposal.CreatedBy) == "" {
+		return fmt.Errorf("created_by is required")
+	}
+	return nil
+}
+
+// validateProposalContent enforces the action-specific content rule: add/modify
+// require content; remove requires content to be empty.
+func validateProposalContent(proposal *Proposal) error {
 	switch proposal.Action {
 	case "add", "modify":
 		if proposal.Content == "" {
@@ -151,12 +166,6 @@ func ValidateProposal(proposal *Proposal) error {
 		if strings.TrimSpace(proposal.Content) != "" {
 			return fmt.Errorf("content must be empty for remove")
 		}
-	}
-	if strings.TrimSpace(proposal.CreatedAt) == "" {
-		return fmt.Errorf("created_at is required")
-	}
-	if strings.TrimSpace(proposal.CreatedBy) == "" {
-		return fmt.Errorf("created_by is required")
 	}
 	return nil
 }
