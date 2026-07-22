@@ -533,10 +533,18 @@ const gitArtifactCloneQuotaBytes = 256 << 20 // 256 MiB
 // (it returns a plain billy.Filesystem with no Cleanup method, so the caller's
 // best-effort type assertion is a no-op for it).
 func gitCloneShallowQuotaBounded(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error) {
-	auth, err := gitSSHAuth(url)
+	primary, fallback, err := gitSSHAuth(url)
 	if err != nil {
 		return nil, nil, err
 	}
+	return cloneWithFallback(primary, fallback, func(auth client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		return quotaBoundedCloneWithAuth(ctx, url, ref, auth)
+	})
+}
+
+// quotaBoundedCloneWithAuth runs the filter-then-unfiltered quota-bounded clone
+// with a single SSH auth method (nil for non-ssh/no auth).
+func quotaBoundedCloneWithAuth(ctx context.Context, url, ref string, auth client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
 	var clientOpts []client.Option
 	if auth != nil {
 		clientOpts = []client.Option{client.WithSSHAuth(auth)}

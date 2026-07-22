@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v6/plumbing/transport/ssh/sshagent"
 	"github.com/go-git/go-git/v6/storage/memory"
+	"golang.org/x/crypto/ssh/agent"
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
@@ -330,10 +333,33 @@ func (f *gitFetcher) clone(ctx context.Context, url, ref string) (*gogit.Reposit
 // billy filesystem, so nothing is written to disk and no temp dir cleanup is
 // needed. Returns the repository (for HEAD) and the worktree filesystem.
 func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error) {
-	auth, err := gitSSHAuth(url)
+	primary, fallback, err := gitSSHAuth(url)
 	if err != nil {
 		return nil, nil, err
 	}
+	return cloneWithFallback(primary, fallback, func(auth client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		return gitCloneOnce(ctx, url, ref, auth)
+	})
+}
+
+// cloneWithFallback runs clone(primary); on ANY error with a non-nil fallback it
+// retries clone(fallback). This is how an agent-path clone (an unprobeable agent:
+// dead/quiet socket, Pageant, a List error) falls back to the on-disk key — the
+// same order OpenSSH uses (agent, then the identity files). Shared by both git
+// clone paths so the retry policy lives in one tested place.
+func cloneWithFallback(primary, fallback client.SSHAuth, clone func(client.SSHAuth) (*gogit.Repository, billy.Filesystem, error)) (*gogit.Repository, billy.Filesystem, error) {
+	repo, fs, err := clone(primary)
+	if err != nil && fallback != nil {
+		return clone(fallback)
+	}
+	return repo, fs, err
+}
+
+// gitCloneOnce performs one Depth:1, single-branch in-memory clone of url at ref
+// with the given SSH auth (nil for a non-ssh URL / no auth). Objects live in an
+// in-memory storer and the checkout in an in-memory billy filesystem, so nothing
+// is written to disk. Returns the repository (for HEAD) and the worktree fs.
+func gitCloneOnce(ctx context.Context, url, ref string, auth client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
 	var clientOpts []client.Option
 	if auth != nil {
 		clientOpts = []client.Option{client.WithSSHAuth(auth)}
@@ -353,35 +379,28 @@ func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, b
 	return repo, fs, nil
 }
 
-// gitSSHAuth builds go-git's SSH ClientConfig for an ssh:// (or SCP-style
-// git@host:path) rawURL, so a `git` config/package source authenticates the
-// same way the user's own `git clone`/`git push` for that URL already does —
-// no separate `eval $(ssh-agent) && ssh-add` just to run da.
+// gitSSHAuth builds go-git's SSH auth for an ssh:// (or SCP-style git@host:path)
+// rawURL, mirroring how the user's own `git` for that URL authenticates — no
+// separate `eval $(ssh-agent) && ssh-add` just to run da.
 //
-// go-git v6 has no such fallback on its own: leaving ClientOptions unset
-// makes it call ssh.NewSSHAgentAuth unconditionally, which hard-fails with
-// "SSH agent requested but SSH_AUTH_SOCK not-specified" the instant
-// SSH_AUTH_SOCK is unset — even when the user has a perfectly usable
-// unencrypted default key (the common case: a plain shell often does not
-// have SSH_AUTH_SOCK exported even though a keychain/GUI agent exists and
-// `git clone`/`git push` for the same URL work fine).
+// It returns a (primary, fallback) pair; gitCloneShallow tries primary, then
+// retries with fallback (when non-nil) on ANY primary clone error. Selection
+// mirrors OpenSSH's own order:
+//   - agent holds >=1 identity          -> (agent, nil)
+//   - agent present but EMPTY           -> (key file, nil)   [macOS launchd default]
+//   - agent present but UNPROBEABLE     -> (agent, key file) so a failed agent
+//     (dead/quiet socket, List error, Windows/Pageant)          clone falls back
+//   - no agent                          -> (key file, nil)
 //
-// The preference order mirrors OpenSSH's own client:
-//  1. A running SSH agent (SSH_AUTH_SOCK set) — unchanged from before.
-//  2. Default identity files, in the order ssh(1) tries them, with any
-//     ~/.ssh/config `IdentityFile` for the host tried first (a more specific
-//     match than the bare defaults).
-//
-// A passphrase-protected key with no agent available surfaces a clear,
-// actionable error instead of go-git's raw "SSH_AUTH_SOCK not-specified".
-//
-// Returns (nil, nil) for a non-ssh URL: the caller then leaves ClientOptions
-// unset, so http(s)/file sources are completely unaffected by this fetcher's
-// auth building.
-func gitSSHAuth(rawURL string) (client.SSHAuth, error) {
-	u, err := transport.ParseURL(rawURL)
-	if err != nil || u.Scheme != "ssh" {
-		return nil, nil
+// go-git v6 has no such fallback on its own: an unset ClientOptions makes it call
+// ssh.NewSSHAgentAuth unconditionally, which hard-fails the instant SSH_AUTH_SOCK
+// is unset OR the agent is empty — even when a usable on-disk key exists and the
+// user's own `git` for the same URL works. Non-ssh URL -> (nil, nil, nil): the
+// caller clones without SSH auth, so http(s)/file sources are unaffected.
+func gitSSHAuth(rawURL string) (primary, fallback client.SSHAuth, err error) {
+	u, perr := transport.ParseURL(rawURL)
+	if perr != nil || u.Scheme != "ssh" {
+		return nil, nil, nil
 	}
 	user := gogitssh.DefaultUsername
 	if u.User != nil {
@@ -391,15 +410,87 @@ func gitSSHAuth(rawURL string) (client.SSHAuth, error) {
 	}
 
 	if sshagent.Available() {
-		return gogitssh.NewSSHAgentAuth(user)
+		switch probeSSHAgent() {
+		case sshAgentHasIdentity:
+			a, e := gogitssh.NewSSHAgentAuth(user)
+			return a, nil, e
+		case sshAgentUnknown:
+			// Present but unprobeable: try the agent, but hand back an on-disk-key
+			// fallback so gitCloneShallow retries when the agent clone fails.
+			if a, e := gogitssh.NewSSHAgentAuth(user); e == nil {
+				fb, _ := fileSSHAuth(rawURL, u.Hostname(), user) // best-effort; nil if no key
+				return a, fb, nil
+			}
+			// The agent could not even be built (e.g. dead socket) — key files only.
+			fa, fe := fileSSHAuth(rawURL, u.Hostname(), user)
+			return fa, nil, fe
+		}
+		// sshAgentEmpty: fall through to the on-disk key path below.
+	}
+	fa, fe := fileSSHAuth(rawURL, u.Hostname(), user)
+	return fa, nil, fe
+}
+
+// sshAgentState is probeSSHAgent's tri-state result.
+type sshAgentState int
+
+const (
+	// sshAgentUnknown: could not determine whether the agent holds a key —
+	// SSH_AUTH_SOCK unset, a dial/list error, or Windows (Pageant, not a unix
+	// socket). Callers treat this as "try the agent, but keep a fallback."
+	sshAgentUnknown sshAgentState = iota
+	// sshAgentHasIdentity: the agent is reachable and holds >=1 identity.
+	sshAgentHasIdentity
+	// sshAgentEmpty: the agent is reachable but holds zero identities (the macOS
+	// launchd default; go-git's agent auth would hard-fail "[none, publickey]").
+	sshAgentEmpty
+)
+
+// probeSSHAgent asks the ssh-agent at SSH_AUTH_SOCK how many identities it holds.
+// It returns hasIdentity/empty only when it actually reached the agent and listed
+// its keys; any uncertainty is sshAgentUnknown so the caller keeps the agent-first
+// behavior with an on-disk-key fallback rather than skipping a working agent.
+func probeSSHAgent() sshAgentState {
+	if runtime.GOOS == "windows" {
+		return sshAgentUnknown // Pageant named pipe, not a SSH_AUTH_SOCK unix socket
+	}
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return sshAgentUnknown
+	}
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		return sshAgentUnknown
+	}
+	defer conn.Close()
+	keys, err := agent.NewClient(conn).List()
+	if err != nil {
+		return sshAgentUnknown
+	}
+	if len(keys) == 0 {
+		return sshAgentEmpty
+	}
+	return sshAgentHasIdentity
+}
+
+// fileSSHAuth builds auth from the OpenSSH default identity files: any
+// ~/.ssh/config IdentityFile for host first, then id_ed25519/id_rsa/id_ecdsa. The
+// error text reflects whether there was no agent at all vs an agent holding no
+// usable identity, with the matching hint (export SSH_AUTH_SOCK vs ssh-add).
+func fileSSHAuth(rawURL, host, user string) (client.SSHAuth, error) {
+	agentState := "no SSH agent (SSH_AUTH_SOCK unset)"
+	agentHint := "run `eval $(ssh-agent) && ssh-add`, or export SSH_AUTH_SOCK to your running agent"
+	if os.Getenv("SSH_AUTH_SOCK") != "" {
+		agentState = "the SSH agent (SSH_AUTH_SOCK) holds no usable identity"
+		agentHint = "run `ssh-add <key>` to load a key into the agent (e.g. `ssh-add ~/.ssh/id_ed25519`)"
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and $HOME is unavailable to locate a default key: %w; run `eval $(ssh-agent) && ssh-add`, or export SSH_AUTH_SOCK", rawURL, err)
+		return nil, fmt.Errorf("git ssh auth for %s: %s and $HOME is unavailable to locate a default key: %w; %s", rawURL, agentState, err, agentHint)
 	}
 	sshDir := filepath.Join(home, ".ssh")
-	candidates := append(sshConfigIdentityFiles(sshDir, u.Hostname()),
+	candidates := append(sshConfigIdentityFiles(sshDir, host),
 		filepath.Join(sshDir, "id_ed25519"),
 		filepath.Join(sshDir, "id_rsa"),
 		filepath.Join(sshDir, "id_ecdsa"),
@@ -417,9 +508,9 @@ func gitSSHAuth(rawURL string) (client.SSHAuth, error) {
 		lastErr = fmt.Errorf("%s: %w", path, keyErr)
 	}
 	if lastErr != nil {
-		return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and the default SSH key needs a passphrase da cannot prompt for; run `eval $(ssh-agent) && ssh-add` first, or export SSH_AUTH_SOCK to your running agent: %w", rawURL, lastErr)
+		return nil, fmt.Errorf("git ssh auth for %s: %s and the default SSH key needs a passphrase da cannot prompt for; %s: %w", rawURL, agentState, agentHint, lastErr)
 	}
-	return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and no default SSH key found in %s (looked for id_ed25519, id_rsa, id_ecdsa); run `eval $(ssh-agent) && ssh-add` first, or export SSH_AUTH_SOCK to your running agent", rawURL, sshDir)
+	return nil, fmt.Errorf("git ssh auth for %s: %s and no default SSH key found in %s (looked for id_ed25519, id_rsa, id_ecdsa); %s", rawURL, agentState, sshDir, agentHint)
 }
 
 // sshConfigIdentityFiles returns the IdentityFile paths <sshDir>/config

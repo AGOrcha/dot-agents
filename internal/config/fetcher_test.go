@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -25,11 +26,13 @@ import (
 	"github.com/go-git/go-billy/v6/osfs"
 	gogit "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
 	"github.com/go-git/go-git/v6/plumbing/object"
 	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v6/storage/memory"
 	cryptossh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 // withPackagesCache points the tier-2 packages cache root (~/.agents/cache) at a
@@ -3603,53 +3606,254 @@ func writeTestSSHKey(t *testing.T, sshDir, name, passphrase string) string {
 }
 
 // TestGitSSHAuthNonSSHURLIsNoop proves https/file sources are completely
-// unaffected by this fetcher's auth building: no ClientOptions, no error.
+// unaffected by this fetcher's auth building: no auth, no error.
 func TestGitSSHAuthNonSSHURLIsNoop(t *testing.T) {
 	for _, url := range []string{"https://github.com/acme/repo.git", "file:///tmp/repo", "http://example.com/x"} {
-		auth, err := gitSSHAuth(url)
-		if err != nil || auth != nil {
-			t.Fatalf("gitSSHAuth(%q) = (%v, %v), want (nil, nil)", url, auth, err)
+		primary, fallback, err := gitSSHAuth(url)
+		if err != nil || primary != nil || fallback != nil {
+			t.Fatalf("gitSSHAuth(%q) = (%v, %v, %v), want (nil, nil, nil)", url, primary, fallback, err)
 		}
 	}
 }
 
-// TestGitSSHAuthPrefersAgentWhenAvailable proves the SSH_AUTH_SOCK branch is
-// still tried first (preserving prior behavior) and never falls through to
-// the default-key path when an agent is configured, even if that agent turns
-// out to be unreachable.
-//
-// Skipped on windows: go-git's sshagent.Available() there checks for a
-// running Pageant (a named pipe), never SSH_AUTH_SOCK
-// (plumbing/transport/ssh/sshagent/sshagent_windows.go), so faking
-// SSH_AUTH_SOCK cannot exercise the "agent present" branch on that platform.
-func TestGitSSHAuthPrefersAgentWhenAvailable(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("go-git's sshagent.Available() checks Pageant on windows, not SSH_AUTH_SOCK")
+// TestCloneWithFallback covers the shared retry policy directly with stub clone
+// funcs (no network): primary success skips the fallback; a primary error with a
+// nil fallback surfaces that error unretried; a primary error with a non-nil
+// fallback retries with the fallback auth, and the fallback result wins.
+func TestCloneWithFallback(t *testing.T) {
+	okRepo := &gogit.Repository{}
+	dummy := &gogitssh.PublicKeys{} // any non-nil client.SSHAuth
+
+	calls := 0
+	repo, _, err := cloneWithFallback(nil, dummy, func(client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		calls++
+		return okRepo, nil, nil
+	})
+	if err != nil || repo != okRepo || calls != 1 {
+		t.Fatalf("primary-success: repo=%v err=%v calls=%d, want (okRepo, nil, 1)", repo, err, calls)
 	}
-	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "not-a-real-agent.sock"))
-	_, err := gitSSHAuth("git@github.com:acme/repo.git")
-	if err == nil {
-		t.Fatal("expected an error dialing the fake agent socket")
+
+	calls = 0
+	_, _, err = cloneWithFallback(nil, nil, func(client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		calls++
+		return nil, nil, errors.New("boom")
+	})
+	if err == nil || calls != 1 {
+		t.Fatalf("primary-fail-no-fallback: err=%v calls=%d, want (err, 1)", err, calls)
 	}
-	if strings.Contains(err.Error(), "no default SSH key") {
-		t.Fatalf("agent branch should not fall through to the default-key error, got: %v", err)
+
+	calls = 0
+	var gotAuth []client.SSHAuth
+	repo, _, err = cloneWithFallback(nil, dummy, func(a client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		calls++
+		gotAuth = append(gotAuth, a)
+		if calls == 1 {
+			return nil, nil, errors.New("primary boom")
+		}
+		return okRepo, nil, nil
+	})
+	if err != nil || repo != okRepo || calls != 2 {
+		t.Fatalf("fallback-retry: repo=%v err=%v calls=%d, want (okRepo, nil, 2)", repo, err, calls)
+	}
+	if gotAuth[0] != nil || gotAuth[1] != client.SSHAuth(dummy) {
+		t.Fatalf("fallback-retry: auth order = %v, want [nil, dummy]", gotAuth)
 	}
 }
 
-// TestGitSSHAuthFallsBackToDefaultKeyFile is the headline fix: no agent, but
-// an unencrypted default key exists — exactly the reported scenario.
+// serveAgent serves keyring on a short-path unix socket (macOS caps sun_path
+// ~104 bytes, so t.TempDir()'s long prefix is avoided) and points SSH_AUTH_SOCK
+// at it for the duration of the test.
+func serveAgent(t *testing.T, keyring agent.Agent) {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "da-agent")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	ln, err := net.Listen("unix", filepath.Join(dir, "a.sock"))
+	if err != nil {
+		t.Fatalf("listen agent sock: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, aerr := ln.Accept()
+			if aerr != nil {
+				return
+			}
+			go func() { _ = agent.ServeAgent(keyring, conn) }()
+		}
+	}()
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(dir, "a.sock"))
+}
+
+// TestGitSSHAuthAgentWithIdentityUsesAgentOnly: an agent holding a key is the
+// sole primary (no file fallback), preserving agent-first behavior.
+func TestGitSSHAuthAgentWithIdentityUsesAgentOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-socket agent probe; Windows uses Pageant")
+	}
+	keyring := agent.NewKeyring()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	if err := keyring.Add(agent.AddedKey{PrivateKey: priv}); err != nil {
+		t.Fatalf("keyring.Add: %v", err)
+	}
+	serveAgent(t, keyring)
+	// A key file exists too, but a keyed agent must win with no fallback.
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
+
+	primary, fallback, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	if _, ok := primary.(*gogitssh.PublicKeysCallback); !ok {
+		t.Fatalf("expected agent primary (*PublicKeysCallback), got %T", primary)
+	}
+	if fallback != nil {
+		t.Fatalf("keyed agent should have no fallback, got %T", fallback)
+	}
+}
+
+// TestGitSSHAuthUnprobeableAgentKeepsFileFallback: SSH_AUTH_SOCK points at a
+// socket that accepts but is not a real agent (List fails -> probe unknown), so
+// gitSSHAuth returns the agent as primary AND an on-disk key as fallback for
+// gitCloneShallow to retry with on any agent-path clone error.
+func TestGitSSHAuthUnprobeableAgentKeepsFileFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-socket agent probe; Windows uses Pageant")
+	}
+	dir, err := os.MkdirTemp("/tmp", "da-agent")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	ln, err := net.Listen("unix", filepath.Join(dir, "a.sock"))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	// Accept then immediately close: dial succeeds (NewSSHAgentAuth builds) but
+	// the agent List() gets EOF -> probeSSHAgent returns unknown.
+	go func() {
+		for {
+			conn, aerr := ln.Accept()
+			if aerr != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(dir, "a.sock"))
+
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
+
+	primary, fallback, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	if _, ok := primary.(*gogitssh.PublicKeysCallback); !ok {
+		t.Fatalf("expected agent primary (*PublicKeysCallback), got %T", primary)
+	}
+	if _, ok := fallback.(*gogitssh.PublicKeys); !ok {
+		t.Fatalf("expected on-disk key fallback (*PublicKeys), got %T", fallback)
+	}
+}
+
+// TestGitSSHAuthDeadAgentSocketUsesKeyFile: a dead SSH_AUTH_SOCK (dial fails, so
+// NewSSHAgentAuth cannot even build) drops straight to the on-disk key primary.
+func TestGitSSHAuthDeadAgentSocketUsesKeyFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-socket agent probe; Windows uses Pageant")
+	}
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "not-a-real-agent.sock"))
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
+
+	primary, fallback, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	if _, ok := primary.(*gogitssh.PublicKeys); !ok {
+		t.Fatalf("dead socket: expected on-disk key primary (*PublicKeys), got %T", primary)
+	}
+	if fallback != nil {
+		t.Fatalf("dead socket: expected no fallback, got %T", fallback)
+	}
+}
+
+// TestGitSSHAuthFallsBackToDefaultKeyFile: no agent, but an unencrypted default
+// key exists — the plain-shell scenario.
 func TestGitSSHAuthFallsBackToDefaultKeyFile(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 	home := t.TempDir()
 	setTestHomeDir(t, home)
 	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
 
-	auth, err := gitSSHAuth("git@github.com:acme/repo.git")
+	primary, _, err := gitSSHAuth("git@github.com:acme/repo.git")
 	if err != nil {
 		t.Fatalf("gitSSHAuth: %v", err)
 	}
-	if auth == nil {
-		t.Fatal("expected non-nil auth built from the default id_ed25519 key")
+	if _, ok := primary.(*gogitssh.PublicKeys); !ok {
+		t.Fatalf("expected on-disk key auth, got %T", primary)
+	}
+}
+
+// TestGitSSHAuthEmptyAgentUsesKeyFile is the omp-session fix: SSH_AUTH_SOCK
+// points at a real but EMPTY agent (the macOS launchd default). The empty agent
+// must NOT shadow the key file — gitSSHAuth builds file-based auth as primary.
+func TestGitSSHAuthEmptyAgentUsesKeyFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-socket agent probe; Windows uses Pageant")
+	}
+	serveAgent(t, agent.NewKeyring()) // zero identities
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
+
+	primary, fallback, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth with empty agent: %v", err)
+	}
+	if _, ok := primary.(*gogitssh.PublicKeys); !ok {
+		t.Fatalf("expected file-based primary (empty agent skipped), got %T", primary)
+	}
+	if fallback != nil {
+		t.Fatalf("empty agent -> file primary should have no fallback, got %T", fallback)
+	}
+}
+
+// TestProbeSSHAgent covers the tri-state probe: SSH_AUTH_SOCK unset -> unknown,
+// a real but empty agent -> empty, a non-empty agent -> hasIdentity.
+func TestProbeSSHAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-socket agent probe; Windows uses Pageant")
+	}
+	t.Setenv("SSH_AUTH_SOCK", "")
+	if got := probeSSHAgent(); got != sshAgentUnknown {
+		t.Fatalf("unset SSH_AUTH_SOCK: got %d, want sshAgentUnknown", got)
+	}
+	keyring := agent.NewKeyring()
+	serveAgent(t, keyring)
+	if got := probeSSHAgent(); got != sshAgentEmpty {
+		t.Fatalf("empty agent: got %d, want sshAgentEmpty", got)
+	}
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	if err := keyring.Add(agent.AddedKey{PrivateKey: priv}); err != nil {
+		t.Fatalf("keyring.Add: %v", err)
+	}
+	if got := probeSSHAgent(); got != sshAgentHasIdentity {
+		t.Fatalf("non-empty agent: got %d, want sshAgentHasIdentity", got)
 	}
 }
 
@@ -3661,23 +3865,23 @@ func TestGitSSHAuthUsesURLUserOrDefault(t *testing.T) {
 	setTestHomeDir(t, home)
 	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
 
-	auth, err := gitSSHAuth("ssh://custom-user@example.com/acme/repo.git")
+	primary, _, err := gitSSHAuth("ssh://custom-user@example.com/acme/repo.git")
 	if err != nil {
 		t.Fatalf("gitSSHAuth: %v", err)
 	}
-	pk, ok := auth.(*gogitssh.PublicKeys)
+	pk, ok := primary.(*gogitssh.PublicKeys)
 	if !ok {
-		t.Fatalf("auth type = %T, want *ssh.PublicKeys", auth)
+		t.Fatalf("auth type = %T, want *ssh.PublicKeys", primary)
 	}
 	if pk.User != "custom-user" {
 		t.Fatalf("User = %q, want custom-user", pk.User)
 	}
 
-	auth2, err := gitSSHAuth("git@github.com:acme/repo.git")
+	primary2, _, err := gitSSHAuth("git@github.com:acme/repo.git")
 	if err != nil {
 		t.Fatalf("gitSSHAuth: %v", err)
 	}
-	if pk2 := auth2.(*gogitssh.PublicKeys); pk2.User != "git" {
+	if pk2 := primary2.(*gogitssh.PublicKeys); pk2.User != "git" {
 		t.Fatalf("User = %q, want git (DefaultUsername)", pk2.User)
 	}
 }
@@ -3691,7 +3895,7 @@ func TestGitSSHAuthPassphraseProtectedKeyErrorsClearly(t *testing.T) {
 	setTestHomeDir(t, home)
 	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "s3cret")
 
-	_, err := gitSSHAuth("git@github.com:acme/repo.git")
+	_, _, err := gitSSHAuth("git@github.com:acme/repo.git")
 	if err == nil {
 		t.Fatal("expected an error for a passphrase-protected key with no agent")
 	}
@@ -3710,7 +3914,7 @@ func TestGitSSHAuthNoKeyFoundErrorsClearly(t *testing.T) {
 	home := t.TempDir()
 	setTestHomeDir(t, home)
 
-	_, err := gitSSHAuth("git@github.com:acme/repo.git")
+	_, _, err := gitSSHAuth("git@github.com:acme/repo.git")
 	if err == nil {
 		t.Fatal("expected an error when no agent and no default key exist")
 	}
@@ -3736,11 +3940,11 @@ func TestGitSSHAuthHonorsSSHConfigIdentityFile(t *testing.T) {
 		t.Fatalf("WriteFile config: %v", err)
 	}
 
-	auth, err := gitSSHAuth("git@github.com:acme/repo.git")
+	primary, _, err := gitSSHAuth("git@github.com:acme/repo.git")
 	if err != nil {
 		t.Fatalf("gitSSHAuth: %v", err)
 	}
-	if auth == nil {
+	if primary == nil {
 		t.Fatal("expected auth built from the ssh_config IdentityFile")
 	}
 }
