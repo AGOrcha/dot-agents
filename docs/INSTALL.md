@@ -55,7 +55,9 @@ checks for *your* code — not a one-size-fits-all pipeline.
 ```sh
 brew tap AGOrcha/tap && brew install da   # or: go install …  (see the README)
 da --version
-da onboard                                # same guided flow, run directly
+da init                                   # scaffold ~/.agents/
+da add .                                  # register + link this project
+da refresh                                # project canonical config into each platform's shape
 da status --audit && da doctor            # verify
 ```
 
