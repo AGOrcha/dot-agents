@@ -20,13 +20,89 @@ The composition rules we want enforced are restatements of the tier invariants i
 | Skill | **T2 compound** | `iteration-close`, `orchestrator-session-start`, `isp` |
 
 The primitive examples above are a representative slice, not the full set. The
-`da workflow` surface has ~34 subcommands — beyond the atoms shown, it also
-includes `merge-back`, `fold-back`, `delegation` (closeout/gate), `contract`,
-`drift`, `sweep`, `bundle`, `hook-sentinel`, `hook-outcome`, `archive-orphans`,
-and `plan` verbs (`schedule`, `derive-scope`, `check-scope`), among others. Run
-`da workflow --help` for the full surface.
+`da workflow` surface ships ~37 top-level subcommands (several with their own
+sub-verbs); the [full command surface](#full-da-workflow-command-surface) below
+groups every one. Run `da workflow --help` for the generated listing.
 
 `tier:` + `calls:` metadata lives in the package-doc comment of each T1 source file (see `commands/workflow/close_task.go` and `start_task.go`). A `TestTierDeclarationsPresent…` pin guards the markers so a refactor that strips them fails the suite immediately rather than silently breaking downstream lint.
+
+## Full `da workflow` command surface
+
+Every top-level `da workflow` subcommand, grouped by role. Sub-verbs are listed
+in parentheses. `close-task` and `start-task` are the T1 client commands
+detailed elsewhere on this page; everything else is a T0 primitive (or a
+primitive family). `--json` is available on the machine-readable verbs.
+
+**Session state & orientation**
+
+| Command | What it does |
+|---------|--------------|
+| `status` | Show workflow state for the current project (includes the Work Tracking block). |
+| `orient` | Render session orient context for the current project. |
+| `health` | Show a workflow health snapshot. |
+| `checkpoint` | Write a checkpoint (`--message`, `--verification-status`/`--verification-summary`, `--log-to-iter N [--role] [--verifier-type]`). |
+| `log` | Show recent checkpoint log entries (`--all`). |
+| `journal` (`snapshot`, `recover`, `show`, `prune`, `append`) | Session-handoff journal — see [below](#session-handoff-journal-da-workflow-journal). |
+
+**Selection & planning**
+
+| Command | What it does |
+|---------|--------------|
+| `plan` (`show`, `graph`, `create`, `update`, `archive`, `schedule`, `derive-scope`, `check-scope`) | List canonical plans; sub-verbs show/render/create/update/archive plans, print the wave schedule, and derive/check scope-evidence sidecars. Bare `plan` lists all canonical plans. |
+| `task` (`add`, `update`, `rename`, `supersede`) | Add, update, rename, or supersede tasks within a canonical plan (rename/supersede repoint every dependency; both take `--dry-run`/`--json`). |
+| `tasks <plan-id>` | Show the tasks for a canonical plan. |
+| `slices <plan-id>` | Show the slices for a canonical plan. |
+| `eligible` | List all unblocked eligible tasks across active plans with conflict detection (`--plan`, `--limit`). |
+| `slots` | Show the slot ledger (occupied / awaiting-owner / blocked) across active plans (`--plan`). |
+| `next` | Suggest the next actionable canonical task (`--plan`). |
+| `complete --plan <ids>` | Probe scoped plan-completion state. |
+| `advance <plan-id> --task --status` | Advance a task's status within a canonical plan (`--commit-state` to stage + commit atomically). |
+
+**Verification & scoring**
+
+| Command | What it does |
+|---------|--------------|
+| `verify` (`record`, `log`) | Manage the verification log: `record` a test/lint/build/format/custom/review run; `log` shows entries (`--all`). |
+
+**Delegation & fanout**
+
+| Command | What it does |
+|---------|--------------|
+| `fanout` | Delegate a task to a sub-agent with a bounded write scope (bundle-producing; many flags — see `--help`). |
+| `contract` | Materialize and inspect delegation contracts for direct orchestrator work. |
+| `bundle` (`stages`) | Inspect delegation bundle artifacts; `stages` expands a bundle into the ordered impl → verifier(s) → review stage list. |
+| `merge-back --task --summary` | Record a sub-agent's completed work as a merge-back artifact (`--commit-state`). |
+| `delegation` (`closeout`, `gate`) | Parent-driven delegation lifecycle: `closeout` archives merge-backs and reconciles task state; `gate` evaluates review evidence into accept/reject/escalate. |
+| `fold-back` (`create`, `update`, `list`) | Route loop observations into TASKS.yaml notes, plan summary, or a `~/.agents` proposal. |
+
+**Profiles, prompts & graph**
+
+| Command | What it does |
+|---------|--------------|
+| `prefs` (`show`, `set-local`, `set-shared`) | Show resolved workflow preferences; set a user-local override or propose a shared change. |
+| `app-types` | List available `app_type` values for the current repo (`--verbose`, `--format`). |
+| `resolve-prompt --kind --slug` | Resolve a stage profile's composed (base-first, scope-resolved) `prompt_files`. |
+| `pipeline` | Emit the materialized per-task pipeline from the profile IR. |
+| `graph` (`query`, `health`) | Query knowledge-graph context by bridge intent; `health` reports bridge adapter state. |
+
+**Persistence & maintenance**
+
+| Command | What it does |
+|---------|--------------|
+| `commit` | Stage and commit workflow-state changes — managed roots plus declared session paths (`--dry-run`, `--include`). Idempotent. |
+| `drift` | Detect workflow drift across managed repos (read-only). |
+| `sweep` | Plan and optionally (`--apply`) fix workflow drift across managed repos. |
+| `archive-orphans` | Sweep stale active merge-back/delegation artifacts after a plan archive. |
+| `hook-sentinel` | Write/read/clear hook sentinels declaring per-skill stop-gate context. |
+| `hook-outcome` | Append hook gate outcomes to the active iteration's sidecar. |
+| `state-ref` (`reconcile`) | Inspect and reconcile the machine coordination state ref (`refs/agents/state`) — see [below](#coordination-state-reconcile-da-workflow-state-ref-reconcile). |
+
+**Client commands (T1)**
+
+| Command | What it does |
+|---------|--------------|
+| `start-task <plan-id> --task` | Start-of-iteration client command: activate plan → focus task → derive scope → commit. |
+| `close-task <plan-id> --task` | End-of-iteration client command: checkpoint → score → advance → focus → commit. |
 
 ## Composition rules (= tier invariants)
 
@@ -65,7 +141,12 @@ da workflow commit
     # honors commit.disable per-project opt-out
 ```
 
-`--no-commit` skips the final step; `--next-focus` overrides the auto-pick.
+`--no-commit` skips the final commit step; `--next-focus <task>` overrides the
+auto-picked next focus. `--score-recompute` scopes the score step —
+`current` (default; the just-closed iteration only), `recent-N`, or `all`.
+`--repo-dir <path>` sets the repository root used for git topology (defaults to
+the current working directory), and `--transcript-dir <path>` (repeatable) names
+agent transcript roots for token backfill during scoring.
 
 The underlying `workflow commit` primitive takes `--dry-run` (print the staging
 path set + generated commit message; make no changes) and `--include <path>`

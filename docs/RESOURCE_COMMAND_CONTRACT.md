@@ -53,8 +53,20 @@ Rationale:
 | **MCP** | `mcp list`, `mcp show`, `mcp remove` | same as rules |
 | **Settings** | `settings list`, `settings show`, `settings remove` | same as rules |
 
-Canonical hook storage and bundle layout: `~/.agents/hooks/…` with `HOOK.yaml` bundles (see
-`da hooks --help`).
+Canonical hook storage and bundle layout: `~/.agents/hooks/<scope>/<logical-name>/HOOK.yaml`
+bundles (optionally with sidecar scripts), where `<scope>` is `global` or a managed
+project name (see `da hooks --help`). The hooks family also spans two **legacy**
+surfaces so pre-bundle setups stay inspectable:
+
+- **Legacy single-file JSON hooks** (`~/.agents/hooks/<scope>/<name>.json`) are still
+  listed, shown, and removed alongside canonical bundles — `hooks list`/`show` label the
+  source kind so bundles and legacy files are distinguishable; prefer `HOOK.yaml` for new
+  work (import/refresh canonicalize legacy content into bundles).
+- **Legacy settings projection (read-only fallback):** when a scope has no canonical or
+  legacy hook specs, `hooks list` falls back to projecting the `hooks` block of
+  `~/.agents/settings/<scope>/claude-code.json` under a "legacy settings projection"
+  header. It is display-only — no dedicated mutation path writes that file through the
+  hooks family.
 
 ## Explicitly out of scope here
 

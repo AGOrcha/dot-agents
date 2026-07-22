@@ -22,12 +22,17 @@ The root command registers these **persistent** flags in `commands/root.go` (`Ne
 | `--yes` | `-y` | Non-interactive assent to prompts |
 | `--json` | | Machine-readable output where implemented |
 
-Nested subcommands may define **local** flags with the same long name. A local would **shadow** the root binding for that subcommand only; the project's direction is to avoid that (read the global instead — e.g. `da config`/`workflow status` now read `Flags.JSON`). Four locals intentionally **augment** (OR-merge) a global rather than shadow it — they are not violations:
+Nested subcommands may define **local** flags with the same long name. A local would **shadow** the root binding for that subcommand only; the project's direction is to avoid that (read the global instead — e.g. `da config`/`workflow status` now read `Flags.JSON`). Nine locals intentionally **augment** (OR-merge) a global rather than shadow it — they are not violations:
 
 - **`kg ingest --dry-run`** — OR-merged with the global `-n` (`commands/kg/kg.go`); see [`kg ingest` dry-run](#kg-ingest-dry-run-vs-global-dry-run).
 - **`workflow commit --dry-run`** — OR-merged with the global `--dry-run` (`commands/workflow/commit_cmd.go:211-218`): `effectiveDryRun = dryRun || deps.Flags.DryRun()`.
 - **`workflow fold-back create --dry-run`** — OR-merged with the global `-n` (`commands/workflow/delegation.go:706-713`): `local || safeDryRun()`.
 - **`hook-sentinel --json`** — OR-merged with the global `--json` (`commands/workflow/hook_sentinel.go:858,1050`): emits the sentinel as JSON if either the local `--json` or the global `--json` is set.
+- **`workflow task rename --dry-run` / `--json`** — both OR-merged with the globals (`commands/workflow/cmd.go:478,484`; the runner reads `in.JSON || deps.Flags.JSON()` at `commands/workflow/plan_task.go:1549`).
+- **`workflow task supersede --dry-run` / `--json`** — both OR-merged (`commands/workflow/cmd.go:503,509`; `asJSON || deps.Flags.JSON()` at `commands/workflow/plan_task.go:3798`).
+- **`workflow state-ref reconcile --dry-run` / `--json`** — both OR-merged (`commands/workflow/cmd.go:1219,1224`; `asJSON || deps.Flags.JSON()` at `commands/workflow/state_ref_reconcile.go:283`).
+- **`workflow start-task --dry-run`** — OR-merged with the global `-n` (`commands/workflow/start_task.go:99-101`): `local || safeDryRun()`.
+- **`workflow pipeline emit --dry-run`** — OR-merged with the global `-n` (`commands/workflow/pipeline_emit.go:94-96`): `local || safeDryRun()`.
 
 ## Legend
 
@@ -68,7 +73,7 @@ Direct children of `da`. Unless noted, all five globals are parsed.
 | `score` | supported | unsupported | unsupported | unsupported | unsupported | Reads `Flags.JSON` (`commands/score.go`); locals `--no-write`/`--recompute` |
 | `session` | unsupported | unsupported | unsupported | unsupported | unsupported | `session stats` renders human-only platform usage; reads no globals |
 | `workflow` | unsupported | unsupported | unsupported | unsupported | unsupported | Per-subcommand; see [Workflow](#workflow-subcommands) |
-| `review` | unsupported | unsupported | unsupported | unsupported | unsupported | |
+| `review` | partial | unsupported | unsupported | unsupported | unsupported | Admin subtree is JSON-capable: `review users` (add/list/remove/set-role) and `review audit` (tail/verify/repair/prune) emit JSON via the global `--json` (`commands/review_admin.go:460-733`). The proposal surface (`review`/`show`/`approve`/`reject`, `commands/review.go`) reads no globals |
 | `sync` | unsupported | partial | partial | unsupported | unsupported | `init` / `commit` / `push` honor `--dry-run`; `pull` rejects `--dry-run` (errors); `push` + `pull` (refresh prompt) honor `--yes`; `status` / `log` do not use these globals |
 | `explain` | unsupported | unsupported | unsupported | unsupported | unsupported | |
 | `install` | unsupported | supported | unsupported | supported | supported | Large surface; `--dry-run` / `--verbose` used throughout `install.go` |
@@ -78,11 +83,13 @@ Direct children of `da`. Unless noted, all five globals are parsed.
 
 ### Read-only / doc-style families
 
-For **`explain`**, **`review`**, and **`skills`**, all five globals are effectively
-**unsupported** (no-op) today while still appearing in root help. **`agents`**,
-**`hooks`**, **`mcp`**, **`rules`**, and **`settings`** are unsupported *except* their
-`remove` subcommands, which honor `--dry-run`/`--yes`/`--force`. Scripts must not rely
-on globals for the read-only paths.
+For **`explain`** and **`skills`**, all five globals are effectively
+**unsupported** (no-op) today while still appearing in root help. **`review`** is
+unsupported on its proposal surface (`review`/`show`/`approve`/`reject`), but its
+**admin subtree** (`review users …`, `review audit …`) reads the global `--json`.
+**`agents`**, **`hooks`**, **`mcp`**, **`rules`**, and **`settings`** are unsupported
+*except* their `remove` subcommands, which honor `--dry-run`/`--yes`/`--force`. Scripts
+must not rely on globals for the read-only paths.
 
 ### `sync` (partial)
 
