@@ -64,6 +64,7 @@ func committedRepoTemplate() (string, error) {
 				"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
 				"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e",
 				"GIT_AUTHOR_DATE=2026-05-23T00:00:00Z", "GIT_COMMITTER_DATE=2026-05-23T00:00:00Z",
+				"GIT_OPTIONAL_LOCKS=0",
 			)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				return &fixtureGitError{args: args, err: err, out: out}
@@ -79,6 +80,8 @@ func committedRepoTemplate() (string, error) {
 			{"config", "user.email", "t@e"},
 			{"config", "user.name", "t"},
 			{"config", "commit.gpgsign", "false"},
+			{"config", "gc.auto", "0"},
+			{"config", "maintenance.auto", "false"},
 			{"add", "README"},
 			{"commit", "-q", "-m", "seed"},
 		} {
@@ -132,6 +135,16 @@ func sharedCommittedRepo(t *testing.T) string {
 func copyDirContents(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
+			// A git-internal transient (a background gc/maintenance lock, or a
+			// loose object mid-repack) can vanish between readdir and lstat.
+			// Such files are never part of the committed state we copy, so a
+			// vanished entry is skipped rather than failing the whole copy.
+			// gc/maintenance are also disabled on the template (see
+			// committedRepoTemplate), so nothing should mutate it post-build;
+			// this is a belt-and-suspenders guard against that race.
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
 			return walkErr
 		}
 		rel, err := filepath.Rel(src, path)
@@ -143,6 +156,9 @@ func copyDirContents(src, dst string) error {
 		}
 		info, err := d.Info()
 		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
 			return err
 		}
 		return copyFixtureEntry(path, filepath.Join(dst, rel), info)
