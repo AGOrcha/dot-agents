@@ -583,17 +583,17 @@ export async function handleReadRoute(request: Request, env: Env): Promise<Respo
     return getHealth(request, env);
   }
 
-  const runIterations = url.pathname.match(
-    /^\/api\/v1\/observability\/runs\/([^/]+)\/iterations$/,
+  const runIterations = /^\/api\/v1\/observability\/runs\/([^/]+)\/iterations$/.exec(
+    url.pathname,
   );
   if (runIterations !== null) {
     return listIterations(request, env, url, runIterations[1]);
   }
-  const run = url.pathname.match(/^\/api\/v1\/observability\/runs\/([^/]+)$/);
+  const run = /^\/api\/v1\/observability\/runs\/([^/]+)$/.exec(url.pathname);
   if (run !== null) {
     return getRun(request, env, run[1]);
   }
-  const iteration = url.pathname.match(/^\/api\/v1\/observability\/iterations\/([^/]+)$/);
+  const iteration = /^\/api\/v1\/observability\/iterations\/([^/]+)$/.exec(url.pathname);
   if (iteration !== null) {
     return getIteration(request, env, url, iteration[1]);
   }

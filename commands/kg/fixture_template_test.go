@@ -96,35 +96,41 @@ func copyGitTemplate(src, dst string) error {
 		if rel == "." {
 			return nil
 		}
-		target := filepath.Join(dst, rel)
 		info, err := d.Info()
 		if err != nil {
 			return err
 		}
-		switch {
-		case d.IsDir():
-			return os.MkdirAll(target, info.Mode().Perm())
-		case info.Mode()&os.ModeSymlink != 0:
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		default:
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
-				return err
-			}
-			mt := info.ModTime()
-			return os.Chtimes(target, mt, mt)
-		}
+		return copyGitEntry(path, filepath.Join(dst, rel), d, info)
 	})
+}
+
+// copyGitEntry copies a single walked entry (dir, symlink, or regular file)
+// from path to target, preserving permission bits and — for regular files —
+// modification time.
+func copyGitEntry(path, target string, d fs.DirEntry, info fs.FileInfo) error {
+	switch {
+	case d.IsDir():
+		return os.MkdirAll(target, info.Mode().Perm())
+	case info.Mode()&os.ModeSymlink != 0:
+		link, err := os.Readlink(path)
+		if err != nil {
+			return err
+		}
+		return os.Symlink(link, target)
+	default:
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
+			return err
+		}
+		mt := info.ModTime()
+		return os.Chtimes(target, mt, mt)
+	}
 }
 
 // TestKGRepoTemplateReusesSingleBootstrap is the instrumented H5 proof: once

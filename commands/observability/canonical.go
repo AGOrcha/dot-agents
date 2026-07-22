@@ -57,37 +57,47 @@ func appendCanonical(out *bytes.Buffer, value any) error {
 		}
 		out.WriteString(number)
 	case []any:
-		out.WriteByte('[')
-		for i, item := range v {
-			if i > 0 {
-				out.WriteByte(',')
-			}
-			if err := appendCanonical(out, item); err != nil {
-				return err
-			}
-		}
-		out.WriteByte(']')
+		return appendCanonicalArray(out, v)
 	case map[string]any:
-		keys := make([]string, 0, len(v))
-		for key := range v {
-			keys = append(keys, key)
-		}
-		sort.Slice(keys, func(i, j int) bool { return utf16Less(keys[i], keys[j]) })
-		out.WriteByte('{')
-		for i, key := range keys {
-			if i > 0 {
-				out.WriteByte(',')
-			}
-			appendCanonicalString(out, key)
-			out.WriteByte(':')
-			if err := appendCanonical(out, v[key]); err != nil {
-				return err
-			}
-		}
-		out.WriteByte('}')
+		return appendCanonicalObject(out, v)
 	default:
 		return fmt.Errorf("unsupported JSON value %T", value)
 	}
+	return nil
+}
+
+func appendCanonicalArray(out *bytes.Buffer, values []any) error {
+	out.WriteByte('[')
+	for i, item := range values {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		if err := appendCanonical(out, item); err != nil {
+			return err
+		}
+	}
+	out.WriteByte(']')
+	return nil
+}
+
+func appendCanonicalObject(out *bytes.Buffer, values map[string]any) error {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return utf16Less(keys[i], keys[j]) })
+	out.WriteByte('{')
+	for i, key := range keys {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		appendCanonicalString(out, key)
+		out.WriteByte(':')
+		if err := appendCanonical(out, values[key]); err != nil {
+			return err
+		}
+	}
+	out.WriteByte('}')
 	return nil
 }
 

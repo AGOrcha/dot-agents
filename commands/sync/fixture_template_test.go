@@ -107,35 +107,51 @@ func copyGitTemplate(src, dst string) error {
 		if rel == "." {
 			return nil
 		}
-		target := filepath.Join(dst, rel)
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		switch {
-		case d.IsDir():
-			return os.MkdirAll(target, info.Mode().Perm())
-		case info.Mode()&os.ModeSymlink != 0:
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		default:
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
-				return err
-			}
-			mt := info.ModTime()
-			return os.Chtimes(target, mt, mt)
-		}
+		return copyGitEntry(path, filepath.Join(dst, rel), d)
 	})
+}
+
+// copyGitEntry replicates one walked entry (dir, symlink, or regular file)
+// from path into target, dispatching on the entry kind.
+func copyGitEntry(path, target string, d fs.DirEntry) error {
+	info, err := d.Info()
+	if err != nil {
+		return err
+	}
+	switch {
+	case d.IsDir():
+		return os.MkdirAll(target, info.Mode().Perm())
+	case info.Mode()&os.ModeSymlink != 0:
+		return copyGitSymlink(path, target)
+	default:
+		return copyGitFile(path, target, info)
+	}
+}
+
+// copyGitSymlink recreates the symlink at path as target.
+func copyGitSymlink(path, target string) error {
+	link, err := os.Readlink(path)
+	if err != nil {
+		return err
+	}
+	return os.Symlink(link, target)
+}
+
+// copyGitFile copies a regular file's contents, permission bits, and mtime
+// from path into target, creating the parent directory as needed.
+func copyGitFile(path, target string, info fs.FileInfo) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
+		return err
+	}
+	mt := info.ModTime()
+	return os.Chtimes(target, mt, mt)
 }
 
 // TestSyncRepoTemplateReusesSingleBootstrap is the instrumented H5 proof: once

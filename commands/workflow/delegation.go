@@ -459,7 +459,7 @@ func parseFoldBackUpsertInputs(cmd *cobra.Command, updateOnly bool) (*foldBackUp
 	in.propose, _ = cmd.Flags().GetBool("propose")
 	in.slug, _ = cmd.Flags().GetString("slug")
 	in.slug = strings.TrimSpace(in.slug)
-	in.writeScope = trimStringSlice(mustGetStringSlice(cmd, "write-scope"))
+	in.writeScope = trimStringSlice(mustGetStringSlice(cmd, workflowFlagWriteScope))
 
 	if strings.TrimSpace(in.observation) == "" {
 		return nil, fmt.Errorf("observation text is required")
@@ -1264,7 +1264,7 @@ func parseFanoutInputs(cmd *cobra.Command) fanoutInputs {
 	taskID, _ := cmd.Flags().GetString("task")
 	sliceID, _ := cmd.Flags().GetString("slice")
 	owner, _ := cmd.Flags().GetString("owner")
-	writeScopeCSV, _ := cmd.Flags().GetString("write-scope")
+	writeScopeCSV, _ := cmd.Flags().GetString(workflowFlagWriteScope)
 	withTests, _ := cmd.Flags().GetBool("with-tests")
 	return fanoutInputs{
 		planID:             planID,
@@ -1272,7 +1272,7 @@ func parseFanoutInputs(cmd *cobra.Command) fanoutInputs {
 		sliceID:            sliceID,
 		owner:              owner,
 		writeScopeCSV:      writeScopeCSV,
-		writeScopeExplicit: cmd.Flags().Changed("write-scope"),
+		writeScopeExplicit: cmd.Flags().Changed(workflowFlagWriteScope),
 		withTests:          withTests,
 	}
 }

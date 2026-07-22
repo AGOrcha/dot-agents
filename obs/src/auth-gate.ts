@@ -37,7 +37,7 @@ function normalizeRequestPath(request: Request): Request | null {
   const url = new URL(request.url);
   let decodedPath: string;
   try {
-    decodedPath = decodeURIComponent(url.pathname).replace(/\\/g, "/");
+    decodedPath = decodeURIComponent(url.pathname).replaceAll("\\", "/");
   } catch {
     return null;
   }

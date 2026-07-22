@@ -58,7 +58,7 @@ const ITERATION_PAYLOAD_KEYS: Record<string, true> = {
 }
 const SESSION_PAYLOAD_KEYS: Record<string, true> = { session_id: true }
 const RUBRIC_PAYLOAD_KEYS: Record<string, true> = { rubric_version: true }
-const RFC3339_UTC_SECONDS = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/
+const RFC3339_UTC_SECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
 const DEFAULT_BASE_DELAY_MS = 1000
 const DEFAULT_MAX_DELAY_MS = 30_000
 

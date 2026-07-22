@@ -141,35 +141,41 @@ func copyDirContents(src, dst string) error {
 		if rel == "." {
 			return nil
 		}
-		target := filepath.Join(dst, rel)
 		info, err := d.Info()
 		if err != nil {
 			return err
 		}
-		switch {
-		case d.IsDir():
-			return os.MkdirAll(target, info.Mode().Perm())
-		case info.Mode()&os.ModeSymlink != 0:
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		default:
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
-				return err
-			}
-			mt := info.ModTime()
-			return os.Chtimes(target, mt, mt)
-		}
+		return copyFixtureEntry(path, filepath.Join(dst, rel), info)
 	})
+}
+
+// copyFixtureEntry copies a single template entry (dir, symlink, or file) to
+// target, preserving permission bits and — for regular files — modification
+// times so the copied git index stays racily-clean. See copyDirContents.
+func copyFixtureEntry(path, target string, info fs.FileInfo) error {
+	switch {
+	case info.IsDir():
+		return os.MkdirAll(target, info.Mode().Perm())
+	case info.Mode()&os.ModeSymlink != 0:
+		link, err := os.Readlink(path)
+		if err != nil {
+			return err
+		}
+		return os.Symlink(link, target)
+	default:
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
+			return err
+		}
+		mt := info.ModTime()
+		return os.Chtimes(target, mt, mt)
+	}
 }
 
 // TestSharedFixtureTemplateReusesSingleBootstrap is the instrumented H1 proof:

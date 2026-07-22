@@ -14,6 +14,8 @@ const (
 	workflowFlagCommitState     = "commit-state"
 	cmdHintCanonicalPlanID      = "Pass a canonical plan ID from `da workflow plan`."
 	cmdFlagCanonicalPlanIDDescr = "Canonical plan ID (required)"
+	workflowFlagDryRun          = "dry-run"
+	cmdHintPlanOwnsTask         = "Pass the canonical plan ID that owns the task."
 )
 
 // Command wiring for `da workflow`: cobra subtree and exported NewCmd(deps).
@@ -447,7 +449,7 @@ func newWorkflowTaskUpdateCmd() *cobra.Command {
 		Example: deps.ExampleBlock(
 			"  da workflow task update loop-orchestrator-layer --task phase-5 --notes \"Needs provider-consumer pairing\"",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
+		Args: deps.ExactArgsWithHints(1, cmdHintPlanOwnsTask),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowTaskUpdate(args[0], taskUpdateID, taskUpdateTitle, taskUpdateNotes, taskUpdateWriteScope, taskUpdateDependsOn, taskUpdateBlocks)
 		},
@@ -473,14 +475,14 @@ func newWorkflowTaskRenameCmd() *cobra.Command {
 			"  da workflow task rename loop-orchestrator-layer --from phase-5 --to phase-5-cleanup --dry-run",
 			"  da workflow task rename loop-orchestrator-layer --from phase-5 --to phase-5-cleanup --json",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
+		Args: deps.ExactArgsWithHints(1, cmdHintPlanOwnsTask),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowTaskRename(cmd.OutOrStdout(), args[0], oldID, newID, dryRun || deps.Flags.DryRun(), asJSON)
 		},
 	}
 	cmd.Flags().StringVar(&oldID, "from", "", "Existing task ID to rename (required)")
 	cmd.Flags().StringVar(&newID, "to", "", "New task ID (required)")
-	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Print dependents that would be repointed without writing")
+	cmd.Flags().BoolVarP(&dryRun, workflowFlagDryRun, "n", false, "Print dependents that would be repointed without writing")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit the result as JSON (also honours the global --json flag)")
 	_ = cmd.MarkFlagRequired("from")
 	_ = cmd.MarkFlagRequired("to")
@@ -505,7 +507,7 @@ func newWorkflowTaskSupersedeCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&oldID, "old", "", "Task ID to remove (required)")
 	cmd.Flags().StringVar(&newID, "new", "", "Existing replacement task ID (required)")
-	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Print dependents that would be repointed without writing")
+	cmd.Flags().BoolVarP(&dryRun, workflowFlagDryRun, "n", false, "Print dependents that would be repointed without writing")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit the result as JSON (also honours the global --json flag)")
 	_ = cmd.MarkFlagRequired("old")
 	_ = cmd.MarkFlagRequired("new")
@@ -641,7 +643,7 @@ func newWorkflowAdvanceCmd() *cobra.Command {
 			"  da workflow advance loop-orchestrator-layer --task phase-5 --status in_progress",
 			"  da workflow advance my-plan --task t1 --status completed --commit-state",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
+		Args: deps.ExactArgsWithHints(1, cmdHintPlanOwnsTask),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := runWorkflowAdvance(args[0], advanceTask, advanceStatus); err != nil {
 				return err
@@ -1034,7 +1036,7 @@ func newWorkflowFoldBackCmd() *cobra.Command {
 	foldBackCreateCmd.Flags().String("slug", "", "Stable id for create-or-update (D2.a); one tagged line per slug in TASKS/plan notes")
 	foldBackCreateCmd.Flags().Bool("propose", false, "Route as proposal rather than inline task note")
 	foldBackCreateCmd.Flags().StringSlice("write-scope", nil, "Declared diff-scope path(s) the proposal writes into (repeatable; proposal only)")
-	foldBackCreateCmd.Flags().Bool("dry-run", false, "Print the routing decision and paths without writing anything")
+	foldBackCreateCmd.Flags().Bool(workflowFlagDryRun, false, "Print the routing decision and paths without writing anything")
 	_ = foldBackCreateCmd.MarkFlagRequired("plan")
 	_ = foldBackCreateCmd.MarkFlagRequired("observation")
 	foldBackUpdateCmd := &cobra.Command{
@@ -1220,7 +1222,7 @@ already-consistent run makes no new ref commit.`,
 			return runWorkflowStateRefReconcile(cmd.OutOrStdout(), opts)
 		},
 	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what would be seeded without writing to the ref")
+	cmd.Flags().BoolVar(&dryRun, workflowFlagDryRun, false, "Report what would be seeded without writing to the ref")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit the reconcile report as JSON (also honours the global --json flag)")
 	return cmd
 }
