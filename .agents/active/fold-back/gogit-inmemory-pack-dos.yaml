@@ -1,0 +1,8 @@
+schema_version: 1
+id: gogit-inmemory-pack-dos
+plan_id: package-artifact-install
+task_id: ""
+observation: t1b closed the achievable fetch-time bounds (blob:limit partial-clone filter for filter-capable servers + pre-decode tree/blob size gate). Documented residual — go-git v6 resolves the received packfile in memory (delta reconstruction + non-blob object decode) BEFORE the quota storer sees a write, and exposes no hook to bound that. So a malicious all-delta-chain pack over non-blob objects, or a filter-incapable server, can still OOM. Availability-only from UNTRUSTED git sources (da-agc is trusted). Follow-up — a transport-byte cap or a shell-git partial-clone fallback for untrusted git sources. Trigger — before advertising untrusted-remote git package sources.
+classification: proposal
+routed_to: proposal:obs-gogit-inmemory-pack-dos.md
+created_at: "2026-07-16T01:28:47Z"

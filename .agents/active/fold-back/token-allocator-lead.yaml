@@ -1,0 +1,8 @@
+schema_version: 1
+id: token-allocator-lead
+plan_id: r3-background-worker-service
+task_id: ""
+observation: Parked lead from research Part N (myprasanna great-flattening) — token allocator plus recurring intent ('state your priorities, the system decides how to spend tokens'; 'fix every production crash' as standing intent). Precursors exist — the r3 scheduler's recurring background tasks and manual cost-aware model scoping (worker-model-selection memory + pipeline-architect cost-tuning). Missing piece is a priority-to-spend mechanism. Trigger — R2/R3 telemetry exposes per-stage token cost, making an allocator decidable. Additive, gate-neutral, no wave decision reopened. Source research/articles/myprasanna-great-flattening.md; eval Part N.
+classification: proposal
+routed_to: proposal:obs-token-allocator-lead.md
+created_at: "2026-07-16T00:02:04Z"

@@ -1,0 +1,8 @@
+schema_version: 1
+id: oci-artifact-nongzip-early-reject
+plan_id: package-artifact-install
+task_id: ""
+observation: t8 round-2 (Codex LOW, deferred) — a non-gzip payload that satisfies guardOCIArtifactType yields Bundle==nil from MaybeUntarBundle; FetchArtifact caches a junk blob and returns success, and the consumer fails closed only later at pass-2 (packages_pass2.go rejects nil Bundle). NOT a security hole. Hardening — reject a nil bundle early in the OCI artifact path with a clear ReasonContent error. Deferred because it changes the established non-gzip→nil-Bundle contract that several existing unit tests (TestOCIFetcherNonGzipBodyHasNoBundle explicitly, plus PullsAndCaches / DigestPinCacheHit / CapturesDigestCacheKey / AuthHeaderForRefWiredThroughPuller) rely on with non-gzip fixtures — landing it requires migrating those OCI test fixtures to real +tar+gzip bundles first (test-hygiene + hardening follow-up).
+classification: proposal
+routed_to: proposal:obs-oci-artifact-nongzip-early-reject.md
+created_at: "2026-07-16T06:43:19Z"

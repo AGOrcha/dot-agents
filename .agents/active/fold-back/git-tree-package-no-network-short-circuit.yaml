@@ -1,0 +1,8 @@
+schema_version: 1
+id: git-tree-package-no-network-short-circuit
+plan_id: package-artifact-install
+task_id: ""
+observation: t5 dogfood — every da install/refresh re-clones each git-tree package ref from upstream even when the CAS is warm and the content digest verifies (~2s per re-run against the live remote). The no-write guarantee holds at the lock/CAS/projection layer but not the network layer. A warm-CAS + matching-lock-digest ref should skip the network fetch entirely (resolve from CAS). Feeds t9-perf — profile and add a CAS-warm fetch short-circuit for git-tree (and OCI) refs.
+classification: proposal
+routed_to: proposal:obs-git-tree-package-no-network-short-circuit.md
+created_at: "2026-07-16T02:28:33Z"

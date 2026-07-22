@@ -1,0 +1,8 @@
+schema_version: 1
+id: see-it-run-verifier-evidence
+plan_id: r2-observability-dashboard
+task_id: ""
+observation: Parked lead from research Part N (myprasanna great-flattening, bottleneck 4) — see-it-run E2E testing as verifier evidence. Add a browser-driven flow-proof recording artifact and a per-branch live preview URL to the verifier/iteration evidence surface ('running code isn't the bar; seeing it run is'). We have the verify + playwright skills but no recording-as-iteration-evidence discipline and no per-branch preview outside the docs site. Trigger — when r2's verifier-evidence surface lands, or the first UI-heavy app_type is onboarded via pipeline-architect. Additive, gate-neutral, no wave decision reopened. Source research/articles/myprasanna-great-flattening.md; eval research/articles-evaluation-kg-and-adjacent.md Part N.
+classification: small
+routed_to: plan_summary:r2-observability-dashboard
+created_at: "2026-07-16T00:01:45Z"

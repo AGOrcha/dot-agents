@@ -1,0 +1,8 @@
+schema_version: 1
+id: control-plane-multiplayer-lead
+plan_id: full-loop-orchestration-runtime
+task_id: ""
+observation: SUPERSEDED 2026-07-15 (owner redirect) — re-anchored to plan r3-background-worker-service as [[control-plane-auth-proxy-lead]]. The cross-operator control plane belongs with kg-as-sot (graph-backend-adapter-contract) plus workstore plus the daemon/bg-service auth-proxy (growing toward a full session proxy), NOT the orchestration runtime. Architecture reference added — larsencc (Browser Use) control-plane-as-credential-proxy. See the re-homed record under r3-background-worker-service for the live lead + trigger. No wave decision reopened.
+classification: proposal
+routed_to: proposal:obs-control-plane-multiplayer-lead.md
+created_at: "2026-07-16T03:38:53Z"

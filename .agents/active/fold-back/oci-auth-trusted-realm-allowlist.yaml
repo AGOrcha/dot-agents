@@ -1,0 +1,8 @@
+schema_version: 1
+id: oci-auth-trusted-realm-allowlist
+plan_id: package-artifact-install
+task_id: ""
+observation: t7 round-3 cross-harness (Codex, demoted to LOW hardening) — the token-endpoint realm from WWW-Authenticate can be any https host and receives the credential; this is the standard OCI two-legged auth model (realm host deliberately differs from registry — Docker Hub auth.docker.io vs registry-1.docker.io, GHCR, ECR) and matches containerd/ORAS/docker, gated on https-only + reject-all-redirects, with realm trust inherited from the registry's authenticated TLS channel — so it is NOT a blocker and binding realm to registry host would break every real registry. Optional defense-in-depth for a hardened posture — add an opt-in per-Source trusted token-service origin allowlist (names/origins only) that, when set, requires the realm origin to match before attaching the credential; leave unset = today's standard behavior. Also — document (a) that realm trust is inherited from the registry TLS channel (matches ORAS/containerd) and (b) that HelperEnv names are forwarded verbatim and should not name other sources' credential env vars. Tie to the daemon auth-proxy work (control-plane-auth-proxy-lead) where a central credential broker makes an origin allowlist most valuable.
+classification: proposal
+routed_to: proposal:obs-oci-auth-trusted-realm-allowlist.md
+created_at: "2026-07-16T05:15:48Z"
