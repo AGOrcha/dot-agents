@@ -39,9 +39,9 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 **Purpose**: Build or incrementally update the code knowledge graph.
 
-**Current state**: Calls CRG MCP tools (`list_graph_stats_tool`, `build_or_update_graph_tool`) directly.
+**Current state**: Drives the `da kg` CLI (`da kg code-status`, `da kg build` / `da kg update`) — see `internal/scaffold/home/starter/skills/global/build-graph/SKILL.md`. MCP parity (`list_graph_stats_tool`, `build_or_update_graph_tool`) is available only via `da kg serve`; the skill prefers the CLI so the same commands work everywhere.
 
-**Integrated state**:
+**Command flow**:
 - Step 1: `da kg code-status` — check if the code graph exists and is current
 - Step 2: `da kg build` (first time) or `da kg update` (incremental)
 - Step 3: `da kg code-status` — report results
@@ -54,9 +54,9 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 **Purpose**: Token-efficient delta review using impact analysis. Reviews only what changed since last commit.
 
-**Current state**: Calls CRG MCP tools (`build_or_update_graph_tool`, `get_review_context_tool`, `get_impact_radius_tool`, `query_graph_tool`).
+**Current state**: Drives the `da kg` CLI (`da kg update`, `da kg changes`, `da kg impact`, `da kg bridge query`) — see `internal/scaffold/home/starter/skills/global/review-delta/instructions/workflow.md`. MCP parity (`build_or_update_graph_tool`, `get_review_context_tool`, `get_impact_radius_tool`, `query_graph_tool`) is available only via `da kg serve`.
 
-**Integrated state**:
+**Command flow**:
 - Step 1: `da kg update` — ensure graph reflects current state
 - Step 2: `da kg changes` — get risk-scored change analysis (replaces `get_review_context_tool`)
 - Step 3: `da kg impact <changed-file>` — blast radius for flagged files
@@ -71,9 +71,9 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 **Purpose**: Full PR review with blast-radius analysis.
 
-**Current state**: Same CRG MCP tools as review-delta, plus `semantic_search_nodes_tool`.
+**Current state**: Drives the same `da kg` CLI as review-delta (plus `da kg query --intent related_notes`) — see `internal/scaffold/home/starter/skills/global/review-pr/instructions/workflow.md`. MCP parity (including `semantic_search_nodes_tool`) via `da kg serve` only.
 
-**Integrated state**: Same as review-delta, plus:
+**Command flow**: Same as review-delta, plus:
 - Step 2a: `da kg changes --base main` — scope to PR diff
 - Step 6: `da kg query --intent related_notes <keyword>` — find related notes/symbols (replaces `semantic_search_nodes_tool`)
 
@@ -83,12 +83,11 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 **Purpose**: Pre-commit quality review.
 
-**Current state**: Runs git diff, applies code quality/security/performance rules. No graph integration.
+**Current state**: Runs a mandatory **Step 0 (KG context)** before any per-file review — `da kg changes --brief` for the structural change set and `da kg impact <changed-files>` for blast radius, captured verbatim into `reviewer_notes`; degrades gracefully when the KG bridge is unavailable. See `internal/scaffold/home/starter/skills/global/self-review/instructions/kg-context.md`.
 
-**Integrated state** (additions only — existing steps unchanged):
-- After step 1 (gather diff): `da kg changes --brief` — get risk scores and test gaps for changed symbols
+**Further integration** (candidate additions):
 - After step 4 (test coverage): `da kg bridge query --intent tests_for <changed-fn>` — structural test coverage check
-- New step: surface `note_symbol_links` for changed code — alert if a decision-documented function was modified
+- Surface `note_symbol_links` for changed code — alert if a decision-documented function was modified
 
 **Why this matters**: self-review is the most-run review skill. Adding lightweight graph awareness (just `--brief`) keeps it fast while catching impact that git diff alone misses.
 
@@ -109,7 +108,7 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 **Purpose**: Package session context for the next agent.
 
-**Current state**: Gathers git state, plans, progress, creates handoff document.
+**Current state**: Gathers git state, plans, and progress, and creates the handoff document. Auto-gather runs the **verified recovery view** `da workflow journal recover` — durable cross-session state re-verified against reality — and on resume the skill starts from that verified view rather than trusting the prose. It also captures a fresh snapshot (`da workflow journal snapshot`) and reasoned deltas (`da workflow journal append`). See `internal/scaffold/home/starter/skills/global/agent-handoff/instructions/auto-gather.md` and `verified-readback.md`.
 
 **Integrated state** (additions only):
 - New: include `da kg changes` summary in handoff — what symbols were modified this session
@@ -279,7 +278,9 @@ regardless of TTL, re-resolves, and rewrites the config section of
 `extends` layer against the AgentsRC layer schema. `da config verify`
 (`commands/config/verify.go`) runs offline repo setup-contract checks without
 re-fetching layers. `da config relevance` (`commands/config/relevance.go`)
-resolves a task's execution profile (units, topology, lenses) by `app_type`.
+resolves a task's execution profile across five facets — units, topology,
+lenses, graph (backend adapter-ref selection), and lessons (repo-local lesson
+relevance) — by `app_type`, sliced via `--filter <facet>|all`.
 
 **Skill integration**: Not skill-invoked today. These are operator-facing
 introspection commands; a future setup or doctor skill could call them to
@@ -298,13 +299,14 @@ Hooks bridge skills and commands by firing on agent events:
 | auto-format | post_tool_use (Write/Edit) | Runs formatters | None |
 | guard-commands | pre_tool_use (Bash) | Blocks dangerous commands | None |
 | secret-scan | post_tool_use (Write/Edit) | Warns on credential writes | None |
+| graph-orient | session_start | Runs `da kg health` (code-graph readiness) | Direct — surfaces graph status at session start (pairs with session-orient) |
 
-### New hooks for graph integration
+### Graph-integration hooks
 
 | Hook | Event | Command | Purpose |
 |------|-------|---------|---------|
 | graph-update | post_tool_use (Edit/Write/Bash) | `da kg update --skip-flows` | Keep graph current as code changes |
-| graph-precommit | pre_commit | `da kg changes --brief` | Surface risk before committing |
+| graph-precommit | pre_tool_use (Bash) | `da kg changes --brief` (via `graph-precommit.sh`, on git-commit-like Bash) | Surface risk before committing |
 
 These replace the hooks that `code-review-graph install` currently writes to `.claude/settings.json`.
 
