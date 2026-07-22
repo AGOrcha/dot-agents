@@ -36,5 +36,34 @@ was armed).
   via SendMessage, or spawn the next pass into a FRESH worktree off the
   updated branch — never a second concurrent worker into the live one.
 
+## Update (2026-07-21): "isolated" in a brief ≠ isolated; and reset-in-shared-tree
+
+Spawned 3 parallel Sonar fixers whose brief SAID "you run in an isolated
+worktree" — but the `task` call did NOT pass `isolated: true`, so all three ran
+in the ONE shared main checkout. Worse, each was told (via IRC, to fix a
+stale-base issue) to `git fetch && git reset --hard origin/master` — in a shared
+tree that is mutually destructive: `reset --hard` wipes every sibling's
+in-progress working-tree edits, and it moved the shared branch ref 3× (visible
+in `git reflog`). Net: collided, partial, untrustworthy patches.
+
+Then relaunching WITH `isolated: true` failed outright — `Isolated task
+execution requires a git repository. fatal: not a git repository: (null)` — the
+worktree-add machinery choked in a repo already carrying ~35 worktrees.
+
+Rules:
+- **Verify the `isolated: true` flag is actually passed** at launch; a brief
+  that merely SAYS "isolated" isolates nothing. Confirm from the spawn params,
+  not the prose.
+- **NEVER instruct a shared-tree (non-isolated) agent to `git reset --hard`**
+  (or any branch-ref move) — it destroys concurrent siblings' work and moves the
+  shared branch. Fix a wrong base by re-spawning from a correct base, not by
+  resetting under live siblings.
+- **`isolated: true` can itself fail** (`not a git repository`) in a repo dense
+  with worktrees. Have a DIY fallback: make the edits yourself in ONE controlled
+  worktree off `origin/master`, or run the workers strictly sequentially (one
+  writer, no reset) — don't keep retrying a flaky isolation machinery.
+- Root prevention: keep the orchestrator's main checkout ON `origin/master`
+  (not a stale plan branch) so any worktree/agent forks from the right base.
+
 Relates to [[subagent-out-of-workspace-access]] and
 [[stale-local-master-ref]] (all delegation-correctness rules).
