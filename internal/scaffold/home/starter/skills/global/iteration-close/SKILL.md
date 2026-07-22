@@ -1,6 +1,6 @@
 ---
 name: "iteration-close"
-description: "Use after completing a loop iteration's code changes and tests to persist workflow state via dot-agents CLI. Fixes the recurring 'persisted_via_workflow_commands: no' anti-pattern. Delegated workers: verify → checkpoint → merge-back (not advance). Direct work: verify → checkpoint → advance when the task is done."
+description: "Use after completing a loop iteration's code changes and tests to persist workflow state via dot-agents CLI. Fixes the recurring 'persisted_via_workflow_commands: no' anti-pattern. Delegated workers: verify → checkpoint → merge-back (not advance). Direct work: verify → checkpoint → `da workflow close-task` (scores, advances, and commits in one call)."
 argument-hint: "[--message <summary>] [--task <plan-id>/<task-id>] [--status pass|fail|partial]"
 tier: T2
 contract:
@@ -13,6 +13,7 @@ contract:
   writes:
     - ".agents/active/verification/log.jsonl — appended by `da workflow verify record --kind test` and `--kind review`."
     - ".agents/active/iteration-log/iter-N.yaml — written/merged by `da workflow checkpoint --log-to-iter <N> --role <impl|verifier|review>`. The `--role review` invocation is what populates the iter-log review block from the self-review artifact (closes the dead-coded path that motivated this skill's T2 contract)."
+    - ".agents/active/iteration-log/iter-N.score.yaml — written by `da workflow close-task` on the direct path (checkpoint → score → advance → focus → commit); the returned score value + band is rendered back to the operator."
     - ".agents/active/merge-back/<task_id>.md — produced by `da workflow merge-back` on the delegated path."
     - "loop-state.md self-assessment lines (`persisted_via_workflow_commands`, `proposal_queued`) — emitted to the chat narrative for the parent / loop owner to append."
   escape_hatches:
@@ -24,7 +25,7 @@ contract:
 
 # Iteration Close
 
-Closes out an **implementation** iteration by persisting workflow state through the dot-agents CLI. Typical chain: `verify record --kind test`, then `/self-review`, then `verify record --kind review`, then `workflow checkpoint --log-to-iter N --role review`, then `workflow merge-back` (delegated) or `workflow advance` (direct). Sets `persisted_via_workflow_commands: yes` in the loop-state self-assessment.
+Closes out an **implementation** iteration by persisting workflow state through the dot-agents CLI. Typical chain: `verify record --kind test`, then `/self-review`, then `verify record --kind review`, then `workflow checkpoint --log-to-iter N --role review`, then `workflow merge-back` (delegated) or `da workflow close-task` (direct — one call that scores the iteration, advances the task, refocuses the plan, and commits). Sets `persisted_via_workflow_commands: yes` in the loop-state self-assessment.
 
 **Not this skill:** routing loose orchestrator observations into plan notes or proposals — use `workflow fold-back create` (see `.agents/workflow/specs/meta-loop-operating-model/design.md`). **Delegation handoff** details live in `.agents/active/delegation-bundles/<delegation_id>.yaml` — use `delegation-lifecycle` for fanout through merge-back and parent closeout.
 
@@ -46,14 +47,14 @@ Closes out an **implementation** iteration by persisting workflow state through 
    Load → `instructions/workflow.md` § Invoke Self-Review
    Invoke `/self-review` so it writes `.agents/active/verification/<task_id>/review-decision.yaml` (per [ADR-0002](../../../docs/adr/0002-self-review-output-schema.md)). Then call `workflow verify record --kind review …` so the existing reader path picks up the YAML; then call `workflow checkpoint --log-to-iter <N> --role review` to populate the iter-log review block via `mergeReviewIterLog`. Document the failure modes (reject / escalate / accept) and respect the gating: a rejected review halts the chain.
 
-5. **Write checkpoint (impl)**
-   Load → `instructions/workflow.md` § Write Checkpoint
-   Run `workflow checkpoint` with iteration message and verification status. Pair with `--log-to-iter <N> --role impl` if the iteration log is being assembled.
+5. **Write the narrative checkpoint**
+   Load → `instructions/workflow.md` § Write the narrative checkpoint
+   Run `workflow checkpoint --message "<summary>" --verification-status <pass|partial>` so `workflow log` / `status` show the current iteration outcome. The iter-log `impl` block is written in Step 6 — by `close-task` on the direct path, or an explicit `--log-to-iter N --role impl` on the delegated path.
 
-6. **Finish canonical workflow** *(pick one path)*
-   Load → `instructions/workflow.md` § Delegation vs direct closeout, then § Merge-back (delegated) or § Advance Task (direct)
-   - **Delegated worker:** run `workflow merge-back` after verify + self-review + checkpoint; do **not** run `workflow advance` yourself.
-   - **Direct worker:** run `workflow advance <plan-id> --task <task-id> --status completed` only when the iteration fully completed that YAML task and you are not under an active parent delegation.
+6. **Close the iteration** *(pick one path)*
+   Load → `instructions/workflow.md` § Delegation vs direct closeout, then § Close the iteration (direct) or § Merge-back (delegated)
+   - **Direct worker:** run `da workflow close-task <plan-id> --task <task-id> --json` — one call that writes the iter-log `impl` block, scores the iteration, advances the task to `completed`, refocuses the plan to the next eligible task, and commits the workflow state. Render the returned score (value + band) back to the operator. Only run it when the iteration fully completed that YAML task and you are not under an active parent delegation.
+   - **Delegated worker:** run `workflow checkpoint --log-to-iter <N> --role impl`, then `workflow merge-back` — do **not** run `close-task`/`advance`; moving the canonical task to `completed` is the parent's call after review.
 
 7. **Refresh the production binary** *(stable section/feature only)*
    Load → `instructions/workflow.md` § Refresh Production Binary

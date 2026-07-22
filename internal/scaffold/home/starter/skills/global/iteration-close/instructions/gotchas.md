@@ -26,12 +26,12 @@
 - **Stale `workflow status` after writing checkpoint** — If `workflow status` still shows the old stale text immediately after `workflow checkpoint`, the checkpoint may have written to a different path. Check `da workflow log` to confirm the new entry appears.
 - **`workflow status` next action shows literal plan Status header** — The "Next action" field in `workflow status` extracts the first `Status:` line from the active plan file, not a semantic next action. Treat it as a freshness indicator, not task direction. Use `workflow orient` + `workflow tasks` for actual task selection.
 
-## Advance Task
+## Close the iteration (direct) / advance
 
-- **Delegated worker advancing the parent task** — If fanout created `.agents/active/delegation/<task-id>.yaml`, you are the worker: use **`workflow merge-back`**. The parent runs `workflow delegation closeout` after accepting your merge-back; accepted closeout already completes the delegated task. `workflow advance` is for direct, non-delegated work. Advancing from the worker breaks the orchestration model in `.agents/workflow/specs/workflow-parallel-orchestration/design.md`.
-- **Advancing a task with incomplete subtasks** — If a plan task has sub-checklist items still open in markdown, advancing YAML to `completed` creates drift. Only advance when the markdown plan and YAML are in sync.
-- **Wrong plan-id or task-id** — Use `da workflow plan` to list plan IDs and `da workflow tasks <plan-id>` to list exact task IDs before running `advance`. Typos silently fail or create a new task.
-- **Advancing before committing** — `workflow advance` should run after the commit is on the branch, not before. If tests pass but the commit fails, the YAML would show completed while code is uncommitted.
+- **Delegated worker closing/advancing the parent task** — If fanout created `.agents/active/delegation/<task-id>.yaml`, you are the worker: use **`workflow merge-back`**, never `close-task`/`advance`. The parent runs `workflow delegation closeout` after accepting your merge-back; accepted closeout already completes the delegated task. Closing/advancing from the worker breaks the orchestration model in `.agents/workflow/specs/workflow-parallel-orchestration/design.md`.
+- **Closing a task with incomplete subtasks** — If a plan task has sub-checklist items still open in markdown, moving the YAML to `completed` (via `close-task` or `advance`) creates drift. Only close when the markdown plan and YAML are in sync.
+- **Wrong plan-id or task-id** — Use `da workflow plan` to list plan IDs and `da workflow tasks <plan-id>` to list exact task IDs before running `close-task`/`advance`. Typos silently fail or create a new task.
+- **`close-task` commits for you** — on the direct path `close-task` runs checkpoint → score → advance → commit in one step, so you do not separately `advance` then `commit`. Get your code commit on the branch first; `close-task` then commits the workflow state on top. Pass `--no-commit` only when a caller batches the commit elsewhere.
 
 ## Loop-State Log Entry
 
