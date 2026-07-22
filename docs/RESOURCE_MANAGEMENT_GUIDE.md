@@ -1,29 +1,36 @@
 ---
-title: Managing Rules, MCP & Settings
-description: A task-oriented guide to the canonical rules, MCP-server, and settings resource families — what each is, how to declare one, how it is emitted per platform, and the da list/show/remove surface.
+title: Managing Resources
+description: A task-oriented guide to the canonical resource families — rules, MCP-server configs, and settings — what each is, how to declare one, how it is emitted per platform, and the shared da list/show/remove surface (hooks has its own guide; agents/skills are separate command shapes; plugins bundle resources).
 sidebar:
   order: 9
 ---
 
-# Managing rules, MCP servers & settings
+# Managing resources
 
-`dot-agents` keeps three more managed resource families in one canonical place and wires
-them into every platform that can represent them — exactly the model
-[Hooks](./HOOKS.md) follows:
+`dot-agents` keeps its **canonical resources** in one place under `~/.agents/` and
+wires each into every platform that can represent it. Several resource families
+share one **list / show / remove** command contract over that canonical store;
+this guide is the task-oriented companion for the file-based ones:
 
 - **rules** — editor/agent rule files (`.mdc` / `.md` / `.txt`).
 - **mcp** — MCP-server config files (`.json` / `.yaml` / `.yml` / `.toml`).
 - **settings** — platform settings files (e.g. `cursor.json`, `claude-code.json`,
   `cursorignore`).
 
-Each family is a sibling of `hooks` under the same per-resource-command model: a canonical
-store under `~/.agents/`, a shared link/refresh executor, and a `list` / `show` / `remove`
-command surface. The lifecycle contract that defines these families is
-[Resource Command Contract](./RESOURCE_COMMAND_CONTRACT.md); this guide is the day-to-day,
-task-oriented companion to it.
+These three are siblings of **hooks** under the same per-resource-command model:
+a canonical store under `~/.agents/`, a shared link/refresh executor, and a
+`list` / `show` / `remove` surface. The lifecycle contract that defines the family
+is the [Resource Command Contract](./RESOURCE_COMMAND_CONTRACT.md); this guide is
+its day-to-day, task-oriented companion.
 
-> **Scope.** This guide covers `da rules`, `da mcp`, and `da settings`. Hooks have their own
-> [Hooks guide](./HOOKS.md); agents and skills have their own `agents` / `skills` families.
+> **Scope.** This guide covers `da rules`, `da mcp`, and `da settings`. **Hooks**
+> share the same contract but have their own [Hooks guide](./HOOKS.md). **Agents**
+> and **skills** are managed resources too, but through their own commands with a
+> *different* shape (`agents`: `list`/`new`/`promote`/`import`/`remove` — no `show`;
+> `skills`: `list`/`new`/`promote`), so they are **not** part of the shared
+> list/show/remove contract. **Plugins** are an install-time *bundle* of these
+> resources with ownership metadata, not a command family — see the
+> [Plugin Contract](./PLUGIN_CONTRACT.md).
 
 ---
 

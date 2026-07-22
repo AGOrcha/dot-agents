@@ -300,6 +300,18 @@ The foundation ships today; remaining work deepens it.
 - **Multi-agent coordination** — building on bounded fan-out, context bundles, and
   merge-back: richer anti-drift coordination protocols, graph-driven adaptive
   context engineering, and cross-agent scheduling with conflict detection.
+- **Transitive config scope** — the home config is v2 today (portable `repo_id`
+  registry + machine-local `bindings.json`). The roadmap wires transitive
+  org→team→repo config layering and a `--scope` selector into the resource
+  commands (`rules` / `mcp` / `settings` / `skills` / `agents`), which today scope
+  by `global` + project name only.
+- **Evolvable knowledge graph** — moving the KG from a fixed code-graph to a
+  pluggable-backend, custom-ontology substrate with cross-scope querying and
+  typed cognitive-memory views (see the Knowledge graph pillar above).
+- **Plugins** — plugin bundles install today and project to OpenCode
+  (`.opencode/plugins/`); the roadmap broadens platform emitters (Cursor / Claude
+  / Codex / Copilot plugin dirs) and adds a `da plugins marketplace` generator.
+  See the [Plugin Contract](docs/PLUGIN_CONTRACT.md).
 
 ## FAQ
 

@@ -91,6 +91,13 @@ Skills are on-demand procedure documents (`SKILL.md` + optional `scripts/` /
 `references/`); subagents are directory-based definitions (`AGENT.md` + optional
 helpers). See [SKILL_COMMAND_INTEGRATION.md](SKILL_COMMAND_INTEGRATION.md).
 
+Project-scoped skills/agents resolve the target project through the synced
+`config.json` (v2: keyed by `repo_id`) plus the machine-local
+`~/.agents/local/bindings.json`, then update that project's `.agentsrc.json`;
+`global` writes to the shared `~/.agents/` store. Scope is the positional
+`global` / project-name argument (there is no `--scope` flag). See
+[Config model](concepts/config-model.md).
+
 ## Canonical Resource Inspection
 
 These inspect and manage canonical files under `~/.agents/`. Each supports
@@ -103,7 +110,7 @@ These inspect and manage canonical files under `~/.agents/`. Each supports
 | `mcp` | Inspect and manage canonical `~/.agents/mcp` config files |
 | `settings` | Inspect and manage canonical `~/.agents/settings` files |
 
-See the [**Managing rules, MCP & settings guide**](RESOURCE_MANAGEMENT_GUIDE.md) for the
+See the [**Managing resources guide**](RESOURCE_MANAGEMENT_GUIDE.md) for the
 canonical model, per-platform emit, and the `list`/`show`/`remove` surface (hooks have their
 own [Hooks guide](HOOKS.md)); the [Resource Command Contract](RESOURCE_COMMAND_CONTRACT.md)
 specifies the shared verb behavior.

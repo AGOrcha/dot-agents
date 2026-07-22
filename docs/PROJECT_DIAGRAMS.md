@@ -31,9 +31,11 @@ flowchart LR
     R["Repo-local outputs<br/>AGENTS.md, CLAUDE.md, .cursor/,<br/>.codex/, .github/, .agents/ mirrors"]
     T["AI platforms<br/>Cursor, Claude Code, Codex,<br/>OpenCode, GitHub Copilot"]
     W["Workflow state<br/>repo .agents/ + ~/.agents/context<br/>+ ~/.agents/proposals"]
+    PL["Plugin bundles<br/>PLUGIN.yaml + resources/<br/>authored or imported via da import"]
 
     H --> A
     H --> M
+    PL --> A
     A --> C
     M --> C
     C --> P
@@ -48,6 +50,7 @@ flowchart LR
 
 - `dot-agents` keeps one canonical source of truth in `~/.agents/` instead of hand-managing each platform separately.
 - A repo-level `.agentsrc.json` declares what a project needs.
+- Plugin bundles are an upstream source, not a separate platform target: `da import` (or direct authoring) lands a `PLUGIN.yaml` bundle under `~/.agents/plugins/`, contributing canonical resources that then project like any other. See the [Plugin Contract](./PLUGIN_CONTRACT.md).
 - The CLI reads canonical resources plus the manifest, plans the right outputs per platform, and projects them into the repo with links or rendered files.
 - The AI tools consume those repo-local files natively.
 - The workflow layer feeds context back through repo-local `.agents/` artifacts and user-local checkpoints and proposals.
