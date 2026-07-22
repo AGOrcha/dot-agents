@@ -3,8 +3,8 @@
 Status: Active
 Last updated: 2026-06-23
 Related:
-- `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md`
-- `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
+- `.agents/workflow/specs/scoped-knowledge-graphs/design.md`
+- `.agents/workflow/specs/graph-bridge-contract/design.md` (Wave 5 KG bridge)
 - legacy precursor: `.agents/active/crg-kg-integration.plan.md`
 
 New workflow planning work should use `da workflow` with canonical bundles under `.agents/workflow/plans/` and supporting design docs under `.agents/workflow/specs/`; `.agents/active/` references here are historical lineage only.

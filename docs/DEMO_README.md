@@ -57,10 +57,10 @@ You edit **one** file in `~/.agents/`. Every project, every agent picks it up.
   Copilot, OpenCode. See [`PLATFORM_DIRS_DOCS.md`](./PLATFORM_DIRS_DOCS.md).
 - **Knowledge graph (`da kg`)** — structured notes + code graph for
   agent-friendly memory recall. See
-  [`KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md`](./KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md).
+  the [scoped-knowledge-graphs spec](../.agents/workflow/specs/scoped-knowledge-graphs/design.md).
 - **Workflow primitives** — canonical plans, tasks, slices, checkpoints,
   verification logs, fanout/merge-back, fold-back, proposal review. Full
-  design in [`LOOP_ORCHESTRATION_SPEC.md`](./LOOP_ORCHESTRATION_SPEC.md).
+  design in the [workflow-parallel-orchestration spec](../.agents/workflow/specs/workflow-parallel-orchestration/design.md).
 - **Layered config (`da config`)** — `da config` explains, syncs, lints, and
   verifies the layered `.agentsrc.json` + `.agentsrc.lock`, where `extends`
   layers resolve from git/local/http/oci and pin by SHA.
@@ -98,8 +98,8 @@ da explain links
 - **End-to-end workflow example?** → [`DEMO_WORKFLOW_WALKTHROUGH.md`](./DEMO_WORKFLOW_WALKTHROUGH.md).
 - **"Does it actually work in practice?"** → [`DEMO_LESSONS_NARRATIVE.md`](./DEMO_LESSONS_NARRATIVE.md).
 - **Full demo material index** → [`DEMO_INDEX.md`](./DEMO_INDEX.md).
-- **Designing for it / contributing** → [`LOOP_ORCHESTRATION_SPEC.md`](./LOOP_ORCHESTRATION_SPEC.md) and
-  [`WORKFLOW_AUTOMATION_PRODUCT_SPEC.md`](./WORKFLOW_AUTOMATION_PRODUCT_SPEC.md).
+- **Designing for it / contributing** → the [workflow-parallel-orchestration](../.agents/workflow/specs/workflow-parallel-orchestration/design.md) and
+  [meta-loop-operating-model](../.agents/workflow/specs/meta-loop-operating-model/design.md) specs.
 
 ---
 

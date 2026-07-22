@@ -188,4 +188,4 @@ Per inventory: **`RenderCommandError` / usage** paths render errors in human-ori
 
 - **Generated coverage matrix** — `docs/generated/GLOBAL_FLAG_COVERAGE.md` is **not checked in**; it is generated on demand by the `cmd/globalflag-coverage` tool, which emits a per-command `commands.Flags` reads matrix. Generate it with `go run ./cmd/globalflag-coverage -markdown -o docs/generated/GLOBAL_FLAG_COVERAGE.md`.
 - [Global Flag Compliance plan (inventory)](../.agents/history/global-flag-compliance/global-flag-compliance.plan.md) — source matrices for this contract
-- [Loop Orchestration Spec](./LOOP_ORCHESTRATION_SPEC.md) — delegation bundles, `workflow graph query` + `--json` forwarding to `kg bridge query`
+- [Graph bridge contract](../.agents/workflow/specs/graph-bridge-contract/design.md) and [workflow parallel orchestration](../.agents/workflow/specs/workflow-parallel-orchestration/design.md) — delegation bundles, `workflow graph query` + `--json` forwarding to `kg bridge query`

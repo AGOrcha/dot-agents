@@ -157,3 +157,50 @@ Priority order should remain:
 2. broader KG command-surface readiness
 3. Go-native code-graph replacement planning
 4. Go-native implementation waves
+
+## Code Structure Graph Reference Model
+
+This section records the code-structure-graph model the Go-native replacement must reproduce, plus the original CRG phase labels for directional context. It is descriptive, not a competing plan: storage-backend design (the `GraphStore` interface, SQLite/Postgres selection, hot/cold layering) is owned by [graph-backend-adapter-contract](../graph-backend-adapter-contract/design.md) and is not restated here.
+
+### What It Indexes
+
+The graph is AST-level, derived from the `code-review-graph` project, and exists to replace grep-based exploration with exact symbol traces:
+
+- **Nodes**: File, Class, Function, Type, Test — carrying qualified names, line ranges, signatures, and language
+- **Edges**: CALLS, IMPORTS_FROM, INHERITS, IMPLEMENTS, CONTAINS, TESTED_BY, DEPENDS_ON
+- **Flows**: traced execution paths from entry points through the call graph
+- **Communities**: auto-detected code clusters via Louvain-style community detection
+
+### Key Capabilities
+
+These define the semantics the query-parity commands above (`impact`, `changes`, `flows`, `communities`, search) must preserve:
+
+- **Impact radius**: given a symbol, find everything affected by a change via BFS over call edges
+- **Change detection**: git diff intersected with the graph, producing risk scores, test-gap analysis, and blast radius
+- **FTS search**: full-text search across symbol names and qualified paths
+- **Community analysis**: which modules are tightly coupled and where the boundaries lie
+- **Flow tracing**: entry-point-to-leaf execution paths with criticality scoring
+
+### Decision-To-Code Traceability
+
+Knowledge notes cross-reference code symbols so decisions and the code that realizes them stay linked:
+
+- a decision note links to the functions that implement it
+- a concept note links to all symbols related to that concept
+- when a symbol changes, linked notes surface as potentially stale
+- when reviewing code, linked decisions supply the rationale for why the code exists
+
+This is stored as `note_symbol_links` with relation types `implements`, `documents`, `decides`, and `references`. The Go-native replacement owns the `note_symbol_links` CRUD path and the `kg link` command.
+
+### Original CRG Phase Labels
+
+The retired spec sequenced the port as CRG-A through CRG-F. They are preserved here for cross-referencing older plans and history; the storage phases defer to the adapter contract:
+
+- **CRG-A** — GraphStore interface and SQLite backend (storage-backend scope; see graph-backend-adapter-contract)
+- **CRG-B** — parser port: tree-sitter Go bindings, node/edge extraction from `parser.py`, incremental update via file hashing, `kg build`/`kg update`
+- **CRG-C** — change detection and flows: git-diff intersection, flow detection, Louvain community detection, `kg changes`/`kg impact`
+- **CRG-D** — hot/cold note lifecycle: filesystem↔database note sync, active→stale→archived archive lifecycle, `note_symbol_links` CRUD, `kg link`
+- **CRG-E** — Postgres backend (storage-backend scope; see graph-backend-adapter-contract)
+- **CRG-F** — skill integration: `build-graph` on `da kg build`; `review-delta`/`review-pr` on `da kg changes` and bridge queries; graph awareness in `self-review`/`agent-start`; canonical graph hooks
+
+Consolidated from the retired docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md.

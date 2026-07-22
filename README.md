@@ -190,7 +190,7 @@ memory views — working / operational / semantic / episodic — over that singl
 store). Today only a built-in `none`-adapter seam plus the design specs exist;
 this is the trajectory being built, distinct from the shipped code graph above.
 See the [graph backend adapter contract](.agents/workflow/specs/graph-backend-adapter-contract/design.md)
-and [knowledge-graph spec](docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md).
+and the [scoped knowledge-graphs spec](.agents/workflow/specs/scoped-knowledge-graphs/design.md).
 
 ## Installation
 

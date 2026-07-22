@@ -269,3 +269,55 @@ The implementation and smoke tasks (tasks 3 and 4) are done when:
 - Curation layer (raw → agent curated → human approved)
 - Cold/warm/hot layer model and note ranking system
 - Postgres production deployment and migration tooling
+
+---
+
+## 11. Query routing: note intents vs code-structure intents
+
+`workflow graph query` distinguishes two intent families and dispatches each to a different
+backing store. Section 2 covers config auto-scaffold; this section defines which intents route
+where and how code-structure intents are forwarded.
+
+| Intent family | Routing | Backing |
+|---|---|---|
+| `plan_context`, `decision_lookup`, `entity_context`, `workflow_memory`, `contradictions` | Workflow filesystem bridge (requires `.agents/workflow/graph-bridge.yaml` with `enabled: true`) | `LocalGraphAdapter` over the configured `graph_home` (KG notes tree) |
+| `symbol_lookup`, `impact_radius`, `change_analysis`, `tests_for`, `callers_of`, `callees_of`, `community_context`, `symbol_decisions`, `decision_symbols` | Subprocess forward, equivalent to `da kg bridge query --intent <intent> …` from the repo | CRG / code graph via `kg bridge` |
+
+### Note / KG-note intents
+
+Served on the workflow-local filesystem bridge when the bridge config is enabled, using
+`graph_home` and `LocalGraphAdapter`. These are the context-lane intents from section 6.
+
+### Code-structure intents (subprocess forwarding)
+
+Code-structure intents are **not** handled on the workflow-local filesystem bridge path. The
+CLI forwards to the same entry point as a manual invocation:
+
+```
+da kg bridge query --intent <intent> <query>
+```
+
+Forwarding semantics:
+
+- The child process uses the project working directory as its `Dir`.
+- The child connects `stdout` and `stderr` to the parent.
+- The child receives the global `--json` flag when the parent was run with `--json`, so the
+  JSON output shape matches `kg bridge query` directly.
+- The workflow-local `--scope` flag applies to note-oriented queries on the filesystem bridge
+  only; it is **not** passed through to the kg subprocess today. If `kg bridge query` gains a
+  compatible `--scope`, the forwarder can pass it through without duplicating semantics here.
+
+This keeps a single implementation for code-structure queries (CRG / structural graph behavior
+in `kg bridge`) while leaving note-oriented workflow queries on the filesystem bridge.
+
+### Orchestrator guidance and escape hatches
+
+Orchestrator agents should prefer `workflow graph query` for **both** families so dispatch
+stays centralized, and fall back to `grep` / `glob` only when the graph is absent, stale, or
+the question is raw-text shaped.
+
+Direct escape hatches remain available for structural queries that bypass the unified router:
+`kg changes`, `kg impact`, `kg communities`, and `kg flows`.
+
+*Consolidated from the retired docs/LOOP_ORCHESTRATION_SPEC.md (KG / CRG Direction and KG-First
+Query Routing) and docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md (Relationship To Workflow Automation).*

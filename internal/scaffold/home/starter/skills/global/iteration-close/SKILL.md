@@ -26,7 +26,7 @@ contract:
 
 Closes out an **implementation** iteration by persisting workflow state through the dot-agents CLI. Typical chain: `verify record --kind test`, then `/self-review`, then `verify record --kind review`, then `workflow checkpoint --log-to-iter N --role review`, then `workflow merge-back` (delegated) or `workflow advance` (direct). Sets `persisted_via_workflow_commands: yes` in the loop-state self-assessment.
 
-**Not this skill:** routing loose orchestrator observations into plan notes or proposals — use `workflow fold-back create` (see `docs/LOOP_ORCHESTRATION_SPEC.md`, Phase 6). **Delegation handoff** details live in `.agents/active/delegation-bundles/<delegation_id>.yaml` — use `delegation-lifecycle` for fanout through merge-back and parent closeout.
+**Not this skill:** routing loose orchestrator observations into plan notes or proposals — use `workflow fold-back create` (see `.agents/workflow/specs/meta-loop-operating-model/design.md`). **Delegation handoff** details live in `.agents/active/delegation-bundles/<delegation_id>.yaml` — use `delegation-lifecycle` for fanout through merge-back and parent closeout.
 
 ## Workflow
 

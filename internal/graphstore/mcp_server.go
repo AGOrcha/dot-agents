@@ -599,7 +599,7 @@ func (s *MCPServer) handleGetDocsSection(params json.RawMessage) (json.RawMessag
 		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: "section is required"}
 	}
 	candidates := []string{
-		filepath.Join(s.workDir, "docs", "KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md"),
+		filepath.Join(s.workDir, ".agents", "workflow", "specs", "scoped-knowledge-graphs", "design.md"),
 		filepath.Join(s.workDir, "docs", "SKILL_COMMAND_INTEGRATION.md"),
 		filepath.Join(s.workDir, ".agents", "workflow", "plans", "crg-kg-integration", "crg-kg-integration.plan.md"),
 	}

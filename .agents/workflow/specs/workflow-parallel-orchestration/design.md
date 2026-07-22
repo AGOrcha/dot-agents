@@ -373,3 +373,206 @@ _Defer optimization until there's a concrete case where greedy produces a subopt
   header). Operators deploying WPO immediately after it lands should expect all-`"none"`
   evidence fields until both PE-WS and kg-freshness-impl mature. This is not a WPO defect —
   it is the expected bootstrap state.
+
+---
+
+## 9. Delegation bundle contract (Phase 8)
+
+_Consolidated from the retired docs/LOOP_ORCHESTRATION_SPEC.md (Phase 8)._ This section
+formalizes the delegation handoff §3.7–§3.8 fanout produces. The per-verifier role prose
+(unit/api/ui-e2e/batch/streaming/review) lives in the repo prompt files under
+`.agents/prompts/verifiers/*.project.md` and in the app-type-profiles /
+verifier-reviewer-template-architecture specs; the delegation-bundle JSON contract is canonical
+in `schemas/workflow-delegation-bundle.schema.json`. This section carries only the handoff
+mechanics not already stated above.
+
+### 9.1 Three-layer handoff model
+
+Delegation handoff is a three-layer model, not one giant prompt as the interface:
+
+1. **Dispatch-injected shared stage instructions** — stable bounded-stage discipline the parent
+   orchestrator resolves and injects at dispatch (per
+   `.agents/proposals/agent-context-resolution-architecture.md`): honor `write_scope`, trust
+   canonical task state, avoid mutating shared workflow state directly; run focused tests first,
+   broader regression only as justified; record a concrete `feedback_goal`, use scenario tags,
+   classify evidence/results; child stages emit their assigned typed artifact and stop — the
+   parent gate owns delegation closeout and canonical reconciliation. This base is **not** an
+   `app_type` profile (those are versioned pipeline configuration in
+   `.agents/workflow/specs/app-type-profiles/design.md` selecting verifier chains, review kinds,
+   and graph backends).
+2. **Project overlay** — repo-local guidance layered on top: plan and loop-state locations,
+   preferred verification surfaces, quality gates and hook expectations, regression matrix path,
+   higher-layer validation queue path, project-specific scenario families and verification
+   heuristics.
+3. **Per-delegation bundle** — the transport/persistence layer for one specific delegation
+   (§9.5), not the definition of the worker itself.
+
+The legacy full-slice `loop-worker` profile (which records `workflow verify record`,
+`workflow checkpoint`, `workflow merge-back`, with the parent running delegation closeout once
+accepted) remains a compatibility surface for full-slice execution only. Its closeout sequence
+would violate stage stop conditions, so it is **not** injected into typed staged (`impl`,
+verifier, reviewer) children. The recovered `.agents/active/active.loop.md` is likewise a
+legacy/full-slice overlay (it includes iteration-close procedure); only a trimmed, stage-safe
+derivative belongs in typed staged agents. Repo-owned per-role overlays follow the same
+three-layer stack — see `.agents/prompts/impl-agent.project.md`,
+`.agents/prompts/verifiers/*.project.md`, and `.agents/prompts/review-agent.project.md`.
+
+### 9.2 D5 — `--project-overlay` vs `--prompt` / `--prompt-file` (do not collapse)
+
+`workflow fanout` maps these inputs to **different** parts of the delegation bundle:
+
+| Input | Bundle path | Role |
+|------|-------------|------|
+| `--project-overlay` | `worker.project_overlay_files` | How this role runs in the repo (AGENT.md-like, durable) |
+| `--prompt` (repeatable) | `prompt.inline` | What to do for **this** delegation (runtime) |
+| `--prompt-file` (repeatable) | `prompt.prompt_files` | File-backed per-delegation prompt, still distinct from the overlay file |
+
+The same file must **not** be passed as both `--project-overlay` and `--prompt-file`. Staged
+auto-fanout defaults to a stage-neutral inline `--prompt` and no implicit project overlay;
+callers may provide a stage-safe overlay or delegation prompt file when one has been
+materialized. Role-aware staged dispatch picks the right stage-safe overlay and prompt file for
+**impl** vs **verifier** vs **review**; the orchestrator uses
+`.agents/active/orchestrator.loop.md`, legacy no-stage `loop-worker` loads `active.loop.md`
+directly, and typed stages must not inherit that full-slice file.
+
+### 9.3 Reusable staged-testing additions
+
+The dispatch-injected shared stage instruction base carries six reusable, non-repo-specific
+testing/verification additions:
+
+1. `feedback_goal` — every delegated iteration states the concrete question the evidence run must answer.
+2. `scenario_tags` with stable coverage families and paired-state guidance.
+3. `regression_matrix` support — a repo may point at one or more durable matrix artifacts for scenario/run-variant tracking.
+4. `higher_layer_validation_queue` support — queue features that are code-complete and automated-check complete but still deserve manual/live validation.
+5. evidence/result `classification` taxonomy: `ok`, `ok-empty`, `ok-warning`, `retry-recovered`, `impl-bug`, `tool-bug`, `missing-feature`, `blocked`.
+6. `sandbox_policy` for destructive or stateful verification, so a worker can prove mutating behavior without touching the user's live home/project state.
+
+Shared staged behavior also requires negative-path coverage whenever the delegated change
+introduces new failure modes. The legacy `loop-worker` profile can consume the same discipline
+without becoming the instruction base for staged children.
+
+### 9.4 Impl-handoff contract (impl-agent → verifiers)
+
+The **impl-agent** role writes a small YAML handoff beside verification artifacts so gates do
+not depend on chat logs:
+
+**Path:** `.agents/active/verification/<task_id>/impl-handoff.yaml`
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `task_id` | string | Canonical task id (matches delegation bundle) |
+| `commit_sha` | string | Commit the verifier should evaluate |
+| `write_scope_touched` | string[] | Paths actually modified; drives scoped tests and TDD-fresh gates |
+| `ready_for_verification` | boolean | `true` when implementation is complete and the tree is ready for verifier entry |
+| `tests_unchanged_justified` | boolean (optional) | When `true`, documents that tests were intentionally not changed under `write_scope_touched` (e.g. doc-only work); omit or `false` when tests were added/updated |
+| `impl_notes` | string | Short cold-start context for verifiers |
+
+Pre-verifier policy can require either a test file touch under `write_scope_touched`, or
+`tests_unchanged_justified: true` with an allowed reason. Repo wording for the impl role lives
+in `.agents/prompts/impl-agent.project.md`; shared staged behavior belongs in dispatch-injected
+stage instructions.
+
+### 9.5 Canonical artifact and schema split
+
+Use a sibling artifact rather than overloading the core delegation contract:
+
+- contract file: `.agents/active/delegation/<parent_task_id>.yaml` (unique delegation id is the contract's `id` field)
+- bundle file: `.agents/active/delegation-bundles/<delegation_id>.yaml` (`delegation_id` should match the contract `id`)
+- schema: `schemas/workflow-delegation-bundle.schema.json`
+
+The schema is embedded into the binary alongside the other repo-local schemas so later runtime
+validation binds directly to the canonical artifact contract.
+
+### 9.6 Legacy full-slice bundle example
+
+Illustrative only — the authoritative field contract is
+`schemas/workflow-delegation-bundle.schema.json`. The legacy full-slice `loop-worker` profile
+shape:
+
+```yaml
+schema_version: 1
+delegation_id: del-phase-6-20260412T213000Z
+plan_id: loop-orchestrator-layer
+task_id: phase-6-fold-back-reconciliation
+slice_id: ""
+owner: worker-a
+
+worker:
+  profile: loop-worker
+  profile_version: 1
+  project_overlay_files:
+    - .agents/active/active.loop.md
+
+selection:
+  selected_by: orchestrator-session-start
+  selected_at: "2026-04-12T21:30:00Z"
+  reason: "first pending unblocked canonical task"
+
+scope:
+  write_scope:
+    - commands/workflow.go
+    - commands/workflow_test.go
+  constraints:
+    - "Do not mutate shared workflow state outside the delegated task"
+
+prompt:
+  inline:
+    - "Implement only the selected task."
+  prompt_files:
+    - .agents/prompts/loop-worker.project.md
+    # impl-only: use .agents/prompts/impl-agent.project.md instead; do not load impl-agent for legacy loop-worker mode (ralph-worker without --stage)
+
+context:
+  required_files:
+    - .agents/workflow/plans/loop-orchestrator-layer/PLAN.yaml
+    - .agents/workflow/plans/loop-orchestrator-layer/TASKS.yaml
+  optional_files:
+    - .agents/active/loop-state.md
+    - docs/LOOP_ORCHESTRATION_SPEC.md
+
+verification:
+  feedback_goal: "Does fold-back create/list persist small and proposal routes cleanly?"
+  scenario_tags:
+    - canonical-plan-present
+    - workflow-fold-back-small
+  regression_artifacts:
+    - .agents/workflow/testing-matrix.yaml
+  higher_layer_validation_queue: .agents/active/live-testing-queue.md
+  focused_commands:
+    - go test ./commands
+  regression_commands:
+    - go test ./...
+  evidence_policy:
+    require_negative_coverage: true
+    sandbox_mutations: true        # also enables adversarial-lens active probing
+    verifier_chain_max: 3          # verifier retry budget (renamed from primary_chain_max)
+    lens_chain_max: 2              # per-lens review retry budget
+
+closeout:
+  worker_must:
+    - workflow_verify_record
+    - workflow_checkpoint
+    - workflow_merge_back
+  parent_must:
+    - workflow_delegation_closeout
+```
+
+### 9.7 Rules
+
+- dispatch-injected shared stage instructions stay reusable; project overlays and delegation bundles must not fork that behavior ad hoc
+- the legacy `loop-worker` profile is not injected into staged child agents because its closeout sequence would violate stage stop conditions
+- prompt/context inputs must be delegation-specific so different sub-agents can receive different bundles
+- repeatable flags are preferable to comma-separated prompt/context strings
+- the bundle must be inspectable after fanout so the handoff can be reproduced and audited
+- the worker should read from the persisted bundle rather than reconstructing context from memory
+- regression matrix and validation queue references are optional at the schema level but should be supported consistently where a repo uses them
+- negative-path coverage is required when the delegated change introduces new failure modes
+- child artifact production and parent closeout responsibilities must remain distinct; accepted delegated work is completed by parent-run delegation closeout, without a second `workflow advance`; orphaned merge-backs without a contract must fail parent gating
+
+### 9.8 Acceptance shape
+
+- a parent can resolve an app-type pipeline profile separately from stable stage instructions and repo-local project overlays
+- a parent can supply inline prompts, prompt files, and multiple context files
+- a delegated worker receives reproducible verification metadata, not just prose instructions
+- two different delegated sub-agents can receive different prompt/context/testing bundles without colliding
+- the resulting bundle is inspectable from repo artifacts and backed by an embedded schema

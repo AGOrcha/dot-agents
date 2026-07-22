@@ -194,9 +194,9 @@ For the start/end-of-iteration sequences these atoms compose into, see
 [`WORKFLOW_CLIENT_COMMANDS.md`](./WORKFLOW_CLIENT_COMMANDS.md)
 (`workflow start-task` / `workflow close-task`).
 
-For the full operating model, see
-[`LOOP_ORCHESTRATION_SPEC.md`](./LOOP_ORCHESTRATION_SPEC.md) §"Command layer"
-and §"Skill layer".
+For the full operating model, see the
+[workflow-parallel-orchestration](../.agents/workflow/specs/workflow-parallel-orchestration/design.md)
+and [meta-loop-operating-model](../.agents/workflow/specs/meta-loop-operating-model/design.md) specs.
 
 ---
 

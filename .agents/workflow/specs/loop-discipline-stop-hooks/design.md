@@ -481,6 +481,63 @@ relevant task starts.
   migration/readback task after integration verification and before
   general legacy-override migration. Do not rely on silent inheritance.
 
+## Companion safety and quality hook bundles
+
+The discipline gates above are the enforcement layer for skill contracts.
+They ship alongside a small set of general-purpose safety and quality hook
+bundles that any project inheriting the starter scaffold also picks up.
+These are non-discipline hooks, but they share the same lifecycle-event
+plumbing and are inventoried here so the concrete blocklist, detector, and
+formatter values live in one canonical place.
+
+| Hook | Event | Behavior | Blocking policy |
+|------|-------|----------|-----------------|
+| `session-orient` | `session_start` | Emits orient Markdown | never blocks |
+| `session-capture` | `stop` | Writes checkpoint and appends session log | never blocks |
+| `guard-commands` | `pre_tool_use` on shell commands | Blocks exact destructive patterns | may block |
+| `secret-scan` | `post_tool_use` on file edits | Warns on likely secrets | never blocks |
+| `auto-format` | `post_tool_use` on file edits | Runs best-effort formatter by extension | never blocks |
+
+### Guard-commands initial blocklist
+
+`guard-commands` hard-blocks these exact destructive patterns:
+
+- `rm -rf /`
+- `rm -rf ~`
+- `git push --force origin main`
+- `git push --force origin master`
+- `DROP DATABASE`
+- `DROP TABLE`
+- `truncate`
+- `:(){ :|:& };:`
+
+### Secret-scan initial detectors and allowlist
+
+`secret-scan` warns (never blocks) on these detector patterns:
+
+- Anthropic keys matching `sk-ant-api`
+- AWS access keys matching `AKIA[0-9A-Z]{16}`
+- GitHub tokens matching `ghp_`, `gho_`, or `ghs_`
+- Stripe keys matching `sk_live_` or `sk_test_`
+- OpenAI keys matching `sk-[a-zA-Z0-9]{20,}`
+
+The initial placeholder allowlist suppresses matches containing
+`YOUR_KEY`, `REPLACE_ME`, `example`, `xxxx`, or `test_`.
+
+### Auto-format routing
+
+`auto-format` runs a best-effort formatter chosen by file extension:
+
+- `.go` -> `gofmt -w`
+- `.py` -> `ruff format --quiet`, fallback `black --quiet`
+- `.ts`, `.tsx`, `.js`, `.jsx`, `.css`, `.scss`, `.json`, `.yaml`, `.yml` -> `npx prettier --write`
+- `.rs` -> `rustfmt`
+
+Formatter availability is best effort: a missing formatter MUST NOT fail
+the hook.
+
+_Consolidated from the retired docs/WORKFLOW_AUTOMATION_PRODUCT_SPEC.md._
+
 ## Deferred items (explicit out-of-scope)
 
 The following are deliberately not in scope and may appear in a future

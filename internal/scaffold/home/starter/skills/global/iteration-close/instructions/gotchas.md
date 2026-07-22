@@ -28,7 +28,7 @@
 
 ## Advance Task
 
-- **Delegated worker advancing the parent task** — If fanout created `.agents/active/delegation/<task-id>.yaml`, you are the worker: use **`workflow merge-back`**. The parent runs `workflow delegation closeout` after accepting your merge-back; accepted closeout already completes the delegated task. `workflow advance` is for direct, non-delegated work. Advancing from the worker breaks the orchestration model in `LOOP_ORCHESTRATION_SPEC.md`.
+- **Delegated worker advancing the parent task** — If fanout created `.agents/active/delegation/<task-id>.yaml`, you are the worker: use **`workflow merge-back`**. The parent runs `workflow delegation closeout` after accepting your merge-back; accepted closeout already completes the delegated task. `workflow advance` is for direct, non-delegated work. Advancing from the worker breaks the orchestration model in `.agents/workflow/specs/workflow-parallel-orchestration/design.md`.
 - **Advancing a task with incomplete subtasks** — If a plan task has sub-checklist items still open in markdown, advancing YAML to `completed` creates drift. Only advance when the markdown plan and YAML are in sync.
 - **Wrong plan-id or task-id** — Use `da workflow plan` to list plan IDs and `da workflow tasks <plan-id>` to list exact task IDs before running `advance`. Typos silently fail or create a new task.
 - **Advancing before committing** — `workflow advance` should run after the commit is on the branch, not before. If tests pass but the commit fails, the YAML would show completed while code is uncommitted.

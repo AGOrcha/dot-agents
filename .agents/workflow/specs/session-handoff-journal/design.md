@@ -197,6 +197,95 @@ kg sync:            input {push}; observed {pull_status,push_status,head_sha?}
    and concurrent-write are safe (atomic + interprocess-safe — see Relationship to `p4h`).
 5. The journal write adds negligible latency/tokens (dirty-check guard + append-only deltas).
 
+## Canonical orient & persist mechanics
+
+The verified recovery view (D7/R4) reads the journal + snapshot; the broader
+session-start **orient** surface and the boundary-written **checkpoint/session-log**
+it complements (§Relationship) carry their own fixed data models, defined here so the
+journal references them rather than re-storing their content (R6). Consolidated from the
+retired docs/WORKFLOW_AUTOMATION_PRODUCT_SPEC.md.
+
+### Orient data model
+
+`da workflow orient` and the session-start hook share one data source (also backing
+`da workflow status`):
+
+- `project`: `name`, `path`.
+- `git`: `branch`, `sha`, `dirty_file_count`, `recent_commits` (up to 5 one-line summaries).
+- `active_plans`: list of `path`, `title`, and up to 3 pending checklist items / leading summary lines.
+- `checkpoint`: latest fields from `checkpoint.yaml`, or `null` if absent.
+- `handoffs`: list of `path` + title.
+- `lessons`: up to 10 recent entries from the first existing of (1) `.agents/lessons/index.md`, (2) `.agents/lessons.md`.
+- `proposals`: `pending_count`.
+- `next_action`: first non-empty of (1) `checkpoint.next_action`, (2) first pending checklist item of the first active plan, (3) `"Review active plan"`.
+- `warnings`: non-fatal issues such as a missing lessons index, missing git repo, or unreadable checkpoint.
+
+**Output formats.** The hook prints human-readable Markdown to stdout with sections for
+Project, Active Plans, Last Checkpoint, Pending Handoffs, Recent Lessons, Pending
+Proposals, and Next Action. `da workflow orient` prints the same Markdown by default;
+`da workflow orient --json` emits the same canonical model as JSON.
+
+**Behavior.** Missing optional artifacts render as empty sections, not errors; orient
+never blocks session start; the MVP persists no separate `orient.yaml`.
+
+### Checkpoint schema
+
+`da workflow checkpoint` (session-end hook or manual) writes
+`~/.agents/context/<project>/checkpoint.yaml`, where `<project>` is
+`.agentsrc.json.project` when present, else the repo directory basename:
+
+```yaml
+schema_version: 1
+timestamp: "2026-04-09T23:30:00Z"
+project:
+  name: "dot-agents"
+  path: "/Users/nikashp/Documents/dot-agents"
+git:
+  branch: "feature/workflow-automation"
+  sha: "abc1234"
+  dirty_file_count: 2
+files:
+  modified:
+    - "internal/platform/hooks.go"
+    - "internal/platform/hooks_test.go"
+message: "phase 3 complete"
+verification:
+  status: "pass"
+  summary: "go test ./... passed"
+next_action: "Implement proposal review command"
+blockers: []
+```
+
+Field rules: `schema_version` is required and set to `1`; `timestamp` required, UTC
+RFC3339; `project.name`/`project.path` required; `git.branch`/`git.sha`/`git.dirty_file_count`
+required when git data is available, else `unknown`/`0`; `files.modified` required, may be
+empty; `message` optional, defaults to `""`; `verification.status` required, one of
+`pass|fail|partial|unknown`; `verification.summary` required, may be empty; `next_action`
+required and concrete; `blockers` required, may be empty.
+
+### Session-log format
+
+Each checkpoint append writes one Markdown entry to
+`~/.agents/context/<project>/session-log.md`:
+
+```md
+## 2026-04-09T23:30:00Z
+branch: feature/workflow-automation
+sha: abc1234
+files: 2
+verification: pass
+message: phase 3 complete
+next_action: Implement proposal review command
+```
+
+### Persist behavior
+
+Session capture never blocks session end; if the checkpoint write fails the hook prints a
+warning and exits 0. `da workflow checkpoint` may expose `--message` and `--verification`
+flags, but the stored schema stays exactly as above. This artifact is distinct from the
+journal's `checkpoint` event (§Command Surface), which records the command invocation and
+its `observed` delta — not the stored file.
+
 ## Deferred / out of scope
 
 - The cross-session **in_progress-task heartbeat** + push-broker → R2 / 0.4.1 (D12).
