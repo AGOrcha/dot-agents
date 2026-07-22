@@ -167,22 +167,30 @@ da workflow commit
 
 `--no-derive-scope` skips the sidecar derivation; `--no-commit` skips the final step. Fanout is intentionally **not** wired — the orchestrator typically decides direct-vs-delegated explicitly via `da workflow fanout` as a separate step.
 
-## Iteration-close skill update (deferred)
+## Iteration-close skill
 
-**Currently deferred / not yet implemented** — the rewrite described below is
-staged, not live. The `iteration-close` skill still uses its existing body.
+The `iteration-close` skill — the T2 compound that wraps `close-task` — ships in
+the dot-agents starter skill pack
+(`internal/scaffold/home/starter/skills/global/iteration-close/`, installed to
+`~/.agents/skills/dot-agents/iteration-close/` by `da init` / `da refresh`).
 
-The `iteration-close` skill — the T2 compound that wraps `close-task` — lives outside this repo at `~/.agents/skills/dot-agents/iteration-close/SKILL.md`. The rewrite as a thin `da workflow close-task --json` caller is staged for the next cross-repo update of the dot-agents skill pack. The proposed frontmatter:
+On the **direct** path the skill closes the iteration through
+`da workflow close-task <plan> --task <task> --json` — one call that writes the
+iter-log `impl` block, scores the iteration, advances the task to `completed`,
+refocuses the plan to the next eligible task, and commits the workflow state —
+then renders the returned `closeTaskResult` (iteration N, score value + band,
+sidecar path, next focus) back to the operator. The immediate-feedback loop
+closes inside the skill: the operator sees *"iteration N → score 0.7 fair → here
+is the breakdown"* the moment the iteration closes, while the context is still hot.
 
-```yaml
-tier: compound
-calls:
-  - workflow-close-task
-review_gate: default
-attendance: unattended
-```
-
-The skill's body becomes: invoke `da workflow close-task --json` with the resolved plan/task, then render the returned `closeTaskResult` (iteration N, score value + band, sidecar path, next focus) back to the operator. The immediate-feedback loop closes inside the skill: the operator sees *"iteration N → score 0.7 fair → here is the breakdown"* the moment the iteration closes, while the context is still hot.
+`close-task` covers only the direct-path tail, so the skill stays a T2 compound
+that also drives the surrounding atoms directly (which the tiering contract
+permits): `verify record --kind test`, `/self-review` + `verify record --kind
+review` + `checkpoint --role review`, and the narrative `checkpoint --message`.
+The **delegated** path does **not** use `close-task` — advancing to `completed`
+is the parent's call after review — so a delegated worker runs `checkpoint
+--log-to-iter N --role impl` then `workflow merge-back`, and the parent completes
+the task via `workflow delegation closeout`.
 
 ## Coordination-state backend surfacing (`da workflow status`)
 
