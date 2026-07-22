@@ -26,6 +26,7 @@ import (
 	"github.com/go-git/go-billy/v6/osfs"
 	gogit "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
 	"github.com/go-git/go-git/v6/plumbing/object"
 	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
@@ -3612,6 +3613,50 @@ func TestGitSSHAuthNonSSHURLIsNoop(t *testing.T) {
 		if err != nil || primary != nil || fallback != nil {
 			t.Fatalf("gitSSHAuth(%q) = (%v, %v, %v), want (nil, nil, nil)", url, primary, fallback, err)
 		}
+	}
+}
+
+// TestCloneWithFallback covers the shared retry policy directly with stub clone
+// funcs (no network): primary success skips the fallback; a primary error with a
+// nil fallback surfaces that error unretried; a primary error with a non-nil
+// fallback retries with the fallback auth, and the fallback result wins.
+func TestCloneWithFallback(t *testing.T) {
+	okRepo := &gogit.Repository{}
+	dummy := &gogitssh.PublicKeys{} // any non-nil client.SSHAuth
+
+	calls := 0
+	repo, _, err := cloneWithFallback(nil, dummy, func(client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		calls++
+		return okRepo, nil, nil
+	})
+	if err != nil || repo != okRepo || calls != 1 {
+		t.Fatalf("primary-success: repo=%v err=%v calls=%d, want (okRepo, nil, 1)", repo, err, calls)
+	}
+
+	calls = 0
+	_, _, err = cloneWithFallback(nil, nil, func(client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		calls++
+		return nil, nil, errors.New("boom")
+	})
+	if err == nil || calls != 1 {
+		t.Fatalf("primary-fail-no-fallback: err=%v calls=%d, want (err, 1)", err, calls)
+	}
+
+	calls = 0
+	var gotAuth []client.SSHAuth
+	repo, _, err = cloneWithFallback(nil, dummy, func(a client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		calls++
+		gotAuth = append(gotAuth, a)
+		if calls == 1 {
+			return nil, nil, errors.New("primary boom")
+		}
+		return okRepo, nil, nil
+	})
+	if err != nil || repo != okRepo || calls != 2 {
+		t.Fatalf("fallback-retry: repo=%v err=%v calls=%d, want (okRepo, nil, 2)", repo, err, calls)
+	}
+	if gotAuth[0] != nil || gotAuth[1] != client.SSHAuth(dummy) {
+		t.Fatalf("fallback-retry: auth order = %v, want [nil, dummy]", gotAuth)
 	}
 }
 

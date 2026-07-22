@@ -337,12 +337,20 @@ func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, b
 	if err != nil {
 		return nil, nil, err
 	}
-	repo, fs, err := gitCloneOnce(ctx, url, ref, primary)
+	return cloneWithFallback(primary, fallback, func(auth client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		return gitCloneOnce(ctx, url, ref, auth)
+	})
+}
+
+// cloneWithFallback runs clone(primary); on ANY error with a non-nil fallback it
+// retries clone(fallback). This is how an agent-path clone (an unprobeable agent:
+// dead/quiet socket, Pageant, a List error) falls back to the on-disk key — the
+// same order OpenSSH uses (agent, then the identity files). Shared by both git
+// clone paths so the retry policy lives in one tested place.
+func cloneWithFallback(primary, fallback client.SSHAuth, clone func(client.SSHAuth) (*gogit.Repository, billy.Filesystem, error)) (*gogit.Repository, billy.Filesystem, error) {
+	repo, fs, err := clone(primary)
 	if err != nil && fallback != nil {
-		// The agent-path clone failed (an unprobeable agent: dead/quiet socket,
-		// Pageant, a List error, …). Retry with the on-disk key for ANY error —
-		// the same order OpenSSH uses (agent, then the identity files).
-		repo, fs, err = gitCloneOnce(ctx, url, ref, fallback)
+		return clone(fallback)
 	}
 	return repo, fs, err
 }

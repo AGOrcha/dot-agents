@@ -537,13 +537,9 @@ func gitCloneShallowQuotaBounded(ctx context.Context, url, ref string) (*gogit.R
 	if err != nil {
 		return nil, nil, err
 	}
-	repo, wfs, err := quotaBoundedCloneWithAuth(ctx, url, ref, primary)
-	if err != nil && fallback != nil {
-		// The agent-path clone failed (unprobeable agent); retry with the on-disk
-		// key fallback for ANY error, mirroring gitCloneShallow.
-		repo, wfs, err = quotaBoundedCloneWithAuth(ctx, url, ref, fallback)
-	}
-	return repo, wfs, err
+	return cloneWithFallback(primary, fallback, func(auth client.SSHAuth) (*gogit.Repository, billy.Filesystem, error) {
+		return quotaBoundedCloneWithAuth(ctx, url, ref, auth)
+	})
 }
 
 // quotaBoundedCloneWithAuth runs the filter-then-unfiltered quota-bounded clone
