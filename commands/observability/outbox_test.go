@@ -365,3 +365,118 @@ func TestCanonicalJSONRFC8785ThresholdsAndOrdering(t *testing.T) {
 		t.Fatalf("canonical JSON:\n got %s\nwant %s", got, want)
 	}
 }
+
+func TestCanonicalJSONRejectsNonFiniteInsideContainers(t *testing.T) {
+	if _, err := canonicalJSON([]byte(`[[1],{"k":2}]`)); err != nil {
+		t.Fatalf("finite nested containers must canonicalize: %v", err)
+	}
+	for _, raw := range []string{`[1, 1e400]`, `{"a": 1e400}`} {
+		if _, err := canonicalJSON([]byte(raw)); err == nil {
+			t.Fatalf("non-finite number inside %s must be rejected", raw)
+		}
+	}
+}
+
+func TestLoadReadyFilesHonorsSchedulingWhenNotExplicit(t *testing.T) {
+	project := t.TempDir()
+	writeOutboxFixture(t, project, 1, func(r *outboxRecord) {
+		r.NextAttemptAt = testNow.Add(time.Hour).UTC().Format(time.RFC3339)
+	})
+	var report SyncReport
+	files, err := loadReadyFiles(outboxDir(project), testNow, false, &report)
+	if err != nil {
+		t.Fatalf("loadReadyFiles: %v", err)
+	}
+	if len(files) != 0 || report.Skipped != 1 {
+		t.Fatalf("a not-yet-due file must be skipped, not loaded: files=%d report=%#v", len(files), report)
+	}
+	// Explicit sync ignores the schedule and loads the same file.
+	report = SyncReport{}
+	files, err = loadReadyFiles(outboxDir(project), testNow, true, &report)
+	if err != nil || len(files) != 1 || report.Skipped != 0 {
+		t.Fatalf("explicit sync must ignore next_attempt_at: files=%d report=%#v err=%v", len(files), report, err)
+	}
+}
+
+func TestOutboxRetryableServerErrorRetainsBatch(t *testing.T) {
+	project := t.TempDir()
+	path := writeOutboxFixture(t, project, 1, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	report, err := syncProject(context.Background(), project, testDeps(t, server), syncOptions{Explicit: true})
+	if err == nil {
+		t.Fatal("explicit sync must fail when a retryable server error retains the batch")
+	}
+	if report.Retained != 1 || report.Accepted != 0 {
+		t.Fatalf("report = %#v, want 1 retained", report)
+	}
+	retained, err := parseOutboxFile(path, outboxID(1))
+	if err != nil || retained.Attempts != 1 {
+		t.Fatalf("retryable 5xx must rewrite retry metadata: attempts=%d err=%v", retained.Attempts, err)
+	}
+}
+
+func TestOutboxNonRetryableServerErrorRetainsWithoutRewrite(t *testing.T) {
+	project := t.TempDir()
+	path := writeOutboxFixture(t, project, 1, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+	report, err := syncProject(context.Background(), project, testDeps(t, server), syncOptions{Explicit: true})
+	if err == nil {
+		t.Fatal("explicit sync must fail on a non-retryable server error")
+	}
+	if report.Retained != 1 {
+		t.Fatalf("report = %#v, want 1 retained", report)
+	}
+	retained, err := parseOutboxFile(path, outboxID(1))
+	if err != nil || retained.Attempts != 0 {
+		t.Fatalf("non-retryable status must not rewrite retry metadata: attempts=%d err=%v", retained.Attempts, err)
+	}
+}
+
+func TestOutboxInvalidResponseRetainsBatch(t *testing.T) {
+	project := t.TempDir()
+	writeOutboxFixture(t, project, 1, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// accepted+deduped+rejected does not equal the batch size (1): invalid.
+		_, _ = w.Write([]byte(`{"accepted":5,"deduped":0,"rejected":[]}`))
+	}))
+	defer server.Close()
+	report, err := syncProject(context.Background(), project, testDeps(t, server), syncOptions{Explicit: true})
+	if err == nil {
+		t.Fatal("explicit sync must fail when the ingest response fails validation")
+	}
+	if report.Retained != 1 || report.Accepted != 0 {
+		t.Fatalf("report = %#v, want 1 retained on invalid response", report)
+	}
+}
+
+func TestLoadReadyFilesSurfacesQuarantineFailure(t *testing.T) {
+	project := t.TempDir()
+	dir := outboxDir(project)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	name := "not-a-uuid.obs-v1.json"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A regular file where the quarantine dir must be created blocks MkdirAll,
+	// so the quarantine attempt fails and the corrupt file is retained instead.
+	if err := os.WriteFile(filepath.Join(dir, "quarantine"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var report SyncReport
+	files, err := loadReadyFiles(dir, testNow, true, &report)
+	if err == nil {
+		t.Fatal("a failed quarantine must surface as a load failure")
+	}
+	if len(files) != 0 || report.Retained != 1 || report.Quarantined != 0 {
+		t.Fatalf("failed quarantine must retain (not count quarantined): files=%d report=%#v", len(files), report)
+	}
+}
