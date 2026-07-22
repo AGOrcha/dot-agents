@@ -96,7 +96,7 @@ Project-scoped skills/agents resolve the target project through the synced
 `~/.agents/local/bindings.json`, then update that project's `.agentsrc.json`;
 `global` writes to the shared `~/.agents/` store. Scope is the positional
 `global` / project-name argument (there is no `--scope` flag). See
-[Config model](concepts/config-model.md).
+[Config model](./concepts/config-model.md).
 
 ## Canonical Resource Inspection
 

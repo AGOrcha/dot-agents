@@ -248,7 +248,7 @@ hooks, and MCP config — packaged with ownership metadata in a `PLUGIN.yaml` ma
 the canonical store under `~/.agents/plugins/<scope>/<name>/` (`resources/{agents,skills,commands,hooks,mcp}/`,
 plus `files/` for native OpenCode source and `platforms/<id>/` passthrough), using the **same scope
 model** — `global` or a project id — as every other canonical bucket. See the
-[Plugin Contract](../PLUGIN_CONTRACT.md) for the full manifest schema and storage layout.
+[Plugin Contract](./PLUGIN_CONTRACT.md) for the full manifest schema and storage layout.
 
 The key point for this projection model: **plugins are a storage/ownership layer that sits
 *upstream* of projection, not a per-platform render target.** A plugin does not add a new output
@@ -279,5 +279,5 @@ resolved through import and the canonical store, then projected as ordinary cano
 - [Hooks](./HOOKS.md) — the canonical hook model and the per-platform event tables.
 - [Layered Configuration](./LAYERED_CONFIG_GUIDE.md) — the config-layer complement: how
   `.agentsrc.json` resolves down a layer stack.
-- [Plugin Contract](../PLUGIN_CONTRACT.md) — the plugin bundle storage/ownership contract: the
+- [Plugin Contract](./PLUGIN_CONTRACT.md) — the plugin bundle storage/ownership contract: the
   upstream layer that packages canonical resources before they project.
