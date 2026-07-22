@@ -20,7 +20,7 @@ The composition rules we want enforced are restatements of the tier invariants i
 | Skill | **T2 compound** | `iteration-close`, `orchestrator-session-start`, `isp` |
 
 The primitive examples above are a representative slice, not the full set. The
-`da workflow` surface ships ~37 top-level subcommands (several with their own
+`da workflow` surface ships 36 top-level subcommands (several with their own
 sub-verbs); the [full command surface](#full-da-workflow-command-surface) below
 groups every one. Run `da workflow --help` for the generated listing.
 
@@ -130,7 +130,7 @@ Every client command's `--help` `Example` block shows the call. The expanded seq
 ```text
 # What close-task does, expanded into the primitive pipeline it invokes:
 
-da workflow checkpoint --log-to-iter <N> --log-to-iter-role impl
+da workflow checkpoint --log-to-iter <N> --role impl
     # N picked by NextIterationNumber(iter-log-dir) — see iter_log_autoderive.go
 da score iteration <N> --recompute
     # writes iter-N.score.yaml; same writer as workflow-client-commands score-current task
@@ -165,7 +165,7 @@ da workflow plan derive-scope <plan-id> <task> [--seed-symbol …] [--seed-path 
 da workflow commit
 ```
 
-`--no-derive-scope` skips the sidecar derivation; `--no-commit` skips the final step. Fanout is intentionally **not** wired — the orchestrator typically decides direct-vs-delegated explicitly via `da workflow fanout` as a separate step.
+`--no-derive-scope` skips the sidecar derivation; `--no-commit` skips the final step; `--dry-run` (or the global `-n`) previews the whole chain without activating the plan, focusing the task, deriving scope, or committing. Fanout is intentionally **not** wired — the orchestrator typically decides direct-vs-delegated explicitly via `da workflow fanout` as a separate step.
 
 ## Iteration-close skill update (deferred)
 
@@ -268,8 +268,10 @@ sentinel ref) with the resolved reality:
   from the live `TASKS.yaml` when `gh` is unavailable. It corroborates the locus arm
   and status (medium trust) but never resolves authoritative coordinates.
 
-Task→PR matching reuses the bounded `branchMatchesTask` token rule, so a task id
-never resolves a sibling's PR.
+`journal recover`'s Task→PR matching uses the stricter `strictBranchMatch` rule —
+a complete, bounded token that binds the full `<plan>-<task>` identity when the
+plan is known — so a task id never resolves a sibling's (or a cross-plan
+look-alike's) PR.
 
 ```text
 da workflow journal snapshot          # capture current live state

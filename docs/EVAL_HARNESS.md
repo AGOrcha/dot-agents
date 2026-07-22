@@ -77,6 +77,22 @@ da eval gen --language python --template add-test-coverage --out task.yaml
 | `--template` | Task template id: `impl-pure-fn` (default), `refactor-extract`, or `add-test-coverage`. |
 | `--out` | Write the `TaskSpec` YAML to this file (atomic write) instead of stdout. |
 
+> **Build the graph for *this* repo first.** `da eval gen` reads the **global**
+> knowledge-graph store at `$KG_HOME/ops/graphstore.db` — the same warm store
+> `da kg` maintains, not a repo-local one
+> ([`commands/eval/registry.go`](../commands/eval/registry.go): `warmDBPath` /
+> `kgHome`). Before generating, build (or warm) the graph for the repository you
+> are standing in with `da kg build` (or `da kg warm`); a store that was never
+> built fails with `eval: code graph not built at <path>`. Generation always
+> relativizes the graph's file paths against the **current working directory**
+> (`gencore.New` → `os.Getwd`), so if the global KG was last built for a
+> *different* checkout, `gen` fails loudly rather than emitting a spec against
+> foreign paths — its seed path "resolves outside the repository root"
+> ([`internal/eval/gen/gencore/normalize.go`](../internal/eval/gen/gencore/normalize.go)).
+> There is no per-repo override for generation today: `da eval gen` takes no
+> `--repo-dir`, and `da eval run`'s `--repo-dir` selects the sandbox source
+> checkout and run-output root, not the graph root generation resolves against.
+
 ### `da eval run` — run one task end-to-end and score it
 
 ```
@@ -99,7 +115,7 @@ The flag that selects the agent is `--agent`, not `--runner`; the internal
 ([`commands/eval/run.go`](../commands/eval/run.go),
 [`internal/eval/runner/runner.go`](../internal/eval/runner/runner.go)). `da eval run` also
 sweeps stale sandbox worktrees from crashed prior runs before it provisions its own — see
-[Sandbox model](#sandbox-model). Add the global `--json` flag for machine-readable output.
+[Sandbox model](#sandbox-model). Add the global `--json` flag for machine-readable output, or `-n`/`--dry-run` to preview the resolved task — the spec `gen` would synthesise — without running the agent, provisioning a sandbox, or persisting a run dir ([`commands/eval/run.go`](../commands/eval/run.go), `previewEvalRun`).
 
 ### `da eval ls` — list persisted runs
 
@@ -323,8 +339,9 @@ even if its diff or test output contains auth vocabulary. Three guards combine:
    solution and task output flow to stdout and the working tree, so solution content never feeds the
    match.
 3. **Narrow signatures.** Only phrases that are unambiguously the CLI's own login/api-key startup
-   failure are used (`not logged in`, `please run /login`, `claude login`, `codex login`,
-   `gh auth login`, `invalid api key`, `no api key`, `missing api key`, `api key not set`). Bare
+   failure are used (`not logged in`, `please log in`, `please run /login`, `run /login`,
+   `claude login`, `codex login`, `gh auth login`, `invalid api key`, `no api key`,
+   `missing api key`, `api key not set`, `api key is not set`). Bare
    `unauthorized` / `authentication failed` / `401` are **excluded** — they occur in legitimate
    solution and test output.
 

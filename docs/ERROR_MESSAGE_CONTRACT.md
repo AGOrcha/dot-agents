@@ -181,7 +181,7 @@ Error rendering is still **human-first** today.
 
 Even when a command supports `--json` on success, callers should assume failures may still render as:
 
-- a colored `Error:` line
+- a red `✗ Error:` line
 - optional bullet hints
 - optional usage text
 
@@ -202,10 +202,10 @@ For command families under active development:
 
 The 2026-04-19 inventory puts the highest normalization priority on:
 
-1. `commands/kg/bridge.go` and `commands/kg/query_lint_maintain.go`
-2. `commands/kg/sync_code_warm_link.go`
-3. `commands/agents/remove.go`, `commands/agents/import.go`, and `commands/agents/promote.go`
-4. setup-validation drift in `commands/add.go` and `commands/install.go`
+1. `commands/kg/bridge.go` and `commands/kg/query_lint_maintain.go` (both still return raw `fmt.Errorf` for user-facing failures)
+2. `commands/kg/sync_code_warm_link.go` — the `kg link` arg-shape and validation errors now route through the package's `kgUsageError` helper (`deps.UsageError`); the `sync`/`code`/`warm` handlers still return raw `fmt.Errorf`
+3. `commands/agents/promote.go` and `commands/skills/promote.go` (both route through the still-raw `internal/projectsync.PromoteResource`); `commands/agents/remove.go` and `commands/agents/import.go` have since been normalized onto `ErrorWithHints` via the package's `agentUserError` helper and are no longer priority areas
+4. setup-validation drift in `commands/add.go` and `commands/internal/lifecycle/install.go`
 
 The strongest current examples to preserve are:
 

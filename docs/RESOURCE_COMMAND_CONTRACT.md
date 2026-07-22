@@ -24,8 +24,8 @@ rules.
 
 ## Strategic shape: per-resource command families
 
-Parity lands as **per-resource Cobra families** (`hooks`, and later `rules`, `mcp`, `settings`, …)
-with **shared internals** (planner, platform projection, manifest updates).
+The CLI exposes **per-resource Cobra families** (`hooks`, `rules`, `mcp`, `settings`) with
+**shared internals** (planner, platform projection, manifest updates).
 
 Rationale:
 
@@ -37,12 +37,23 @@ Rationale:
   is a thin composition adapter. After the **root-command-decomposition** plan landed, each family's
   command package is a leaf rather than a flat `commands/*.go` file: `hooks` lives at
   `commands/hooks/`, while `rules`, `mcp`, and `settings` live under `commands/internal/{rules,mcp,settings}/`
-  (alongside `commands/internal/lifecycle/` for `install`/`doctor`/`init`/`status`). Root
+  (alongside `commands/internal/lifecycle/` for `install`/`doctor`/`init`/`refresh`/`status`). Root
   (`commands/root.go`) is a composition root that wires each leaf in via its constructor
-  (`NewHooksCmd`, `rules.NewRulesCmd`, `mcp.NewCmd`, `settings.NewCmd`, …). That satisfies the
-  guardrail above without forcing a single CLI noun for all resources.
-- **Phasing:** families can ship incrementally (hooks first) while readback commands (`status`,
-  `explain`, `doctor`) stay aligned in later phases.
+  (`NewHooksCmd`, `rules.NewRulesCmd`, `mcp.NewCmd`, `settings.NewCmd` — `commands/root.go:210-213`).
+  That satisfies the guardrail above without forcing a single CLI noun for all resources.
+- **Shared list/show/remove helper:** `rules`, `mcp`, and `settings` do not hand-write their
+  `list`/`show`/`remove` flows. Each leaf declares one static `cmdutil.CanonicalResourceDef`
+  (`commands/internal/cmdutil/resources.go`: `RulesResource`, `MCPResource`, `SettingsResource`),
+  binds its per-verb runner closures through `cmdutil.SpecForResource`, and routes the tree and
+  executors through the shared `cmdutil.NewCanonicalResourceCmd` and
+  `cmdutil.RunCanonical{List,Show,Remove}` helpers
+  (`commands/internal/cmdutil/canonical_cmd.go:37-102`, `canonfile.go`). The three leaves' own
+  `RunList`/`RunShow`/`RunRemove` are one-line forwarders into those executors
+  (`commands/internal/{rules,mcp,settings}/{list,show,remove}.go`). `hooks` is the exception: it
+  keeps a hand-written `list`/`show`/`remove` path (`commands/hooks/{list,show,remove}.go`) because
+  its two legacy surfaces (below) fall outside the canonical-file helper's shape.
+- **Rollout:** the families shipped incrementally (hooks first); the cross-cutting readback
+  commands (`status`, `explain`, `doctor`) are aligned with the same model.
 
 ## Managed resource families (in scope for this plan)
 
