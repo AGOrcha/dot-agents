@@ -2,207 +2,87 @@
 
 **The operational layer for AI coding agents**
 
-One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and OpenCode — and a set of composable primitives (dynamic loops, bounded workflows, agent teams) you assemble into your own agentic orchestration, not a closed set of commands.
+One CLI (`da`) to manage configuration and workflow state across Cursor, Claude
+Code, Codex, GitHub Copilot, and OpenCode — plus a set of composable primitives
+(dynamic loops, bounded workflows, agent teams) you assemble into your own
+agentic orchestration, not a closed set of commands.
 
-> **Fastest start:** paste one block into your AI agent and it installs `da`, runs
-> the guided onboarding, and tailors a setup to your project — see
-> **[Install & onboard](docs/INSTALL.md)**. New to the model? The
-> [AI development lifecycle](docs/concepts/ai-dev-lifecycle.md) maps the whole loop.
-
-The read-only R2 observability dashboard surfaces workflow runs, iteration
-scores, rubric details, and live scoring updates; see the
-[Observability Dashboard guide](docs/OBSERVABILITY_DASHBOARD.md) for today's
-standalone and R3-hosted run modes. The planned
-`dashboard-subsystem-and-bus-security` direction consolidates local use into a
-`da dashboard` subsystem while retaining the shared R3 composition.
-
-```bash
-# Install
-brew tap AGOrcha/tap && brew install da
-
-# Set up
-da init
-da add ~/Github/myproject
-
-# Check status
-da status
-da doctor
-
-# Refresh after pulling changes
-da refresh
-```
+- **New here?** Paste the [one block](#fastest-start-one-paste) below into your
+  agent — it installs `da`, onboards you, and tailors a setup to *your* project.
+- **Want the hands-on quickstart?** → [Getting Started](docs/GETTING_STARTED.md)
+- **Want the whole command surface?** → [Command reference](docs/COMMANDS.md)
+- **New to the model?** → [AI development lifecycle](docs/concepts/ai-dev-lifecycle.md)
 
 ---
 
-## The Problems
+## Fastest start (one paste)
 
-### 1. Config Fragmentation
+You don't have to read the whole site first. Paste this into your AI coding agent
+(Claude Code, Cursor, Codex, Copilot, OpenCode, Antigravity, …). It installs `da`,
+runs the guided **onboarding**, and tailors a setup to *your* project — asking you
+questions instead of making you read docs.
 
-Every AI coding agent has its own config location and format:
+```text
+Set me up with dot-agents (da). Do this in order, and ask before any destructive change:
 
-| Agent | Instruction / rule files | Format |
-|-------|--------------------------|--------|
-| Cursor | `.cursor/rules/*.mdc` (also `AGENTS.md`) | MDC / Markdown |
-| Claude Code | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `CLAUDE.local.md` | Markdown, JSON |
-| Codex | `AGENTS.md`, `AGENTS.override.md` | Markdown |
-| OpenCode | `AGENTS.md` (also `CLAUDE.md`) | Markdown |
-| GitHub Copilot | `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md` | Markdown |
+1. Install the binary: run `brew tap AGOrcha/tap && brew install da` (or, if Homebrew
+   isn't available, the Go / install-script method from
+   https://github.com/AGOrcha/dot-agents#installation). Confirm with `da --version`.
 
-Beyond the base instruction file, each agent supports more specific rule files —
-Cursor's per-rule `.mdc` files and Claude's nested `.claude/rules/*.md` are both
-projected by dot-agents from one canonical source. Copilot's path-scoped
-`.github/instructions/**/*.instructions.md` is vendor-documented too, but dot-agents
-doesn't wire it yet — only the single `.github/copilot-instructions.md` is managed
-today. See `docs/PLATFORM_DIRS_DOCS.md` for the full matrix.
+2. Run the dot-agents `onboard` skill (skill://onboard). Detect my setup path
+   — from-home (a shared/team ~/.agents git URL), from-manifest (this repo already
+   commits a real .agentsrc.json), or fresh (empty home) — run exactly that path,
+   link my active editor with `da refresh`, then verify with `da status --audit`
+   and `da doctor`. If the path is ambiguous, ask me the single disambiguating question.
 
-This leads to:
-- **Duplicated rules** across every repository
-- **No way to share** common configurations
-- **Inconsistent setups** between machines
+3. Analyze this project and ask me: what am I building, my stack / app_type, my
+   editor/harness, and how much automation I want. Then tailor:
+   - use the `pipeline-architect` skill to design my execution_profile
+     (app_type → verifier/reviewer sequence + topology + review lenses),
+   - use the `skill-architect` skill for any repeatable workflow I describe,
+   - create bounded subagents for my recurring delegated tasks.
 
-### 2. Workflow Fragmentation
+4. Teach me the da primitives I'll actually use, grounded in what you just set up:
+   `da workflow orient | checkpoint | verify | advance`, `da workflow fanout` +
+   merge-back for bounded delegation, `da review` for proposals, and `da kg` for
+   project memory. For each, tell me WHEN to reach for it in my loop.
 
-Autonomous agents already behave like a workflow system — resuming work across sessions, persisting plans, verifying as they go — but each platform scatters this state in its own format and location:
-
-- **Context amnesia**: 30-40 minutes per session re-explaining what the agent already knew yesterday
-- **Scattered plans**: Plans, tasks, and checkpoints live in different places per platform
-- **Repeated verification**: Agents rediscover what's broken vs. what they just caused
-- **Lost handoffs**: Session continuity depends on the agent reconstructing state from scratch
-
-## The Solution
-
-**dot-agents** rests on three pillars, all shipping today:
-
-- **Config management** — one source of truth at `~/.agents/`, distributed
-  automatically; layered manifests `extends` shared bases and pin resolved
-  layers in `.agentsrc.lock` (see [Layered config & the lockfile](#layered-config--the-lockfile-agentsrclock))
-- **Workflow management** — composable primitives (dynamic loops, bounded
-  workflows, and agent teams) you assemble into your own orchestration; agents
-  orient, persist, verify, delegate, and propose changes autonomously through
-  `da workflow` and `da review`
-- **Knowledge graph (`da kg`)** — a local store of structured project memory
-  plus a code graph and the cross-references between them, so agents resume
-  with what was already learned instead of rediscovering it (see the
-  [Knowledge Graph](#knowledge-graph-1) section)
-
-### Layer 1: Config Management (Shipped)
-
-**dot-agents** creates a single source of truth at `~/.agents/`:
-
-```
-~/.agents/
-├── config.json              # Projects, settings, feature flags
-├── rules/
-│   ├── global/              # Applied to ALL projects
-│   │   ├── coding-style.mdc
-│   │   └── security.mdc
-│   └── myproject/           # Project-specific rules
-│       └── api-patterns.mdc
-├── skills/                  # Reusable agent skills (procedures)
-│   ├── global/
-│   │   └── deploy/SKILL.md
-│   └── myproject/
-├── agents/                  # Subagent definitions
-│   ├── global/
-│   │   └── reviewer/AGENT.md
-│   └── myproject/
-├── settings/                # Agent-specific settings
-│   └── global/
-├── hooks/                   # Canonical hook bundles
-│   └── global/
-└── mcp/                     # MCP server configurations
-    └── global/
+Keep it to the minimum decisions. Prefer the conservative/standard option and tell me
+what you chose.
 ```
 
-Then **symlinks and hard links** distribute configs to your projects automatically:
+| Step | What happens | Backed by |
+|---|---|---|
+| 1. Install | Gets the `da` binary onto your machine | Homebrew / Go / script |
+| 2. Onboard | Detects your path, scaffolds `~/.agents`, links your editor, health-checks | `onboard` skill (`from-home` / `from-manifest` / `fresh` → verify) |
+| 3. Tailor | Designs your execution profile, skills, and subagents around *your* stack | `pipeline-architect`, `skill-architect` |
+| 4. Teach | Shows the primitives + when to use each, in context | `da workflow` / `da review` / `da kg` |
 
+Full walkthrough and what each step does: **[Install & onboard](docs/INSTALL.md)**.
+
+### Prefer to drive it yourself?
+
+```bash
+brew tap AGOrcha/tap && brew install da   # or: go install …  (see Install below)
+da --version
+da init                                   # scaffold ~/.agents/
+da add ~/Github/myproject                 # register + link a project
+da refresh                                # project canonical config into each platform's shape
+da status --audit && da doctor            # verify
 ```
-~/Github/myproject/
-├── .cursor/rules/
-│   ├── global--coding-style.mdc  → ~/.agents/rules/global/...
-│   └── myproject--api-patterns.mdc → ~/.agents/rules/myproject/...
-├── .claude/rules/
-│   └── myproject--api-patterns.md → ~/.agents/rules/myproject/...
-├── AGENTS.md                     → ~/.agents/rules/global/agents.md
-└── (your code)
-```
 
-A repo's `.agentsrc.json` manifest can also `extends` shared config layers
-sourced from git, local paths, HTTP, or OCI; the resolved layer SHAs pin in
-`.agentsrc.lock` so every machine projects the same effective config. This
-layered model ships today — see
-[Layered config & the lockfile](#layered-config--the-lockfile-agentsrclock).
+The [Getting Started](docs/GETTING_STARTED.md) guide covers the three setup paths
+in full — **adopt** a shared home config, **install** a repo manifest, or **start
+fresh** — then the shared verify step.
 
-### Layer 2: Workflow Management (Shipped)
-
-Workflow-state management ships today through `da workflow`: agents orient at
-session start, persist checkpoints and verification state as they go, manage
-canonical plans and tasks, delegate bounded fan-out work, and queue
-rule/skill/config changes for human review through `da review`. Orient and
-related context draw on the knowledge graph (`da kg`) described below, so
-agents resume with what was already learned (see the
-[Knowledge Graph](#knowledge-graph-1) section).
-
-| Primitive | What It Does | Status |
-|-----------|-------------|--------|
-| **Propose** | Agents queue rule/skill/config changes for human review when patterns emerge | Shipped (`da review`) |
-| **Orient** | Load active plan, last checkpoint, verification state at session start | Shipped (`da workflow orient`) |
-| **Persist** | Save checkpoints, verification results, and plan/task progress at natural breakpoints | Shipped (`da workflow checkpoint`, `verify`, `advance`) |
-| **Delegate** | Bounded fan-out to sub-agents with write-scope constraints and merge-back | Shipped (`da workflow fanout`, `merge-back`) |
-
-The design principle: **agents operate, humans steer.**
-
-**These are primitives, not a fixed toolset.** dot-agents does not hand you one
-hard-coded loop — it gives you composable pieces to assemble your own agentic
-orchestration: **dynamic loops**, **bounded workflows**, and **agent teams**.
-Per `app_type`, an *execution profile* declares the **executor : verifier :
-reviewer** topology, an ordered **verifier sequence**, and a **review-lens** set
-with concurrency — resolve any of it with `da config relevance`. `da workflow
-fanout` spawns workers under explicit write scopes, `da workflow bundle` expands
-a delegation into its ordered `impl → verifier(s) → review` stages, a
-precondition gate enforces verification before a task can advance, and `da
-workflow merge-back` folds results back into the parent. The orchestration
-skills (`loop-worker`, `orchestrator-session-start`, `isp`,
-`delegation-lifecycle`) drive these primitives end to end. The CLI resolves,
-gates, and records the topology; the verifier and review *steps themselves* are
-run by the agents/skills you compose on top — so you build the bounded workflow
-and agent team that your project actually needs.
-
-Deeper multi-agent coordination is on the roadmap; see the Roadmap section below.
-
-### Layer 3: Knowledge Graph (Shipped, and evolving)
-
-The third pillar, `da kg`, is a local store of structured project memory —
-typed notes about decisions, entities, and sessions — plus a code graph and
-the cross-references between them. It backs the `workflow orient` context an
-agent loads at session start. See the [Knowledge Graph](#knowledge-graph-1)
-section for the full surface.
-
-**Shipped today:** typed notes, a hot-filesystem + warm-SQLite store (Postgres
-backend included), a code graph via the code-review-graph bridge
-(`kg build`/`update`/`impact`), bridge queries by intent, and note→symbol
-cross-references.
-
-**Where it's heading (in progress, not yet shipped):** dot-agents is evolving
-the KG from a fixed code-graph into a **dynamic, evolvable knowledge
-substrate** — one graph store fronted by **pluggable backend adapters** so you
-define your **own ontology of entities and relationships**, query it through a
-declarative query layer that **auto-queries across the available scopes**, and
-derive your **own operational views** tailored to your `app_type` and how your
-workflow actually needs them (the longer-term direction adds typed cognitive
-memory views — working / operational / semantic / episodic — over that single
-store). Today only a built-in `none`-adapter seam plus the design specs exist;
-this is the trajectory being built, distinct from the shipped code graph above.
-See the [graph backend adapter contract](.agents/workflow/specs/graph-backend-adapter-contract/design.md)
-and the [scoped knowledge-graphs spec](.agents/workflow/specs/scoped-knowledge-graphs/design.md).
+---
 
 ## Installation
 
 ### Homebrew (recommended)
 
 ```bash
-brew tap AGOrcha/tap
-brew install da
+brew tap AGOrcha/tap && brew install da
 ```
 
 ### Install script
@@ -221,22 +101,20 @@ irm https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.
 
 ### Go toolchain (`go install`)
 
-If you already have **Go 1.26.2+**, install the CLI straight from source with
-the Go toolchain (or set `GOTOOLCHAIN=auto` to let Go fetch the required
-toolchain automatically):
+With **Go 1.26.2+** (or `GOTOOLCHAIN=auto` to auto-fetch the toolchain):
 
 ```bash
 go install github.com/AGOrcha/dot-agents/cmd/da@latest
-# or
+# or a pinned release:
 go install github.com/AGOrcha/dot-agents/cmd/da@<release-version>
 ```
 
-The `da` binary is placed in `$(go env GOBIN)` (falling back to
-`$(go env GOPATH)/bin`); ensure that directory is on your `PATH`.
+The `da` binary lands in `$(go env GOBIN)` (falling back to `$(go env GOPATH)/bin`);
+ensure that directory is on your `PATH`.
 
 ### Manual (from source)
 
-Requires **Go 1.26.2+** (or set `GOTOOLCHAIN=auto`).
+Requires **Go 1.26.2+** (or `GOTOOLCHAIN=auto`).
 
 ```bash
 git clone https://github.com/AGOrcha/dot-agents ~/.dot-agents
@@ -245,390 +123,116 @@ go build -ldflags "-s -w" -o ./bin/da ./cmd/da
 export PATH="$HOME/.dot-agents/bin:$PATH"
 ```
 
-### Verify a release (optional)
-
-Releases are signed with [Cosign](https://github.com/sigstore/cosign) using
-keyless signing via Sigstore + GitHub OIDC. See
-[`docs/RELEASE_VERIFICATION.md`](docs/RELEASE_VERIFICATION.md) for the
-step-by-step `cosign verify-blob` recipe.
-
-## Quick Start
-
-```bash
-# 1. Initialize ~/.agents/ with starter skills, agents, hooks, and config
-#    (prompts to confirm; pass -y to run non-interactively)
-da init
-
-# 2. Add a project
-da add ~/Github/myproject
-
-# 3. Check what was linked
-da status --audit
-da doctor
-
-# 4. Create reusable skills and subagents
-da skills new deploy
-da agents new reviewer
-
-# 5. Or, inside a repo that already committed .agentsrc.json:
-da install
-```
-
-## Commands
-
-`da` exposes 26 top-level commands (excluding `help` and `completion`).
-
-### Project Management
-
-| Command | Description |
-|---------|-------------|
-| `init` | Initialize `~/.agents/` directory structure |
-| `add <path>` | Add a project to da management |
-| `remove <project>` | Remove a project from da management |
-| `refresh [project]` | Refresh managed setup from `~/.agents/`; auto-enables newly-installed editors and updates their versions. EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep the additive behavior |
-| `import [project]` | Import configs from project/global scope into `~/.agents/` |
-| `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create one). EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep additive behavior, `--strict` to fail on a missing declared resource |
-| `status` | Show managed projects and link health; for effective-config detail run `da config explain` (use `--audit` for details) |
-| `doctor` | Check installations, validate links, detect issues (read-only — reports problems and the command to fix them; never repairs) |
-
-### Configuration
-
-| Command | Description |
-|---------|-------------|
-| `config explain [field]` | Show the effective `.agentsrc.json` value of a field and which layer set it (`--all`, `--flags`, `--json`) |
-| `config sync` | Re-fetch every declared layer regardless of TTL, re-resolve, and rewrite the `units` section + `inputs_digest` of `.agentsrc.lock` — the uv `--upgrade` analog (`--layer source-id:path`, `--json`) |
-| `config lint` | Validate the repo-local `.agentsrc.json` and each `extends` layer against the AgentsRC layer schema; non-zero exit if invalid (`--json`) |
-| `config verify` | Offline setup contract check — manifest parses, declared local source layers exist, integrations ready, and remote `extends` layers are cached at the lockfile's SHA (`--json`; non-zero exit on failure) |
-| `config relevance` | Resolve a task's execution profile (units, topology, lenses) by `app_type` (`--filter`, `--app-type`, `--task`, `--stage`, `--recompute`, `--json`; see [docs/CONFIG_RELEVANCE.md](docs/CONFIG_RELEVANCE.md)) |
-
-#### Layered config & the lockfile (`.agentsrc.lock`)
-
-A `.agentsrc.json` manifest may `extends` one or more config layers sourced from
-git, local paths, HTTP, or OCI (any source may supply a layer; the kind is set by the
-pulled blob's media type), declared as `source:path@version`.
-When the layers are resolved, the resolved layer SHAs are pinned in
-`.agentsrc.lock` so every machine projects the same effective config.
-
-See the [**Layered Configuration guide**](docs/LAYERED_CONFIG_GUIDE.md) for the full
-model — the manifest, `extends` layers, resolution and precedence, the lockfile, and a
-worked walkthrough of `da config sync` / `explain` / `lint`.
-
-- `da config sync` re-checks every declared layer upstream (ignoring TTL),
-  re-resolves the stack, and rewrites the `units` section of `.agentsrc.lock`.
-  This is the explicit upstream re-check — the uv `--upgrade` analog.
-- `da refresh` and `da install` re-project the locked config locally and only
-  re-resolve when the lock is stale, so routine relinking never reaches the
-  network for an unchanged stack.
-
-### Skills & Agents
-
-| Command | Description |
-|---------|-------------|
-| `skills list [project]` | List shared or project-scoped skills |
-| `skills new <name> [project]` | Create a new skill |
-| `skills promote <name>` | Promote a repo-local skill to shared storage |
-| `agents list [project]` | List shared or project-scoped agents |
-| `agents new <name> [project]` | Create a new agent |
-| `agents promote <name>` | Promote a repo-local agent to shared storage |
-| `agents import <name>` | Link a canonical agent from `~/.agents/agents/` into this repo |
-| `agents remove <name>` | Unlink agent symlinks from this repo and drop the manifest entry |
-
-### Canonical Resource Inspection
-
-These inspect and manage canonical files under `~/.agents/`. Each supports
-`list [scope]`, `show <scope> <name>`, and `remove <scope> <name>`.
-
-| Command | Description |
-|---------|-------------|
-| `rules` | Inspect and manage canonical `~/.agents/rules` files |
-| `hooks` | Inspect and manage canonical `~/.agents/hooks` bundles |
-| `mcp` | Inspect and manage canonical `~/.agents/mcp` config files |
-| `settings` | Inspect and manage canonical `~/.agents/settings` files |
-
-See the [**Managing rules, MCP & settings guide**](docs/RESOURCE_MANAGEMENT_GUIDE.md) for the
-canonical model, per-platform emit, and the `list`/`show`/`remove` surface (hooks have their
-own [Hooks guide](docs/HOOKS.md)).
-
-### Workflow Proposals
-
-| Command | Description |
-|---------|-------------|
-| `review` | Review pending workflow proposals |
-| `review show <id>` | Show a pending proposal |
-| `review approve <id>` | Approve and apply a pending proposal |
-| `review reject <id>` | Reject a pending proposal |
-| `review users <add\|list\|remove\|set-role>` | Admin-only RBAC for the review surface; `add` mints a bearer token printed once, every mutation writes a hash-chained audit record (`--role`, `--token`, `--users-file`) |
-| `review audit <tail\|verify\|repair\|prune>` | Inspect and attest the append-only, hash-chained review audit log; `verify` needs no token and exits non-zero on an integrity break (usable as a CI gate) |
-
-### Workflow State
-
-`da workflow` captures repository-local workflow state — canonical plans,
-checkpoints, verification logs, preferences, fanout artifacts, and bridge
-queries — so humans and agents can resume work safely.
-
-| Command | Description |
-|---------|-------------|
-| `workflow status` | Show workflow state for the current project |
-| `workflow orient` | Render session orient context for the current project |
-| `workflow next` | Suggest the next actionable canonical task |
-| `workflow eligible` | List all unblocked eligible tasks across active plans with conflict detection |
-| `workflow slots` | Show the slot ledger (occupied / awaiting-owner / blocked) across active plans (`--plan`) |
-| `workflow complete --plan <id>` | Probe scoped plan-completion state |
-| `workflow health` | Show workflow health snapshot |
-| `workflow app-types` | List available app_type values for the current repo |
-| `workflow resolve-prompt --kind <k> --slug <s>` | Resolve a stage profile's composed (base-first, scope-resolved) `prompt_files` |
-
-#### Plans & Tasks
-
-| Command | Description |
-|---------|-------------|
-| `workflow plan` | List canonical plans (`show`, `graph`, `schedule` subcommands) |
-| `workflow plan create <id> --title <t>` | Create a new canonical plan with PLAN.yaml and TASKS.yaml stubs |
-| `workflow plan update <id>` | Update PLAN.yaml metadata fields |
-| `workflow plan archive --plan <id>` | Archive one or more completed canonical plans |
-| `workflow plan derive-scope <plan> <task>` | Derive a candidate scope-evidence sidecar via KG/CRG queries |
-| `workflow plan check-scope <plan> <task>` | Check changed files against a task's scope-evidence sidecar |
-| `workflow task add <plan> --id <id> --title <t>` | Append a new task to a plan's TASKS.yaml |
-| `workflow task update <plan> --task <id>` | Update notes, write-scope, or title for a task |
-| `workflow tasks <plan>` | Show tasks for a canonical plan |
-| `workflow slices <plan>` | Show slices for a canonical plan |
-| `workflow advance <plan> --task <id> --status <s>` | Advance a task's status within a plan |
-
-#### Persist & Verify
-
-| Command | Description |
-|---------|-------------|
-| `workflow checkpoint --message <m>` | Write a checkpoint for the current project |
-| `workflow log` | Show recent checkpoint log entries |
-| `workflow verify record` | Record a verification run (test/lint/build/review) |
-| `workflow verify log` | Show verification log entries |
-| `workflow prefs` | Show resolved workflow preferences (`set-local`, `set-shared`) |
-| `workflow graph query` | Query knowledge graph context by bridge intent (`graph health`) |
-
-#### Session-handoff journal
-
-`da workflow journal` is an append-only, crash-survivable event log plus a
-deterministic live-state snapshot, kept off the git tree under the XDG state
-directory — so a session resumed after a compaction or crash re-injects state
-from durable file state, re-verified against current reality, instead of
-re-grounding from scratch.
-
-| Command | Description |
-|---------|-------------|
-| `workflow journal snapshot` | Capture the deterministic live-state snapshot for the current project |
-| `workflow journal recover` | Build the verified recovery view (snapshot + replay, re-verified against reality) |
-| `workflow journal show` | Show the current snapshot and recent journal events (`--limit`, `--all`) |
-| `workflow journal prune` | Drop journal events beyond a bounded retention (safe, atomic; `--keep`) |
-| `workflow journal append` | Low-level: append one event to the journal (reasoned-overlay / testing) |
-
-#### Delegation
-
-| Command | Description |
-|---------|-------------|
-| `workflow contract create --task <id>` | Materialize a delegation contract for direct orchestrator work (`list` subcommand; `--plan`, `--mode`, `--write-scope`) |
-| `workflow fanout --plan <id> --task <id>` | Delegate a task to a sub-agent with a bounded write scope |
-| `workflow merge-back --task <id> --summary <s>` | Record a sub-agent's completed work as a merge-back artifact |
-| `workflow delegation closeout` | Archive merge-back artifacts and reconcile canonical task state |
-| `workflow delegation gate --task <id>` | Evaluate task-local review evidence into a parent-gate outcome |
-| `workflow fold-back create` | Route loop observations into plan artifacts or proposals (`update`, `list`) |
-| `workflow bundle stages <path>` | Expand a delegation bundle into the ordered stage list |
-
-#### Drift (cross-repo, read-only by default)
-
-| Command | Description |
-|---------|-------------|
-| `workflow drift` | Detect workflow drift across managed repos (read-only) |
-| `workflow sweep` | Plan and optionally apply fixes for workflow drift (`--apply`) |
-
-#### Automation / internal commands
-
-These are driven by skills and lifecycle hooks (e.g. iteration-close, loop-worker), not run by
-hand. They are listed for completeness; reach for the end-user commands above for day-to-day work.
-
-| Command | Description |
-|---------|-------------|
-| `workflow hook-sentinel` | Write/read/clear hook sentinels declaring per-skill stop-gate context (`write`/`read`/`clear`) |
-| `workflow hook-outcome write` | Append a hook gate outcome record to the active iteration's `iter-N.hook-outcomes.yaml` sidecar |
-| `workflow commit` | Stage and commit workflow-state changes (managed roots + declared session paths) |
-| `workflow archive-orphans` | Sweep stale active merge-back/delegation artifacts after a plan archive |
-| `kg lockfile show` | Inspect adapter lockfile state (`reconcile` subcommand runs fail-closed view reconciliation) |
-
-A task may also carry the parameterized status `blocked-on:<ref>` (set via
-`workflow advance --status blocked-on:<ref>`); it is a task *state*, not a standalone command,
-and frees its parallelism slot in the `workflow slots` ledger until the blocker auto-resolves.
-
-### Worktrees
-
-`da worktree` creates and merges back managed sub-branch worktrees stacked on a
-parent branch — useful for isolated delegation or parallel work. `create` forks a
-new branch+worktree from a parent branch and records that parent tip as an
-immutable base ref; `merge-back` integrates the sub-branch by reading that recorded
-base — never re-deriving it with `git merge-base` — so a parent that advanced or was
-force-pushed is caught loudly instead of silently rebasing onto the wrong commit.
-
-| Command | Description |
-|---------|-------------|
-| `worktree create --name <n> --path <p> --base-branch <b>` | Fork a sub-branch worktree from a parent branch and record the base-branch tip as its immutable base ref |
-| `worktree merge-back --name <n> --onto <b>` | Integrate the sub-branch into its parent using the recorded base ref (never `git merge-base`), failing loudly if the parent moved |
-
-### Observability
-
-`da observability` publishes workflow iteration/score telemetry to a remote
-dashboard backend (the reference deployment is `obs.agorcha.dev`) and inspects its
-reachability. The endpoint + credential come from the `.agentsrc.json`
-`observability` block; events queue crash-safe in `.agents/active/obs-outbox/` and
-drain idempotently, so a publish failure never changes a local command's result.
-
-| Command | Description |
-|---------|-------------|
-| `observability status` | Report the configured endpoint's reachability + authentication (resolves the credential-ref; refuses a non-HTTPS endpoint before resolving) |
-| `observability sync` | Drain the observability outbox to the endpoint (server dedupes); `--full` replays local `.agents/history/` to rebuild the remote read model |
-| `observability login --from-env` | Store the service-token credential (`CF_OBS_CLIENT_ID` / `CF_OBS_CLIENT_SECRET`) in the credential store |
-
-Publishing is wired best-effort into `workflow checkpoint` / `verify record`. See
-[docs/cf-access-bootstrap.md](docs/cf-access-bootstrap.md) for the Cloudflare Access
-apps and `obs/` for the Worker deploy target.
-
-### Knowledge Graph
-
-`da kg` creates, queries, and maintains the local knowledge graph used for
-structured project memory, bridge queries, and code-to-note context.
-
-| Command | Description |
-|---------|-------------|
-| `kg setup` | Initialize the knowledge graph at `KG_HOME` |
-| `kg health` | Show knowledge graph health |
-| `kg serve` | Start the MCP server (stdio transport, JSON-RPC 2.0) |
-| `kg ingest [file]` | Ingest a raw source into the graph (`--all`, `--type`, `--dry-run`) |
-| `kg queue` | List pending sources in the inbox |
-| `kg query [string] --intent <i>` | Query the knowledge graph by intent |
-| `kg lint` | Check graph integrity and knowledge quality (`--check`) |
-
-#### Maintenance
-
-| Command | Description |
-|---------|-------------|
-| `kg maintain reweave` | Repair broken links and add missing source_ref links |
-| `kg maintain mark-stale` | Mark notes not updated beyond threshold as stale (`--days`) |
-| `kg maintain compact` | Archive superseded and archived notes |
-| `kg sync` | Sync graph via git pull + lint (`--push` to push) |
-| `kg warm` | Sync hot filesystem notes into the warm SQLite layer (`stats` subcommand) |
-
-#### Bridge
-
-| Command | Description |
-|---------|-------------|
-| `kg bridge query --intent <i>` | Execute a bridge intent query |
-| `kg bridge health` | Show adapter availability and health |
-| `kg bridge mapping` | Show bridge intent to KG intent mapping |
-
-#### Code Graph
-
-| Command | Description |
-|---------|-------------|
-| `kg build` | Full code graph build (re-parse all files via code-review-graph) |
-| `kg update` | Incremental code graph update (changed files only) |
-| `kg code-status` | Show code graph stats (nodes, edges, languages) |
-| `kg changes` | Detect change impact in the current diff |
-| `kg impact [file...]` | Show blast radius for given files (or current diff) |
-| `kg flows` | List detected execution flows |
-| `kg communities` | List detected code communities |
-| `kg postprocess` | Rebuild flows, communities, and FTS index |
-| `kg link add\|list\|remove` | Manage note→code symbol cross-references |
-
-### Sync
-
-`da sync` wraps git operations on `~/.agents/`.
-
-| Command | Description |
-|---------|-------------|
-| `sync init` | Initialize git repo in `~/.agents/` |
-| `sync status` | Show git status |
-| `sync commit` | Commit all changes |
-| `sync push` | Push to remote |
-| `sync pull` | Pull from remote |
-| `sync log` | Show recent commit log |
-
-### Evaluation & Recipes
-
-`da eval` drives the R4 agent-evaluation harness end to end — synthesise a
-reproducible TaskSpec from the knowledge graph, run it in an isolated sandbox,
-and score the outcome against the same rubric `da score` uses (see the
-[**Eval harness guide**](docs/EVAL_HARNESS.md)). `da run` executes a *recipe*:
-a line-oriented sequence of `da` commands.
-
-| Command | Description |
-|---------|-------------|
-| `eval gen` | Generate a reproducible eval TaskSpec from the knowledge graph (`--language go\|python\|typescript`, `--difficulty`, `--template`, `--out`) |
-| `eval run` | Run one eval task end-to-end in an isolated sandbox and score the outcome (`--agent claude\|codex\|copilot`, `--task`, `--language`, `--repo-dir`) |
-| `eval ls` | List persisted eval runs under `.agents/eval/runs/` (`--repo-dir`) |
-| `run <file>` | Execute a da recipe file — dispatched in order, fail-fast, with `$VAR`/`${VAR}` env-substitution and no shell invoked (shebang-friendly via `#!/usr/bin/env -S da run`) |
-
-### Utilities
-
-| Command | Description |
-|---------|-------------|
-| `explain [topic]` | Explain da concepts |
-| `score run` | Compute and query agent-run outcome scores (`iteration <N>`, `session <id>` subcommands; see the [**Scoring guide**](docs/SCORE_GUIDE.md)) |
-| `session stats` | Show usage statistics from each installed AI platform |
-| `--help` | Show help for any command |
-| `--version` | Show version |
-
-## How It Works
-
-### Cursor Rules (Hard Links)
-
-Cursor doesn't follow symlinks for `.cursor/rules/`, so dot-agents uses **hard links**:
-
-```bash
-# In your project
-.cursor/rules/global--coding-style.mdc  # Hard link to ~/.agents/rules/global/coding-style.mdc
-```
-
-Hard links share the same file content (same inode), so edits in either location are reflected in both.
-
-### Claude Code / Codex (Symlinks)
-
-Claude Code project rules are standard symlinks under `.claude/rules/`, one per
-canonical rule (same idea as the Cursor rules above, but symlinks instead of hard
-links). Global rules need no per-project link: `~/.claude/CLAUDE.md` is symlinked once
-at user scope, and Claude loads that user-memory file for every project.
-
-Codex's instructions link as a project-root `AGENTS.md` symlink — the global rule by
-default, replaced by a project-scoped override when one exists:
-
-```bash
-.claude/rules/myproject--api-patterns.md  → ~/.agents/rules/myproject/api-patterns.md
-AGENTS.md                                 → ~/.agents/rules/global/agents.md
-```
-
-Codex also gets agent definitions (rendered to `.codex/agents/*.toml`), settings (`.codex/config.toml`), and hooks (`.codex/hooks.json`).
-
-### Naming Convention
-
-Files in `.cursor/rules/` are prefixed to show their source:
-- `global--*.mdc` → From `~/.agents/rules/global/`
-- `{project}--*.mdc` → From `~/.agents/rules/{project}/`
-
-## Syncing Across Machines
-
-Your `~/.agents/` directory is designed to be git-tracked:
-
-```bash
-# First time setup
-da sync init
-cd ~/.agents
-git remote add origin git@github.com:YOU/agents-config.git
-da sync push
-
-# On another machine
-git clone git@github.com:YOU/agents-config.git ~/.agents
-da add ~/Github/myproject  # Re-link your projects
-```
-
-## Supported Agents
-
-| Agent | Status | Config Files |
+Releases are signed with [Cosign](https://github.com/sigstore/cosign) (keyless, via
+Sigstore + GitHub OIDC) — see [`docs/RELEASE_VERIFICATION.md`](docs/RELEASE_VERIFICATION.md)
+for the `cosign verify-blob` recipe.
+
+---
+
+## Why dot-agents
+
+Every AI coding agent scatters its own state in its own place — and so does the
+work those agents do.
+
+- **Config fragmentation.** Each agent has its own instruction/rule files and
+  format (`.cursor/rules/*.mdc`, `CLAUDE.md`, `AGENTS.md`,
+  `.github/copilot-instructions.md`, …), so rules get duplicated per repo, can't
+  be shared, and drift between machines.
+- **Workflow fragmentation.** Autonomous agents already behave like a workflow
+  system — resuming across sessions, persisting plans, verifying as they go — but
+  each platform stores that state differently. The cost: context amnesia at every
+  session start, scattered plans, repeated rediscovery of what's broken, and lost
+  handoffs.
+
+**dot-agents** answers both with one source of truth and one operational surface.
+
+### The three pillars (all shipping today)
+
+1. **Config management** — a single source of truth at `~/.agents/`, distributed
+   to each project via symlinks/hard links in the shape each platform expects. A
+   repo's `.agentsrc.json` can `extends` shared layers (git / local / HTTP / OCI);
+   resolved layer SHAs pin in `.agentsrc.lock` so every machine projects the same
+   effective config.
+   → [Layered Configuration](docs/LAYERED_CONFIG_GUIDE.md) ·
+   [Config model](docs/concepts/config-model.md) ·
+   [Platform projection](docs/concepts/platform-projection.md) ·
+   [Platform matrix](docs/PLATFORM_DIRS_DOCS.md)
+
+2. **Workflow management** — composable primitives, not a fixed toolset. Agents
+   orient at session start, persist checkpoints/verification, manage canonical
+   plans and tasks, delegate bounded fan-out with write-scope constraints and
+   merge-back, and queue changes for human review (`da review`). Per `app_type`, an
+   *execution profile* declares the executor : verifier : reviewer topology, an
+   ordered verifier sequence, and a review-lens set — the CLI resolves, gates, and
+   records the topology while the steps run in the agents/skills you compose on
+   top. **Agents operate, humans steer.**
+   → [Workflow client commands](docs/WORKFLOW_CLIENT_COMMANDS.md) ·
+   [Workflow artifact model](docs/concepts/workflow-artifact-model.md) ·
+   [Verification & scoring](docs/concepts/verification-and-scoring.md) ·
+   [Diagrams](docs/PROJECT_DIAGRAMS.md)
+
+3. **Knowledge graph (`da kg`)** — a local store of structured project memory
+   (typed notes about decisions, entities, sessions) plus a code graph and the
+   cross-references between them. It backs the `workflow orient` context an agent
+   loads at session start, so it resumes with what was already learned. Shipped: a
+   hot-filesystem + warm-SQLite store (Postgres backend included), a code graph via
+   the code-review-graph bridge, bridge queries by intent, note→symbol links. The
+   KG is evolving toward a pluggable-backend, custom-ontology substrate — see the
+   [graph backend adapter contract](.agents/workflow/specs/graph-backend-adapter-contract/design.md)
+   and the [scoped knowledge-graphs spec](.agents/workflow/specs/scoped-knowledge-graphs/design.md).
+
+A read-only [Observability dashboard](docs/OBSERVABILITY_DASHBOARD.md) surfaces
+workflow runs, iteration scores, and rubric detail with live updates.
+
+---
+
+## Command surface
+
+`da` exposes 26 top-level commands. The **[full command reference](docs/COMMANDS.md)**
+documents every family and subcommand; the map below is the entry point, and each
+row links to the guide for that area. Run `da <command> --help` for the
+authoritative flag set, and see the [Global Flag Contract](docs/GLOBAL_FLAG_CONTRACT.md)
+for how `--json` / `--dry-run` / `--yes` / `--force` / `--verbose` behave per command.
+
+| Family | For | Deep dive |
+|--------|-----|-----------|
+| `init` `add` `remove` `refresh` `import` `install` `status` `doctor` | Set up `~/.agents/` and link projects | [Getting Started](docs/GETTING_STARTED.md) |
+| `worktree` (`create` `merge-back`) | Managed sub-branch worktrees for isolated / parallel work | [Command reference](docs/COMMANDS.md#worktrees) |
+| `config` (`explain` `sync` `lint` `verify` `relevance`) | Inspect/resolve effective config + layers | [Layered config](docs/LAYERED_CONFIG_GUIDE.md), [relevance](docs/CONFIG_RELEVANCE.md) |
+| `skills` `agents` | Author + promote reusable skills and subagents | [Skill↔command integration](docs/SKILL_COMMAND_INTEGRATION.md) |
+| `rules` `hooks` `mcp` `settings` | Manage canonical resources under `~/.agents/` | [Resource management](docs/RESOURCE_MANAGEMENT_GUIDE.md), [Hooks](docs/HOOKS.md) |
+| `workflow` | Orient, plan, verify, checkpoint, delegate, journal | [Workflow commands](docs/COMMANDS.md#workflow-state) |
+| `review` | Approve/reject proposed rule/skill/config changes | [Command reference](docs/COMMANDS.md#workflow-proposals) |
+| `kg` | Structured project memory + code graph | [Command reference](docs/COMMANDS.md#knowledge-graph) |
+| `observability` | Publish iteration/score telemetry to the dashboard | [Dashboard](docs/OBSERVABILITY_DASHBOARD.md) |
+| `eval` `run` `score` | Eval harness, recipes, outcome scoring | [Eval](docs/EVAL_HARNESS.md), [Scoring](docs/SCORE_GUIDE.md) |
+| `sync` | Git operations on `~/.agents/` | [Command reference](docs/COMMANDS.md#sync) |
+
+---
+
+## How it works
+
+Canonical config lives once under `~/.agents/`; `da` projects it into each
+project in the exact shape that platform reads:
+
+- **Cursor** doesn't follow symlinks for `.cursor/rules/`, so dot-agents uses
+  **hard links** (`global--coding-style.mdc` → `~/.agents/rules/global/…`). The
+  `global--*` / `{project}--*` prefix shows each file's source.
+- **Claude Code** links project rules as symlinks under `.claude/rules/` (one per
+  canonical rule); global rules load once from the user-scope `~/.claude/CLAUDE.md`.
+  **Codex** links a project-root `AGENTS.md` (the global rule by default, a
+  project-scoped override when one exists) plus rendered `.codex/` agents/settings/hooks.
+  **Copilot** manages `.github/copilot-instructions.md` (+ `.github/agents/*.agent.md`);
+  **OpenCode** gets `AGENTS.md` + `.opencode/agent/*.md`. Each platform also gets its
+  rendered agent/settings/hook/MCP files.
+
+The full per-platform matrix (files, formats, link types) lives in
+[`docs/PLATFORM_DIRS_DOCS.md`](docs/PLATFORM_DIRS_DOCS.md); the model behind it is
+[Platform projection](docs/concepts/platform-projection.md).
+
+## Supported agents
+
+| Agent | Status | Config files |
 |-------|--------|--------------|
 | **Cursor** | ✅ Full | `.cursor/rules/*.mdc`, `.cursor/settings.json`, `.cursor/mcp.json`, `.cursor/hooks.json`, `.cursorignore`, `.claude/agents/` (subagent compat) |
 | **Claude Code** | ✅ Full | `.claude/rules/*.md`, `.claude/settings.local.json`, `.mcp.json`, `.claude/agents/`, `.claude/skills/`, `.agents/skills/`, `~/.claude/CLAUDE.md` (user scope) |
@@ -640,261 +244,91 @@ da add ~/Github/myproject  # Re-link your projects
 ## Requirements
 
 - **macOS** or **Linux** for the CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
-- **Windows:** use `scripts/install.ps1` for the CLI.
-- **Go 1.26.2+** — only for `go install` or building from source. The Homebrew and `scripts/install.sh` paths ship a prebuilt binary and need no Go toolchain. (Set `GOTOOLCHAIN=auto` to auto-fetch the toolchain.)
-- **git** (for sync features)
+- **Windows:** use `scripts/install.ps1`.
+- **Go 1.26.2+** — only for `go install` or building from source (Homebrew and the
+  install script ship a prebuilt binary; set `GOTOOLCHAIN=auto` to auto-fetch).
+- **git** — for sync features and git-sourced config layers.
 
-## Configuration
+---
 
-### config.json
+## Documentation
 
-`~/.agents/config.json` is the **synced, portable identity registry** — safe to commit
-to a git-tracked `~/.agents/` (see [Syncing Across Machines](#syncing-across-machines)).
-Absolute paths never appear here; they live in the machine-local, gitignored
-`~/.agents/local/bindings.json`, keyed by the same project id.
+- **Start here:** [Getting Started](docs/GETTING_STARTED.md) ·
+  [Install & onboard](docs/INSTALL.md) ·
+  [AI development lifecycle](docs/concepts/ai-dev-lifecycle.md)
+- **Reference:** [Command reference](docs/COMMANDS.md) ·
+  [Global flag contract](docs/GLOBAL_FLAG_CONTRACT.md) ·
+  [Platform matrix](docs/PLATFORM_DIRS_DOCS.md)
+- **Config:** [Layered configuration](docs/LAYERED_CONFIG_GUIDE.md) ·
+  [Config model](docs/concepts/config-model.md) ·
+  [Resource management](docs/RESOURCE_MANAGEMENT_GUIDE.md) ·
+  [Hooks](docs/HOOKS.md)
+- **Workflow:** [Workflow client commands](docs/WORKFLOW_CLIENT_COMMANDS.md) ·
+  [Workflow artifact model](docs/concepts/workflow-artifact-model.md) ·
+  [Verification & scoring](docs/concepts/verification-and-scoring.md) ·
+  [Scoring guide](docs/SCORE_GUIDE.md) · [Diagrams](docs/PROJECT_DIAGRAMS.md)
+- **Advanced:** [Config relevance](docs/CONFIG_RELEVANCE.md) ·
+  [Eval harness](docs/EVAL_HARNESS.md) ·
+  [Observability dashboard](docs/OBSERVABILITY_DASHBOARD.md) ·
+  [Release verification](docs/RELEASE_VERIFICATION.md) ·
+  [Architecture decision records](docs/adr/)
 
-```json
-{
-  "version": 2,
-  "projects": {
-    "myproject": {
-      "repo_id": "github.com/you/myproject"
-    }
-  },
-  "defaults": {
-    "agent": "claude"
-  },
-  "features": {
-    "tasks": false,
-    "history": false,
-    "sync": false
-  }
-}
-```
+## Syncing across machines
 
-`~/.agents/local/bindings.json` (machine-local, never synced) resolves each project id
-to its absolute path on this machine:
-
-```json
-{
-  "version": 2,
-  "bindings": {
-    "myproject": {
-      "path": "/Users/you/Github/myproject",
-      "added": "2026-01-10T10:00:00Z"
-    }
-  }
-}
-```
-
-### Skills
-
-Skills are reusable procedure documents that agents can invoke:
+`~/.agents/` is designed to be git-tracked:
 
 ```bash
-# Create a new skill
-da skills new deploy
-
-# List all skills
-da skills list
-
-# Promote a repo-local skill into ~/.agents/
-da skills promote deploy
+da sync init && cd ~/.agents
+git remote add origin git@github.com:YOU/agents-config.git
+da sync push
+# On another machine:
+da init --from git@github.com:YOU/agents-config.git   # adopt the shared home
+da add ~/Github/myproject                             # rebind each project
 ```
-
-Skills live in `~/.agents/skills/global/` with this structure:
-- `SKILL.md` - The skill definition with frontmatter
-- `scripts/` - Optional helper scripts
-- `references/` - Optional additional context
-
-### Subagents
-
-Subagents are directory-based agent definitions:
-
-```bash
-# Create a new subagent
-da agents new reviewer
-
-# List all subagents
-da agents list
-
-# Promote a repo-local subagent into ~/.agents/
-da agents promote reviewer
-```
-
-Each subagent is a directory containing:
-- `AGENT.md` - Required agent definition with frontmatter (name, description, model)
-- `scripts/` - Optional helper scripts
-- `references/` - Optional additional context documents
-
-### Hooks
-
-Inspect canonical hook bundles stored in `~/.agents/hooks/`:
-
-```bash
-# List all hooks
-da hooks list
-
-# Inspect one hook bundle
-da hooks show global session-orient
-```
-
-### Project Manifests (.agentsrc.json)
-
-Commit a `.agentsrc.json` to your repo so any contributor can set up agent configs from the repo itself:
-
-```bash
-# Generate manifest from current ~/.agents/ state
-da install --generate
-
-# Set up a cloned repo from its manifest
-da install
-```
-
-`da install` is **EXACT** by default: the platform link pass prunes managed
-shared-target links that are no longer in the resolved set, so the tree
-converges to exactly what the lock declares. Pass `--inexact` to keep the
-additive behavior and leave stale managed links in place, or `--strict` to
-fail if any declared resource is missing. `da refresh` follows the same
-EXACT/prune-by-default convention with the same `--inexact` opt-out.
-
-### Importing Existing Configs
-
-Already have agent configs scattered across your projects? Import them into `~/.agents/`:
-
-```bash
-da import myproject
-```
-
-This detects existing rules, skills, agents, and hooks in the project and copies them into the central `~/.agents/` directory.
-
-### Knowledge Graph
-
-The knowledge graph (`da kg`) is a local store of structured project memory:
-durable notes about decisions, entities, concepts, and sessions, plus a
-code graph and the cross-references between them. It backs the `workflow
-orient` context an agent loads at session start, so the agent resumes with
-what was already learned instead of rediscovering it.
-
-Notes carry a type — `source`, `entity`, `concept`, `synthesis`,
-`decision`, `repo`, or `session` — and live as hot Markdown files that are
-synced into a warm SQLite layer for fast querying. Raw material (Markdown,
-text, PDFs, URLs, transcripts) is brought in through an inbox and turned
-into typed notes:
-
-```bash
-# One-time: initialize the graph at KG_HOME
-da kg setup
-
-# Ingest a source (or --all to drain the inbox), then sync to the warm layer
-da kg ingest notes.md
-da kg warm
-
-# Query by intent (decision_lookup, repo_context, related_notes, ...)
-da kg query --intent decision_lookup "why postgres backend"
-
-# Health and integrity
-da kg health
-da kg lint
-```
-
-A code graph is built from the repo with `da kg build` (incremental
-updates via `da kg update`). It powers impact analysis — `da kg impact`
-shows the blast radius of changed files, and `da kg changes` detects
-change impact in the current diff. Notes can be tied to specific code
-symbols so context follows the code:
-
-```bash
-# Build the code graph, then cross-reference a note to a symbol
-da kg build
-da kg link add <note-id> <qualified-name>
-da kg link list <note-id>
-```
-
-Maintenance keeps the graph honest: `da kg maintain reweave` repairs
-broken links, `mark-stale` flags notes past a freshness threshold, and
-`compact` archives superseded notes. `da kg sync` pulls and lints the
-graph (add `--push` to publish), and `da kg serve` exposes the graph to
-agents over MCP. See the [Knowledge Graph](#knowledge-graph) command
-table above for the full surface.
 
 ## Roadmap
 
-### Agent-as-Operator
+The foundation ships today; remaining work deepens it.
 
-The next major evolution: agents run `da` autonomously instead of humans operating it manually. The agent manages config, skills, rules, and workflow state — surfacing only decisions that require human judgment.
-
-Changes follow an **approval gradient**:
-- **Auto-apply**: Checkpoints, verification results, plan progress, lessons after corrections
-- **Propose-and-apply**: New rules, skills, workflow config changes — human confirms
-- **Escalate**: Conflicting rules, stale config affecting production, cross-repo drift
-
-### Workflow State
-
-Based on analysis of real session data across Claude Code, Cursor, and Codex, dot-agents manages six workflow concerns. The foundation ships today via `da workflow`; remaining work deepens coverage:
-
-1. **Resume context** — collect active plan, last handoff, and likely next step (shipped: `workflow orient`, `next`)
-2. **Plan & task state** — canonical plan artifacts with dependency-aware phases (shipped: `workflow plan`, `task`, `advance`)
-3. **Verification state** — persist test/lint/build results so agents stop rediscovering what's broken (shipped: `workflow verify`, `checkpoint`)
-4. **Approvals & tool health** — surface auth expiry, rate-limit risk, environment readiness (roadmap)
-5. **Repo preferences** — persist per-repo habits like test commands and review preferences (shipped: `workflow prefs`)
-6. **Delegation & handoff** — bounded fan-out with ownership constraints and merge-back summaries (shipped: `workflow fanout`, `merge-back`)
-
-### Multi-Agent Coordination
-
-The foundation ships today: **bounded fan-out** (`workflow fanout`) spawns
-workers with explicit write scopes, **structured context bundles**
-(`workflow bundle`) front-load them so they don't rediscover state, and
-**merge-back** (`workflow merge-back`) collects results into parent
-continuation artifacts. Drawing from supervisor and swarm-orchestration
-patterns, the roadmap deepens this with:
-
-- **Richer coordination protocols**: intent-marker conventions that prevent infinite loops and drift between cooperating agents
-- **Adaptive context engineering**: tune each subagent's bundle from graph impact analysis instead of fixed scopes
-- **Cross-agent scheduling**: coordinate multiple concurrent workers against a shared plan with conflict detection
+- **Agent-as-operator** — agents run `da` autonomously along an approval gradient:
+  *auto-apply* (checkpoints, verification, plan progress, lessons),
+  *propose-and-apply* (new rules/skills/config — human confirms), *escalate*
+  (conflicting rules, stale prod config, cross-repo drift).
+- **Workflow depth** — the six workflow concerns are partly shipped (orient/next,
+  plans/tasks, verify/checkpoint, prefs, fanout/merge-back); approvals & tool-health
+  surfacing remain on the roadmap.
+- **Multi-agent coordination** — building on bounded fan-out, context bundles, and
+  merge-back: richer anti-drift coordination protocols, graph-driven adaptive
+  context engineering, and cross-agent scheduling with conflict detection.
 
 ## FAQ
 
-**Q: Why hard links for Cursor?**
+**Why hard links for Cursor?** Cursor's rule system doesn't follow symlinks; hard
+links share the actual file content, so edits sync automatically.
 
-Cursor's rule system doesn't follow symlinks. Hard links share the actual file content, so changes sync automatically.
+**Can I use this with existing projects?** Yes — `da add` won't overwrite existing
+files unless you pass `--force`.
 
-**Q: Can I use this with existing projects?**
+**Is my config private?** Yes. Everything stays in `~/.agents/` on your machine;
+git sync is optional and to your own repo.
 
-Yes! `da add` won't overwrite existing files unless you use `--force`.
+**What's `da refresh` for?** After pulling `~/.agents/` changes, `refresh`
+re-applies links to all projects. It's **EXACT** by default (prunes managed links
+no longer in the resolved set); pass `--inexact` to keep additive behavior.
 
-**Q: Is my config private?**
-
-Yes. Everything stays in `~/.agents/` on your machine. Git sync is optional and to your own repo.
-
-**Q: What if I don't use all the agents?**
-
-That's fine! dot-agents only creates config files for agents it detects or that you have rules for.
-
-**Q: What is `da refresh` for?**
-
-After pulling changes to `~/.agents/` from git, run `refresh` to re-apply links and configs to all your projects. This ensures your projects stay in sync with your central config. `refresh` is **EXACT** by default — it prunes managed shared-target links that are no longer in the resolved set; pass `--inexact` to keep the additive behavior and leave stale managed links in place.
-
-**Q: How do skills differ from rules?**
-
-- **Rules** (`.mdc` files) are always-active guidelines applied to all projects
-- **Skills** (`SKILL.md` files) are on-demand procedures that agents invoke when needed, like deployment checklists or code review workflows
-
-**Q: Can I sync my config across machines?**
-
-Yes! `da sync` helps you manage `~/.agents/` as a git repository. Clone it on another machine and run `da refresh` to set up all your projects.
+**Skills vs rules?** Rules (`.mdc`) are always-active guidelines; skills
+(`SKILL.md`) are on-demand procedures agents invoke when needed.
 
 ## Contributing
 
-Contributions welcome! Please open an issue or pull request on GitHub.
+Contributions welcome — open an issue or pull request on GitHub.
 
 ## License
 
-[Apache License 2.0](LICENSE) — see also [NOTICE](NOTICE).
-
-Contributions are accepted under the Apache 2.0 terms (§5): unless you state
-otherwise, anything you intentionally submit for inclusion is licensed under
-Apache 2.0, with its patent grant.
+[Apache License 2.0](LICENSE) — see also [NOTICE](NOTICE). Contributions are
+accepted under the Apache 2.0 terms (§5): unless you state otherwise, anything you
+intentionally submit for inclusion is licensed under Apache 2.0, with its patent
+grant.
 
 ---
 

@@ -134,21 +134,39 @@ Parent `workflow` does not read globals; behavior is per subcommand.
 | `drift` | supported | unsupported | unsupported | |
 | `sweep` | unsupported | unsupported | partial | Uses **`--apply`** for real runs (default is dry plan). Globals `--dry-run` / `--yes` are not wired; `--yes` skips per-action prompts when `sweep --apply` runs |
 | `journal` (snapshot/recover/show/prune/append) | supported | partial | unsupported | Session-handoff journal; subcommands read the global `--json` (`commands/workflow/journal.go:217,268,424,481`); `prune` honors the global `-n` |
+| `eligible` | supported | unsupported | unsupported | Cross-plan eligible-task listing |
+| `slots` | supported | unsupported | unsupported | Slot-ledger view (`--plan`) |
+| `complete` | supported | unsupported | unsupported | Scoped plan-completion probe (`--plan` required) |
+| `app-types` | supported | unsupported | unsupported | Local `--verbose` is a **distinct-semantic** local (per-`app_type` detail), not the global |
+| `resolve-prompt` | supported | unsupported | unsupported | Stage-profile prompt resolution |
+| `plan schedule` | supported | unsupported | unsupported | Kahn-BFS wave schedule |
+| `plan derive-scope` | supported | unsupported | unsupported | Scope-evidence sidecar via KG/CRG queries |
+| `plan check-scope` | supported | unsupported | unsupported | Changed-files vs sidecar check |
+| `plan archive` | unsupported | supported | unsupported | Reads global `-n` (no-op preview); `--force` is a **distinct-semantic** local (skip completed-status guard) |
+| `task rename` | local | local | unsupported | Local `--json`/`--dry-run` **OR-merged** with the globals (`plan_task.go`) |
+| `task supersede` | local | local | unsupported | Local `--json`/`--dry-run` **OR-merged** with the globals |
+| `fold-back update` | supported | unsupported | unsupported | Slug-scoped fold-back refine |
+| `contract create` / `contract list` | supported | unsupported | unsupported | Delegation-contract materialization / listing |
+| `delegation gate` | supported | unsupported | unsupported | Task-local review evidence → parent-gate outcome |
+| `bundle stages` | supported | unsupported | unsupported | Expand a delegation bundle into ordered stages |
+| `close-task` | supported | unsupported | unsupported | End-of-iteration client command |
+| `start-task` | supported | local | unsupported | Local `--dry-run` **OR-merged** with global `-n` (`start_task.go`) |
+| `commit` | unsupported | local | unsupported | Local `--dry-run` **OR-merged** with global `--dry-run` (`commit_cmd.go`) |
+| `state-ref reconcile` | local | local | unsupported | Local `--json`/`--dry-run` **OR-merged** with the globals |
+| `pipeline emit` | supported | local | unsupported | Local `--dry-run` **OR-merged** with global `-n` |
+| `hook-sentinel write` / `read` / `clear` | supported | unsupported | unsupported | `write`'s local `--json` **OR-merged** with the global |
+| `hook-outcome write` | supported | unsupported | unsupported | Appends the iteration hook-outcome sidecar |
+| `archive-orphans` | supported | supported | unsupported | Reads global `--json` + `-n` |
 
 Root `--force` and `--verbose` are not shown in the workflow inventory table; treat as **unsupported** for workflow subcommands unless a future inventory row documents otherwise.
 
-This table is a **partial inventory** as of the 0.5.0 cut. Newer subcommands not yet
-individually rowed — `eligible`, `slots`, `complete`, `app-types`, `resolve-prompt`,
-`contract` (create/list), `delegation gate`, `bundle stages`, `commit`, `close-task`,
-`start-task`, `hook-sentinel`, `hook-outcome`, `archive-orphans`, `plan archive`,
-`plan schedule`, `plan derive-scope`, `plan check-scope`, `fold-back update` — inherit
-the same root-persistent globals; confirm a given leaf's support by its
-`deps.Flags.JSON()` / `deps.Flags.DryRun()` reads rather than assuming from this
-table. `plan archive` additionally honors the global `--dry-run` for a genuine no-op
-preview (threaded as `deps.Flags.DryRun()` at `commands/workflow/cmd.go:318` into
-`runWorkflowPlanArchive`, `commands/workflow/plan_task.go:3221`) on top of its local
-`--force` (see the distinct-semantic-locals summary row below). A full per-row
-re-inventory is tracked for a later pass.
+This table now individually rows the workflow subcommand surface as of the 0.5.0
+cut — including the `close-task` / `start-task` client commands and the
+orchestration/automation leaves. `plan archive`'s `--force` is a distinct-semantic
+local (skip the completed-status guard), summarized in the cross-cutting row below.
+Regenerate the authoritative machine matrix any time with
+`go run ./cmd/globalflag-coverage -markdown`, which prints each command's
+`commands.Flags` reads straight from the code.
 
 ### Workflow `status` JSON shadowing — RESOLVED
 

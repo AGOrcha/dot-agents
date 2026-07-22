@@ -14,7 +14,8 @@ starts. `da` keeps your hooks in one place and wires them into each platform
 that supports them.
 
 > This is the user-facing guide. For a quick command summary see the
-> **Hooks** entry in the [README](../README.md#hooks); this document
+> **Canonical Resource Inspection** entry in the
+> [command reference](./COMMANDS.md#canonical-resource-inspection); this document
 > covers the storage model and per-platform behavior in more detail.
 
 ## The canonical model
@@ -487,6 +488,6 @@ every platform that supports them.
 
 ## See also
 
-- [README — Hooks](../README.md#hooks) — quick command summary
+- [Command reference — resources](./COMMANDS.md#canonical-resource-inspection) — quick command summary
 - [PLATFORM_DIRS_DOCS.md](./PLATFORM_DIRS_DOCS.md) — full per-platform resource
   locations and the Hook Wiring Audit
