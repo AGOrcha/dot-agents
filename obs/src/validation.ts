@@ -197,7 +197,11 @@ function canonicalize(value: unknown): string {
     return `{${Object.keys(value)
       // explicit code-unit comparator (NOT localeCompare): canonical JSON must
       // stay byte-stable for signing/hashing, so keys sort by UTF-16 code unit
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      .sort((a, b) => {
+        if (a < b) return -1;
+        if (a > b) return 1;
+        return 0;
+      })
       .map((key) => {
         assertValidUnicode(key);
         return `${JSON.stringify(key)}:${canonicalize(value[key])}`;
