@@ -638,6 +638,22 @@ jobs:
         # Produces web/dashboard/coverage/lcov.info consumed by sonar.javascript.lcov.reportPaths.
         run: pnpm --filter r2-observability-dashboard test:coverage
 
+      - name: Install obs worker deps
+        # obs is a standalone npm package (not in the pnpm workspace); its tests
+        # emit c8 lcov consumed by sonar.javascript.lcov.reportPaths so obs/src
+        # lines get a real coverage signal instead of reading 0% for lack of one.
+        # --ignore-scripts per Sonar S6505; esbuild (tsx's native dep) is rebuilt
+        # explicitly next so the tsx --test run can locate its binary.
+        run: npm --prefix obs ci --ignore-scripts
+
+      - name: Rebuild obs esbuild binary
+        run: npm --prefix obs rebuild esbuild
+
+      - name: Run obs worker tests with lcov coverage
+        # Produces obs/coverage/lcov.info (SF: paths relative to obs/, matching the
+        # dashboard pattern; Sonar resolves them against the report's package dir).
+        run: npm --prefix obs run test:coverage
+
       # Provide the scanner's JRE on the runner so it does NOT download one from
       # Sonar's CDN mid-run (that download intermittently 403s and failed this
       # gate). Paired with sonar.scanner.skipJreProvisioning below.
