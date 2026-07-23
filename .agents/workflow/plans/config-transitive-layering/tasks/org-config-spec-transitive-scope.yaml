@@ -4,7 +4,7 @@ order: 0
 task:
     id: org-config-spec-transitive-scope
     title: Spec org→team→repo transitive extends + source scope/owner routing
-    status: pending
+    status: completed
     depends_on: []
     blocks: []
     owner: NikashPrakash
