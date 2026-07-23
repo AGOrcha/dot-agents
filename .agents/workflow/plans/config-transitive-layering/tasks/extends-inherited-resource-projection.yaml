@@ -4,7 +4,7 @@ order: 4
 task:
     id: extends-inherited-resource-projection
     title: Project extends-inherited (org/team) skills/agents at install
-    status: pending
+    status: completed
     depends_on:
         - layered-consumers-relevance-verify
     blocks: []
