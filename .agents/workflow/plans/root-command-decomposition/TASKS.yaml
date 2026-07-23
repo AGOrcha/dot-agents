@@ -851,7 +851,7 @@ tasks:
       verification_required: true
       notes: |-
         Re-narrowed per t13a worker's SECOND fold-back
-        (.agents/active/fold-back/t13a-respawn-lifecycle-shims-not-passthroughs.yaml):
+        (.agents/history/root-command-decomposition/fold-backs/t13a-respawn-lifecycle-shims-not-passthroughs.yaml):
         the proposed full-7-call rewire collided with HEAD reality on
         4 of 7 calls — lifecycle.NewInitCmd does not exist (init.go
         builds cobra locally via lifecycle.SetInitFlags + InitUsageErrorFn
@@ -997,7 +997,7 @@ tasks:
       verification_required: true
       notes: |-
         Second half of t13 split per worker fold-back
-        (.agents/active/fold-back/t13-write-scope-missing-test-files.yaml).
+        (.agents/history/root-command-decomposition/fold-backs/t13-write-scope-missing-test-files.yaml).
         Strip the lifecycle-cluster shim wiring (re-export var blocks,
         syncLifecycleGlobals, lifecycleDeps, lifecycleStatusDeps,
         lifecycleDoctorDeps) plus the lowercased forwarders
