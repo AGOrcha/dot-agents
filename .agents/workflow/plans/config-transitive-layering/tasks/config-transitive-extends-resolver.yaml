@@ -4,7 +4,7 @@ order: 2
 task:
     id: config-transitive-extends-resolver
     title: 'CORE: resolve layer-declared sources/extends transitively'
-    status: pending
+    status: completed
     depends_on:
         - config-source-scope-schema
     blocks: []
