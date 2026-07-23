@@ -762,6 +762,7 @@ var claudeEventTable = map[string]string{
 	"post_tool_use":         "PostToolUse",
 	"post_tool_use_failure": "PostToolUseFailure",
 	"notification":          "Notification",
+	"message_display":       "MessageDisplay",
 	"user_prompt_submit":    "UserPromptSubmit",
 	"session_start":         "SessionStart",
 	"session_end":           "SessionEnd",

@@ -296,13 +296,12 @@ Comparison of documented vendor events vs. the per-platform event tables in `int
 | `stop` | `Stop` ✅ | `Stop` ✅ | `stop` ✅ | `agentStop` ✅ (camelCase, not `stop`) | `Stop` ✅ |
 | `subagent_start` | `SubagentStart` ✅ | `SubagentStart` ✅ | `subagentStart` ✅ | `subagentStart` ✅ | — |
 | `subagent_stop` | `SubagentStop` ✅ | `SubagentStop` ✅ | `subagentStop` ✅ | `subagentStop` ✅ | — |
-| `message_display` | ❌ (not in `claudeEventTable`) | — | — | — | — |
+| `message_display` | `MessageDisplay` ✅ | — | — | — | — |
 
 Cells: ✅ = mapped today; ❌ = vendor documents the event but the platform's table does not yet map it; — = vendor does not document the event for that platform.
 
-Remaining gaps as of 2026-06-23:
+Vendor-surface notes (each table maps exactly its platform's documented event surface today — no code gaps remain):
 
-- **Claude `message_display`**: Claude now documents `MessageDisplay`, but it is **not** present in `claudeEventTable` — the only genuine event-mapping gap in this table today. (Wiring it is a separately-routed code change.)
 - **Codex** documents the narrowest set; it has no `session_end`, `post_tool_use_failure`, `notification`, or any of the Cursor fine-grained shell/MCP/file events, so those fall through.
 - **Cursor** has the widest surface (shell/MCP/file-edit/tab events in `cursorEventTable`) but does not document `notification` or `permission_request`.
 - **Copilot** uniquely exposes `error_occurred` → `errorOccurred`. Its terminal event is `agentStop` (camelCase), correctly mapped today.
