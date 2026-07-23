@@ -447,6 +447,11 @@ func TestCanonicalWhenEventMapping(t *testing.T) {
 			claude: "Setup",
 		},
 		{
+			name:   "message_display",
+			when:   "message_display",
+			claude: "MessageDisplay",
+		},
+		{
 			name:   "user_prompt_expansion",
 			when:   "user_prompt_expansion",
 			claude: "UserPromptExpansion",
@@ -709,13 +714,14 @@ func TestCanonicalWhenEventMappingRenders(t *testing.T) {
 	// value must render under its documented vendor key with the
 	// canonical matcher fallback ("*"), exactly the same shape as the
 	// pre-existing Claude entries. This is a representative subset; the
-	// table-driven mapper test above covers the full 16-event surface.
+	// table-driven mapper test above covers the full 17-event surface.
 	t.Run("claude p1d wider-surface events render under documented vendor keys", func(t *testing.T) {
 		cases := []struct {
 			canonical string
 			vendor    string
 		}{
 			{canonical: "setup", vendor: "Setup"},
+			{canonical: "message_display", vendor: "MessageDisplay"},
 			{canonical: "user_prompt_expansion", vendor: "UserPromptExpansion"},
 			{canonical: "post_tool_batch", vendor: "PostToolBatch"},
 			{canonical: "permission_denied", vendor: "PermissionDenied"},

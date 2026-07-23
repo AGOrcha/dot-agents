@@ -128,6 +128,7 @@ requires its own task with a documented invariant.
 | Canonical `When`              | Claude Code           |
 |-------------------------------|-----------------------|
 | `setup`                       | `Setup`               |
+| `message_display`             | `MessageDisplay`      |
 | `user_prompt_expansion`       | `UserPromptExpansion` |
 | `post_tool_batch`             | `PostToolBatch`       |
 | `permission_denied`           | `PermissionDenied`    |
