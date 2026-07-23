@@ -4,7 +4,7 @@ order: 3
 task:
     id: layered-consumers-relevance-verify
     title: Make relevance/verify/verifier dispatch read layered snapshots
-    status: pending
+    status: completed
     depends_on:
         - config-transitive-extends-resolver
     blocks: []
