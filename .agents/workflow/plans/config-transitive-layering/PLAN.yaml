@@ -4,8 +4,8 @@ title: Transitive org→team→repo config layering (resolver + scope schema + l
 status: active
 summary: 'The dot-agents CODE work that unblocks the platform-config-layering rollout: spec + Source.scope/owner schema + the transitive extends resolver (resolveExtendsGraph) + migrating relevance/verify consumers onto the layered snapshot. Extracted from payout:platform-config-layering (dot-agents-repo: tasks); the da loop implements it here. On completion, unpause the agent-conf-ext content plans.'
 created_at: "2026-07-11T12:10:04Z"
-updated_at: "2026-07-23T05:55:21Z"
+updated_at: "2026-07-23T06:09:28Z"
 owner: NikashPrakash
 success_criteria: A repo declaring only its team source resolves org fields transitively (org→team→repo, post-order) offline from the units lock; Source.scope/owner round-trip as routing metadata (not authority); da config relevance/verify read the layered snapshot (no more matched:false for extends-supplied app_types); existing non-transitive resolver tests stay green.
 verification_strategy: 'Go package tests: resolver_transitive_test.go (post-order, dedupe, cycle, source-collision, optional-skip, offline-no-lock), schema_roundtrip_test.go (scope/owner, byte-stable v1), units_lock_wiring_test.go (transitive units locked); explain/relevance smoke on a local org+team+repo scratch stack.'
-current_focus_task: Add Source.Scope/Owner typed schema surface
+current_focus_task: 'CORE: resolve layer-declared sources/extends transitively'

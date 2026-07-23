@@ -4,7 +4,7 @@ order: 1
 task:
     id: config-source-scope-schema
     title: Add Source.Scope/Owner typed schema surface
-    status: pending
+    status: completed
     depends_on:
         - org-config-spec-transitive-scope
     blocks: []
