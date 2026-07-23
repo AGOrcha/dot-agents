@@ -1,0 +1,17 @@
+schema_version: 1
+plan_id: config-transitive-layering
+order: 4
+task:
+    id: extends-inherited-resource-projection
+    title: Project extends-inherited (org/team) skills/agents at install
+    status: pending
+    depends_on:
+        - layered-consumers-relevance-verify
+    blocks: []
+    owner: dot-agents
+    write_scope:
+        - commands/internal/lifecycle/install.go
+        - commands/internal/lifecycle/install_test.go
+    verification_required: true
+    notes: 'Install linked rc.Skills/rc.Agents from the FLAT .agentsrc.json, so a skill/agent supplied only by an extends layer (org->team) never materialized despite resolving in config (config explain showed it, install projected nothing). Fix: link from ensureRes.Snapshot.Effective (resolved, union-merged, transitive) with a nil-guard for --dry-run; always include the canonical home (~/.agents) in the resource search path so a home-canonical resource resolves even when the manifest declares sources. Surfaced by the extends-inherited-skill-not-projected fold-back; part of the plan''s original intent.'
+    app_type: go-cli
