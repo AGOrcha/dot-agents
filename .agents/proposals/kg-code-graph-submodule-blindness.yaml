@@ -1,0 +1,102 @@
+schema_version: 1
+id: kg-code-graph-submodule-blindness
+status: open
+type: observation
+action: investigate
+target: internal/kg (code graph build + postprocess surface)
+scope: global
+created_at: "2026-07-25T05:00:00Z"
+created_by: payout session 2026-07-25 (workspace CRG helper revamp)
+rationale: |
+    `da kg build` indexes via git ls-files. In a superproject, submodules are
+    gitlinks, not trees, so every file inside them is invisible to the build.
+    The failure is silent and looks like success.
+
+    Measured live in the payout monorepo (19 submodules, 7 languages):
+
+      da kg build            -> 47 nodes, 376 edges, 2 files, "READY"
+      per-submodule + merge  -> 5946 nodes, 45642 edges, 885 files
+
+    `da kg code-status` reported READY on the 2-file graph with no hint that
+    submodules existed and were skipped. Every downstream consumer degrades
+    quietly: `da kg impact` returns an empty blast radius, `da kg flows` and
+    `da kg communities` find nothing, and code-side KG queries come back empty
+    in a way that is indistinguishable from "this topic is genuinely absent".
+    That last point matters for kg-brief Phase 1, which uses impact radius to
+    seed Phase 3 write-scopes.
+content: |
+    # `da kg` code graph is blind to git submodules
+
+    ## Observation
+
+    Three distinct gaps, in severity order.
+
+    ### 1. Submodule contents are never indexed, and nothing says so
+
+    `da kg build` walks git ls-files, which in a superproject lists a submodule
+    as a single gitlink entry. Only root-level source is parsed. The build
+    prints a success line and `code-status` prints READY, so a 2-file graph in
+    a 885-file workspace is indistinguishable from a healthy one.
+
+    Minimum fix: detect `.gitmodules` (or gitlink entries) during build and
+    either recurse or emit a loud warning naming the skipped submodules. A
+    silent 98%-incomplete index is worse than a hard error.
+
+    ### 2. Workspace aggregation is not a first-class capability
+
+    Because there is no `--recurse-submodules` (or equivalent), monorepos must
+    hand-roll it. payout carries `scripts/setup-code-review-graph.sh` plus a
+    ~190-line `scripts/merge-code-review-graphs.py` that builds each submodule
+    separately and merges the per-repo SQLite databases into the root graph.
+    Every monorepo adopting `da kg` will re-derive this.
+
+    Worth noting the merge is only feasible because `da kg build` writes
+    ABSOLUTE paths in `nodes.file_path`, `edges.file_path` and
+    `qualified_name`. That makes cross-repo rows non-colliding and the
+    delete-then-reinsert edge strategy correct. If path storage ever moves to
+    repo-relative, every hand-rolled aggregator silently corrupts.
+
+    ### 3. Raw-SQL graph mutation bypasses postprocess
+
+    `da kg postprocess` documents itself as running automatically as part of
+    `kg build` and `kg update`. Any path that writes graph rows WITHOUT going
+    through those commands therefore leaves derived state stale: execution
+    flows, code communities, and — most damaging — the FTS index.
+
+    The payout aggregator merged rows with direct SQLite writes, so the merged
+    workspace graph had a populated `nodes`/`edges` table and an EMPTY search
+    index. Workspace-wide search returned nothing while the graph "looked"
+    healthy. Fixed by appending an explicit `da kg postprocess` pass after the
+    merge, but the trap is structural: the invariant "rows changed => derived
+    data must be rebuilt" is enforced by convention, not by the schema or the
+    tooling.
+
+    ## Secondary finding: cross-repo false edges
+
+    After merging, `da kg impact` on a manager-ui file surfaced `FullCheck`,
+    `SplitByItemCheck` and `SplitByPersonCheck`, which live in client-ui. Edge
+    targets appear to resolve partly by symbol name, so common identifiers
+    (`Button`, `renderNavLinks`, `handleSubmit`) link across repository
+    boundaries that have no build-time relationship.
+
+    Impact radius on a merged multi-repo graph should therefore be read as an
+    upper bound. If aggregation becomes first-class, edge resolution needs a
+    repository/scope discriminator.
+
+    ## Suggested direction
+
+    - Warn (or recurse) when a build encounters submodules; never silently
+      index 2 of 885 files.
+    - Consider a first-class workspace/monorepo build so each project stops
+      re-inventing the merge.
+    - Guarantee the postprocess invariant at the layer that owns the tables,
+      or expose an explicit `--no-postprocess` so bypassing it is a choice
+      rather than an accident.
+    - Scope edge resolution by repository before advertising cross-repo
+      impact radius as trustworthy.
+
+    ## Evidence
+
+    - payout `scripts/merge-code-review-graphs.py`, `scripts/setup-code-review-graph.sh`
+      (revamped this session onto `da`; commit `4bfd4df`).
+    - Before/after counts above, from `da kg code-status` in `~/proj-docs/payout`.
