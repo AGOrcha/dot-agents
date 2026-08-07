@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 73
+date: "2026-07-23"
+wave: config-transitive-layering
+task_id: config-transitive-extends-resolver
+commit: 14dad8a0b62222a12f5c66fee5b5b46836bfab54
+files_changed: 4
+lines_added: 287
+lines_removed: 91
+checkpoint_at: "2026-07-23T06:30:00Z"
+impl:
+    item: "CORE: resolve layer-declared sources/extends transitively"
+    summary: "Replaced the flat concurrent resolveExtends with a recursive children-first graph walk (resolveExtendsGraph + extendsGraphState.walk): each fetched layer's OWN sources/extends are expanded in a child sourceEnv (layer-local sources visible to descendants only) BEFORE the layer is admitted -> post-order (org->team->repo-local). Dedupe by canonical ref+resolved digest (first/baseline wins; divergent digest -> hard ReasonContent error); cycle detect on recursion stack -> new ReasonCycle import reason; every transitive unit locked via the existing writeUnitsLock over the returned locked map (offline reproduces the full stack). Dropped extendsResult/resolveConcurrency + obsolete test; flat behavior preserved."
+    scope_note: "Declared write_scope: resolver.go, resolver_test.go, resolver_extra_test.go (+lock_units.go/units_lock_wiring_test.go untouched — transitive locking needed no lock_units change). fetcher.go (+3) is one file beyond scope: the ReasonCycle const belongs with its ImportFailReason enum."
+    feedback_goal: "THE key gap. Add resolveExtendsGraph: recurse each fetched layer's own sources+extends, children-first (org before team before repo-local); dedupe by ref+digest (fail on ref->different-digest); cycle-detect (don't silently drop); LOCK all transitive layer units so offline/locked reproduces the full stack."
+    retries: 0
+    focused_tests_added: 5
+verifiers:
+    - type: unit
+      status: pass
+      summary: "transitive post-order + diamond-dedupe + cycle fail-loud + digest-conflict fail-loud + offline transitive-lock reproduce; full ./internal/config regression; whole-repo go build; config/lifecycle consumers green; gofmt/vet clean"
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/config-transitive-extends-resolver/review-decision.yaml
+    verify_record_appended: true

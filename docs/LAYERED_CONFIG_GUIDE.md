@@ -136,6 +136,24 @@ or `packages`) carries a `kind` that governs how it is treated:
 
 `extends` entries resolve to `layer` units; `packages` entries resolve to `artifact` units.
 
+**Transitive layers (org → team → repo).** A layer may declare its own `sources` and
+`extends`, so importing one layer can pull in a whole chain. The chain resolves
+**children-first**: if your team layer `extends` an org layer, the effective order is
+`[org, team, <your repo>]` — the org sets the baseline, the team refines it, and your
+repo-local settings win last. This lets a repo declare **only** its team source and still
+inherit org/platform policy transitively. A layer's own `sources` are visible only to that
+layer and the layers beneath it. The full transitive stack is pinned in `.agentsrc.lock`,
+so `da config explain` reproduces org/team fields offline even for a repo that never named
+the org source directly. A repeated layer is imported once (kept at its first, baseline position — the shared base stays beneath its extenders); the
+same layer ref resolving to two different digests, or a cycle, is a hard error, not a
+silent merge.
+
+**`scope` and `owner` are routing, not authority.** A source may carry
+`scope` (`public`/`org`/`team`/`repo`) and `owner` (e.g. `acme-platform`). These route
+scoped content and drive editability/explain UI — they do **not** grant a layer authority to
+bind locks. Authority still comes only from the grants described under *Policy authority*
+below; an imported layer starts at `public` regardless of its `scope`.
+
 ### Resolution and precedence
 
 Layers merge into an **effective configuration**. The stack, lowest precedence first:

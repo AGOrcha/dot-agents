@@ -354,6 +354,56 @@ Offline behavior should be:
 
 This aligns with the external-sources design rather than redefining it.
 
+### 6.6 Transitive extends: org-through-team post-order
+
+§6.3 covers ordering **within** a single manifest's `extends` list. This subsection
+covers what happens when an imported layer **itself declares** `sources` and `extends`
+— the org→team→repo transitive case that lets a consuming repo declare only its team
+source and still inherit org/platform policy.
+
+**Dependency expansion, children-first (post-order).** An `extends` entry is resolved
+as a graph, not a flat list. When a fetched layer declares its own `extends`, those are
+resolved **before** the layer that declared them is admitted to the effective stack. So
+if `team/base.json` extends `org/base.json`, the effective imported order is
+`[org/base.json, team/base.json]`, followed by repo-local. Org sets baseline vocabulary;
+team refines and overrides it; repo-local wins last. Root entry order (§6.3) is preserved
+**after** each root's subtree is expanded in place.
+
+**Layer-local source environment.** A layer may declare `sources` of its own. Those
+sources are available **only to that layer and its descendants** (a child source
+environment extended from the parent's), never leaked back up to siblings or the root.
+This is what lets a team layer name a private org source that the consuming repo never
+declares.
+
+**Dedupe by ref + resolved digest.** The same canonical layer ref reached through two
+paths is admitted **once**, kept at its **first-resolved (baseline, lowest-precedence)** position —
+so a shared base layer stays beneath every layer that extends it (org before team). The later
+occurrence is recorded as already-satisfied provenance, not merged twice. But if the same
+ref resolves to **different digests** (conflicting source refs pinning divergent content),
+resolution **fails loudly** rather than silently merging ambiguous policy.
+
+**Cycle detection.** A cycle in the extends graph (`A → B → A`) is detected on the active
+recursion stack and fails structurally (an explicit `cycle` import-fail reason), never
+silently dropped. The failure names the offending frame chain for provenance.
+
+**Lock the whole transitive stack.** Every resolved layer unit — not only the repo-root
+`extends` — is written to the unified `units` lock. A repo that declares only its team
+source must still be able to `da config explain` org/platform fields **offline** after a
+lock sync, because the org layer was locked as a transitive unit (see §6.5 and
+[config-distribution-model §15](../config-distribution-model/design.md#15-coherence-model-v2-scopes-sources-units-and-the-lock)).
+
+**Worked example (org → team → repo).** A repo's manifest declares only its team
+source and `extends` `acme:team/base.json`. `team/base.json` itself declares an org
+source and `extends` `acme-org:org/base.json`. The resolved effective stack is
+`[acme-org:org/base.json, acme:team/base.json, <repo-local>]` — the repo inherits the org
+layer transitively without ever naming the org source, and all three units are locked.
+
+**Scope/owner are routing, not authority.** A layer's `sources[].scope`
+(`public|org|team|repo`) and `owner` are ROUTING/ownership metadata that seed
+scoped-content routing and explain/editability UI. They do **not** grant policy authority:
+an imported layer still starts at `public` authority and can only bind locks through the
+`authority_grants` pass (config-distribution-model §15 D1a). See §7 for merge/precedence.
+
 ## 7. Merge and precedence rules
 
 ### 7.1 Why a merge contract matters

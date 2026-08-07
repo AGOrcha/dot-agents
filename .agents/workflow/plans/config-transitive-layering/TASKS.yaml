@@ -3,7 +3,7 @@ plan_id: config-transitive-layering
 tasks:
     - id: org-config-spec-transitive-scope
       title: Spec org→team→repo transitive extends + source scope/owner routing
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: NikashPrakash
@@ -12,10 +12,10 @@ tasks:
         - .agents/workflow/specs/config-distribution-model/design.md
         - docs/LAYERED_CONFIG_GUIDE.md
       verification_required: true
-      notes: 'Spec repo→team→org transitive extends with POST-ORDER precedence (org before team before repo-local); define sources[].scope (public|org|team|repo) + owner as ROUTING metadata (NOT authority — authority stays authority_grants; imported layers default AuthPublic per authority_apply.go:44-103). Worked PA example: repo declares ONLY the PA source, inherits Roos org transitively. Design lives in payout:platform-config-layering.plan.md §Schema Api Shape.'
+      notes: 'Spec repo→team→org transitive extends with POST-ORDER precedence (org before team before repo-local); define sources[].scope (public|org|team|repo) + owner as ROUTING metadata (NOT authority — authority stays authority_grants; imported layers default AuthPublic per authority_apply.go:44-103). Worked org→team example: a repo declares ONLY its team source and inherits the org layer transitively. Design lives in payout:platform-config-layering.plan.md §Schema Api Shape.'
     - id: config-source-scope-schema
       title: Add Source.Scope/Owner typed schema surface
-      status: pending
+      status: completed
       depends_on:
         - org-config-spec-transitive-scope
       blocks: []
@@ -29,7 +29,7 @@ tasks:
       notes: 'Source.Scope (enum public|org|team|repo) + Source.Owner (string) as ROUTING metadata. schema $defs.source.properties.scope enum + owner. Round-trip; legacy v1 sources (no scope) byte-stable. Comment: routing, not authority. Target agentsrc.schema.json:440-510.'
     - id: config-transitive-extends-resolver
       title: 'CORE: resolve layer-declared sources/extends transitively'
-      status: pending
+      status: completed
       depends_on:
         - config-source-scope-schema
       blocks: []
@@ -44,7 +44,7 @@ tasks:
       notes: 'THE key gap. Current LayeredResolver resolves only repo-local extends (config-v2-migration p1b). Add resolveExtendsGraph: for each extends entry, decode the fetched layer''s OWN sources+extends, extend a child sourceEnv, recurse; return CHILDREN FIRST (org before team before repo-local); dedupe by ref+digest (fail loudly on ref→different-digest); detect cycles (A→B→A, don''t silently drop); LOCK all transitive layer units (writeUnitsLock) so offline/locked reproduces the full stack. Algorithm+types in payout:platform-config-layering.plan.md §Schema Api Shape.transitive_extends_api.'
     - id: layered-consumers-relevance-verify
       title: Make relevance/verify/verifier dispatch read layered snapshots
-      status: pending
+      status: completed
       depends_on:
         - config-transitive-extends-resolver
       blocks: []
@@ -57,3 +57,16 @@ tasks:
         - docs/CONFIG_RELEVANCE.md
       verification_required: true
       notes: da config relevance resolves through legacy loadFlatSnapshot (commands/config/explain.go) — product-defaults→user-local→repo-local, NEVER extends → org-through-team app_types show matched:false. Migrate relevance + prompt-driven verifier dispatch onto the layered/locked resolver. SHARED prerequisite for worker-bundle-lessons:load-lessons-2. Consumer gap documented in payout/po-agents-config/README.md:103-108.
+    - id: extends-inherited-resource-projection
+      title: Project extends-inherited (org/team) skills/agents at install
+      status: completed
+      depends_on:
+        - layered-consumers-relevance-verify
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/internal/lifecycle/install.go
+        - commands/internal/lifecycle/install_test.go
+      verification_required: true
+      notes: 'Install linked rc.Skills/rc.Agents from the FLAT .agentsrc.json, so a skill/agent supplied only by an extends layer (org->team) never materialized despite resolving in config (config explain showed it, install projected nothing). Fix: link from ensureRes.Snapshot.Effective (resolved, union-merged, transitive) with a nil-guard for --dry-run; always include the canonical home (~/.agents) in the resource search path so a home-canonical resource resolves even when the manifest declares sources. Surfaced by the extends-inherited-skill-not-projected fold-back; part of the plan''s original intent.'
+      app_type: go-cli

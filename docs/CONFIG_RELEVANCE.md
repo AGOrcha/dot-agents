@@ -28,11 +28,15 @@ independently overridable **facets** per `app_type`:
 | **graph** | the graph-backend adapter-ref and built-in registry resolution | `--filter graph` |
 | **lessons** | repo-local `.agents/lessons/<name>/LESSON.md` selection by app_type plus task/path/package scope | `--filter lessons` |
 
-The layer lives under `execution_profile` in `.agentsrc.json` (and, once config-v2 §15 lands,
-merges by scope precedence org → team → repo → project-local — it is already shaped for that). It
-is **purely additive**: an `app_type` with no entry is not an error, it just has no overrides, and
-`default_class: situational` guarantees nothing unlisted is ever silently dropped from a working
-set.
+The layer lives under `execution_profile` in `.agentsrc.json` and merges by scope precedence
+**org → team → repo → project-local** through the layered resolver. That resolution is now
+**transitive** (`config-transitive-layering`): a repo that declares only its team source still
+inherits an `execution_profile` (and its `by_app_type` entries) from an org layer the team layer
+`extends`, because `da config relevance` / `verify` resolve through the same layered,
+lockfile-backed snapshot as `da config explain` — reconstructing transitively-locked layers even
+offline. It is **purely additive**: an `app_type` with no entry is not an error, it just has no
+overrides, and `default_class: situational` guarantees nothing unlisted is ever silently dropped
+from a working set.
 
 ## Command surface
 

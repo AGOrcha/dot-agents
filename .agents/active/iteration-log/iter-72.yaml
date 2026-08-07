@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 72
+date: "2026-07-23"
+wave: config-transitive-layering
+task_id: config-source-scope-schema
+commit: e7a0b6a4373e33300cd4d9efa6aeb15ef97411b9
+files_changed: 4
+lines_added: 140
+lines_removed: 0
+checkpoint_at: "2026-07-23T06:09:26Z"
+impl:
+    item: "Add Source.Scope/Owner typed schema surface"
+    summary: "internal/config/agentsrc.go: SourceScope enum (public|org|team|repo) + IsValid; Source.Scope + Source.Owner (omitempty -> v1 byte-stable), commented routing-not-authority (imported layers stay AuthPublic until an authority_grants blessing per D1a). schemas/agentsrc.schema.json: source \\$def scope (4-enum) + owner (string). Tests: Source.Scope/Owner round-trip + legacy-v1 byte-stability (no scope/owner keys) + SourceScope.IsValid; nested-source schema-drift guard."
+    scope_note: "Within declared write_scope: agentsrc.go, agentsrc.schema.json, agentsrc_test.go, schema_roundtrip_test.go."
+    feedback_goal: "Source.Scope (enum public|org|team|repo) + Source.Owner as ROUTING metadata (NOT authority). schema \\$defs.source.properties.scope enum + owner. Round-trip; legacy v1 sources (no scope) byte-stable."
+    retries: 0
+    focused_tests_added: 3
+verifiers:
+    - type: unit
+      status: pass
+      summary: "go test ./internal/config (focused SourceScopeOwner/SchemaSourceScopeOwner/RoundTrip + full package) green; gofmt/vet clean; schema valid JSON"
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/config-source-scope-schema/review-decision.yaml
+    verify_record_appended: true

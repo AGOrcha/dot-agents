@@ -391,3 +391,150 @@ func TestResolveLockedInvalidLayerCacheIsSchemaError(t *testing.T) {
 		t.Fatalf("expected schema ImportError, got %v", err)
 	}
 }
+
+// TestResolveLockedVersionPinnedRef covers the version-pinned dedupe key in the
+// transitive walk: an extends ref carrying `@<version>` keys the dedupe/cycle
+// map by ref+version, and reconstructs from the cache keyed by source+path.
+func TestResolveLockedVersionPinnedRef(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "s", "type": "git", "url": "https://example/s.git", "ref": "main"}],
+		"extends": ["s:org.json@v1"]
+	}`)
+	if err := WriteConfigLock(repo, map[string]LockedLayer{
+		"s:org.json@v1": {ResolvedSHA: "shaorg", FetchedAt: "2026-06-02T00:00:00Z"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`{"version":2,"skills":["org"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := NewLayeredResolver().ResolveLocked(repo)
+	if err != nil {
+		t.Fatalf("ResolveLocked: %v", err)
+	}
+	wantIDs := []string{LayerProductDefaults, "s:org.json@v1", LayerRepoLocal}
+	if got := layerIDs(snap.Layers); !reflect.DeepEqual(got, wantIDs) {
+		t.Errorf("layer ids = %v, want %v", got, wantIDs)
+	}
+}
+
+// TestResolveLockedCycleDetected: a cyclic cached extends graph (org->team->org)
+// is a fatal cycle ImportError in the offline replay, never an infinite walk.
+// Seeded manually because the online resolve rejects the cycle before it could
+// write the lock.
+func TestResolveLockedCycleDetected(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "s", "type": "git", "url": "https://example/s.git", "ref": "main"}],
+		"extends": ["s:org.json"]
+	}`)
+	if err := WriteConfigLock(repo, map[string]LockedLayer{
+		"s:org.json":  {ResolvedSHA: "shaorg", FetchedAt: "t"},
+		"s:team.json": {ResolvedSHA: "shateam", FetchedAt: "t"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`{"version":2,"extends":["s:team.json"],"skills":["org"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCachedLayer(layerCacheDir("s", "team.json"), "shateam", []byte(`{"version":2,"extends":["s:org.json"],"skills":["team"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewLayeredResolver().ResolveLocked(repo)
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonCycle {
+		t.Fatalf("expected cycle ImportError, got %v", err)
+	}
+}
+
+// TestResolveLockedOptionalChildSkipped: a nested (transitive) optional extends
+// whose lock/cache is missing is skipped with a warning, and its parent layer is
+// still admitted — the optional-skip semantics apply at every depth, not just at
+// the repo root.
+func TestResolveLockedOptionalChildSkipped(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "s", "type": "git", "url": "https://example/s.git", "ref": "main"}],
+		"extends": ["s:org.json"]
+	}`)
+	if err := WriteConfigLock(repo, map[string]LockedLayer{
+		"s:org.json": {ResolvedSHA: "shaorg", FetchedAt: "t"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// org.json transitively extends an OPTIONAL team layer that was never locked.
+	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`{"version":2,"extends":[{"ref":"s:team.json","optional":true}],"skills":["org"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := NewLayeredResolver().ResolveLocked(repo)
+	if err != nil {
+		t.Fatalf("ResolveLocked: %v", err)
+	}
+	if !hasWarningPrefix(snap.Warnings, "s:team.json", "optional_skipped") {
+		t.Errorf("expected optional_skipped warning for the nested child, got %+v", snap.Warnings)
+	}
+	wantIDs := []string{LayerProductDefaults, "s:org.json", LayerRepoLocal}
+	if got := layerIDs(snap.Layers); !reflect.DeepEqual(got, wantIDs) {
+		t.Errorf("layer ids = %v, want %v (parent still admitted)", got, wantIDs)
+	}
+}
+
+// TestResolveLockedNullLayerCacheIsSchemaError: cached bytes of `null` decode to
+// a nil payload that validateLayer rejects as a schema ImportError (an empty
+// fetch must be loud), distinct from non-JSON bytes that fail at decode.
+func TestResolveLockedNullLayerCacheIsSchemaError(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "s", "type": "git", "url": "https://example/s.git", "ref": "main"}],
+		"extends": ["s:org.json"]
+	}`)
+	if err := WriteConfigLock(repo, map[string]LockedLayer{
+		"s:org.json": {ResolvedSHA: "shaorg", FetchedAt: "t"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`null`)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewLayeredResolver().ResolveLocked(repo)
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("expected schema ImportError, got %v", err)
+	}
+}
+
+// TestResolveLockedChildExtendsWrongTypeErrors: a cached layer whose `extends` is
+// the wrong JSON type passes the layer schema (which does not type-check extends)
+// but fails the typed decode of the child's own sources/extends in the walk — a
+// schema ImportError rather than a silent drop of the transitive edge.
+func TestResolveLockedChildExtendsWrongTypeErrors(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "s", "type": "git", "url": "https://example/s.git", "ref": "main"}],
+		"extends": ["s:org.json"]
+	}`)
+	if err := WriteConfigLock(repo, map[string]LockedLayer{
+		"s:org.json": {ResolvedSHA: "shaorg", FetchedAt: "t"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`{"version":2,"extends":{"bad":"object"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewLayeredResolver().ResolveLocked(repo)
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("expected schema ImportError, got %v", err)
+	}
+}

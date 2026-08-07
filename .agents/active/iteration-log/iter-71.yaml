@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 71
+date: "2026-07-23"
+wave: config-transitive-layering
+task_id: org-config-spec-transitive-scope
+commit: 6532f487b8a0e870b1a67e43d78530a1d27bd0d9
+files_changed: 3
+lines_added: 99
+lines_removed: 0
+checkpoint_at: "2026-07-23T05:55:19Z"
+impl:
+    item: "Spec org→team→repo transitive extends + Source.scope/owner routing"
+    summary: "org-config-resolution §6.6 (post-order transitive extends: org before team before repo-local; layer-local source env inherited children-first; dedupe by ref+digest, fail on ref→different-digest; cycle-detect; lock full transitive stack for offline explain; worked org→team example); config-distribution-model D16 (Source.scope public|org|team|repo + owner as routing/ownership metadata, NOT authority — imported layers stay public until an authority_grants blessing per D1a; legacy v1 sources byte-stable); docs/LAYERED_CONFIG_GUIDE.md transitive-layers + scope/owner user note. Grounds the resolver work (tasks 2-4)."
+    scope_note: "Within declared write_scope: the 2 specs + the guide. No code changed (spec task)."
+    feedback_goal: "Spec repo→team→org transitive extends with POST-ORDER precedence (org before team before repo-local); define sources[].scope (public|org|team|repo) + owner as ROUTING metadata (NOT authority — authority stays authority_grants; imported layers default AuthPublic). Worked org→team example: a repo declares ONLY its team source and inherits the org layer transitively."
+    retries: 0
+    focused_tests_added: 0
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/org-config-spec-transitive-scope/review-decision.yaml
+    verify_record_appended: false
