@@ -117,8 +117,15 @@ test("an assertion with an unknown kid is rejected", async () => {
 
 test("a bad signature is rejected", async () => {
   const assertion = await signedAssertion();
-  const replacement = assertion.endsWith("A") ? "B" : "A";
-  const result = await gatedRequest(`${assertion.slice(0, -1)}${replacement}`);
+  // Corrupt the FIRST char of the signature segment. A byte-aligned signature's
+  // LAST base64url char carries only 2 significant bits (2048 mod 6 == 512 mod 6
+  // == 2), so an A<->B flip there decodes to identical bytes ~25% of the time —
+  // the tamper becomes a no-op and the "bad" signature verifies (a flaky false
+  // pass). The first char is fully significant, so flipping it always changes the
+  // decoded signature.
+  const parts = assertion.split(".");
+  parts[2] = (parts[2][0] === "A" ? "B" : "A") + parts[2].slice(1);
+  const result = await gatedRequest(parts.join("."));
   assert.equal(result.response.status, 403);
   assert.equal(result.dispatches, 0);
 });
