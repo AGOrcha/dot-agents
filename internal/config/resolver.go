@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"sync"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
@@ -831,100 +829,146 @@ func (r *LayeredResolver) loadUserLayer() (ResolvedLayer, bool, error) {
 	return ResolvedLayer{ID: LayerUserLocal, Present: true, Raw: raw}, true, nil
 }
 
-// extendsResult is one layer's fetch outcome, collected per-index so the
-// precedence order of the imported stack and the warning sequence stay
-// deterministic regardless of which goroutine finishes first.
-type extendsResult struct {
-	layer ResolvedLayer
-	lock  LockedLayer
-	warns []ProvenanceWarning
-	err   error
+// resolveExtends resolves the repo-local manifest's `extends` array into the
+// imported layer stack, expanding each layer's OWN declared sources/extends
+// transitively (org→team→repo-local). Returns the imported ResolvedLayers in
+// precedence order (children before parents), the lockfile entries for every
+// transitive unit, and non-fatal warnings. Thin wrapper over the recursive
+// engine so the Resolve() caller is unchanged.
+func (r *LayeredResolver) resolveExtends(trace auditTrace, projectPath string, repoRaw map[string]any) ([]ResolvedLayer, map[string]LockedLayer, []ProvenanceWarning, error) {
+	return r.resolveExtendsGraph(trace, projectPath, repoRaw)
 }
 
-// resolveExtends walks the repo-local manifest's `extends` array left-to-right,
-// fetching + validating each layer, and returns the imported ResolvedLayers (in
-// precedence order), the lockfile entries to persist, and any non-fatal
-// warnings. The repo manifest is parsed into a typed AgentsRC to read its typed
-// sources/extends rather than re-walking the generic map.
-//
-// Each layer fetch is independent network/IO work, so the fetches run
-// concurrently with a bounded worker pool; the .agentsrc.lock write stays a
-// single serialized flush downstream (spec §7.4 "parallel resolution,
-// serialized write"). Results are reduced in entry order afterwards so the
-// imported stack, the warning sequence, and the first non-optional failure are
-// identical to a sequential walk.
-func (r *LayeredResolver) resolveExtends(trace auditTrace, projectPath string, repoRaw map[string]any) ([]ResolvedLayer, map[string]LockedLayer, []ProvenanceWarning, error) {
+// sourceEnv is a layer-local source environment: the sources visible to a layer
+// and, by inheritance, its descendants. A child env is the parent env overlaid
+// with the layer's own declared `sources`, so a team layer can name a private
+// org source the consuming repo never declares (org-config-resolution §6.6). A
+// layer-local declaration shadows an inherited same-id source.
+type sourceEnv map[string]Source
+
+func (e sourceEnv) child(layerSources []Source) sourceEnv {
+	if len(layerSources) == 0 {
+		return e
+	}
+	c := make(sourceEnv, len(e)+len(layerSources))
+	for k, v := range e {
+		c[k] = v
+	}
+	for k, v := range indexSources(layerSources) {
+		c[k] = v
+	}
+	return c
+}
+
+// extendsGraphState is the mutable state threaded through the recursive
+// children-first walk of the transitive extends graph.
+type extendsGraphState struct {
+	trace      auditTrace
+	prevLocked map[string]LockedLayer
+	imported   []ResolvedLayer
+	locked     map[string]LockedLayer
+	// digestByRef dedupes by canonical ref → resolved digest. A ref reached
+	// twice at the SAME digest is admitted once (first/highest-precedence wins);
+	// the same ref at a DIFFERENT digest is a hard error (ambiguous policy).
+	digestByRef map[string]string
+	// onStack is the active recursion stack for cycle detection (A→B→A).
+	onStack  map[string]bool
+	warnings []ProvenanceWarning
+}
+
+// resolveExtendsGraph is the recursive engine. It decodes the repo manifest,
+// then walks each root `extends` entry depth-first, expanding every fetched
+// layer's own sources/extends BEFORE admitting the layer itself, so the imported
+// stack is post-order (org before team before repo-local) and every transitive
+// unit is locked (org-config-resolution §6.6, payout platform-config-layering
+// § Transitive Extends Api).
+func (r *LayeredResolver) resolveExtendsGraph(trace auditTrace, projectPath string, repoRaw map[string]any) ([]ResolvedLayer, map[string]LockedLayer, []ProvenanceWarning, error) {
 	rc, err := decodeEffective(repoRaw)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("decoding repo manifest: %w", err)
 	}
-	locked := map[string]LockedLayer{}
-	if len(rc.Extends) == 0 {
-		return nil, locked, nil, nil
+	st := &extendsGraphState{
+		trace:       trace,
+		locked:      map[string]LockedLayer{},
+		digestByRef: map[string]string{},
+		onStack:     map[string]bool{},
 	}
-
-	sources := indexSources(rc.Sources)
-	// Read the prior lock on every resolve, not just offline: the online path
-	// consults each layer's recorded cache key (CacheKeyStaleForLayer) to decide
-	// whether a force escape or a cache_keys override edit must force a
-	// cache-bypassing re-fetch (config-distribution-model §7A.4 / R6). A missing
-	// or legacy lock yields an empty map, so a first resolve fetches normally.
+	if len(rc.Extends) == 0 {
+		return nil, st.locked, nil, nil
+	}
+	// Read the prior lock on every resolve (online consults recorded cache keys;
+	// offline serves the locked SHA). A missing/legacy lock yields an empty map.
 	prevLocked, err := readLockedLayersFromUnits(projectPath)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	// Fetch all layers concurrently. Each goroutine writes its own result slot
-	// (no shared mutation); sources and prevLocked are read-only.
-	results := make([]extendsResult, len(rc.Extends))
-	sem := make(chan struct{}, resolveConcurrency(len(rc.Extends)))
-	var wg sync.WaitGroup
-	for i, entry := range rc.Extends {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(i int, entry LayerRef) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			layer, lock, warns, err := r.resolveOneLayer(trace, entry, sources, prevLocked)
-			results[i] = extendsResult{layer: layer, lock: lock, warns: warns, err: err}
-		}(i, entry)
-	}
-	wg.Wait()
-
-	// Reduce in entry order: deterministic precedence, warnings, and the first
-	// non-optional failure (matching the prior sequential semantics).
-	imported := make([]ResolvedLayer, 0, len(rc.Extends))
-	warnings := []ProvenanceWarning{}
-	for i, entry := range rc.Extends {
-		res := results[i]
-		warnings = append(warnings, res.warns...)
-		if res.err != nil {
-			trace.emit(importFailedEvent(asImportError(entry.Ref, res.err), entry.Optional))
+	st.prevLocked = prevLocked
+	rootEnv := sourceEnv(indexSources(rc.Sources))
+	for _, entry := range rc.Extends {
+		if err := st.walk(r, entry, rootEnv); err != nil {
+			trace.emit(importFailedEvent(asImportError(entry.Ref, err), entry.Optional))
 			if entry.Optional {
-				warnings = append(warnings, optionalSkipWarning(entry.Ref, res.err))
+				st.warnings = append(st.warnings, optionalSkipWarning(entry.Ref, err))
 				continue
 			}
-			return nil, nil, nil, res.err
+			return nil, nil, nil, err
 		}
-		imported = append(imported, res.layer)
-		locked[entry.Ref] = res.lock
 	}
-	return imported, locked, warnings, nil
+	return st.imported, st.locked, st.warnings, nil
 }
 
-// resolveConcurrency bounds the extends-fetch worker pool. Layer fetches are
-// network/IO-bound, so the cap oversubscribes the CPU count (always >=4 since
-// GOMAXPROCS is >=1), clamped to the number of layers — never spawn more
-// workers than there is work.
-func resolveConcurrency(n int) int {
-	if n < 1 {
-		return 1
+// walk resolves one extends entry and, children-first, its transitive extends.
+// The layer is appended to the imported stack AFTER its own extends, giving
+// post-order precedence (a declared org layer lands before the team layer that
+// extends it). Dedupe and cycle detection guard against divergent-digest
+// re-resolution and extends loops.
+func (st *extendsGraphState) walk(r *LayeredResolver, entry LayerRef, env sourceEnv) error {
+	parts, err := ParseLayerRef(entry.Ref)
+	if err != nil {
+		return &ImportError{Ref: entry.Ref, Reason: ReasonSchema, Err: err}
 	}
-	limit := runtime.GOMAXPROCS(0) * 4
-	if n < limit {
-		return n
+	key := parts.SourceID + ":" + parts.LayerPath
+	if parts.Version != "" {
+		key += "@" + parts.Version
 	}
-	return limit
+	if st.onStack[key] {
+		return &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonCycle, Err: fmt.Errorf("extends cycle detected at %q", entry.Ref)}
+	}
+	layer, lock, warns, err := r.resolveOneLayer(st.trace, entry, env, st.prevLocked)
+	st.warnings = append(st.warnings, warns...)
+	if err != nil {
+		return err
+	}
+	if prev, seen := st.digestByRef[key]; seen {
+		if prev != lock.ResolvedSHA {
+			return &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonContent, Err: fmt.Errorf("ref %q resolves to conflicting digests (%s vs %s); refusing to merge ambiguous policy", entry.Ref, prev, lock.ResolvedSHA)}
+		}
+		// Already satisfied at the same digest: first occurrence keeps precedence.
+		return nil
+	}
+	st.digestByRef[key] = lock.ResolvedSHA
+	// Expand the layer's OWN sources/extends in a child env, children first.
+	childRC, err := decodeEffective(layer.Raw)
+	if err != nil {
+		return &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonSchema, Err: fmt.Errorf("decoding layer %q sources/extends: %w", entry.Ref, err)}
+	}
+	childEnv := env.child(childRC.Sources)
+	st.onStack[key] = true
+	for _, child := range childRC.Extends {
+		if err := st.walk(r, child, childEnv); err != nil {
+			st.trace.emit(importFailedEvent(asImportError(child.Ref, err), child.Optional))
+			if child.Optional {
+				st.warnings = append(st.warnings, optionalSkipWarning(child.Ref, err))
+				continue
+			}
+			st.onStack[key] = false
+			return err
+		}
+	}
+	st.onStack[key] = false
+	st.imported = append(st.imported, layer)
+	st.locked[entry.Ref] = lock
+	return nil
 }
 
 // resolveOneLayer resolves a single extends entry: parse ref, locate source,

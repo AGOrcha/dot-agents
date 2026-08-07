@@ -1150,6 +1150,38 @@ is a clear schema error, so a layer blob is never installed as an artifact (and 
 matrix/callout, README, and the `SelectFetcher` error string narrative) follow once #110/#111 land,
 per the extends-oci-relax sequencing.
 
+#### D16 — `Source.scope` / `Source.owner` are routing metadata, not authority
+A `sources[]` entry may carry `scope` (`public` | `org` | `team` | `repo`) and `owner`
+(a free string, e.g. `acme-platform`, `acme-team`, `payout`). These are
+**routing/ownership metadata only** — the discriminator that says *which distributed scope
+a source represents* and *who owns it* — and they seed exactly two things:
+- **scoped-content routing (D13):** a source's `scope` selects which scope's `proposals/`,
+  `context/`, lessons, and asset units route to it, generalizing D13's four-scope routing to
+  source-declared scope instead of an inferred one.
+- **explain/editability UI:** `da config explain` and the D11 editability check surface
+  `scope`/`owner` so an operator can see *whose* layer supplied a field and whether it is
+  editable at the current scope.
+
+**`scope` is NOT an authority self-declaration.** It does not map to `AuthorityScope` and it
+cannot bind locks. Authority remains derived through the **source-authority registry / D1a
+authority pass**: an imported layer defaults to `public` authority (`AuthPublic`) and is
+upgraded only by an `authority_grants` blessing from a trusted higher/root mechanism,
+regardless of the `scope` it declares. A `scope: "org"` source with no grant may still
+**contribute values** as an imported layer, but binds **no** locks. This preserves the D1a
+invariant that AUTHORITY-RANK and VALUE-PRECEDENCE are distinct axes: `Source.scope` is a
+VALUE/routing-side tag, never an AUTHORITY-side one.
+
+**Legacy compatibility.** `scope`/`owner` are optional. A v1 source with neither is byte-stable
+on round-trip and behaves exactly as today (an un-scoped imported layer at `public` authority).
+`owner` is optional even for scoped sources; `public` sources need neither.
+
+> **Resolver-code obligation (follow-on, tracked by `config-transitive-layering`).** D16
+> obligates a typed `Source.Scope`/`Source.Owner` schema surface (enum + string, schema
+> `$defs.source.properties`) with the "routing, not authority" comment at the type, and the
+> transitive resolver (§6.6 of org-config-resolution) threading a layer's declared `sources`
+> — with their `scope`/`owner` — into its descendants' source environment. The current
+> `Source` struct carries neither field.
+
 ### 15.4 Requirements (behavioral)
 
 R1. **A lockfile exists for every resolved project**, including flat/local-only, carrying

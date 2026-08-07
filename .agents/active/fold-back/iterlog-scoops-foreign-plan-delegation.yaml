@@ -1,0 +1,43 @@
+schema_version: 1
+id: iterlog-scoops-foreign-plan-delegation
+plan_id: full-loop-orchestration-runtime
+task_id: ""
+observation: |-
+  BUG (found live during config-transitive-layering loop iter-71).
+  `scanActiveDelegationContract` -> `firstReadableDelegationContract`
+  (commands/workflow/iter_log.go:220-248) is PLAN-UNSCOPED: it returns the FIRST
+  pending/active delegation contract in .agents/active/delegation/*.yaml in
+  os.ReadDir (alphabetical) order, regardless of which plan it belongs to. The
+  checkpoint iter-log stub (`da workflow checkpoint --log-to-iter N`) derives
+  wave/task_id (and feedback_goal via the bundle) from that contract.
+
+  Because .agents/active/ is SHARED, committed coordination state, a second
+  session's in-flight delegation lands on master and is inherited by every
+  worktree. A loop working on plan A then stamps plan B's focus into A's iter-log.
+  Observed: iter-71 (config-transitive-layering / org-config-spec-transitive-scope,
+  a spec-only ~99-line change, commit 6532f487) was written as
+  wave=package-artifact-install, task_id=t2-materialize-store, commit=72b9616d
+  (master HEAD), files_changed=22 +1360/-1140 — entirely the OTHER session's
+  t2-materialize-store delegation. `score run` then scored the mislabeled record.
+
+  Impact: mislabeled iterations, bogus dashboard rows, and — since the scoop
+  repeats every checkpoint — a persistent cross-session contamination. This is the
+  iter-log face of the shared-active-state hazard specced in
+  workflow-store-concurrency (unsynchronized RMW / no per-plan scoping of active
+  coordination artifacts).
+
+  Fix directions:
+  - Scope the contract scan to the loop's CURRENT plan focus: filter
+    firstReadableDelegationContract by ParentPlanID == the active plan (pass the
+    plan through from checkpoint/start-task context instead of "first readable").
+  - Or key the iter-log wave/task off an explicit start-task focus record rather
+    than inferring from whatever delegation happens to be active.
+  - Defensive: when >1 active delegation spans multiple plans, refuse to
+    auto-derive and require an explicit --plan/--task on checkpoint.
+
+  Workaround used this run: the foreign contract+bundle were moved out of the
+  scan dir (plain mv, unstaged) so the loop's iter-logs derive cleanly; iter-71
+  was rewritten to the real iteration and re-scored.
+classification: bug
+routed_to: task_note:full-loop-orchestration-runtime
+created_at: "2026-07-23T06:05:00Z"

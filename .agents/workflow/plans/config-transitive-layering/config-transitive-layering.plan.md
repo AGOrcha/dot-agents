@@ -6,7 +6,7 @@ there carried `dot-agents-repo:` write scopes); this is now the **canonical
 execution home** — the dot-agents `da` loop implements it here.
 
 ## Why here (not payout)
-The config layers live in separate repos (`roos-agc` org, `provadm-agc`/
+The config layers live in separate repos (`example-org-repo` org, `example-team-repo`/
 `po-agents-config` team), but the resolver/schema/spec **code** lives in
 dot-agents. The payout plan originated the design (ideation ✅); execution of the
 code belongs in this repo so `da workflow next` in dot-agents drives it.
@@ -32,16 +32,16 @@ repo). This plan adds the **transitive** layer on top — a fetched layer's OWN
    `loadFlatSnapshot` onto the layered/locked resolver (today extends-supplied
    app_types show `matched:false`).
 
-Algorithm/types and the worked PA example are in
+Algorithm/types and the worked org→team example are in
 `~/proj-docs/payout/.agents/workflow/plans/platform-config-layering/platform-config-layering.plan.md`
 (§ Schema Api Shape, § Edge Cases, § Verification).
 
 ## Downstream unblocks (the "after deps are met" gate)
 On completion of task 3 (and ideally 4), the **content/adoption** plans in the
 config repos become runnable — they are currently **paused** pending this plan:
-- `agent-conf-ext/roos-agc` → plan `roos-org-source-buildout`
-- `agent-conf-ext/provadm-agc` → plan `provadm-config-v2-revamp`
-- payout `platform-config-layering` → `po-agents-config-adopt-roos-layer`,
+- `agent-conf-ext/example-org-repo` → plan `org-layer-buildout`
+- `agent-conf-ext/example-team-repo` → plan `team-config-revamp`
+- payout `platform-config-layering` → `team-config-adopt-org-layer`,
   `repo-rollout-manifest-examples`
 
 **Closeout action:** when this plan completes, unpause those two agent-conf-ext

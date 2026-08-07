@@ -185,7 +185,25 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := linkInstallResources(projectName, rc, resolvedSources, strict, deps); err != nil {
+	// Project the RESOLVED, layered resource set: skills/agents supplied by
+	// extends layers (org→team) live in the effective manifest, never the flat
+	// on-disk .agentsrc.json, so linking from the resolved snapshot (not the raw
+	// rc) is what materializes transitively-inherited resources
+	// (config-transitive-layering). Effective ⊇ the flat rc's skills/agents.
+	resolvedManifest := rc
+	switch {
+	case ensureRes != nil:
+		resolvedManifest = &ensureRes.Snapshot.Effective
+	case Flags.DryRun:
+		// Dry-run writes no lock (ensureRes is nil), but the PREVIEW must still
+		// reflect the effective/layered config, not the flat manifest. Resolve
+		// read-only from the committed lock (Frozen — no write, no fetch); a
+		// project with no lock yet has nothing to preview, so fall back to rc.
+		if ro, roErr := config.EnsureResolved(projectPath, config.EnsureOpts{Frozen: true}); roErr == nil {
+			resolvedManifest = &ro.Snapshot.Effective
+		}
+	}
+	if err := linkInstallResources(projectName, resolvedManifest, resolvedSources, strict, deps); err != nil {
 		return err
 	}
 	if err := ensureInstallProjectDirs(projectName); err != nil {
@@ -315,12 +333,11 @@ func resolveInstallSources(sources []config.Source, strict bool, deps InstallDep
 }
 
 func linkInstallResources(projectName string, rc *config.AgentsRC, resolvedSources []string, strict bool, deps InstallDeps) error {
-	sources := resolvedSources
-	if len(sources) == 0 {
-		// Manifest may omit explicit sources while listing skills/agents that already exist
-		// under ~/.agents/<bucket>/<project>/ (e.g. after promote). Resolve from canonical home.
-		sources = []string{config.AgentsHome()}
-	}
+	// Canonical resources live in the home store (~/.agents/<bucket>/<scope>/), so
+	// it is ALWAYS a valid resource source alongside any resolved project/layer
+	// sources — a skill/agent supplied by an extends layer (or by `da promote`)
+	// resolves from home even when the manifest also declares sources.
+	sources := append(append([]string{}, resolvedSources...), config.AgentsHome())
 	if err := linkInstallResourceList("skills", "skill", rc.Skills, projectName, sources, strict, deps); err != nil {
 		return err
 	}

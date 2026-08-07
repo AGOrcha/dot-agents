@@ -2308,3 +2308,89 @@ func TestRegisterInstallProject_RebindPreservesIdentity(t *testing.T) {
 		t.Errorf("install rebind did not set machine-local path: got %q", got)
 	}
 }
+
+// TestRunInstall_ProjectsExtendsInheritedSkill pins config-transitive-layering's
+// projection payoff: a repo that declares only its team source (and extends the
+// team layer) must materialize a skill supplied by the ORG layer the team layer
+// transitively extends — even though that skill is ABSENT from the repo's flat
+// .agentsrc.json. Regression guard for linking from the resolved effective
+// manifest (ensureRes.Snapshot.Effective) rather than the raw manifest.
+func TestRunInstall_ProjectsExtendsInheritedSkill(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(`{"version":2}`), 0644)
+	// canonical org-supplied skill at global scope
+	skillDir := filepath.Join(agentsHome, "skills", "global", "org-skill")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# org-skill"), 0644)
+	// source layers: team extends org; org declares the skill
+	src := filepath.Join(tmp, "src")
+	os.MkdirAll(filepath.Join(src, "org"), 0755)
+	os.MkdirAll(filepath.Join(src, "team"), 0755)
+	os.WriteFile(filepath.Join(src, "org", "base.json"), []byte(`{"skills":["org-skill"]}`), 0644)
+	// strconv.Quote escapes the path so the JSON is valid on Windows (a raw
+	// backslash path yields invalid string escapes); matches the idiom in
+	// commands/config/relevance_test.go's transitive fixture.
+	os.WriteFile(filepath.Join(src, "team", "base.json"),
+		[]byte(`{"sources":[{"id":"org","type":"local","path":`+strconv.Quote(src)+`}],"extends":["org:org/base.json"]}`), 0644)
+	// repo declares ONLY the team source + extends team; NO skills in the flat manifest
+	projDir := filepath.Join(tmp, "proj")
+	os.MkdirAll(projDir, 0755)
+	os.WriteFile(filepath.Join(projDir, config.AgentsRCFile),
+		[]byte(`{"project":"proj","version":2,"sources":[{"id":"team","type":"local","path":`+strconv.Quote(src)+`}],"extends":["team:team/base.json"]}`), 0644)
+
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(prev) })
+	if err := os.Chdir(projDir); err != nil {
+		t.Fatal(err)
+	}
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := RunInstall(false, StdInstallDeps{}); err != nil {
+		t.Fatalf("RunInstall: %v", err)
+	}
+	dest := filepath.Join(agentsHome, "skills", "proj", "org-skill")
+	info, err := os.Lstat(dest)
+	if err != nil {
+		t.Fatalf("extends-inherited org-skill not projected at %s: %v", dest, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected %s to be a symlink to the canonical org-skill", dest)
+	}
+}
+
+// TestRunInstall_DryRunNoResolvedSnapshotNoPanic pins the nil-guard: under
+// --dry-run ensureInstallResolved returns a nil EnsureResult, so runInstall must
+// fall back to the flat manifest for the resource list instead of dereferencing
+// a nil snapshot.
+func TestRunInstall_DryRunNoResolvedSnapshotNoPanic(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(`{"version":2}`), 0644)
+	projDir := filepath.Join(tmp, "proj")
+	os.MkdirAll(projDir, 0755)
+	os.WriteFile(filepath.Join(projDir, config.AgentsRCFile),
+		[]byte(`{"project":"proj","version":2}`), 0644)
+
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(prev) })
+	if err := os.Chdir(projDir); err != nil {
+		t.Fatal(err)
+	}
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	// Must not panic on the nil resolved snapshot.
+	if err := RunInstall(false, StdInstallDeps{}); err != nil {
+		t.Fatalf("dry-run RunInstall: %v", err)
+	}
+}

@@ -95,6 +95,9 @@ const (
 	ReasonSchema ImportFailReason = "schema"
 	// ReasonNotFound: the referenced source id or layer path does not exist.
 	ReasonNotFound ImportFailReason = "not_found"
+	// ReasonCycle: a cyclic extends graph (A→B→A). Detected on the active
+	// recursion stack during transitive expansion; never silently dropped.
+	ReasonCycle ImportFailReason = "cycle"
 )
 
 // ImportError carries the structured failure contract for an extends/packages

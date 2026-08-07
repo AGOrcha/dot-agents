@@ -666,3 +666,47 @@ func TestSchemaRoundTrip_DiscoverableSchemas(t *testing.T) {
 		t.Fatal("no *.schema.json files discovered")
 	}
 }
+
+// TestSchemaSourceScopeOwnerDeclared asserts the source $def declares the
+// config-transitive-layering task 2 routing fields: scope (enum
+// public|org|team|repo) and owner (string). Guards struct<->schema drift for the
+// nested source object, which the top-level coverage walk does not reach.
+func TestSchemaSourceScopeOwnerDeclared(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "schemas", "agentsrc.schema.json"))
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	var doc struct {
+		Defs map[string]struct {
+			Properties map[string]struct {
+				Type string   `json:"type"`
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse schema: %v", err)
+	}
+	props := doc.Defs["source"].Properties
+	scope, ok := props["scope"]
+	if !ok {
+		t.Fatal("source $def missing scope property (struct<->schema drift)")
+	}
+	wantEnum := map[string]bool{"public": true, "org": true, "team": true, "repo": true}
+	if len(scope.Enum) != len(wantEnum) {
+		t.Errorf("scope enum = %v, want the four source scopes", scope.Enum)
+	}
+	for _, e := range scope.Enum {
+		if !wantEnum[e] {
+			t.Errorf("scope enum has unexpected value %q", e)
+		}
+	}
+	owner, ok := props["owner"]
+	if !ok {
+		t.Fatal("source $def missing owner property")
+	}
+	if owner.Type != "string" {
+		t.Errorf("owner type = %q, want string", owner.Type)
+	}
+}

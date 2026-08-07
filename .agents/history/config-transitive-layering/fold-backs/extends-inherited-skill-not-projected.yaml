@@ -1,0 +1,39 @@
+schema_version: 1
+id: extends-inherited-skill-not-projected
+plan_id: platform-driven-diagnostics
+task_id: ""
+observation: |-
+  ADJACENT FINDING (surfaced during the config-transitive-layering task-4
+  refresh/import smoke, iter-74). A skill supplied by an `extends` layer resolves
+  correctly in config but never reaches PLATFORM PROJECTION.
+
+  Repro (live, da-dev): a repo declares only its team source and extends a team
+  layer that transitively extends an org layer declaring `skills: ["org-skill"]`;
+  the canonical `org-skill` exists in the home store (~/.agents/skills/org-skill).
+  - `da config explain skills` → `["org-skill"]`, active layer `org:org/base.json`
+    (transitive resolve works end-to-end).
+  - `da install` / `da refresh` complete cleanly and idempotently — but project NO
+    org-skill link into any platform dir (.claude/skills, .cursor/skills, …).
+  - `da status --audit` shows `skills (empty)` for the platform, while listing
+    `.agents/skills/org-skill (local file)`.
+
+  So a resource the resolver says is in effect (via a config layer) is silently
+  absent from projection. The config `skills` list and the projected platform
+  skill set are computed by different paths, and the projection path does not
+  consult the resolved/layered `skills` selection for extends-supplied entries.
+  This is distinct from — and the inverse of — the known refresh link-COLLISION
+  bug (new imported link vs original in target); that collision did NOT surface in
+  this smoke (install/refresh were idempotent and collision-free).
+
+  Open question: is skill projection meant to be driven by the resolved effective
+  `skills` list (so extends-inherited skills materialize), or only by canonical
+  scope routing (so a global/org skill is "available" but never repo-projected)?
+  If the former, projection must read the layered snapshot's skills selection like
+  relevance/verify now do (config-transitive-layering task 4); if the latter, the
+  behavior is correct but `status --audit` mislabels it as an empty gap.
+
+  Not blocking config-transitive-layering (its acceptance is relevance/verify
+  reading the layered snapshot — proven). Filed for the platform-projection owner.
+classification: bug
+routed_to: task_note:platform-driven-diagnostics
+created_at: "2026-07-23T07:00:00Z"

@@ -568,6 +568,16 @@
           "minLength": 1,
           "description": "v2: stable local identifier used in extends/packages refs."
         },
+        "scope": {
+          "type": "string",
+          "enum": ["public", "org", "team", "repo"],
+          "description": "v2 (config-transitive-layering / config-distribution-model D16): distributed-scope discriminator. ROUTING/ownership metadata only — seeds scoped-content routing (D13) and explain/editability UI. NOT an authority grant: an imported layer stays public authority until an authority_grants blessing upgrades it (D1a). Absent on v1 sources (byte-stable)."
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "description": "v2 (config-distribution-model D16): who owns this source (e.g. 'acme-platform', 'acme-team', 'payout'). Ownership metadata for explain/routing UI. Optional even for scoped sources; absent on public/v1 sources."
+        },
         "cache_ttl": {
           "type": "string",
           "minLength": 1,

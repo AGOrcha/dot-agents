@@ -1163,6 +1163,41 @@ type Source struct {
 	// the derivation; a *CacheKeys pointer keeps a defaulting source byte-stable
 	// (no cache_keys object emitted). Omitted on a v1 source.
 	CacheKeys *CacheKeys `json:"cache_keys,omitempty"`
+	// Scope is the distributed-scope discriminator (public|org|team|repo) — see
+	// SourceScope. ROUTING/ownership metadata, NOT authority (config-distribution
+	// D16). Omitted on a v1 source, keeping it byte-stable on round-trip.
+	Scope SourceScope `json:"scope,omitempty"`
+	// Owner names who owns this source (e.g. "acme-platform",
+	// "acme-team", "payout"). Ownership metadata for explain/routing UI;
+	// optional even on scoped sources, omitted on public/v1 sources.
+	Owner string `json:"owner,omitempty"`
+}
+
+// SourceScope is the distributed-scope discriminator for a source: which layer of
+// the org→team→repo distribution it represents. It is ROUTING/ownership metadata
+// only — it seeds scoped-content routing (config-distribution-model D13/D16) and
+// explain/editability UI. It is NOT an authority grant: an imported layer stays at
+// public authority (AuthPublic) until an authority_grants blessing upgrades it
+// (D1a), regardless of the SourceScope it declares.
+type SourceScope string
+
+const (
+	SourceScopePublic SourceScope = "public"
+	SourceScopeOrg    SourceScope = "org"
+	SourceScopeTeam   SourceScope = "team"
+	SourceScopeRepo   SourceScope = "repo"
+)
+
+// IsValid reports whether s is one of the four defined source scopes. The empty
+// scope (a legacy v1 source declares none) returns false so validators can
+// distinguish "absent" from "invalid value" and keep v1 manifests byte-stable.
+func (s SourceScope) IsValid() bool {
+	switch s {
+	case SourceScopePublic, SourceScopeOrg, SourceScopeTeam, SourceScopeRepo:
+		return true
+	default:
+		return false
+	}
 }
 
 const AgentsRCFile = ".agentsrc.json"

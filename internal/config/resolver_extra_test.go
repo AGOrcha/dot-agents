@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -58,21 +57,6 @@ func TestReadLockedLayersOpenError(t *testing.T) {
 	}
 	if _, err := readLockedLayersFromUnits(proj); err == nil {
 		t.Fatal("expected open error when lock path is a directory")
-	}
-}
-
-// TestResolveConcurrency checks the worker-pool bound: never below 1, never
-// more workers than layers, and clamped to the oversubscribed CPU ceiling.
-func TestResolveConcurrency(t *testing.T) {
-	if got := resolveConcurrency(0); got != 1 {
-		t.Errorf("resolveConcurrency(0) = %d, want 1", got)
-	}
-	if got := resolveConcurrency(2); got != 2 {
-		t.Errorf("resolveConcurrency(2) = %d, want 2 (fewer layers than the cap)", got)
-	}
-	ceiling := runtime.GOMAXPROCS(0) * 4
-	if got := resolveConcurrency(ceiling + 100); got != ceiling {
-		t.Errorf("resolveConcurrency(%d) = %d, want clamp to %d", ceiling+100, got, ceiling)
 	}
 }
 

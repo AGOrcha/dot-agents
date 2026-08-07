@@ -1655,3 +1655,239 @@ func assertLockfileSections(t *testing.T, repo string, wantLayerRefs []string) {
 		t.Error("lockfile missing inputs_digest")
 	}
 }
+
+// shiftingShaFetcher serves a fixed body but returns a DIFFERENT resolved SHA on
+// each call (cycling through shas), so the same ref resolved twice yields
+// divergent digests — the fail-loud path in the transitive walk.
+type shiftingShaFetcher struct {
+	body string
+	shas []string
+	n    int
+}
+
+func (f *shiftingShaFetcher) Fetch(_ Source, _ LayerRefParts, cacheDir string) (FetchedLayer, error) {
+	sha := f.shas[f.n%len(f.shas)]
+	f.n++
+	if err := writeCachedLayer(cacheDir, sha, []byte(f.body)); err != nil {
+		return FetchedLayer{}, err
+	}
+	return FetchedLayer{Data: []byte(f.body), ResolvedSHA: sha}, nil
+}
+
+// TestLayeredResolverTransitiveExtendsPostOrder: a repo that declares ONLY its
+// team source and extends the team layer inherits the org layer transitively —
+// the team layer declares the org source + extends it — and the imported stack
+// is children-first (org before team). Both transitive units are locked.
+func TestLayeredResolverTransitiveExtendsPostOrder(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "team", "type": "git", "url": "https://example/team.git", "ref": "main"}],
+		"extends": ["team:team/base.json"]
+	}`)
+	fake := &fakeFetcher{files: map[string]string{
+		"team/base.json": `{"sources":[{"id":"org","type":"git","url":"https://example/org.git","ref":"main"}],"extends":["org:org/base.json"],"skills":["team-skill"]}`,
+		"org/base.json":  `{"skills":["org-skill"]}`,
+	}}
+	snap, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	ids := layerIDs(snap.Layers)
+	want := []string{LayerProductDefaults, "org:org/base.json", "team:team/base.json", LayerRepoLocal}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("transitive layer ids = %v, want children-first %v", ids, want)
+	}
+	wantSkills := []string{"org-skill", "team-skill"}
+	if !reflect.DeepEqual(snap.Effective.Skills, wantSkills) {
+		t.Errorf("skills = %v, want %v (org baseline before team)", snap.Effective.Skills, wantSkills)
+	}
+	assertLockfileSections(t, repo, []string{"org:org/base.json", "team:team/base.json"})
+}
+
+// TestLayeredResolverTransitiveDiamondDedupe: root extends [a, b]; both extend
+// the same org layer. Org is admitted ONCE, at its first (baseline) position,
+// and never re-imported.
+func TestLayeredResolverTransitiveDiamondDedupe(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "s", "type": "git", "url": "https://example/s.git", "ref": "main"}],
+		"extends": ["s:a.json", "s:b.json"]
+	}`)
+	fake := &fakeFetcher{files: map[string]string{
+		"a.json":   `{"extends":["s:org.json"],"skills":["a"]}`,
+		"b.json":   `{"extends":["s:org.json"],"skills":["b"]}`,
+		"org.json": `{"skills":["org"]}`,
+	}}
+	snap, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	ids := layerIDs(snap.Layers)
+	want := []string{LayerProductDefaults, "s:org.json", "s:a.json", "s:b.json", LayerRepoLocal}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("diamond ids = %v, want org deduped to one baseline slot %v", ids, want)
+	}
+	seen := 0
+	for _, id := range ids {
+		if id == "s:org.json" {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Errorf("org layer imported %d times, want exactly 1 (dedupe)", seen)
+	}
+}
+
+// TestLayeredResolverTransitiveCycleFailsLoud: an extends cycle (a→b→a) is a
+// hard ReasonCycle error, never a silent drop.
+func TestLayeredResolverTransitiveCycleFailsLoud(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "s", "type": "git", "url": "https://example/s.git", "ref": "main"}],
+		"extends": ["s:a.json"]
+	}`)
+	fake := &fakeFetcher{files: map[string]string{
+		"a.json": `{"extends":["s:b.json"]}`,
+		"b.json": `{"extends":["s:a.json"]}`,
+	}}
+	_, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo)
+	if err == nil {
+		t.Fatal("expected a cycle error, got nil")
+	}
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonCycle {
+		t.Fatalf("want *ImportError reason=cycle, got %v", err)
+	}
+}
+
+// TestLayeredResolverTransitiveDigestConflictFailsLoud: the same ref resolving
+// to two different digests is a hard error, not an ambiguous merge.
+func TestLayeredResolverTransitiveDigestConflictFailsLoud(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "s", "type": "git", "url": "https://example/s.git", "ref": "main"}],
+		"extends": ["s:a.json", "s:a.json"]
+	}`)
+	fake := &shiftingShaFetcher{
+		body: `{"skills":["x"]}`,
+		shas: []string{strings.Repeat("a", 40), strings.Repeat("b", 40)},
+	}
+	_, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo)
+	if err == nil {
+		t.Fatal("expected a digest-conflict error, got nil")
+	}
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want *ImportError reason=content (divergent digest), got %v", err)
+	}
+}
+
+// TestLayeredResolverTransitiveLockedOffline: after an online transitive
+// resolve, an OFFLINE re-resolve with a failing fetcher must reproduce the full
+// stack from the lock — proving the transitive org unit was locked, not only the
+// repo-root team extends.
+func TestLayeredResolverTransitiveLockedOffline(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "team", "type": "git", "url": "https://example/team.git", "ref": "main"}],
+		"extends": ["team:team/base.json"]
+	}`)
+	fake := &fakeFetcher{files: map[string]string{
+		"team/base.json": `{"sources":[{"id":"org","type":"git","url":"https://example/org.git","ref":"main"}],"extends":["org:org/base.json"],"skills":["team-skill"]}`,
+		"org/base.json":  `{"skills":["org-skill"]}`,
+	}}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("online resolve: %v", err)
+	}
+	offlineFake := &fakeFetcher{fetchErr: errors.New("network down")}
+	snap, err := NewLayeredResolver().WithFetcher("git", offlineFake).WithOffline(true).Resolve(repo)
+	if err != nil {
+		t.Fatalf("offline re-resolve failed (transitive org unit not locked?): %v", err)
+	}
+	ids := layerIDs(snap.Layers)
+	want := []string{LayerProductDefaults, "org:org/base.json", "team:team/base.json", LayerRepoLocal}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("offline transitive ids = %v, want %v", ids, want)
+	}
+}
+
+// TestResolveLockedReplaysTransitiveStack: after an online resolve locks the full
+// org→team stack, ResolveLocked (the offline, no-fetch path all consumers use via
+// da config explain/relevance/verify) must reconstruct [org, team] from the lock,
+// not just the repo-declared team extends. Guards the offline transitive replay.
+func TestResolveLockedReplaysTransitiveStack(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "team", "type": "git", "url": "https://example/team.git", "ref": "main"}],
+		"extends": ["team:team/base.json"]
+	}`)
+	fake := &fakeFetcher{files: map[string]string{
+		"team/base.json": `{"sources":[{"id":"org","type":"git","url":"https://example/org.git","ref":"main"}],"extends":["org:org/base.json"],"skills":["team-skill"]}`,
+		"org/base.json":  `{"skills":["org-skill"]}`,
+	}}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("seed online resolve: %v", err)
+	}
+	// ResolveLocked must not fetch: a failing fetcher proves it reads only the lock/cache.
+	noFetch := &fakeFetcher{fetchErr: errors.New("ResolveLocked must not fetch")}
+	snap, err := NewLayeredResolver().WithFetcher("git", noFetch).ResolveLocked(repo)
+	if err != nil {
+		t.Fatalf("ResolveLocked: %v", err)
+	}
+	ids := layerIDs(snap.Layers)
+	want := []string{LayerProductDefaults, "org:org/base.json", "team:team/base.json", LayerRepoLocal}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("ResolveLocked transitive ids = %v, want %v (org reconstructed offline from the lock)", ids, want)
+	}
+	if noFetch.calls != 0 {
+		t.Errorf("ResolveLocked invoked the fetcher %d times, want 0", noFetch.calls)
+	}
+}
+
+// TestResolveOnlineOfflineTransitiveParity pins the invariant that the online
+// graph walk (extendsGraphState) and the offline locked replay
+// (lockedExtendsState) produce an IDENTICAL transitive layer stack (refs + order)
+// and identical effective merge. The two walks are hand-mirrored; this guards
+// them against the drift that caused the offline path to miss transitive layers.
+func TestResolveOnlineOfflineTransitiveParity(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "s", "type": "git", "url": "https://example/s.git", "ref": "main"}],
+		"extends": ["s:team.json", "s:platform.json"]
+	}`)
+	// Diamond: repo extends team + platform, both extend org — pins dedupe
+	// (org admitted once) AND order parity between the online/offline walks.
+	fake := &fakeFetcher{files: map[string]string{
+		"team.json":     `{"extends":["s:org.json"],"skills":["team-skill"]}`,
+		"platform.json": `{"extends":["s:org.json"],"skills":["platform-skill"]}`,
+		"org.json":      `{"skills":["org-skill"]}`,
+	}}
+	online, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo)
+	if err != nil {
+		t.Fatalf("online Resolve: %v", err)
+	}
+	offline, err := NewLayeredResolver().WithFetcher("git", &fakeFetcher{fetchErr: errors.New("no fetch")}).ResolveLocked(repo)
+	if err != nil {
+		t.Fatalf("offline ResolveLocked: %v", err)
+	}
+	if on, off := layerIDs(online.Layers), layerIDs(offline.Layers); !reflect.DeepEqual(on, off) {
+		t.Errorf("online vs offline layer-stack drift:\n online=%v\n offline=%v", on, off)
+	}
+	if !reflect.DeepEqual(online.Effective.Skills, offline.Effective.Skills) {
+		t.Errorf("online vs offline effective-skills drift: %v vs %v", online.Effective.Skills, offline.Effective.Skills)
+	}
+}

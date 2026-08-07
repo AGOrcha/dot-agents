@@ -82,23 +82,83 @@ func (r *LayeredResolver) ResolveLocked(projectPath string) (*Snapshot, error) {
 // from the lockfile, or whose cached bytes are missing, is a fatal *ImportError
 // so explain can surface the gap without ever triggering a fetch.
 func (r *LayeredResolver) readLockedExtends(rc AgentsRC, locked map[string]LockedLayer) ([]ResolvedLayer, []ProvenanceWarning, error) {
-	sources := indexSources(rc.Sources)
-	imported := make([]ResolvedLayer, 0, len(rc.Extends))
-	warnings := []ProvenanceWarning{}
-
+	st := &lockedExtendsState{
+		locked:      locked,
+		digestByRef: map[string]string{},
+		onStack:     map[string]bool{},
+	}
+	rootEnv := sourceEnv(indexSources(rc.Sources))
 	for _, entry := range rc.Extends {
-		layer, warns, err := r.readOneLockedLayer(entry, sources, locked)
-		warnings = append(warnings, warns...)
-		if err != nil {
+		if err := st.walk(r, entry, rootEnv); err != nil {
 			if entry.Optional {
-				warnings = append(warnings, optionalSkipWarning(entry.Ref, err))
+				st.warnings = append(st.warnings, optionalSkipWarning(entry.Ref, err))
 				continue
 			}
 			return nil, nil, err
 		}
-		imported = append(imported, layer)
 	}
-	return imported, warnings, nil
+	return st.imported, st.warnings, nil
+}
+
+// lockedExtendsState mirrors extendsGraphState for the OFFLINE replay: the same
+// children-first transitive walk (a layer's own sources/extends expand before
+// the layer is admitted, post-order org→team→repo-local), but each layer is read
+// from the cache at its locked SHA rather than fetched. This is what lets a repo
+// declaring only its team source reproduce the org layer offline — the org unit
+// was locked transitively by the online resolve (org-config-resolution §6.6,
+// "Offline Locked Behavior").
+type lockedExtendsState struct {
+	locked      map[string]LockedLayer
+	imported    []ResolvedLayer
+	digestByRef map[string]string
+	onStack     map[string]bool
+	warnings    []ProvenanceWarning
+}
+
+func (st *lockedExtendsState) walk(r *LayeredResolver, entry LayerRef, env sourceEnv) error {
+	parts, err := ParseLayerRef(entry.Ref)
+	if err != nil {
+		return &ImportError{Ref: entry.Ref, Reason: ReasonSchema, Err: err}
+	}
+	key := parts.SourceID + ":" + parts.LayerPath
+	if parts.Version != "" {
+		key += "@" + parts.Version
+	}
+	if st.onStack[key] {
+		return &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonCycle, Err: fmt.Errorf("extends cycle detected at %q", entry.Ref)}
+	}
+	layer, warns, err := r.readOneLockedLayer(entry, env, st.locked)
+	st.warnings = append(st.warnings, warns...)
+	if err != nil {
+		return err
+	}
+	sha := st.locked[entry.Ref].ResolvedSHA
+	if prev, seen := st.digestByRef[key]; seen {
+		if prev != sha {
+			return &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonContent, Err: fmt.Errorf("ref %q locked at conflicting digests (%s vs %s)", entry.Ref, prev, sha)}
+		}
+		return nil
+	}
+	st.digestByRef[key] = sha
+	childRC, err := decodeEffective(layer.Raw)
+	if err != nil {
+		return &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonSchema, Err: fmt.Errorf("decoding layer %q sources/extends: %w", entry.Ref, err)}
+	}
+	childEnv := env.child(childRC.Sources)
+	st.onStack[key] = true
+	for _, child := range childRC.Extends {
+		if err := st.walk(r, child, childEnv); err != nil {
+			if child.Optional {
+				st.warnings = append(st.warnings, optionalSkipWarning(child.Ref, err))
+				continue
+			}
+			st.onStack[key] = false
+			return err
+		}
+	}
+	st.onStack[key] = false
+	st.imported = append(st.imported, layer)
+	return nil
 }
 
 // readOneLockedLayer reconstructs a single extends entry's ResolvedLayer from the

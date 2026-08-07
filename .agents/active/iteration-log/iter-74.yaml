@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 74
+date: "2026-07-23"
+wave: config-transitive-layering
+task_id: layered-consumers-relevance-verify
+commit: b3df06262b2d389ff030429d88ea61178fe64a5c
+files_changed: 4
+lines_added: 224
+lines_removed: 15
+checkpoint_at: "2026-07-23T06:55:00Z"
+impl:
+    item: "Make relevance/verify/verifier dispatch read layered snapshots"
+    summary: "The consumer migration off loadFlatSnapshot already shipped in config-v2 (runRelevance->resolveLayered, ResolvePreconditionPolicy->ResolveLocked; loadFlatSnapshot retired). A proving test exposed that the OFFLINE replay consumers use (ResolveLocked->readLockedExtends) only walked the repo's DIRECT extends, dropping transitively-locked layers offline -> org-through-team app_types still showed matched:false. Fixed readLockedExtends to be a children-first transitive walk (lockedExtendsState) reading each layer from cache at its locked SHA, mirroring the online extendsGraphState. relevance.go/explain.go/precondition_resolve.go/commands/workflow needed no code change."
+    scope_note: "Declared write_scope: relevance.go/explain.go/commands/workflow/precondition_resolve.go/CONFIG_RELEVANCE.md — of these only CONFIG_RELEVANCE.md needed a change (the code consumers were already migrated). resolve_locked.go (offline transitive fix) + resolver_test.go (parity/offline tests) are beyond the declared scope: the offline replay was the actual gap and its natural home."
+    feedback_goal: "da config relevance resolves through legacy loadFlatSnapshot — org-through-team app_types show matched:false. Migrate relevance + prompt-driven verifier dispatch onto the layered/locked resolver."
+    retries: 0
+    focused_tests_added: 3
+verifiers:
+    - type: unit
+      status: pass
+      summary: "TransitiveOrgViaTeamLayer relevance match + ResolveLocked-transitive + online/offline diamond parity; full ./internal/config + ./commands/config; whole-repo go build; -race refresh/import/projection; live config-explain + install/refresh smoke (idempotent, collision-free)"
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/layered-consumers-relevance-verify/review-decision.yaml
+    verify_record_appended: true

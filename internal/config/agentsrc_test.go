@@ -3066,3 +3066,54 @@ func TestMergeGenerateAgentsRCPreservesObservability(t *testing.T) {
 		t.Fatalf("merged auth changed through source alias: %+v", merged.Observability.Auth)
 	}
 }
+
+// TestSourceScopeOwnerRoundtrip covers the config-transitive-layering task 2
+// schema surface: Source.Scope/Owner round-trip, SourceScope.IsValid, and the
+// byte-stability of a legacy v1 source that declares neither field.
+func TestSourceScopeOwnerRoundtrip(t *testing.T) {
+	src := Source{Type: "git", URL: "https://example.com/acme.git", Ref: "main", ID: "acme", Scope: SourceScopeOrg, Owner: "acme-platform"}
+	data, err := json.Marshal(src)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var rt Source
+	if err := json.Unmarshal(data, &rt); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rt.Scope != SourceScopeOrg {
+		t.Errorf("Scope round-trip: %q -> %q", SourceScopeOrg, rt.Scope)
+	}
+	if rt.Owner != "acme-platform" {
+		t.Errorf("Owner round-trip: %q -> %q", "acme-platform", rt.Owner)
+	}
+
+	// Legacy v1 source declares neither field -> byte-stable: the encoded JSON
+	// must NOT carry a "scope" or "owner" key (omitempty).
+	legacy := Source{Type: "local"}
+	ldata, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy: %v", err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(ldata, &m); err != nil {
+		t.Fatalf("reparse legacy: %v", err)
+	}
+	if _, ok := m["scope"]; ok {
+		t.Errorf("legacy v1 source emitted a scope key (not byte-stable): %s", ldata)
+	}
+	if _, ok := m["owner"]; ok {
+		t.Errorf("legacy v1 source emitted an owner key (not byte-stable): %s", ldata)
+	}
+
+	// IsValid accepts exactly the four defined scopes; empty and unknown are invalid.
+	for _, s := range []SourceScope{SourceScopePublic, SourceScopeOrg, SourceScopeTeam, SourceScopeRepo} {
+		if !s.IsValid() {
+			t.Errorf("SourceScope(%q).IsValid() = false, want true", s)
+		}
+	}
+	for _, s := range []SourceScope{"", "user", "product", "bogus"} {
+		if s.IsValid() {
+			t.Errorf("SourceScope(%q).IsValid() = true, want false", s)
+		}
+	}
+}

@@ -884,3 +884,77 @@ func chdir(t *testing.T, dir string) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(prev) })
 }
+
+// TestRunRelevance_TransitiveOrgViaTeamLayer proves the config-transitive-layering
+// payoff at the consumer: a repo that declares ONLY its team source (and extends
+// the team layer) surfaces an app_type defined by the ORG layer, which the team
+// layer pulls in transitively. Before the transitive resolver (task 3) this
+// org app_type showed matched:false at relevance because only repo-local extends
+// were expanded; now relevance rides the same transitive layered path.
+func TestRunRelevance_TransitiveOrgViaTeamLayer(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+
+	src := t.TempDir()
+	for _, d := range []string{"org", "team"} {
+		if err := os.MkdirAll(filepath.Join(src, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Org layer defines the app_type's execution profile.
+	if err := os.WriteFile(filepath.Join(src, "org", "base.json"), []byte(`{
+  "execution_profile": {
+    "by_app_type": {
+      "org-shared-svc": {
+        "topology": {
+          "executors": 2,
+          "verifiers_per_executor": 1,
+          "verifier_sequence": ["org-unit", "org-api"]
+        }
+      }
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Team layer declares its OWN org source and extends the org layer — the repo
+	// never names the org source.
+	if err := os.WriteFile(filepath.Join(src, "team", "base.json"), []byte(`{
+  "sources":[{"id":"org","type":"local","path":`+strconv.Quote(src)+`}],
+  "extends":["org:org/base.json"]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, cfg.AgentsRCFile), []byte(`{
+  "project":"svc","version":2,
+  "sources":[{"id":"team","type":"local","path":`+strconv.Quote(src)+`}],
+  "extends":["team:team/base.json"]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed .agentsrc.lock + cache via one online resolve (locks the full
+	// transitive stack), then runRelevance replays offline via ResolveLocked.
+	if _, err := cfg.NewLayeredResolver().Resolve(repo); err != nil {
+		t.Fatalf("seed online resolve: %v", err)
+	}
+
+	opts := mustRelevanceOptions(repo)
+	opts.filter = filterTopology
+	opts.appType = "org-shared-svc"
+	opts.jsonOut = true
+	if err := runRelevance(opts, testDeps()); err != nil {
+		t.Fatalf("runRelevance: %v", err)
+	}
+	var got relevanceResult
+	if err := json.Unmarshal([]byte(relevanceOut(opts)), &got); err != nil {
+		t.Fatalf("decode json: %v\n%s", err, relevanceOut(opts))
+	}
+	if !got.Matched {
+		t.Fatalf("expected the transitively-imported org app_type to match at relevance, got %+v", got)
+	}
+	if got.Topology == nil || strings.Join(got.Topology.VerifierSequence, ",") != "org-unit,org-api" {
+		t.Fatalf("transitive org topology missing/mismatched: %+v", got.Topology)
+	}
+}

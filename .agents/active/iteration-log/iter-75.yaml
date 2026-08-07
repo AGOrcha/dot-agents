@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 75
+date: "2026-07-23"
+wave: config-transitive-layering
+task_id: extends-inherited-resource-projection
+commit: bf2d1442633284ec40b28aebbfdf108700270055
+files_changed: 2
+lines_added: 100
+lines_removed: 7
+checkpoint_at: "2026-07-23T09:10:00Z"
+impl:
+    item: "Project extends-inherited (org/team) skills/agents at install"
+    summary: "Install linked rc.Skills/rc.Agents from the FLAT .agentsrc.json, so a skill/agent supplied only by an extends layer (org->team) never materialized despite resolving in config (config explain showed it; install/status showed empty). Fixed runInstall to link from ensureRes.Snapshot.Effective (resolved, union-merged, transitive), with a nil-guard falling back to the flat rc under --dry-run; and linkInstallResources now ALWAYS includes the canonical home (~/.agents) in the resource search path (was: only when no sources declared) so a home-canonical resource resolves even when the manifest declares sources. refresh needs no change (re-projects from the canonical bucket install populates; link survives)."
+    scope_note: "Within declared write_scope: commands/internal/lifecycle/install.go + install_test.go."
+    feedback_goal: "A resource the resolver reports in effect via an extends layer must actually reach projection — org-through-team skills/agents materialize at install, not just resolve. Consumes the extends-inherited-skill-not-projected fold-back (the plan's original projection intent)."
+    retries: 0
+    focused_tests_added: 2
+verifiers:
+    - type: unit
+      status: pass
+      summary: "RunInstall projects an extends-inherited skill absent from the flat manifest; --dry-run nil-guard test; whole-repo go build; config/config-command/lifecycle/platform suites green; live smoke (install projects org-skill + refresh preserves it)"
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/extends-inherited-resource-projection/review-decision.yaml
+    verify_record_appended: true
