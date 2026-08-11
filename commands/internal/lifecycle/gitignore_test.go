@@ -219,6 +219,47 @@ func TestMaintainManagedGitignore_OptOutRemovesAnExistingBlock(t *testing.T) {
 	}
 }
 
+// TestMaintainManagedGitignore_IsPerProject pins that the step is keyed off the
+// project path it is handed, not any ambient state — `da refresh` fans out
+// across every registered project in one run, so each must get a block derived
+// from its OWN manifest, and one project's opt-out must not leak to a sibling.
+func TestMaintainManagedGitignore_IsPerProject(t *testing.T) {
+	root := t.TempDir()
+	optIn := filepath.Join(root, "opted-in")
+	optOut := filepath.Join(root, "opted-out")
+	noManifest := filepath.Join(root, "no-manifest")
+	for _, d := range []string{optIn, optOut, noManifest} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeManifest(t, optIn, nil)
+	disabled := false
+	writeManifest(t, optOut, &disabled)
+
+	// Seed the opted-out project with a block, as an earlier run would have.
+	if _, err := MaintainManagedGitignore(optOut, claudeAndCodex(t)); err != nil {
+		t.Fatalf("seed opt-out: %v", err)
+	}
+
+	// One fan-out pass over all three, as refreshOneProject does per project.
+	for _, d := range []string{optIn, optOut, noManifest} {
+		if _, err := MaintainManagedGitignore(d, claudeAndCodex(t)); err != nil {
+			t.Fatalf("maintain %s: %v", d, err)
+		}
+	}
+
+	if got := readProjectGitignore(t, optIn); !strings.Contains(got, managedBegin) {
+		t.Errorf("opted-in project must have a block:\n%s", got)
+	}
+	if got := readProjectGitignore(t, noManifest); !strings.Contains(got, managedBegin) {
+		t.Errorf("manifest-less project must default to a block:\n%s", got)
+	}
+	if got := readProjectGitignore(t, optOut); got != "" {
+		t.Errorf("opted-out project must have no block, and its sibling's state must not leak in:\n%s", got)
+	}
+}
+
 // installFixture stands up an isolated agents home + project dir, chdirs into
 // the project, and returns the project path. Mirrors the harness the rest of
 // install_test.go uses.
