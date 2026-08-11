@@ -47,7 +47,7 @@ const (
 // tolerates one everywhere else, so skipping keeps refresh's failure semantics
 // unchanged.) Only a real write failure is returned as an error.
 //
-// Callers own dry-run gating; this function always writes.
+// This function performs no dry-run check of its own — callers gate it.
 func MaintainManagedGitignore(projectPath string, enabled []platform.Platform) (string, error) {
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
