@@ -621,7 +621,7 @@ func canonicalImportFromPath(t *testing.T, sourceRoot, sourcePath string) ([]imp
 		project:    canonicalImportProject,
 		sourceRoot: sourceRoot,
 		sourcePath: sourcePath,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("canonicalImportOutputs failed: %v", err)
 	}
@@ -1986,7 +1986,7 @@ func TestWalkedImportCandidate_RejectsBackupAndDirs(t *testing.T) {
 // ---------- canonical hook bundle converters (edge cases) ----------
 
 func TestCanonicalHookBundleOutputsFromCursorFile_MissingFileErrors(t *testing.T) {
-	_, _, err := canonicalHookBundleOutputsFromCursorFile("p", filepath.Join(t.TempDir(), "missing"))
+	_, _, err := canonicalHookBundleOutputsFromCursorFile("p", filepath.Join(t.TempDir(), "missing"), "")
 	if err == nil {
 		t.Error("expected error reading missing file")
 	}
@@ -1998,7 +1998,7 @@ func TestCanonicalHookBundleOutputsFromCursorFile_InvalidJSONReturnsFalse(t *tes
 	var ok bool
 	var err error
 	out := captureRelinkStdout(t, func() {
-		_, ok, err = canonicalHookBundleOutputsFromCursorFile("p", tmp)
+		_, ok, err = canonicalHookBundleOutputsFromCursorFile("p", tmp, "")
 	})
 	if err != nil || ok {
 		t.Errorf("got ok=%v err=%v, want false,nil", ok, err)
@@ -2011,7 +2011,7 @@ func TestCanonicalHookBundleOutputsFromCursorFile_InvalidJSONReturnsFalse(t *tes
 func TestCanonicalHookBundleOutputsFromCursorFile_EmptyHooksReturnsFalse(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{}}`), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", tmp)
+	_, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", tmp, "")
 	if ok {
 		t.Error("empty hooks should return ok=false")
 	}
@@ -2020,7 +2020,7 @@ func TestCanonicalHookBundleOutputsFromCursorFile_EmptyHooksReturnsFalse(t *test
 func TestCanonicalHookBundleOutputsFromCursorFile_UnknownEventReturnsFalse(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{"unknownEvent":[{"command":"echo hi"}]}}`), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", tmp)
+	_, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", tmp, "")
 	if ok {
 		t.Error("unknown event should return ok=false")
 	}
@@ -2029,14 +2029,14 @@ func TestCanonicalHookBundleOutputsFromCursorFile_UnknownEventReturnsFalse(t *te
 func TestCanonicalHookBundleOutputsFromCursorFile_EmptyCommandReturnsFalse(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{"preToolUse":[{"command":"  "}]}}`), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", tmp)
+	_, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", tmp, "")
 	if ok {
 		t.Error("empty command should return ok=false")
 	}
 }
 
 func TestCanonicalHookBundleOutputsFromCodexFile_MissingFileErrors(t *testing.T) {
-	_, _, err := canonicalHookBundleOutputsFromCodexFile("p", filepath.Join(t.TempDir(), "missing"))
+	_, _, err := canonicalHookBundleOutputsFromCodexFile("p", filepath.Join(t.TempDir(), "missing"), "")
 	if err == nil {
 		t.Error("expected error")
 	}
@@ -2047,7 +2047,7 @@ func TestCanonicalHookBundleOutputsFromCodexFile_InvalidJSON(t *testing.T) {
 	os.WriteFile(tmp, []byte("notjson"), 0644)
 	var ok bool
 	out := captureRelinkStdout(t, func() {
-		_, ok, _ = canonicalHookBundleOutputsFromCodexFile("p", tmp)
+		_, ok, _ = canonicalHookBundleOutputsFromCodexFile("p", tmp, "")
 	})
 	if ok {
 		t.Error("invalid json should return ok=false")
@@ -2060,7 +2060,7 @@ func TestCanonicalHookBundleOutputsFromCodexFile_InvalidJSON(t *testing.T) {
 func TestCanonicalHookBundleOutputsFromCodexFile_EmptyHooks(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{}}`), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromCodexFile("p", tmp)
+	_, ok, _ := canonicalHookBundleOutputsFromCodexFile("p", tmp, "")
 	if ok {
 		t.Error("empty hooks should return ok=false")
 	}
@@ -2069,7 +2069,7 @@ func TestCanonicalHookBundleOutputsFromCodexFile_EmptyHooks(t *testing.T) {
 func TestCanonicalHookBundleOutputsFromCodexFile_Success(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo hi"}]}]}}`), 0644)
-	outputs, ok, err := canonicalHookBundleOutputsFromCodexFile("p", tmp)
+	outputs, ok, err := canonicalHookBundleOutputsFromCodexFile("p", tmp, "")
 	if err != nil || !ok {
 		t.Fatalf("err=%v ok=%v", err, ok)
 	}
@@ -2079,7 +2079,7 @@ func TestCanonicalHookBundleOutputsFromCodexFile_Success(t *testing.T) {
 }
 
 func TestCanonicalHookBundleOutputsFromClaudeCompatFile_MissingFileErrors(t *testing.T) {
-	_, _, err := canonicalHookBundleOutputsFromClaudeCompatFile("p", filepath.Join(t.TempDir(), "missing"))
+	_, _, err := canonicalHookBundleOutputsFromClaudeCompatFile("p", filepath.Join(t.TempDir(), "missing"), "")
 	if err == nil {
 		t.Error("expected error")
 	}
@@ -2088,7 +2088,7 @@ func TestCanonicalHookBundleOutputsFromClaudeCompatFile_MissingFileErrors(t *tes
 func TestCanonicalHookBundleOutputsFromClaudeCompatFile_NonClaudeKeysReturnsFalse(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{},"settings":{"x":1}}`), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp)
+	_, ok, _ := canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp, "")
 	if ok {
 		t.Error("non-claude-compat keys should return ok=false")
 	}
@@ -2097,7 +2097,7 @@ func TestCanonicalHookBundleOutputsFromClaudeCompatFile_NonClaudeKeysReturnsFals
 func TestCanonicalHookBundleOutputsFromClaudeCompatFile_EmptyHooks(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"$schema":"x","hooks":{}}`), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp)
+	_, ok, _ := canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp, "")
 	if ok {
 		t.Error("empty hooks should return ok=false")
 	}
@@ -2113,7 +2113,7 @@ func TestCanonicalHookBundleOutputsFromClaudeCompatFile_InvalidJSON(t *testing.T
 	var ok bool
 	var err error
 	out := captureRelinkStdout(t, func() {
-		_, ok, err = canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp)
+		_, ok, err = canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp, "")
 	})
 	if err != nil || ok {
 		t.Errorf("got ok=%v err=%v, want false,nil", ok, err)
@@ -2126,7 +2126,7 @@ func TestCanonicalHookBundleOutputsFromClaudeCompatFile_InvalidJSON(t *testing.T
 func TestCanonicalHookBundleOutputsFromClaudeCompatFile_Success(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo hi"}]}]}}`), 0644)
-	outputs, ok, err := canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp)
+	outputs, ok, err := canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp, "")
 	if err != nil || !ok {
 		t.Fatalf("err=%v ok=%v", err, ok)
 	}
@@ -2136,7 +2136,7 @@ func TestCanonicalHookBundleOutputsFromClaudeCompatFile_Success(t *testing.T) {
 }
 
 func TestCanonicalHookBundleOutputsFromCopilotFile_MissingFileErrors(t *testing.T) {
-	_, _, err := canonicalHookBundleOutputsFromCopilotFile("p", filepath.Join(t.TempDir(), "missing"), "h")
+	_, _, err := canonicalHookBundleOutputsFromCopilotFile("p", filepath.Join(t.TempDir(), "missing"), "h", "")
 	if err == nil {
 		t.Error("expected error")
 	}
@@ -2147,7 +2147,7 @@ func TestCanonicalHookBundleOutputsFromCopilotFile_InvalidJSON(t *testing.T) {
 	os.WriteFile(tmp, []byte("notjson"), 0644)
 	var ok bool
 	out := captureRelinkStdout(t, func() {
-		_, ok, _ = canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+		_, ok, _ = canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h", "")
 	})
 	if ok {
 		t.Error("invalid json should return ok=false")
@@ -2160,7 +2160,7 @@ func TestCanonicalHookBundleOutputsFromCopilotFile_InvalidJSON(t *testing.T) {
 func TestCanonicalHookBundleOutputsFromCopilotFile_UnknownEvent(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{"unknown":[{"type":"command","bash":"echo hi"}]}}`), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h", "")
 	if ok {
 		t.Error("unknown event should return ok=false")
 	}
@@ -2169,7 +2169,7 @@ func TestCanonicalHookBundleOutputsFromCopilotFile_UnknownEvent(t *testing.T) {
 func TestCanonicalHookBundleOutputsFromCopilotFile_EmptyHooks(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{}}`), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h", "")
 	if ok {
 		t.Error("empty hooks should return ok=false")
 	}
@@ -2178,7 +2178,7 @@ func TestCanonicalHookBundleOutputsFromCopilotFile_EmptyHooks(t *testing.T) {
 func TestCanonicalHookBundleOutputsFromCopilotFile_NonCommandAction(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{"sessionStart":[{"type":"notcommand","bash":"echo hi"}]}}`), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h", "")
 	if ok {
 		t.Error("non-command action type should return ok=false")
 	}
@@ -2607,7 +2607,7 @@ func TestCanonicalHookBundleOutputsFromCodexFile_UnknownEvent(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "hooks.json")
 	os.WriteFile(path, []byte(`{"hooks":{"NotARealEvent":[{"hooks":[{"type":"command","command":"x"}]}]}}`), 0644)
-	outputs, ok, err := canonicalHookBundleOutputsFromCodexFile("p", path)
+	outputs, ok, err := canonicalHookBundleOutputsFromCodexFile("p", path, "")
 	if outputs != nil || ok || err != nil {
 		t.Errorf("expected (nil, false, nil) for unknown event, got (%v, %v, %v)", outputs, ok, err)
 	}
@@ -2619,7 +2619,7 @@ func TestCanonicalHookBundleOutputsFromCursorFile_EmptyHooks(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "hooks.json")
 	os.WriteFile(path, []byte(`{"hooks":{}, "version":1}`), 0644)
-	outputs, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", path)
+	outputs, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", path, "")
 	if outputs != nil || ok {
 		t.Errorf("expected (nil, false) for empty cursor hooks")
 	}
@@ -2634,7 +2634,7 @@ func TestCanonicalHookBundleOutputsFromCursorFile_InvalidJSON(t *testing.T) {
 	var outputs []importOutput
 	var ok bool
 	out := captureRelinkStdout(t, func() {
-		outputs, ok, _ = canonicalHookBundleOutputsFromCursorFile("p", path)
+		outputs, ok, _ = canonicalHookBundleOutputsFromCursorFile("p", path, "")
 	})
 	if outputs != nil || ok {
 		t.Errorf("expected (nil, false) for invalid cursor json")
@@ -2650,7 +2650,7 @@ func TestCanonicalHookBundleOutputsFromClaudeCompatFile_NonHookKey(t *testing.T)
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "settings.json")
 	os.WriteFile(path, []byte(`{"hooks":{}, "other": 1}`), 0644)
-	outputs, ok, _ := canonicalHookBundleOutputsFromClaudeCompatFile("p", path)
+	outputs, ok, _ := canonicalHookBundleOutputsFromClaudeCompatFile("p", path, "")
 	if outputs != nil || ok {
 		t.Errorf("expected (nil, false), got (%v, %v)", outputs, ok)
 	}
@@ -2662,7 +2662,7 @@ func TestCanonicalHookBundleOutputsFromCursorFile_ReadError(t *testing.T) {
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "iam-a-dir")
 	os.MkdirAll(dir, 0755)
-	_, _, err := canonicalHookBundleOutputsFromCursorFile("p", dir)
+	_, _, err := canonicalHookBundleOutputsFromCursorFile("p", dir, "")
 	if err == nil {
 		t.Error("expected read error from directory path")
 	}

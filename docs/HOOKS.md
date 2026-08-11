@@ -47,6 +47,37 @@ recognized and listed for visibility, but bundle directories are the
 preferred form for new hooks. `da import` and `da refresh` canonicalize
 hook content into this same layout.
 
+### Render and import are inverses (the fixed-point rule)
+
+`da refresh` **renders** every enabled bundle into each harness's own config
+(`~/.claude/settings.json`, `.codex/hooks.json`, …). `da import` — which also
+runs as a step inside `da refresh` and `da review approve` — **captures** hook
+entries it finds in those same files back into bundles.
+
+The rule that keeps the two from fighting:
+
+> **refresh → import → refresh is a fixed point.** Import never re-captures
+> an entry that `da` itself rendered, so no cycle can create a bundle, and
+> the rendered config is byte-stable across cycles.
+
+Ownership is decided by the entry's **command**, never by its name. A
+rendered entry belongs to an existing bundle when its command either equals
+that bundle's resolved `run.command`, or executes a file that lives inside
+that bundle's directory — which is what a relative `command: ./gate.sh`
+becomes once resolved. Consequently:
+
+- **You may name a bundle anything.** The name import would derive from a
+  rendered entry (canonical event + command stem, e.g. `pre-compact-gate`)
+  has no bearing on whether that entry is re-captured.
+- **Multi-event bundles are safe.** A `when_events` bundle renders under
+  several event names; none of them can match a single bundle name, and none
+  is re-captured.
+- **Enabling more harnesses is safe.** Each additional harness render is
+  another import source, and each is recognized as a render output.
+- Only genuinely hand-authored entries — commands no bundle explains — are
+  captured, and exactly once: the bundle created for one then explains it on
+  every later run.
+
 ## Per-platform behavior
 
 Hooks are distributed only to platforms that can represent them. Coverage

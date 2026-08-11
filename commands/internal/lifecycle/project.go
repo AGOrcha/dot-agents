@@ -17,6 +17,12 @@ type ImportCandidate struct {
 	SourceRoot string
 	SourcePath string
 	DestRel    string
+	// AgentsHome is the agents home whose existing canonical hook bundles
+	// establish provenance for a hook-shaped source: an entry that home
+	// already renders is a render output, not a hook to capture. Empty
+	// means "no home in play" — nothing can claim ownership and every
+	// parsed entry is treated as hand-authored.
+	AgentsHome string
 }
 
 // ImportOutput is the exported, lifecycle-facing shape of a canonical

@@ -754,7 +754,7 @@ func mapGlobalRelToDest(rel string) string {
 }
 
 func processCanonicalHookBundleImport(c importCandidate, agentsHome, timestamp string, srcInfo os.FileInfo, deps importDeps) (importResult, bool) {
-	outputs, ok, err := canonicalImportOutputs(c)
+	outputs, ok, err := canonicalImportOutputs(c, agentsHome)
 	if !ok {
 		return importResult{}, false
 	}
@@ -1078,7 +1078,12 @@ func writeImportConflictReviewNote(agentsHome, project, primaryRel, alternateRel
 	return deps.WriteFile(fn, append(data, '\n'), 0644)
 }
 
-func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
+// canonicalImportOutputs converts one import candidate into the canonical
+// artifacts it should produce. agentsHome is the home whose existing
+// canonical hook bundles establish provenance for hook-shaped sources; pass
+// "" only when no home is in play (no bundle can then claim ownership and
+// every parsed entry is treated as hand-authored).
+func canonicalImportOutputs(c importCandidate, agentsHome string) ([]importOutput, bool, error) {
 	rel, err := filepath.Rel(c.sourceRoot, c.sourcePath)
 	if err != nil {
 		return nil, false, err
@@ -1088,7 +1093,7 @@ func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
 	if outputs, ok, err := canonicalPluginOutputs(c, rel); ok {
 		return outputs, true, err
 	}
-	return canonicalImportOutputsNonPlugin(c, rel)
+	return canonicalImportOutputsNonPlugin(c, rel, agentsHome)
 }
 
 // init wires two lifecycle seams whose canonical-import internals
@@ -1115,7 +1120,7 @@ func restoreCanonicalResourceFileImpl(project, resourcesDir, agentsHome, path st
 		sourceRoot: resourcesDir,
 		sourcePath: path,
 	}
-	outputs, ok, canonErr := canonicalImportOutputs(candidate)
+	outputs, ok, canonErr := canonicalImportOutputs(candidate, agentsHome)
 	if !ok {
 		return 0, false, nil
 	}
@@ -1146,7 +1151,7 @@ func canonicalImportOutputsImpl(c lifecycle.ImportCandidate) ([]lifecycle.Import
 		sourcePath: c.SourcePath,
 		destRel:    c.DestRel,
 	}
-	outputs, ok, err := canonicalImportOutputs(candidate)
+	outputs, ok, err := canonicalImportOutputs(candidate, c.AgentsHome)
 	if !ok || err != nil {
 		return nil, ok, err
 	}
@@ -1162,18 +1167,18 @@ func canonicalImportOutputsImpl(c lifecycle.ImportCandidate) ([]lifecycle.Import
 }
 
 // canonicalImportOutputsNonPlugin handles hook/settings paths after package-plugin routing.
-func canonicalImportOutputsNonPlugin(c importCandidate, rel string) ([]importOutput, bool, error) {
+func canonicalImportOutputsNonPlugin(c importCandidate, rel, agentsHome string) ([]importOutput, bool, error) {
 	switch rel {
 	case relCursorHooksJSON:
-		return canonicalHookBundleOutputsFromCursorFile(c.project, c.sourcePath)
+		return canonicalHookBundleOutputsFromCursorFile(c.project, c.sourcePath, agentsHome)
 	case relCodexHooksJSON:
-		return canonicalHookBundleOutputsFromCodexFile(c.project, c.sourcePath)
+		return canonicalHookBundleOutputsFromCodexFile(c.project, c.sourcePath, agentsHome)
 	case relClaudeSettingsLocal, relClaudeSettingsJSON:
-		return canonicalHookBundleOutputsFromClaudeCompatFile(c.project, c.sourcePath)
+		return canonicalHookBundleOutputsFromClaudeCompatFile(c.project, c.sourcePath, agentsHome)
 	}
 
 	if name, ok := githubHookBundleName(rel); ok {
-		if outputs, canonOK, err := canonicalHookBundleOutputsFromCopilotFile(c.project, c.sourcePath, name); err == nil && canonOK {
+		if outputs, canonOK, err := canonicalHookBundleOutputsFromCopilotFile(c.project, c.sourcePath, name, agentsHome); err == nil && canonOK {
 			return outputs, true, nil
 		}
 		// Preserve unsupported hook files without data loss until the shared import
@@ -1223,7 +1228,7 @@ func warnIfCorruptHookJSON(path string, err error) {
 }
 
 func canonicalHookBundleContentFromCopilotFile(path, hookName string) ([]byte, error) {
-	outputs, ok, err := canonicalHookBundleOutputsFromCopilotFile("ignored", path, hookName)
+	outputs, ok, err := canonicalHookBundleOutputsFromCopilotFile("ignored", path, hookName, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1233,7 +1238,7 @@ func canonicalHookBundleContentFromCopilotFile(path, hookName string) ([]byte, e
 	return outputs[0].content, nil
 }
 
-func canonicalHookBundleOutputsFromCopilotFile(scope, path, hookName string) ([]importOutput, bool, error) {
+func canonicalHookBundleOutputsFromCopilotFile(scope, path, hookName, agentsHome string) ([]importOutput, bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, true, err
@@ -1275,14 +1280,10 @@ func canonicalHookBundleOutputsFromCopilotFile(scope, path, hookName string) ([]
 		}
 	}
 
-	outputs := buildCanonicalHookOutputs(scope, specs)
-	if len(outputs) == 0 {
-		return nil, false, nil
-	}
-	return outputs, true, nil
+	return canonicalHookOutputsForSpecs(scope, agentsHome, specs)
 }
 
-func canonicalHookBundleOutputsFromCursorFile(scope, path string) ([]importOutput, bool, error) {
+func canonicalHookBundleOutputsFromCursorFile(scope, path, agentsHome string) ([]importOutput, bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, true, err
@@ -1316,14 +1317,10 @@ func canonicalHookBundleOutputsFromCursorFile(scope, path string) ([]importOutpu
 			})
 		}
 	}
-	outputs := buildCanonicalHookOutputs(scope, specs)
-	if len(outputs) == 0 {
-		return nil, false, nil
-	}
-	return outputs, true, nil
+	return canonicalHookOutputsForSpecs(scope, agentsHome, specs)
 }
 
-func canonicalHookBundleOutputsFromCodexFile(scope, path string) ([]importOutput, bool, error) {
+func canonicalHookBundleOutputsFromCodexFile(scope, path, agentsHome string) ([]importOutput, bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, true, err
@@ -1340,14 +1337,10 @@ func canonicalHookBundleOutputsFromCodexFile(scope, path string) ([]importOutput
 	if !ok {
 		return nil, false, nil
 	}
-	outputs := buildCanonicalHookOutputs(scope, specs)
-	if len(outputs) == 0 {
-		return nil, false, nil
-	}
-	return outputs, true, nil
+	return canonicalHookOutputsForSpecs(scope, agentsHome, specs)
 }
 
-func canonicalHookBundleOutputsFromClaudeCompatFile(scope, path string) ([]importOutput, bool, error) {
+func canonicalHookBundleOutputsFromClaudeCompatFile(scope, path, agentsHome string) ([]importOutput, bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, true, err
@@ -1371,11 +1364,7 @@ func canonicalHookBundleOutputsFromClaudeCompatFile(scope, path string) ([]impor
 	if !ok {
 		return nil, false, nil
 	}
-	outputs := buildCanonicalHookOutputs(scope, specs)
-	if len(outputs) == 0 {
-		return nil, false, nil
-	}
-	return outputs, true, nil
+	return canonicalHookOutputsForSpecs(scope, agentsHome, specs)
 }
 
 func hasOnlyClaudeCompatKeys(top map[string]json.RawMessage) bool {
@@ -1417,6 +1406,64 @@ func collectImportedCommandHookSpecs(
 		}
 	}
 	return specs, true
+}
+
+// canonicalHookOutputsForSpecs is the single choke point every hook-shaped
+// import source funnels through once its native entries have been parsed
+// into importedHookSpec values.
+//
+// Two things happen here, in this order, and the order is load-bearing:
+//
+//  1. Entries that `da refresh` itself rendered from an existing canonical
+//     bundle are dropped (see dropBundleRenderedHookSpecs). Import exists to
+//     capture hooks dot-agents does not already own; re-capturing its own
+//     render output is what made refresh → import → refresh a divergent
+//     loop instead of a fixed point.
+//  2. Only the surviving specs are named. Filtering BEFORE naming is what
+//     keeps names stable: importedHookName's `used` counter and the `total`
+//     hint both depend on the spec list, so filtering afterwards would shift
+//     a surviving entry's name (`stop-gate` → `stop-gate-2`) purely because
+//     a bundle-owned sibling happened to sort first — reintroducing the
+//     churn from the other end.
+//
+// A recognized hook source whose entries are ALL bundle-owned returns
+// (nil, true, nil): handled, nothing to import. Returning handled=false
+// there would drop the source through to the generic file-copy import,
+// which for `.github/hooks/*.json` would preserve the rendered file as a
+// brand new legacy hook — the same duplication by another route.
+func canonicalHookOutputsForSpecs(scope, agentsHome string, specs []importedHookSpec) ([]importOutput, bool, error) {
+	if len(specs) == 0 {
+		return nil, false, nil
+	}
+	return buildCanonicalHookOutputs(scope, dropBundleRenderedHookSpecs(agentsHome, specs)), true, nil
+}
+
+// dropBundleRenderedHookSpecs removes the specs whose command is owned by a
+// canonical hook bundle that already exists under agentsHome — that is, the
+// entries a prior `da refresh` rendered out of those bundles.
+//
+// Ownership is decided by command, never by name: the importer's derived
+// name for a rendered entry (`pre-compact-gate`) rarely equals the name of
+// the bundle it came from (`isp-gate`), so name equality only ever
+// deduplicated by coincidence, and any bundle whose author picked a
+// different name — or that renders under more than one event — duplicated
+// on every cycle instead.
+//
+// The index is rebuilt per source file rather than once per import run, and
+// that is deliberate: a bundle minted while processing an earlier candidate
+// must be visible to later ones. Without it, one hand-authored command
+// present in both .claude/settings.json and .codex/hooks.json would be
+// captured twice under two different derived names.
+func dropBundleRenderedHookSpecs(agentsHome string, specs []importedHookSpec) []importedHookSpec {
+	provenance := platform.NewHookProvenance(agentsHome)
+	kept := make([]importedHookSpec, 0, len(specs))
+	for _, spec := range specs {
+		if _, owned := provenance.Owner(spec.command); owned {
+			continue
+		}
+		kept = append(kept, spec)
+	}
+	return kept
 }
 
 func buildCanonicalHookOutputs(scope string, specs []importedHookSpec) []importOutput {
