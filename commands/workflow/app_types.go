@@ -357,3 +357,44 @@ func sequenceKey(seq []string) string {
 func filepathAgentsRC(projectPath string) string {
 	return filepath.Join(projectPath, config.AgentsRCFile)
 }
+
+// validateTaskAppType checks a candidate app_type against the same effective
+// execution_profile.by_app_type set `workflow app-types` renders, so `task add`
+// and `task update` agree on what's valid without a second source of truth.
+//
+// appType == "" is always accepted silently (nothing to validate — the field is
+// simply left unset).
+//
+// When resolution itself fails, or resolves but yields no app_type entries (no
+// execution profile configured for this repo), the candidate is accepted as-is:
+// a non-empty warning is returned for the caller to print, but err is nil. This
+// keeps `task update --app-type` usable for repos/teams that haven't adopted
+// execution profiles yet, per the same "absence isn't fatal" posture
+// resolveEffectiveAppTypeMap already takes for `workflow app-types`.
+//
+// When resolution DOES produce a non-empty set and appType isn't in it, err
+// spells out the valid values directly in its message (rather than as a
+// deps.ErrorWithHints hint) so the full list survives regardless of how the
+// caller renders the error — the same choice renderWorkflowAppTypeFormat's
+// own validation error makes a few lines below.
+func validateTaskAppType(projectPath, appType string) (warning string, err error) {
+	if appType == "" {
+		return "", nil
+	}
+	appTypeMap, _, resolveErr := resolveEffectiveAppTypeMap(projectPath)
+	if resolveErr != nil {
+		return fmt.Sprintf("could not resolve app_type set (%v); recording app_type %q without validation", resolveErr, appType), nil
+	}
+	if len(appTypeMap) == 0 {
+		return fmt.Sprintf("no execution profile configured for this repo; recording app_type %q without validation", appType), nil
+	}
+	if _, ok := appTypeMap[appType]; ok {
+		return "", nil
+	}
+	valid := make([]string, 0, len(appTypeMap))
+	for name := range appTypeMap {
+		valid = append(valid, name)
+	}
+	sort.Strings(valid)
+	return "", fmt.Errorf("invalid app_type %q; valid values for this repo: %s", appType, strings.Join(valid, ", "))
+}

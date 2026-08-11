@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 	"go.yaml.in/yaml/v3"
 )
@@ -1921,7 +1922,10 @@ func TestRunWorkflowTaskUpdate_UpdatesFields(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	if err := runWorkflowTaskUpdate("wave-2", "t2", "new title", "fresh notes", "x/, y/", "", ""); err != nil {
+	if err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: "wave-2", TaskID: "t2", Title: "new title", Notes: "fresh notes",
+		WriteScope: "x/, y/", DependsOn: "", Blocks: "",
+	}); err != nil {
 		t.Fatalf("runWorkflowTaskUpdate: %v", err)
 	}
 
@@ -1956,7 +1960,10 @@ func TestRunWorkflowTaskUpdate_PreservesUnsetFields(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	if err := runWorkflowTaskUpdate("wave-2", "t1", "", "", "", "", ""); err != nil {
+	if err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: "wave-2", TaskID: "t1", Title: "", Notes: "",
+		WriteScope: "", DependsOn: "", Blocks: "",
+	}); err != nil {
 		t.Fatalf("runWorkflowTaskUpdate: %v", err)
 	}
 	tf, _ := loadCanonicalTasks(repo, "wave-2")
@@ -1973,7 +1980,10 @@ func TestRunWorkflowTaskUpdate_MissingTaskReturnsError(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	err := runWorkflowTaskUpdate("wave-2", "nope", "x", "", "", "", "")
+	err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: "wave-2", TaskID: "nope", Title: "x", Notes: "",
+		WriteScope: "", DependsOn: "", Blocks: "",
+	})
 	if err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("expected missing-task error; got: %v", err)
 	}
@@ -1996,7 +2006,10 @@ func TestRunWorkflowTaskUpdate_DependsOnAndBlocks(t *testing.T) {
 		t.Fatalf("runWorkflowTaskAdd: %v", err)
 	}
 
-	if err := runWorkflowTaskUpdate("wave-2", "t4", "", "", "", "t1", "t2"); err != nil {
+	if err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: "wave-2", TaskID: "t4", Title: "", Notes: "",
+		WriteScope: "", DependsOn: "t1", Blocks: "t2",
+	}); err != nil {
 		t.Fatalf("runWorkflowTaskUpdate: %v", err)
 	}
 
@@ -2019,6 +2032,149 @@ func TestRunWorkflowTaskUpdate_DependsOnAndBlocks(t *testing.T) {
 
 	inDegree, adj := buildPlanScheduleGraph(tf)
 	assertScheduleEdge(t, inDegree, adj, t1Idx, t4Idx)
+}
+
+// stubAppTypeProfile stubs appTypeSnapshot for the duration of the test with a
+// resolved execution_profile carrying the given by_app_type set, so validation
+// tests don't depend on real .agentsrc.json layered resolution.
+func stubAppTypeProfile(t *testing.T, byAppType map[string]config.AppTypeProfile) {
+	t.Helper()
+	orig := appTypeSnapshot
+	t.Cleanup(func() { appTypeSnapshot = orig })
+	appTypeSnapshot = func(string) (*config.Snapshot, error) {
+		return &config.Snapshot{
+			Effective: config.AgentsRC{
+				ExecutionProfile: &config.ExecutionProfile{ByAppType: byAppType},
+			},
+		}, nil
+	}
+}
+
+// TestRunWorkflowTaskUpdate_AppType table-drives the --app-type validation
+// contract: a value in the resolved execution_profile's app_type set persists,
+// a value outside it errors listing the valid set, and (when no execution
+// profile is configured at all) any non-empty value is accepted with a warning
+// rather than blocking teams that haven't adopted execution profiles.
+func TestRunWorkflowTaskUpdate_AppType(t *testing.T) {
+	profile := map[string]config.AppTypeProfile{
+		"go-cli":          {Topology: config.Topology{VerifierSequence: []string{"unit"}}},
+		"go-http-service": {Topology: config.Topology{VerifierSequence: []string{"unit", "integration"}}},
+	}
+
+	cases := []struct {
+		name        string
+		stubProfile bool
+		appType     string
+		wantErrSub  string
+		wantWarn    bool
+	}{
+		{
+			name:        "valid value against a configured profile persists",
+			stubProfile: true,
+			appType:     "go-cli",
+		},
+		{
+			name:        "invalid value against a configured profile errors listing the valid set",
+			stubProfile: true,
+			appType:     "not-a-real-app-type",
+			wantErrSub:  `invalid app_type "not-a-real-app-type"`,
+		},
+		{
+			name:     "no execution profile configured accepts the value with a warning",
+			appType:  "anything-goes",
+			wantWarn: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := initWorkflowTestRepo(t)
+			addCanonicalPlanFixture(t, repo)
+			chdirRepo(t, repo)
+			if c.stubProfile {
+				stubAppTypeProfile(t, profile)
+			}
+
+			var runErr error
+			stdout := captureStdoutToString(t, func() {
+				runErr = runWorkflowTaskUpdate(taskUpdateInputs{PlanID: "wave-2", TaskID: "t1", AppType: c.appType})
+			})
+
+			if c.wantErrSub != "" {
+				if runErr == nil || !strings.Contains(runErr.Error(), c.wantErrSub) {
+					t.Fatalf("expected error containing %q, got: %v", c.wantErrSub, runErr)
+				}
+				if !strings.Contains(runErr.Error(), "go-cli") || !strings.Contains(runErr.Error(), "go-http-service") {
+					t.Errorf("error should list the valid app_type set, got: %v", runErr)
+				}
+				return
+			}
+			if runErr != nil {
+				t.Fatalf("runWorkflowTaskUpdate: %v", runErr)
+			}
+			if c.wantWarn && !strings.Contains(stdout, "app_type") {
+				t.Errorf("expected a warning mentioning app_type on stdout, got: %q", stdout)
+			}
+			if !c.wantWarn && strings.Contains(stdout, "!") {
+				t.Errorf("unexpected warning when a profile validated the value: %q", stdout)
+			}
+
+			tf, err := loadCanonicalTasks(repo, "wave-2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			idx := taskIndexByID(tf, "t1")
+			if idx == -1 {
+				t.Fatal("t1 missing after update")
+			}
+			if tf.Tasks[idx].AppType != c.appType {
+				t.Errorf("app_type = %q, want %q", tf.Tasks[idx].AppType, c.appType)
+			}
+		})
+	}
+}
+
+// TestRunWorkflowTaskUpdate_AppTypeDoesNotDisturbOtherFields regression-tests
+// that --app-type composes with the other update flags the way every other
+// field here already does: updating app_type alone leaves title untouched, and
+// updating title alone leaves a previously-set app_type untouched.
+func TestRunWorkflowTaskUpdate_AppTypeDoesNotDisturbOtherFields(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowTaskUpdate(taskUpdateInputs{PlanID: "wave-2", TaskID: "t1", AppType: "go-cli"}); err != nil {
+		t.Fatalf("seed app_type: %v", err)
+	}
+	if err := runWorkflowTaskUpdate(taskUpdateInputs{PlanID: "wave-2", TaskID: "t1", Title: "renamed"}); err != nil {
+		t.Fatalf("runWorkflowTaskUpdate: %v", err)
+	}
+	tf, err := loadCanonicalTasks(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := taskIndexByID(tf, "t1")
+	if tf.Tasks[idx].AppType != "go-cli" {
+		t.Errorf("app_type disturbed by an unrelated title update: got %q, want go-cli", tf.Tasks[idx].AppType)
+	}
+	if tf.Tasks[idx].Title != "renamed" {
+		t.Errorf("title = %q, want renamed", tf.Tasks[idx].Title)
+	}
+
+	if err := runWorkflowTaskUpdate(taskUpdateInputs{PlanID: "wave-2", TaskID: "t1", AppType: "go-http-service"}); err != nil {
+		t.Fatalf("runWorkflowTaskUpdate: %v", err)
+	}
+	tf, err = loadCanonicalTasks(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx = taskIndexByID(tf, "t1")
+	if tf.Tasks[idx].Title != "renamed" {
+		t.Errorf("title disturbed by an app_type-only update: got %q, want renamed", tf.Tasks[idx].Title)
+	}
+	if tf.Tasks[idx].AppType != "go-http-service" {
+		t.Errorf("app_type = %q, want go-http-service", tf.Tasks[idx].AppType)
+	}
 }
 
 // taskIndexByID returns the index of the task with the given ID in tf.Tasks,
@@ -3370,7 +3526,10 @@ func TestRunWorkflowTaskAdd_MissingPlan(t *testing.T) {
 func TestRunWorkflowTaskUpdate_MissingTask(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirForCov(t, repo)
-	err := runWorkflowTaskUpdate("plan-001", "no-such", "title", "", "", "", "")
+	err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: "plan-001", TaskID: "no-such", Title: "title", Notes: "",
+		WriteScope: "", DependsOn: "", Blocks: "",
+	})
 	if err == nil || !strings.Contains(err.Error(), "task") {
 		t.Fatalf("expected task-not-found, got %v", err)
 	}
@@ -3520,7 +3679,10 @@ func TestRunWorkflowTaskUpdate_SaveErr(t *testing.T) {
 	chdirForCov(t, repo)
 	sentinel := errors.New("yaml boom")
 	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
-	err := runWorkflowTaskUpdate("plan-001", "task-001", "newtitle", "", "", "", "")
+	err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: "plan-001", TaskID: "task-001", Title: "newtitle", Notes: "",
+		WriteScope: "", DependsOn: "", Blocks: "",
+	})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected sentinel, got %v", err)
 	}
@@ -4238,7 +4400,10 @@ func TestRunWorkflowAdvance_CompleteResetsFocus(t *testing.T) {
 func TestRunWorkflowTaskUpdate_UpdatesNotesAndWriteScope(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	if err := runWorkflowTaskUpdate("plan-001", "task-001", "", "new note", "x/,y/", "", ""); err != nil {
+	if err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: "plan-001", TaskID: "task-001", Title: "", Notes: "new note",
+		WriteScope: "x/,y/", DependsOn: "", Blocks: "",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	tf, _ := loadCanonicalTasks(repo, "plan-001")
@@ -4676,7 +4841,10 @@ func TestRunWorkflowTaskAdd_PlanMissingTasksFile(t *testing.T) {
 func TestRunWorkflowTaskUpdate_TaskNotFound(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	err := runWorkflowTaskUpdate("plan-001", "ghost-task", "T", "N", "", "", "")
+	err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: "plan-001", TaskID: "ghost-task", Title: "T", Notes: "N",
+		WriteScope: "", DependsOn: "", Blocks: "",
+	})
 	if err == nil || !strings.Contains(err.Error(), "ghost-task") {
 		t.Fatalf("expected task-not-found, got %v", err)
 	}
@@ -4685,7 +4853,10 @@ func TestRunWorkflowTaskUpdate_TaskNotFound(t *testing.T) {
 func TestRunWorkflowTaskUpdate_PlanMissing(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	err := runWorkflowTaskUpdate("ghost-plan", "task-001", "T", "N", "", "", "")
+	err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: "ghost-plan", TaskID: "task-001", Title: "T", Notes: "N",
+		WriteScope: "", DependsOn: "", Blocks: "",
+	})
 	if err == nil {
 		t.Fatal("expected plan-not-found error")
 	}

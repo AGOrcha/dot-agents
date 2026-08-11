@@ -1451,7 +1451,10 @@ func TestRunWorkflowTaskUpdate_GitRefBackendMirrorsToRef(t *testing.T) {
 	if err := runWorkflowAdvance(stateRefTestPlanID, "t1", "in_progress"); err != nil {
 		t.Fatalf("seed advance: %v", err)
 	}
-	if err := runWorkflowTaskUpdate(stateRefTestPlanID, "t1", "renamed title", "fresh notes", "", "", ""); err != nil {
+	if err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: stateRefTestPlanID, TaskID: "t1", Title: "renamed title", Notes: "fresh notes",
+		WriteScope: "", DependsOn: "", Blocks: "",
+	}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	tf, err := loadCanonicalTasks(repo, stateRefTestPlanID)
@@ -1685,7 +1688,10 @@ func TestCanonicalWriters_PlanLoadErrorPropagates(t *testing.T) {
 		t.Fatal("task add must surface the plan-load error")
 	}
 	newRepoNoPlan()
-	if err := runWorkflowTaskUpdate(stateRefTestPlanID, "t1", "new", "", "", "", ""); err == nil {
+	if err := runWorkflowTaskUpdate(taskUpdateInputs{
+		PlanID: stateRefTestPlanID, TaskID: "t1", Title: "new", Notes: "",
+		WriteScope: "", DependsOn: "", Blocks: "",
+	}); err == nil {
 		t.Fatal("task update must surface the plan-load error")
 	}
 }
