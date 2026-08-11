@@ -688,6 +688,12 @@ func hookRequiredOnPlatform(spec HookSpec, platformID string) bool {
 }
 
 // ResolveHookCommand returns the hook command with relative paths resolved against the HOOK.yaml location.
+// A first token written as ./x or ../x is always resolved. A bare relative
+// token (e.g. "x.sh") is resolved only when it names an existing regular file
+// beside the hook's manifest — bare binaries expected on PATH (e.g. "echo")
+// never match a bundle file and pass through untouched, so rendered configs
+// cannot end up with repo-cwd-relative script paths that break when the
+// harness runs the hook from a subdirectory or a linked git worktree.
 func ResolveHookCommand(spec HookSpec) string {
 	command := strings.TrimSpace(spec.Command)
 	if command == "" {
@@ -698,11 +704,25 @@ func ResolveHookCommand(spec HookSpec) string {
 		return command
 	}
 	first := parts[0]
-	if strings.HasPrefix(first, "./") || strings.HasPrefix(first, "../") {
+	explicitRelative := strings.HasPrefix(first, "./") || strings.HasPrefix(first, "../")
+	if explicitRelative || bundleRelativeHookCommandFile(spec, first) {
 		parts[0] = filepath.Clean(filepath.Join(filepath.Dir(spec.SourcePath), first))
 		return strings.Join(parts, " ")
 	}
 	return command
+}
+
+// bundleRelativeHookCommandFile reports whether first is a non-absolute
+// command token that resolves to an existing regular file beside the hook's
+// HOOK.yaml. Only such tokens are safe to absolutize; anything else (bare
+// binaries on PATH, absolute paths, specs without a source path) is left
+// alone.
+func bundleRelativeHookCommandFile(spec HookSpec, first string) bool {
+	if first == "" || filepath.IsAbs(first) || strings.TrimSpace(spec.SourcePath) == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(filepath.Dir(spec.SourcePath), first))
+	return err == nil && info.Mode().IsRegular()
 }
 
 func platformOverride(spec HookSpec, platformID string) HookPlatformOverride {

@@ -2188,6 +2188,55 @@ func TestResolveHookCommand_RelativeBundleResolution(t *testing.T) {
 	}
 }
 
+// TestResolveHookCommand_Table covers the full first-token resolution
+// contract: explicit ./-relative commands always resolve against the
+// HOOK.yaml directory, bare relative tokens resolve ONLY when they name an
+// existing regular file beside the manifest, and bare binaries on PATH or
+// absolute commands are never rewritten.
+func TestResolveHookCommand_Table(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "HOOK.yaml")
+	if err := os.WriteFile(src, []byte("name: x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(tmp, "x.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{"explicit dot-slash relative", "./x.sh", script},
+		{"bare token existing beside manifest", "x.sh", script},
+		{"bare token with args existing beside manifest", "x.sh --flag", script + " --flag"},
+		{"bare binary on PATH untouched", "echo foo", "echo foo"},
+		{"bare token missing beside manifest untouched", "missing.sh", "missing.sh"},
+		{"absolute path untouched", "/usr/local/bin/run --now", "/usr/local/bin/run --now"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := HookSpec{
+				SourcePath: src,
+				SourceKind: HookSourceCanonicalBundle,
+				Command:    tc.command,
+			}
+			if got := ResolveHookCommand(spec); got != tc.want {
+				t.Errorf("ResolveHookCommand(%q) = %q, want %q", tc.command, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("bare token without source path untouched", func(t *testing.T) {
+		spec := HookSpec{Command: "x.sh"}
+		if got := ResolveHookCommand(spec); got != "x.sh" {
+			t.Errorf("ResolveHookCommand = %q, want %q", got, "x.sh")
+		}
+	})
+}
+
 // TestEmitHookSpec_NilNoOp keeps the early-return branch covered.
 func TestEmitHookSpec_NilNoOp(t *testing.T) {
 	if err := emitHookSpec(stdPlatformIO{}, nil, "/dev/null", HookEmissionMode{}); err != nil {
