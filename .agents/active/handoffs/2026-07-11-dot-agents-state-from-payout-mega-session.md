@@ -306,7 +306,7 @@ Cross-mapped 2026-07-11. Reconciliation detail: this file's companion research.
 
 ## G. Deferred decisions with a dot-agents surface (owner input needed)
 From payout handoff §D — the dot-agents-tooling subset:
-- **Platform-config layering:** `roos-agents-config` scope (platform-only vs repo
+- **Platform-config layering:** `orga-agents-config` scope (platform-only vs repo
   catalogs)? require `version:2` on layer files? org base single vs multiple? org
   locks now vs value-only inheritance first? (design set filed under repo `config-*` proposals; board §H).
 - **Observability (obs.usepayout.com):** CF Access IdP source? D1 retention window?

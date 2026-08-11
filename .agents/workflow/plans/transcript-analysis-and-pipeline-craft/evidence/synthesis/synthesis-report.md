@@ -37,9 +37,9 @@ Consumed by `evidence_id` / finding-ID only (rubric R1; no raw transcripts).
 ### 1.2 Prior analyses (committed prose, treated `internal`)
 
 - **`DA`** — payout-wrk + dot-agents agent-behavior evidence (`prior/prior-findings-index.md` legend).
-- **`EFF`** — AI-assisted delivery-efficiency-gains synthesis (provadm-agc).
-- **`BEH`** — Provider-Admin + Roosevelt agent-behavior case-study record.
-- **`PLAN`** — ProvAdm analysis-tooling + config-promotion companion note.
+- **`EFF`** — AI-assisted delivery-efficiency-gains synthesis (adminapp-agc).
+- **`BEH`** — AdminApp + OrgA agent-behavior case-study record.
+- **`PLAN`** — AdminApp analysis-tooling + config-promotion companion note.
 - **`OH-A1..E3`** — 14 open hypotheses the priors raised but never tested (`prior/open-hypotheses.md`).
 - **Method deltas** — `prior/methodology-deltas.md` (their toolkit vs our rubrics).
 

@@ -4,7 +4,7 @@
 windows-latest (most recently run 28554198278 attempt 1: 5.01s timeout — the
 contender never acquired within its budget) + owner-machine runtime failures
 (`da config explain` / `da install` lock errors, see
-`.agents/history/provadm-windows-da-lock-observation.md`, PR #254).
+`.agents/history/windows-workstation-da-lock-observation.md`, PR #254).
 **Observed**: recurring; deferred for a careful root-cause fix (integrity was
 intact — atomic merge-write meant no data loss, only stranded acquirers).
 **Status**: RESOLVED — PR `fix/agentslock-release-race` (agentslock: fix
@@ -40,7 +40,7 @@ every fresh `da` process into a guaranteed timeout.
 
 ## Owner work-PC note (separate cause, related fix)
 
-The ProvAdm trace (PR #254) shows PLAIN file writes also failing (`Access is
+The work-PC trace (PR #254) shows PLAIN file writes also failing (`Access is
 denied` on TASKS.yaml, plan-create mkdir) — an ENVIRONMENTAL denial (Controlled
 Folder Access / OneDrive-protected Documents / AV), not (only) the release
 race. The same PR fixes the adjacent misdiagnosis: a persistent

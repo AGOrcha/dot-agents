@@ -55,9 +55,9 @@ D) classification/attribution edge cases, E) coverage/measurement bias.
   Source: `BEH-E3`/`BEH-EC` (`BEH#L469-486,534-549`), `EFF-E2`/`EFF-LC3` (`EFF#L124,681-683`). Untested: the causal attribution to Windows/code-signing/policy friction is asserted from transcript mentions of `da` failures (`BEH#L297-304`); the counterfactual (same case on a working `da`) was never run.
   Test: reproduce the blocked `da workflow`/`da config explain` operations on a current environment; if they now succeed, the friction attribution is consistent — but check whether the *delegated-archive omission* specifically was tool-blocked vs simply not attempted. Refuted if the archive gap persists where `da` is known-good.
 
-- **OH-D2 — payout/dot-agents "influenced Provider Admin process design earlier and more directly than the artifact-only pass could prove."**
-  Source: `DA-T5` (`DA#L90-94`), `DA-T1..T3` (`DA#L78-86`). Untested: inferred from hidden-transcript titles/references (e.g., 2026-05-12 "Create payout plan for provider admin"); title co-occurrence ≠ causal influence on design.
-  Test: trace whether specific ProvAdm design decisions cite/mirror payout artifacts by content (not just chronology). Refuted if the ProvAdm decisions predate or diverge from the payout patterns they supposedly derive from.
+- **OH-D2 — payout/dot-agents "influenced AdminApp process design earlier and more directly than the artifact-only pass could prove."**
+  Source: `DA-T5` (`DA#L90-94`), `DA-T1..T3` (`DA#L78-86`). Untested: inferred from hidden-transcript titles/references (e.g., 2026-05-12 "Create payout plan for adminapp"); title co-occurrence ≠ causal influence on design.
+  Test: trace whether specific AdminApp design decisions cite/mirror payout artifacts by content (not just chronology). Refuted if the AdminApp decisions predate or diverge from the payout patterns they supposedly derive from.
 
 - **OH-D3 — "environment mode (devcontainer/WSL vs Windows-first) materially affects agent behavior over time."**
   Source: `DA-T4`/`DA-S2` (`DA#L28-40,87-94`). Untested: raised as a caveat about comparison validity; never isolated as a variable.

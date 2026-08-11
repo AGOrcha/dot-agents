@@ -16,8 +16,8 @@ Without that split, operators end up with two bad choices:
 
 That is especially painful for fields like:
 
-- `app_type_verifier_map.pa-angular-ui`
-- `verifier_profiles.pa-ui-e2e`
+- `app_type_verifier_map.acme-angular-ui`
+- `verifier_profiles.acme-ui-e2e`
 - feature flags
 - future `app_type` profile refs
 
@@ -87,7 +87,7 @@ commands can stay optimized for authoring.
 ### 1. Single field
 
 ```text
-da config explain app_type_verifier_map.pa-angular-ui
+da config explain app_type_verifier_map.acme-angular-ui
 ```
 
 Default output should include:
@@ -100,16 +100,16 @@ Default output should include:
 Example:
 
 ```text
-$ da config explain app_type_verifier_map.pa-angular-ui
+$ da config explain app_type_verifier_map.acme-angular-ui
 
-Field:   app_type_verifier_map["pa-angular-ui"]
-Value:   ["pa-ui-unit", "pa-ui-lint", "pa-ui-e2e"]
+Field:   app_type_verifier_map["acme-angular-ui"]
+Value:   ["acme-ui-unit", "acme-ui-lint", "acme-ui-e2e"]
 
 Layer stack:
   [1] product defaults           -> not set
   [2] user-local                 -> not set
-  [3] provider-admin:lang/ui     -> ["pa-ui-unit", "pa-ui-lint"]
-  [4] provider-admin:app/ui      -> ["pa-ui-unit", "pa-ui-lint", "pa-ui-e2e"]   <- active
+  [3] acme:lang/ui               -> ["acme-ui-unit", "acme-ui-lint"]
+  [4] acme:app/ui                -> ["acme-ui-unit", "acme-ui-lint", "acme-ui-e2e"]   <- active
   [5] repo-local .agentsrc.json  -> not set
 ```
 
@@ -142,9 +142,9 @@ they only need one specific value.
 ### Suggested flags
 
 ```text
-da config explain app_type_verifier_map.pa-angular-ui --value-only
-da config explain app_type_verifier_map.pa-angular-ui --origin-only
-da config explain app_type_verifier_map.pa-angular-ui --json
+da config explain app_type_verifier_map.acme-angular-ui --value-only
+da config explain app_type_verifier_map.acme-angular-ui --origin-only
+da config explain app_type_verifier_map.acme-angular-ui --json
 ```
 
 ### `--value-only`
@@ -154,13 +154,13 @@ Print only the effective value.
 Examples:
 
 ```text
-$ da config explain app_type_verifier_map.pa-angular-ui --value-only
-["pa-ui-unit","pa-ui-lint","pa-ui-e2e"]
+$ da config explain app_type_verifier_map.acme-angular-ui --value-only
+["acme-ui-unit","acme-ui-lint","acme-ui-e2e"]
 ```
 
 ```text
 $ da config explain app_type --value-only
-pa-angular-ui
+acme-angular-ui
 ```
 
 This is the easiest way to get one specific piece of info into a script, clipboard action, or
@@ -173,8 +173,8 @@ Print only the winning layer identity.
 Example:
 
 ```text
-$ da config explain app_type_verifier_map.pa-angular-ui --origin-only
-provider-admin:app/ui
+$ da config explain app_type_verifier_map.acme-angular-ui --origin-only
+acme:app/ui
 ```
 
 ### `--json`
@@ -185,13 +185,13 @@ Suggested single-field shape:
 
 ```json
 {
-  "field": "app_type_verifier_map.pa-angular-ui",
-  "value": ["pa-ui-unit", "pa-ui-lint", "pa-ui-e2e"],
-  "active_layer": "provider-admin:app/ui",
+  "field": "app_type_verifier_map.acme-angular-ui",
+  "value": ["acme-ui-unit", "acme-ui-lint", "acme-ui-e2e"],
+  "active_layer": "acme:app/ui",
   "layers": [
     {"layer": "product-defaults", "value": null, "active": false},
-    {"layer": "provider-admin:lang/ui", "value": ["pa-ui-unit", "pa-ui-lint"], "active": false},
-    {"layer": "provider-admin:app/ui", "value": ["pa-ui-unit", "pa-ui-lint", "pa-ui-e2e"], "active": true}
+    {"layer": "acme:lang/ui", "value": ["acme-ui-unit", "acme-ui-lint"], "active": false},
+    {"layer": "acme:app/ui", "value": ["acme-ui-unit", "acme-ui-lint", "acme-ui-e2e"], "active": true}
   ]
 }
 ```
@@ -205,8 +205,8 @@ The field-path syntax should make narrow lookup predictable.
 ### Examples
 
 - `app_type`
-- `app_type_verifier_map.pa-angular-ui`
-- `verifier_profiles.pa-ui-e2e`
+- `app_type_verifier_map.acme-angular-ui`
+- `verifier_profiles.acme-ui-e2e`
 - `flags.graph_bridge`
 
 ### Rule

@@ -14,7 +14,7 @@ sensitivity: public-ok | internal | sensitive   # rubric R5; sensitive => no exc
 confidence: high | medium | low   # per rubric §3
 inference_flags: []            # any reconstructed values, e.g. stage-timing
 rubric_version: <score sidecar version if score-derived, else null>
-related_prior: []              # IDs from payout/provadm reports, if convergent
+related_prior: []              # IDs from payout/adminapp reports, if convergent
 ```
 
 Notes:

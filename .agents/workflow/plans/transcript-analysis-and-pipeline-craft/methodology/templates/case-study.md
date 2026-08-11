@@ -1,6 +1,6 @@
 # Case Study — <title>
 
-Canonical section order (matches prior payout/provadm analyses — do not reorder):
+Canonical section order (matches prior payout/adminapp analyses — do not reorder):
 
 ## 1. Sources
 <!-- inventory rows consumed; evidence_ids only -->
