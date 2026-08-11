@@ -481,8 +481,13 @@ func TestRestoreFromResources_Wrapper(t *testing.T) {
 
 // TestRunRefresh_InstalledPlatformDoesCreateLinks exercises the full refresh
 // loop with an installed Claude platform: shared-target projection runs, the
-// per-platform CreateLinks branch runs (non-dry-run), and the agentsrc refresh
-// metadata is written.
+// per-platform CreateLinks branch runs (non-dry-run), and the refresh metadata
+// lands in .agentsrc.lock — NOT in a manifest.
+//
+// Refresh must not author .agentsrc.json. It used to bootstrap one here, which
+// is how a user-authored manifest ended up being round-tripped through AgentsRC
+// and gaining `"hooks": false, "mcp": false, "settings": false` keys the author
+// never wrote (those explicit falses then beat the org config layers).
 func TestRunRefresh_InstalledPlatformDoesCreateLinks(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -510,10 +515,14 @@ func TestRunRefresh_InstalledPlatformDoesCreateLinks(t *testing.T) {
 		t.Errorf("runRefresh installed: %v", err)
 	}
 
-	// agentsrc should have been written with refresh metadata even though there
-	// was no prior manifest.
-	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.json")); err != nil {
-		t.Errorf("expected .agentsrc.json written: %v", err)
+	// No manifest existed before the refresh, so refresh must not have created
+	// one: authoring .agentsrc.json is `da install --generate`'s explicit job.
+	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.json")); !os.IsNotExist(err) {
+		t.Errorf("refresh must not create .agentsrc.json (stat err=%v)", err)
+	}
+	// The lock IS the machine-written artifact and must carry the metadata.
+	if _, err := os.Stat(config.AgentsLockPath(projectPath)); err != nil {
+		t.Errorf("expected refresh metadata written to .agentsrc.lock: %v", err)
 	}
 }
 

@@ -427,7 +427,7 @@ func finalizeProjectRefresh(name, path string, projectFailed bool, refreshCommit
 		ui.Bullet("warn", "skipping refresh metadata for "+name+" — refresh was partial")
 		return false
 	}
-	if err := projectsync.WriteRefreshToLock(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+	if err := projectsync.WriteRefreshToLock(path, Version, refreshCommit, refreshDescribe); err != nil {
 		ui.Bullet("warn", fmt.Sprintf("lock refresh metadata: %v", err))
 		return false
 	}

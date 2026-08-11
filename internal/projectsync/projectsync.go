@@ -83,35 +83,29 @@ func RefreshMarkerContent(version, commit, describe string) []byte {
 	return []byte(content)
 }
 
-// WriteRefreshToLock ensures .agentsrc.json exists (generating one via a
-// project scan when absent, mirroring the old manifest-bootstrap behavior)
-// and re-saves it — which also strips any legacy top-level "refresh" key a
-// pre-refresh-metadata-to-lock manifest may still carry, since AgentsRC no
-// longer has a Refresh field to round-trip it through (config-distribution-
-// model §7A / refresh-metadata-to-lock). It then stamps the refresh metadata
-// (version, commit, describe, refreshedAt) into .agentsrc.lock's "refresh"
-// section — refresh metadata is resolved state about the project, not
-// manifest content, so it belongs in the lock, not the committed manifest —
-// and removes a legacy .agents-refresh marker file if present.
-func WriteRefreshToLock(projectName, projectPath, version, commit, describe string) error {
-	rc, err := config.LoadAgentsRC(projectPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return err
-		}
-		// GenerateAgentsRC scans local ~/.agents state (skills, rules, agents,
-		// hooks, mcp, settings dirs) and the project's git remote; every one
-		// of those lookups swallows its own error (missing dir, unreadable
-		// file, non-git checkout) and degrades to an empty/zero value instead
-		// of propagating one. It has no failure mode today, so its error
-		// return is deliberately ignored here rather than left as an
-		// uncoverable dead branch — see its doc comment for the "never
-		// fails" guarantee.
-		rc, _ = config.GenerateAgentsRC(projectName, projectPath)
-	}
-	if err := rc.Save(projectPath); err != nil {
-		return err
-	}
+// WriteRefreshToLock stamps the refresh metadata (version, commit, describe,
+// refreshedAt) into .agentsrc.lock's "refresh" section — refresh metadata is
+// resolved state about the project, not manifest content, so it belongs in the
+// lock, not the committed manifest — and removes a legacy .agents-refresh
+// marker file if present.
+//
+// It deliberately does NOT touch .agentsrc.json. The manifest is user-authored
+// and only the lock is machine-written by `da refresh` / `da config sync`.
+// This function previously load-and-re-saved the manifest on every refresh to
+// opportunistically strip a legacy top-level "refresh" key; that side effect
+// corrupted manifests, because a re-save round-trips the whole file through
+// AgentsRC and re-emits keys the author never wrote. Concretely it injected
+// `"hooks": false, "mcp": false, "settings": false` into any manifest that
+// omitted them, and since the layer merge is key-presence driven those explicit
+// falses then beat an org layer's `true` — silently disabling hooks/mcp/settings
+// projection for every repo relying on org defaults.
+//
+// The legacy-"refresh"-key strip is still available, but only behind its
+// explicit, backed-up, opt-in path: `da config migrate`. A resolve/projection
+// command must not rewrite user-authored files as a side effect. The former
+// projectName parameter went away with the manifest-generate path that was its
+// only consumer.
+func WriteRefreshToLock(projectPath, version, commit, describe string) error {
 	meta := config.RefreshMetadata{
 		Version:     version,
 		Commit:      commit,
