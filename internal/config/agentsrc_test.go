@@ -28,6 +28,31 @@ const (
 	testRealSkillName   = "real" + "-skill"
 )
 
+// ── optional-field test helpers ──────────────────────────────────────────────
+//
+// AgentsRC.Hooks/MCP/Settings are pointers so an ABSENT manifest key stays
+// distinguishable from an explicit false. sob/pbool build the "explicitly
+// declared" form for struct literals; sobNames/sobAll/boolVal read a possibly
+// absent declaration without panicking.
+
+func sob(s StringsOrBool) *StringsOrBool { return &s }
+
+func pbool(b bool) *bool { return &b }
+
+// sobNames returns the declared names, or nil when the key is absent.
+func sobNames(s *StringsOrBool) []string {
+	if s == nil {
+		return nil
+	}
+	return s.Names
+}
+
+// sobAll reports All on a possibly absent declaration (absent ⇒ false).
+func sobAll(s *StringsOrBool) bool { return s != nil && s.All }
+
+// boolVal reports the value of a possibly absent bool (absent ⇒ false).
+func boolVal(b *bool) bool { return b != nil && *b }
+
 // ── StringsOrBool ────────────────────────────────────────────────────────────
 
 func assertStringsOrBoolMarshalJSON(t *testing.T, input StringsOrBool, want string) {
@@ -293,9 +318,9 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 		Skills:   []string{"skill-a", "skill-b"},
 		Agents:   []string{"agent-x"},
 		Rules:    []string{"global", "project"},
-		Hooks:    StringsOrBool{Names: []string{testHookPreToolUse, testHookPostToolUse}},
-		MCP:      StringsOrBool{All: true},
-		Settings: true,
+		Hooks:    sob(StringsOrBool{Names: []string{testHookPreToolUse, testHookPostToolUse}}),
+		MCP:      sob(StringsOrBool{All: true}),
+		Settings: pbool(true),
 		Sources: []Source{
 			{Type: testSourceTypeLocal},
 			{Type: "git", URL: "https://github.com/example/repo.git", Ref: "main"},
@@ -323,14 +348,20 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 	if !reflect.DeepEqual(got.Rules, orig.Rules) {
 		t.Errorf("Rules: got %v, want %v", got.Rules, orig.Rules)
 	}
-	if !reflect.DeepEqual(got.Hooks.Names, orig.Hooks.Names) {
-		t.Errorf("Hooks.Names: got %v, want %v", got.Hooks.Names, orig.Hooks.Names)
+	// All three were explicitly declared, so all three must come back as
+	// declarations (non-nil), not as absent keys.
+	if got.Hooks == nil || got.MCP == nil || got.Settings == nil {
+		t.Fatalf("explicit hooks/mcp/settings declarations lost on round trip: hooks=%v mcp=%v settings=%v",
+			got.Hooks, got.MCP, got.Settings)
 	}
-	if got.MCP.All != orig.MCP.All {
-		t.Errorf("MCP.All: got %v, want %v", got.MCP.All, orig.MCP.All)
+	if !reflect.DeepEqual(sobNames(got.Hooks), sobNames(orig.Hooks)) {
+		t.Errorf("Hooks.Names: got %v, want %v", sobNames(got.Hooks), sobNames(orig.Hooks))
 	}
-	if got.Settings != orig.Settings {
-		t.Errorf("Settings: got %v, want %v", got.Settings, orig.Settings)
+	if sobAll(got.MCP) != sobAll(orig.MCP) {
+		t.Errorf("MCP.All: got %v, want %v", sobAll(got.MCP), sobAll(orig.MCP))
+	}
+	if boolVal(got.Settings) != boolVal(orig.Settings) {
+		t.Errorf("Settings: got %v, want %v", boolVal(got.Settings), boolVal(orig.Settings))
 	}
 	if len(got.Sources) != 2 || got.Sources[1].URL != orig.Sources[1].URL {
 		t.Errorf("Sources: got %+v, want %+v", got.Sources, orig.Sources)
@@ -494,9 +525,9 @@ func TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations(t *testing.
 		Skills:   []string{"skill-global", "skill-proj"},
 		Rules:    []string{"global", "project"},
 		Agents:   []string{"agent-global", "agent-proj"},
-		Hooks:    StringsOrBool{All: true},
-		MCP:      StringsOrBool{Names: []string{"global-mcp-server", "server-a", "server-b"}},
-		Settings: true,
+		Hooks:    sob(StringsOrBool{All: true}),
+		MCP:      sob(StringsOrBool{Names: []string{"global-mcp-server", "server-a", "server-b"}}),
+		Settings: pbool(true),
 		Sources:  []Source{{Type: testSourceTypeLocal}},
 	}
 
@@ -515,25 +546,25 @@ func TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations(t *testing.
 	if !reflect.DeepEqual(out.Rules, []string{"project"}) {
 		t.Errorf("Rules: got %v, want [project] (stale global entry must be dropped)", out.Rules)
 	}
-	gotMCP := append([]string(nil), out.MCP.Names...)
+	gotMCP := append([]string(nil), sobNames(out.MCP)...)
 	sort.Strings(gotMCP)
 	wantMCP := []string{"server-a", "server-b"}
 	if !reflect.DeepEqual(gotMCP, wantMCP) {
 		t.Errorf("MCP.Names: got %v, want %v (stale global server must be dropped)", gotMCP, wantMCP)
 	}
-	if out.MCP.All {
+	if sobAll(out.MCP) {
 		t.Error("MCP.All should be false after regenerate")
 	}
-	gotHooks := append([]string(nil), out.Hooks.Names...)
+	gotHooks := append([]string(nil), sobNames(out.Hooks)...)
 	sort.Strings(gotHooks)
 	wantHooks := []string{testHookPostToolUse, testHookPreToolUse}
 	if !reflect.DeepEqual(gotHooks, wantHooks) {
 		t.Errorf("Hooks.Names: got %v, want %v (stale All:true must be replaced by the project scan)", gotHooks, wantHooks)
 	}
-	if out.Hooks.All {
+	if sobAll(out.Hooks) {
 		t.Error("Hooks.All should be false after regenerate — project scope only has named events")
 	}
-	if !out.Settings {
+	if !boolVal(out.Settings) {
 		t.Error("Settings should stay true — driven by the project-scoped cursor.json, not the stale global declaration")
 	}
 }
@@ -773,13 +804,13 @@ func TestGenerateAgentsRCHooksNamedEvents(t *testing.T) {
 	}
 
 	// Only non-empty event arrays should appear; Notification is empty → excluded
-	got := rc.Hooks.Names
+	got := sobNames(rc.Hooks)
 	sort.Strings(got)
 	want := []string{testHookPostToolUse, testHookPreToolUse}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Hooks.Names: got %v, want %v", got, want)
 	}
-	if rc.Hooks.All {
+	if sobAll(rc.Hooks) {
 		t.Error("Hooks.All should be false when specific events are listed")
 	}
 }
@@ -793,8 +824,10 @@ func TestGenerateAgentsRCHooksNoSettings(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if rc.Hooks.IsEnabled() {
-		t.Errorf("Hooks should be disabled when no settings file exists, got %+v", rc.Hooks)
+	// Nothing detected ⇒ no declaration at all, so the "hooks" key stays out of
+	// the manifest and the layer stack still applies.
+	if rc.Hooks != nil {
+		t.Errorf("Hooks should be absent when no settings file exists, got %+v", rc.Hooks)
 	}
 }
 
@@ -814,11 +847,11 @@ func TestGenerateAgentsRCHooksCanonicalBundlesEnableAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
-	if !rc.Hooks.All {
+	if !sobAll(rc.Hooks) {
 		t.Fatalf("Hooks.All = false, want true when project-scoped canonical hook bundles exist; got %+v", rc.Hooks)
 	}
-	if len(rc.Hooks.Names) != 0 {
-		t.Fatalf("Hooks.Names = %v, want empty when Hooks.All is true", rc.Hooks.Names)
+	if len(sobNames(rc.Hooks)) != 0 {
+		t.Fatalf("Hooks.Names = %v, want empty when Hooks.All is true", sobNames(rc.Hooks))
 	}
 }
 
@@ -841,8 +874,8 @@ func TestGenerateAgentsRCHooksCanonicalBundlesGlobalOnlyNotCaptured(t *testing.T
 	if err != nil {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
-	if rc.Hooks.IsEnabled() {
-		t.Errorf("Hooks: got %+v, want disabled (global-only bundle must not be captured)", rc.Hooks)
+	if rc.Hooks != nil {
+		t.Errorf("Hooks: got %+v, want absent (global-only bundle must not be captured)", rc.Hooks)
 	}
 }
 
@@ -873,8 +906,8 @@ func TestGenerateAgentsRCHooksLegacySettingsGlobalOnlyNotCaptured(t *testing.T) 
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if rc.Hooks.IsEnabled() {
-		t.Errorf("Hooks: got %+v, want disabled (global-only legacy settings must not be captured)", rc.Hooks)
+	if rc.Hooks != nil {
+		t.Errorf("Hooks: got %+v, want absent (global-only legacy settings must not be captured)", rc.Hooks)
 	}
 }
 
@@ -887,13 +920,13 @@ func TestGenerateAgentsRCMCPNamedServers(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	got := rc.MCP.Names
+	got := sobNames(rc.MCP)
 	sort.Strings(got)
 	want := []string{"server-a", "server-b"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("MCP.Names: got %v, want %v", got, want)
 	}
-	if rc.MCP.All {
+	if sobAll(rc.MCP) {
 		t.Error("MCP.All should be false when specific servers are listed")
 	}
 }
@@ -915,8 +948,8 @@ func TestGenerateAgentsRCMCPGlobalOnlyNotCaptured(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if rc.MCP.IsEnabled() {
-		t.Errorf("MCP: got %+v, want disabled (global-only server must not be captured)", rc.MCP)
+	if rc.MCP != nil {
+		t.Errorf("MCP: got %+v, want absent (global-only server must not be captured)", rc.MCP)
 	}
 }
 
@@ -969,8 +1002,8 @@ func TestGenerateAgentsRCMCPGlobalOnlyNotCapturedDocumentedMCPServersShape(t *te
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if rc.MCP.IsEnabled() {
-		t.Errorf("MCP: got %+v, want disabled (global-only server must not be captured)", rc.MCP)
+	if rc.MCP != nil {
+		t.Errorf("MCP: got %+v, want absent (global-only server must not be captured)", rc.MCP)
 	}
 }
 
@@ -991,8 +1024,8 @@ func TestGenerateAgentsRCMCPReadsDotMCPJSON(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if !reflect.DeepEqual(rc.MCP.Names, []string{"repo-srv"}) {
-		t.Errorf("MCP.Names: got %v, want [repo-srv]", rc.MCP.Names)
+	if !reflect.DeepEqual(sobNames(rc.MCP), []string{"repo-srv"}) {
+		t.Errorf("MCP.Names: got %v, want [repo-srv]", sobNames(rc.MCP))
 	}
 }
 
@@ -1005,8 +1038,8 @@ func TestGenerateAgentsRCMCPNoConfig(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if rc.MCP.IsEnabled() {
-		t.Errorf("MCP should be disabled when no config exists, got %+v", rc.MCP)
+	if rc.MCP != nil {
+		t.Errorf("MCP should be absent when no config exists, got %+v", rc.MCP)
 	}
 }
 
@@ -1019,8 +1052,8 @@ func TestGenerateAgentsRCSettings(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if !rc.Settings {
-		t.Error("Settings should be true when the project-scoped cursor.json exists")
+	if !boolVal(rc.Settings) {
+		t.Errorf("Settings should be an explicit true when the project-scoped cursor.json exists, got %v", rc.Settings)
 	}
 }
 
@@ -1044,8 +1077,8 @@ func TestGenerateAgentsRCSettingsGlobalOnlyNotCaptured(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if rc.Settings {
-		t.Error("Settings should be false — a global-only cursor.json must not be captured")
+	if rc.Settings != nil {
+		t.Errorf("Settings should be absent — a global-only cursor.json must not be captured, got %v", *rc.Settings)
 	}
 }
 
@@ -1058,8 +1091,8 @@ func TestGenerateAgentsRCSettingsFalse(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if rc.Settings {
-		t.Error("Settings should be false when no cursor.json exists")
+	if rc.Settings != nil {
+		t.Errorf("Settings should be absent when no cursor.json exists, got %v", *rc.Settings)
 	}
 }
 
@@ -1247,8 +1280,10 @@ func TestAgentsRCJSONShape(t *testing.T) {
 		Version: 1,
 		Project: "proj",
 		Skills:  []string{"s1"},
-		Hooks:   StringsOrBool{Names: []string{testHookPreToolUse}},
-		MCP:     StringsOrBool{All: false},
+		Hooks:   sob(StringsOrBool{Names: []string{testHookPreToolUse}}),
+		// An explicit, deliberately-disabled MCP declaration — distinct from
+		// Settings below, which is left absent (nil) and must not be emitted.
+		MCP:     sob(StringsOrBool{All: false}),
 		Sources: []Source{{Type: testSourceTypeLocal}},
 	}
 	if err := rc.Save(tmp); err != nil {
@@ -1265,9 +1300,15 @@ func TestAgentsRCJSONShape(t *testing.T) {
 	if _, ok := raw["hooks"].([]any); !ok {
 		t.Errorf("hooks should be JSON array, got %T", raw["hooks"])
 	}
-	// mcp should be false (not enabled)
+	// mcp was declared explicitly (All:false), so the key must be emitted as
+	// JSON false — an explicit false is a real declaration and must survive.
 	if v, ok := raw["mcp"].(bool); !ok || v {
 		t.Errorf("mcp should be JSON false, got %v", raw["mcp"])
+	}
+	// settings was never declared (nil), so the key must be ABSENT rather than
+	// re-emitted as false — an injected false would beat a lower config layer.
+	if _, present := raw["settings"]; present {
+		t.Errorf("settings was never declared; key must be omitted, got %v", raw["settings"])
 	}
 	// $schema present
 	if raw["$schema"] == nil {
@@ -2040,9 +2081,9 @@ func TestV2_AgentsRCMarshalUnmarshalRoundTrip(t *testing.T) {
 		Version:  2,
 		Project:  "p",
 		RepoID:   "github.com/acme/p",
-		Hooks:    StringsOrBool{All: false},
-		MCP:      StringsOrBool{All: false},
-		Settings: false,
+		Hooks:    sob(StringsOrBool{All: false}),
+		MCP:      sob(StringsOrBool{All: false}),
+		Settings: pbool(false),
 		Sources: []Source{
 			{ID: "local-src", Type: "local"},
 			{ID: "acme-pkgs", Type: "oci", URL: "oci://example/repo",
@@ -2081,6 +2122,12 @@ func TestV2_AgentsRCMarshalUnmarshalRoundTrip(t *testing.T) {
 	}
 	if got.Features["graph_bridge"] != "preview" {
 		t.Errorf("Features lost: %+v", got.Features)
+	}
+	// Explicit falses are declarations, not absence: they must survive the
+	// round trip as non-nil pointers rather than collapsing to absent keys.
+	if got.Hooks == nil || got.MCP == nil || got.Settings == nil {
+		t.Errorf("explicit false hooks/mcp/settings lost: hooks=%v mcp=%v settings=%v",
+			got.Hooks, got.MCP, got.Settings)
 	}
 	// Source v2 fields
 	if got.Sources[1].Type != "oci" || got.Sources[1].ID != "acme-pkgs" {

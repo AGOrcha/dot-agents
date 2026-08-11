@@ -549,9 +549,9 @@ func runInstallGenerate(deps InstallDeps, opts installOptions) error {
 		ui.DryRun(fmt.Sprintf("  skills:   %v", rc.Skills))
 		ui.DryRun(fmt.Sprintf("  rules:    %v", rc.Rules))
 		ui.DryRun(fmt.Sprintf("  agents:   %v", rc.Agents))
-		ui.DryRun(fmt.Sprintf("  hooks:    %v", rc.Hooks))
-		ui.DryRun(fmt.Sprintf("  mcp:      %v", rc.MCP))
-		ui.DryRun(fmt.Sprintf("  settings: %v", rc.Settings))
+		ui.DryRun(fmt.Sprintf("  hooks:    %s", describeStringsOrBool(rc.Hooks)))
+		ui.DryRun(fmt.Sprintf("  mcp:      %s", describeStringsOrBool(rc.MCP)))
+		ui.DryRun(fmt.Sprintf("  settings: %s", describeOptionalBool(rc.Settings)))
 		return nil
 	}
 
@@ -568,6 +568,28 @@ func runInstallGenerate(deps InstallDeps, opts installOptions) error {
 	fmt.Fprintf(os.Stdout, "  2. Commit:  git add %s && git commit -m 'Add da manifest'\n", config.AgentsRCFile)
 	fmt.Fprintln(os.Stdout, "  3. Others:  da install   (after cloning)")
 	return nil
+}
+
+// describeStringsOrBool renders an optional hooks/mcp declaration for the
+// --dry-run preview. A nil pointer means the key will be OMITTED from the
+// manifest (deferring to the layer stack), which is materially different from
+// an explicit `false`, so the preview must not collapse the two.
+func describeStringsOrBool(s *config.StringsOrBool) string {
+	if s == nil {
+		return "(absent — inherited from config layers)"
+	}
+	if len(s.Names) > 0 {
+		return fmt.Sprintf("%v", s.Names)
+	}
+	return fmt.Sprintf("%v", s.All)
+}
+
+// describeOptionalBool is the bool analog of describeStringsOrBool.
+func describeOptionalBool(b *bool) string {
+	if b == nil {
+		return "(absent — inherited from config layers)"
+	}
+	return fmt.Sprintf("%v", *b)
 }
 
 // ─── source resolution ───────────────────────────────────────────────────────
