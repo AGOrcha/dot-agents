@@ -272,15 +272,19 @@ func TestBundlePromptFilesFromRefs_DropsBlankPath(t *testing.T) {
 }
 
 // TestFlattenBundlePromptPaths reduces source-aware files to the flat []string
-// surface the existing bundle prompt_files field accepts, skipping blanks.
+// surface the existing bundle prompt_files field accepts, skipping blanks. A
+// source-pinned entry keeps its qualification by rendering the canonical
+// "source:path[@version]" ref — dropping the source here is what made a
+// source-pinned prompt unresolvable downstream.
 func TestFlattenBundlePromptPaths(t *testing.T) {
 	files := []bundlePromptFile{
 		{Path: "a.md"},
 		{Source: "acme", Path: "b.md", Version: "v1"},
+		{Source: "acme", Path: "c.md"},
 		{Path: "   "}, // blank -> skipped
 	}
 	got := flattenBundlePromptPaths(files)
-	want := []string{"a.md", "b.md"}
+	want := []string{"a.md", "acme:b.md@v1", "acme:c.md"}
 	if len(got) != len(want) {
 		t.Fatalf("flatten: got %v, want %v", got, want)
 	}
