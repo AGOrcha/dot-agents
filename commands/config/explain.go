@@ -127,6 +127,14 @@ var resolveLayered = func(projectPath string) (*cfg.Snapshot, error) {
 // which layer wins, then maps the resolver's FieldProvenance into the stable
 // FieldExplanation JSON shape.
 //
+// Value comes straight from FieldProvenance.Value, which FieldAt already
+// deep-merges across contributing layers for map-merge/set-union paths (the
+// same merge semantics the resolver uses to build the effective config) — so
+// an intermediate object path (e.g. "stage_profiles.verifier") reports the
+// merged subtree, not just the highest-precedence layer's raw value. Per-layer
+// entries in Layers still carry each layer's own raw (unmerged) contribution,
+// so operators can see exactly what each layer set.
+//
 // A field that is unset in every layer returns a FieldExplanation with
 // Value=nil and ActiveLayer="" — the caller decides whether to treat that as an
 // error (single-field default) or as informational ("not set" in --all).
@@ -134,14 +142,12 @@ func explainField(snap *cfg.Snapshot, path string) FieldExplanation {
 	fp := snap.FieldAt(path)
 	out := FieldExplanation{
 		Field:       path,
+		Value:       fp.Value,
 		ActiveLayer: fp.ActiveLayer,
 		Layers:      make([]LayerValue, 0, len(fp.Layers)),
 	}
 	for _, lv := range fp.Layers {
 		out.Layers = append(out.Layers, LayerValue{Layer: lv.Layer, Value: lv.Value, Active: lv.Active})
-		if lv.Active {
-			out.Value = lv.Value
-		}
 	}
 	return out
 }
