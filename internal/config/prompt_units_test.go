@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -319,6 +320,79 @@ func TestPromptUnitsDroppedWhenUndeclared(t *testing.T) {
 	}
 	if _, ok := units.Units["team:verifiers/verifier.base.md"]; !ok {
 		t.Fatalf("the still-declared prompt must stay pinned, got %#v", units.Units)
+	}
+}
+
+// TestLockedPromptFileRejectsUnusableUnits covers the offline probe's fail-closed
+// branches: an absent pin, a pin of another kind, a digest-less pin, and a cache
+// path that is not a readable file all resolve to "not available" so the caller
+// emits the sync hint instead of handing out a bogus path.
+func TestLockedPromptFileRejectsUnusableUnits(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	ref := PromptUnitRef{SourceID: "team", Path: "verifiers/x.md"}
+	cases := []struct {
+		name  string
+		units map[string]LockedUnit
+	}{
+		{"absent", map[string]LockedUnit{}},
+		{"wrong kind", map[string]LockedUnit{ref.Key(): {Kind: UnitKindLayer, Digest: "abc"}}},
+		{"no digest", map[string]LockedUnit{ref.Key(): {Kind: UnitKindPrompt}}},
+		{"nothing cached", map[string]LockedUnit{ref.Key(): {Kind: UnitKindPrompt, Digest: "abc"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if path, ok := LockedPromptFile(tc.units, ref); ok {
+				t.Fatalf("expected no resolution, got %q", path)
+			}
+		})
+	}
+	// A directory sitting where the cached file belongs is not a prompt.
+	if err := os.MkdirAll(CachedPromptPath(ref, "abc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := LockedPromptFile(map[string]LockedUnit{ref.Key(): {Kind: UnitKindPrompt, Digest: "abc"}}, ref); ok {
+		t.Fatal("a directory at the cache path must not resolve")
+	}
+}
+
+// TestFetchPromptUnitErrors covers the per-ref failure classification: an
+// undeclared source, an unsupported source type, and a fetcher that already
+// classified its own failure (whose reason must be preserved verbatim).
+func TestFetchPromptUnitErrors(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	ref := PromptUnitRef{SourceID: "team", Path: "verifiers/x.md"}
+	trace := newAuditTrace(nil)
+
+	if _, err := NewLayeredResolver().fetchPromptUnit(trace, ref, map[string]Source{}); !isImportReason(err, ReasonNotFound) {
+		t.Fatalf("undeclared source = %v, want reason %s", err, ReasonNotFound)
+	}
+	badType := map[string]Source{"team": {ID: "team", Type: "carrier-pigeon"}}
+	if _, err := NewLayeredResolver().fetchPromptUnit(trace, ref, badType); !isImportReason(err, ReasonSchema) {
+		t.Fatalf("unsupported source type = %v, want reason %s", err, ReasonSchema)
+	}
+	gitSource := map[string]Source{"team": {ID: "team", Type: "git", URL: "file:///team"}}
+	classified := &fakeFetcher{fetchErr: &ImportError{Ref: ref.Key(), SourceID: "team", Reason: ReasonAuth}}
+	r := NewLayeredResolver().WithFetcher("git", classified)
+	if _, err := r.fetchPromptUnit(trace, ref, gitSource); !isImportReason(err, ReasonAuth) {
+		t.Fatalf("classified fetcher error = %v, want its own reason %s preserved", err, ReasonAuth)
+	}
+}
+
+// isImportReason reports whether err is (or wraps) an *ImportError carrying want.
+func isImportReason(err error, want ImportFailReason) bool {
+	var ie *ImportError
+	return errors.As(err, &ie) && ie.Reason == want
+}
+
+// TestPromptUnitsSurfacesLockReadError proves a corrupt lock fails the resolve
+// loudly on the prompt path rather than silently resolving with no pins.
+func TestPromptUnitsSurfacesLockReadError(t *testing.T) {
+	repo := promptProject(t, promptManifest)
+	if err := os.WriteFile(AgentsLockPath(repo), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", &fakeFetcher{}).Resolve(repo); err == nil {
+		t.Fatal("expected a corrupt lock to fail the resolve")
 	}
 }
 

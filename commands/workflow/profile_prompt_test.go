@@ -557,12 +557,30 @@ func TestComposeProfilePrompt_SourceQualified(t *testing.T) {
 	}
 }
 
+// TestComposeProfilePrompt_CorruptLock proves the offline lock read is a real
+// input, not a best-effort one: an unreadable .agentsrc.lock surfaces as an error
+// rather than silently composing with zero prompt pins.
+func TestComposeProfilePrompt_CorruptLock(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, config.AgentsLockFile), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshotWithProfiles(t, `{"unit":{"prompt_files":["verifiers/unit.md"]}}`, "")
+	if _, err := composeProfilePrompt(project, t.TempDir(), profileKindVerifier, "unit"); err == nil {
+		t.Fatal("expected a corrupt lock to fail the composition")
+	}
+}
+
 func TestRenderComposedPrompt_SourceHint(t *testing.T) {
 	out := captureWorkflowStdout(t, func() {
 		renderComposedPrompt(composedPromptView{Kind: "verifier", Slug: "ts-lint", Matched: true, Entries: []composedPromptEntry{
+			{Ref: "team:verifiers/verifier.base.md", Resolved: "~/.agents/cache/config/team/base", Scope: "source", Source: "team", Exists: true},
 			{Ref: "team:verifiers/ts-lint.md", Scope: "unresolved", Source: "team", Hint: "run `da config sync`"},
 		}})
 	})
+	if !strings.Contains(out, "source -> ~/.agents/cache/config/team/base") {
+		t.Fatalf("resolved source entry should render its cached path:\n%s", out)
+	}
 	if !strings.Contains(out, "team:verifiers/ts-lint.md") || !strings.Contains(out, "da config sync") {
 		t.Fatalf("unresolved source entry should render its hint:\n%s", out)
 	}
