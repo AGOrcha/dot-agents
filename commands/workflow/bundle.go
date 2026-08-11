@@ -62,20 +62,42 @@ func bundlePromptFilesFromRefs(refs []config.PromptFileRef) []bundlePromptFile {
 	return out
 }
 
-// flattenBundlePromptPaths reduces source-aware prompt files to the flat path
-// list the bundle's prompt.prompt_files field accepts. This is the bridge from
-// the typed source-aware model to the existing []string bundle surface: the
-// source/version provenance is retained on bundlePromptFile for callers that
-// fetch from a config source, while consumers that only resolve a local prompt
-// path (the legacy resolver) see the plain path list they already expect.
+// flattenBundlePromptPaths reduces source-aware prompt files to the flat string
+// list the bundle's prompt.prompt_files field accepts. It is the bridge from the
+// typed model to the []string bundle surface, and it preserves source
+// qualification by emitting the CANONICAL ref form "source:path[@version]" for a
+// source-pinned entry (a local entry still emits its bare path). Dropping the
+// source here — the original behavior — silently downgraded every source-pinned
+// prompt to a local path that could never resolve; the string form round-trips
+// back through the same §5 ref grammar resolvePromptRef classifies against the
+// declared source set.
 func flattenBundlePromptPaths(files []bundlePromptFile) []string {
 	out := make([]string, 0, len(files))
 	for _, f := range files {
-		if p := strings.TrimSpace(f.Path); p != "" {
-			out = append(out, p)
+		if ref := bundlePromptRef(f); ref != "" {
+			out = append(out, ref)
 		}
 	}
 	return out
+}
+
+// bundlePromptRef renders one bundle prompt file as its canonical wire ref:
+// "source:path[@version]" when it is source-pinned, else the bare path. An entry
+// with no path yields "" so a malformed profile never injects a blank prompt.
+func bundlePromptRef(f bundlePromptFile) string {
+	path := strings.TrimSpace(f.Path)
+	if path == "" {
+		return ""
+	}
+	source := strings.TrimSpace(f.Source)
+	if source == "" {
+		return path
+	}
+	ref := source + ":" + path
+	if version := strings.TrimSpace(f.Version); version != "" {
+		ref += "@" + version
+	}
+	return ref
 }
 
 // runWorkflowBundleStages reads a bundle YAML and prints or encodes the ordered stage list.

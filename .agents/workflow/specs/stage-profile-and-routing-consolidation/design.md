@@ -171,6 +171,74 @@ the worker exits at merge-back and the verifier owns the loop (per
 slug (`pr-ci`) routed into `topology.verifier_sequence` — additive to this model.
 Tracked as a follow-up; **not** in scope of the shipped consolidation.
 
+## 7B. Source-qualified prompt files — the deferred source-resolution point, resolved (2026-08-11)
+
+**Status: RATIFIED + SHIPPED.** D1 carried PR #40's `PromptFileRef` forward "unchanged", including its
+`source` field — but *source resolution* was never implemented, only the shape. Every consumer
+flattened a `PromptFileRef` to its `path`
+(`commands/workflow/profile_prompt.go:promptRefPath`, `bundle.go:flattenBundlePromptPaths`), and
+nothing ever fetched a prompt file from a config source. The observable failure: a team layer fetched
+via `extends` declaring
+`prompt_files: ["po-agents-config:verifiers/verifier.base.md", …]` made
+`da workflow resolve-prompt --kind verifier --slug ts-lint` report `matched: true` with every entry
+`scope: "unresolved", exists: false` — the source id was treated as part of a literal filename. This
+section closes that gap; it is the canonical owner of prompt-source semantics.
+
+### 7B.1 Ref grammar (decision)
+
+- A `prompt_files` entry in the **typed object** form `{source, path, version}` is the canonical
+  source-qualified form and is always treated as source-qualified. An undeclared `source` is honored
+  as written (it surfaces as an unresolved prompt with a sync hint) rather than silently downgraded
+  to a local path — the author was explicit.
+- A **bare string** entry is source-qualified **only** when its prefix before the first `:` matches a
+  source id declared in the **effective** config. This aligns the prompt tier with the
+  `source-id:path[@version]` ref grammar `config-distribution-model` §5 already defines
+  (`ParseLayerRef`). Any other string — including a legacy `verifiers/unit.md` and a Windows
+  `C:\…` literal — keeps local-path semantics and the historical scope search path
+  (absolute → repo-local → `.agents/prompts/` → `<AgentsHome>/prompts/`).
+- Source/version provenance is preserved **end to end**: no consumer may flatten a `PromptFileRef` to
+  a bare path. The bundle seam renders the canonical `source:path[@version]` string, which round-trips
+  back through the same grammar.
+
+### 7B.2 Mechanism (decision)
+
+Three parts, mirroring how a config layer already resolves:
+
+1. **Sync-time fetch.** `LayeredResolver.Resolve` — the one network-touching path, behind
+   `da config sync` / `da install` — collects the source-qualified prompt refs the effective config's
+   `stage_profiles` declare and fetches each through the SAME per-source-type `Fetcher` an `extends`
+   layer uses, caching it content-addressed at
+   `~/.agents/cache/config/<source-id>/<prompt-path>/<sha>/`.
+2. **Lock pinning.** Each fetched prompt file is recorded in `.agentsrc.lock`'s `units` section as a
+   `kind: "prompt"` unit keyed `<source-id>:<prompt-path>[@version]` with its resolved digest. This
+   extends the §7A/R5 reproducibility guarantee (same source-set + lock digest ⇒ identical effective
+   bundle) from config content to **prompt content**. The kind is new rather than a reuse of
+   `artifact`: a prompt is neither merged like a layer nor installed/invoked under a trust posture
+   like an artifact — it is content pinned for composition.
+3. **Offline probe.** `da workflow resolve-prompt` (and every dispatch surface it feeds) resolves a
+   source-qualified entry purely from lock + cache, reporting `scope: "source"`, `exists: true`, and
+   the cached path. It remains **offline by contract** (`ResolveLocked`, lock+cache only, never
+   network): a never-synced or cache-pruned prompt is `unresolved` plus a `run \`da config sync\`` hint,
+   never a fetch trigger — the same skip+sync-hint precedent `LockedRemoteLayerBytes` sets for layers.
+
+Failure policy: a prompt that cannot be fetched is **non-fatal** to the resolve (a warning; the
+previous pin is carried forward when one exists). A prompt is composition input, not policy — failing
+a whole `da config sync` over one stale prompt ref is a worse trade than surfacing it as unresolved at
+resolve-prompt time. Offline resolves never fetch and never drop existing prompt pins.
+
+### 7B.3 Done criteria (for this section)
+
+1. A stage profile pinning `{source, path}` (or a declared-source-prefixed string) resolves to
+   `scope: "source"`, `exists: true` with a cached path after `da config sync`, and to `unresolved`
+   with a sync hint when the cache is pruned — with zero network calls in either case.
+2. A bare string whose prefix names no declared source keeps local-path semantics unchanged.
+3. `.agentsrc.lock` carries a `kind: "prompt"` unit per source-qualified prompt file; the lock stays
+   **additive** (existing locks remain valid; sibling `layer`/`artifact`/`profile` units are
+   untouched; the prompt set is replaced wholesale by pass 1 so a deleted `prompt_files` entry drops
+   out).
+4. Source/version survives `decodeProfilePromptFiles` and the bundle prompt-file seam; the
+   `resolve-prompt` JSON stays backward compatible (`source` and `hint` are additive, `omitempty`).
+
 ## 8. Relationships
 
 - **PR #40 / config-v2-p1c** — superseded; its `PromptFileRef` + `$defs/promptFileRef` + tests are the

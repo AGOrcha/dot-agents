@@ -1276,6 +1276,17 @@ git; not implemented here).
   adjacent `inspect` command (the §10 "Installed starter-seed upgrade boundary" addendum). Non-blocking
   for the units substrate; an owner-facing UX decision, not a substrate gap. Tracked here so it is not
   re-litigated as a §15 open question.
+  - **Partially resolved (2026-08-11) — source-qualified prompt *resolution* is no longer deferred.**
+    A stage profile's `prompt_files` entry may name a config source
+    (`source-id:path[@version]`, or the typed `{source, path, version}` form); those files are fetched
+    at sync time through the same per-source-type `Fetcher` as a layer, cached at
+    `~/.agents/cache/config/<source-id>/<prompt-path>/<sha>/`, and pinned in the `units` section as
+    `kind: "prompt"` units — so prompt content joins the R5 reproducibility guarantee and
+    `da workflow resolve-prompt` resolves them offline from lock+cache. The ratified grammar,
+    mechanism, and failure policy live in
+    `stage-profile-and-routing-consolidation/design.md` §7B (its canonical owner). What remains
+    deferred here is only the **surfacing UX** above: shipped-vs-installed provenance/drift for
+    starter-owned overlays.
 
 ### 15.8 Implementation status note (context, not contract)
 
