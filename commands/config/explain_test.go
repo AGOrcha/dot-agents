@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -287,6 +288,135 @@ func TestExplainField_AbsentFieldHasNoActiveLayer(t *testing.T) {
 	}
 	if exp.Value != nil {
 		t.Errorf("expected nil value, got %v", exp.Value)
+	}
+}
+
+// TestExplainField_IntermediateObjectPath covers the config-explain-merged-subtree
+// bug: `da config explain <intermediate-path>` used to return only the
+// highest-precedence layer's raw subtree at that path, silently hiding keys a
+// lower layer contributed (e.g. a base layer's stage_profiles.verifier.ts-lint
+// disappeared once an app-type layer also set stage_profiles.verifier). FieldAt
+// now folds every contributing layer's subtree through mergeField/mergeMaps —
+// the exact function resolveSnapshot uses to build Effective — so explain and
+// the resolver can never disagree.
+func TestExplainField_IntermediateObjectPath(t *testing.T) {
+	cases := []struct {
+		name            string
+		user            map[string]any
+		repo            map[string]any
+		path            string
+		wantValue       any
+		wantActiveLayer string
+	}{
+		{
+			name: "disjoint keys under one map return the union",
+			user: map[string]any{
+				"stage_profiles": map[string]any{
+					"verifier": map[string]any{
+						"ts-lint": map[string]any{"id": "ts-lint-base"},
+					},
+				},
+			},
+			repo: map[string]any{
+				"stage_profiles": map[string]any{
+					"verifier": map[string]any{
+						"ts-typecheck":      map[string]any{"id": "ts-typecheck-web"},
+						"ts-playwright-e2e": map[string]any{"id": "ts-playwright-web"},
+					},
+				},
+			},
+			path: "stage_profiles.verifier",
+			wantValue: map[string]any{
+				"ts-lint":           map[string]any{"id": "ts-lint-base"},
+				"ts-typecheck":      map[string]any{"id": "ts-typecheck-web"},
+				"ts-playwright-e2e": map[string]any{"id": "ts-playwright-web"},
+			},
+			wantActiveLayer: layerRepoLocal,
+		},
+		{
+			name: "overlapping key resolves to the winning layer's value",
+			user: map[string]any{
+				"stage_profiles": map[string]any{
+					"verifier": map[string]any{
+						"ts-lint": map[string]any{"id": "user-ts-lint"},
+					},
+				},
+			},
+			repo: map[string]any{
+				"stage_profiles": map[string]any{
+					"verifier": map[string]any{
+						"ts-lint": map[string]any{"id": "repo-ts-lint"},
+					},
+				},
+			},
+			path: "stage_profiles.verifier",
+			wantValue: map[string]any{
+				"ts-lint": map[string]any{"id": "repo-ts-lint"},
+			},
+			wantActiveLayer: layerRepoLocal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := flatSnapshot(t, tc.user, tc.repo)
+			exp := explainField(snap, tc.path)
+			if !reflect.DeepEqual(exp.Value, tc.wantValue) {
+				t.Errorf("Value = %#v, want %#v", exp.Value, tc.wantValue)
+			}
+			if exp.ActiveLayer != tc.wantActiveLayer {
+				t.Errorf("ActiveLayer = %q, want %q", exp.ActiveLayer, tc.wantActiveLayer)
+			}
+		})
+	}
+}
+
+// TestExplainField_IntermediateMergeMatchesLeafDrillDown asserts that the
+// merged intermediate-path Value agrees, key by key, with drilling straight
+// into each leaf path — leaf-level attribution (already correct pre-fix) is
+// unchanged, and the merged intermediate view now reports the same winning
+// values and layers per child key.
+func TestExplainField_IntermediateMergeMatchesLeafDrillDown(t *testing.T) {
+	user := map[string]any{
+		"stage_profiles": map[string]any{
+			"verifier": map[string]any{
+				"ts-lint": map[string]any{"id": "user-ts-lint"},
+			},
+		},
+	}
+	repo := map[string]any{
+		"stage_profiles": map[string]any{
+			"verifier": map[string]any{
+				"ts-lint":      map[string]any{"id": "repo-ts-lint"},      // overlapping: repo wins
+				"ts-typecheck": map[string]any{"id": "repo-ts-typecheck"}, // repo-only: disjoint
+			},
+		},
+	}
+	snap := flatSnapshot(t, user, repo)
+
+	mid := explainField(snap, "stage_profiles.verifier")
+	midMap, ok := mid.Value.(map[string]any)
+	if !ok {
+		t.Fatalf("intermediate Value is not a map: %#v", mid.Value)
+	}
+	if len(midMap) != 2 {
+		t.Fatalf("intermediate Value has %d keys, want 2 (union of overlapping + disjoint): %#v", len(midMap), midMap)
+	}
+
+	leafLint := explainField(snap, "stage_profiles.verifier.ts-lint")
+	if !reflect.DeepEqual(midMap["ts-lint"], leafLint.Value) {
+		t.Errorf("intermediate ts-lint = %#v, leaf-level = %#v", midMap["ts-lint"], leafLint.Value)
+	}
+	if leafLint.ActiveLayer != layerRepoLocal {
+		t.Errorf("leaf ts-lint ActiveLayer = %q, want %q", leafLint.ActiveLayer, layerRepoLocal)
+	}
+
+	leafTypecheck := explainField(snap, "stage_profiles.verifier.ts-typecheck")
+	if !reflect.DeepEqual(midMap["ts-typecheck"], leafTypecheck.Value) {
+		t.Errorf("intermediate ts-typecheck = %#v, leaf-level = %#v", midMap["ts-typecheck"], leafTypecheck.Value)
+	}
+	if leafTypecheck.ActiveLayer != layerRepoLocal {
+		t.Errorf("leaf ts-typecheck ActiveLayer = %q, want %q", leafTypecheck.ActiveLayer, layerRepoLocal)
 	}
 }
 

@@ -49,11 +49,24 @@ type LayerValue struct {
 // precedence (lowest first). ActiveLayer is the identifier of the winning layer,
 // or "" when no layer set the field.
 type FieldProvenance struct {
+	// Value is the effective value at this path: the same merge semantics
+	// resolveSnapshot uses to build Effective (mergeField/mergeMaps, keyed by
+	// the path's top-level field category), applied across every layer that
+	// contributed at this path in precedence order. For an intermediate
+	// object path under a CategoryMapMerge field (e.g. "stage_profiles.verifier"),
+	// this is the deep-merged subtree — not just the highest-precedence
+	// layer's raw value — so an operator auditing an intermediate node sees
+	// the same union/override result the resolver actually produced. For a
+	// leaf or a scalar/replace-category field, it is simply the winning
+	// layer's value (identical to the pre-merge behavior).
+	Value any `json:"value"`
 	// ActiveLayer is the winning layer id, or "" when the field is unset
 	// everywhere.
 	ActiveLayer string `json:"active_layer"`
 	// Layers is the ordered (lowest precedence first) per-layer stack. Always
-	// a non-nil slice so JSON marshals to [] not null.
+	// a non-nil slice so JSON marshals to [] not null. Each entry still holds
+	// that layer's own raw (unmerged) contribution at this path, so callers
+	// can see exactly what each layer set.
 	Layers []LayerValue `json:"layers"`
 }
 
@@ -131,14 +144,35 @@ func (s *Snapshot) EffectiveRaw() (map[string]any, error) {
 // (e.g. "kg.backend", "execution_profile.by_app_type.go-cli"), computing it on demand by
 // walking each layer's raw object. Top-level paths are also available directly
 // in s.Provenance; FieldAt is the general accessor that also handles nested keys.
+//
+// Value is folded across every contributing layer in precedence order via
+// mergeField, keyed by the path's top-level field name — the SAME function
+// resolveSnapshot uses to build Effective. That reuse is what keeps explain
+// and the resolver from disagreeing: a CategoryMapMerge path (stage_profiles,
+// kg, features, …) deep-merges each layer's subtree at path just like the
+// real effective config does, instead of returning only the highest-precedence
+// layer's raw (and possibly partial) subtree. A scalar/set/ordered-replace
+// path still resolves to the winning layer's value, unchanged.
 func (s *Snapshot) FieldAt(path string) FieldProvenance {
 	parts := splitFieldPath(path)
+	var topKey string
+	if len(parts) > 0 {
+		topKey = parts[0]
+	}
 	out := FieldProvenance{Layers: make([]LayerValue, 0, len(s.Layers))}
+	var merged any
+	haveMerged := false
 	for _, layer := range s.Layers {
 		entry := LayerValue{Layer: layer.ID}
 		if val, ok := lookupPath(layer.Raw, parts); ok {
 			entry.Value = val
 			out.ActiveLayer = layer.ID // last (highest precedence) writer wins
+			if haveMerged {
+				merged = mergeField(topKey, merged, val)
+			} else {
+				merged = val
+				haveMerged = true
+			}
 		}
 		out.Layers = append(out.Layers, entry)
 	}
@@ -149,6 +183,7 @@ func (s *Snapshot) FieldAt(path string) FieldProvenance {
 			}
 		}
 	}
+	out.Value = merged
 	return out
 }
 
