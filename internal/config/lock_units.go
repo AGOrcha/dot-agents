@@ -24,6 +24,15 @@ const (
 	// every other unit. The machine-local BINDING table (id → absolute-path) is
 	// NOT this unit and is never synced/scoped/projected (see IsSyncedUnitKind).
 	UnitKindProjectSet = "project-set"
+	// UnitKindPrompt is the source-qualified PROMPT FILE unit: one stage profile
+	// prompt_files entry fetched from a config source rather than resolved on the
+	// local prompt search path (see prompt_units.go). It is neither merged like a
+	// layer nor installed/invoked like an artifact — it is content pinned for
+	// composition — so it gets its own kind rather than overloading
+	// UnitKindArtifact, whose trust/signing posture and packages-cache install
+	// path do not apply. Pinning it extends the R5 reproducibility guarantee to
+	// prompt content: same source-set + lock digest ⇒ identical composed prompt.
+	UnitKindPrompt = "prompt"
 	// UnitKindDescriptor is the §15 D3/A3 CONDITIONAL fourth behavior: declarative,
 	// non-merging, non-installing projection data. It stays Go-internal / NOT a
 	// §15 unit (no lock entry, not projected) until a descriptor becomes
@@ -48,7 +57,8 @@ const (
 // machine-local config (the id→absolute-path binding table), NOT in the portable,
 // content-addressed lock.
 type LockedUnit struct {
-	// Kind is UnitKindLayer or UnitKindArtifact.
+	// Kind is UnitKindLayer, UnitKindArtifact, UnitKindPrompt, or one of the other
+	// §15 unit kinds (see KnownUnitKind).
 	Kind string `json:"kind"`
 	// Digest is the content hash recorded at fetch time ("sha256:…").
 	Digest string `json:"digest"`

@@ -20,7 +20,7 @@ const descriptorsSourceShipped = false
 // unit (see IsProjectableKind).
 func KnownUnitKind(kind string) bool {
 	switch kind {
-	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindDescriptor, UnitKindProfile, UnitKindManifest:
+	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindDescriptor, UnitKindProfile, UnitKindManifest, UnitKindPrompt:
 		return true
 	default:
 		return false
@@ -29,11 +29,12 @@ func KnownUnitKind(kind string) bool {
 
 // IsProjectableKind reports whether a unit of this kind participates in
 // resolution/projection today. layer (merges), artifact (installs), project-set
-// (synced identity registry), and manifest (distributable §15+L1 bundle, L2) are
-// projectable; descriptor is NOT until descriptorsSourceShipped flips (§15 D3/A3).
+// (synced identity registry), prompt (source-qualified prompt content pinned for
+// composition), and manifest (distributable §15+L1 bundle, L2) are projectable;
+// descriptor is NOT until descriptorsSourceShipped flips (§15 D3/A3).
 func IsProjectableKind(kind string) bool {
 	switch kind {
-	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindProfile, UnitKindManifest:
+	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindProfile, UnitKindManifest, UnitKindPrompt:
 		return true
 	case UnitKindDescriptor:
 		return descriptorsSourceShipped
@@ -46,11 +47,12 @@ func IsProjectableKind(kind string) bool {
 // scope, participates in the lock + inputs_digest). project-set is synced
 // portable identity (§15 D13/A2); manifest is the synced, scope-attachable L2
 // bundle (distributable-config-manifest D1); the machine-local binding table
-// (id → absolute-path) is never a unit, so it never reaches this guard. A
+// (id → absolute-path) is never a unit, so it never reaches this guard. A prompt
+// unit is synced config content (fetched at sync time, pinned in the lock). A
 // descriptor is not synced until source-shipped.
 func IsSyncedUnitKind(kind string) bool {
 	switch kind {
-	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindProfile, UnitKindManifest:
+	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindProfile, UnitKindManifest, UnitKindPrompt:
 		return true
 	default:
 		return false
