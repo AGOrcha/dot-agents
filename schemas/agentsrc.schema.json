@@ -47,6 +47,10 @@
     "settings": {
       "type": "boolean"
     },
+    "gitignore_projections": {
+      "type": "boolean",
+      "description": "Whether `da install` / `da refresh` maintain the dot-agents-managed block in this repo's .gitignore covering the outputs they project (platform links, generated configs, *.dot-agents-backup). Absent means enabled; set false to skip the block and remove one a previous run wrote. Only untracked files are affected — a projection the repo already commits stays tracked."
+    },
     "sources": {
       "type": "array",
       "minItems": 1,

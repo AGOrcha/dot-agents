@@ -595,6 +595,18 @@ type AgentsRC struct {
 	// manifest.go. Its owning authority is SOURCE-derived, never authored here (D4).
 	Manifests map[string]ManifestSpec `json:"manifests,omitempty"`
 
+	// GitignoreProjections opts the project out of the managed `.gitignore`
+	// block `da install` / `da refresh` maintain for the outputs they project
+	// into this repo (config-distribution-model §15 / D14 / R8).
+	//
+	// Tri-state on purpose: absent (nil) means DEFAULT-ON — the overwhelmingly
+	// common case, so an unannotated manifest still gets its generated outputs
+	// ignored — while an explicit `false` is a deliberate opt-out that also
+	// REMOVES a previously-written block. A plain `bool` could not tell "the
+	// author wrote false" from "the key is missing", which is exactly the
+	// distinction the removal behavior turns on.
+	GitignoreProjections *bool `json:"gitignore_projections,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
@@ -607,6 +619,21 @@ type AgentsRC struct {
 	// surface a deprecation warning without re-parsing the file (config-v2
 	// §15.3 deprecation cadence). Not serialized.
 	LegacyKeys []string `json:"-"`
+}
+
+// GitignoreProjectionsEnabled reports whether install/refresh should maintain
+// the managed `.gitignore` block for this project's projected outputs (§15 D14).
+//
+// Default-on: a nil receiver (manifest-less project) and an absent key both
+// answer true, so the block appears without anyone opting in. Only an explicit
+// `"gitignore_projections": false` disables it — and that case is a positive
+// instruction to REMOVE any block a previous run wrote, not merely to skip
+// writing one, which is why the field is a *bool rather than a bool.
+func (a *AgentsRC) GitignoreProjectionsEnabled() bool {
+	if a == nil || a.GitignoreProjections == nil {
+		return true
+	}
+	return *a.GitignoreProjections
 }
 
 // PredicateSpec is the config-facing mirror of the commands/workflow Predicate:
@@ -965,6 +992,8 @@ var agentsRCKnown = map[string]bool{
 	"locks": true, "authority_grants": true,
 	// unified-config-profiles (L1): scope-attached layering policy unit
 	"layering_policy": true,
+	// gitignore_projections: managed-.gitignore opt-out (§15 D14)
+	"gitignore_projections": true,
 	// distributable-config-manifest (L2): scope-attached manifest units
 	"manifests": true,
 	// deprecated legacy keys — read and folded into stage_profiles /
@@ -1009,6 +1038,8 @@ type agentsRCCore struct {
 	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
 	LayeringPolicy  *LayeringPolicy           `json:"layering_policy,omitempty"`
 	Manifests       map[string]ManifestSpec   `json:"manifests,omitempty"`
+
+	GitignoreProjections *bool `json:"gitignore_projections,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -1041,6 +1072,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.AuthorityGrants = core.AuthorityGrants
 	a.LayeringPolicy = core.LayeringPolicy
 	a.Manifests = core.Manifests
+	a.GitignoreProjections = core.GitignoreProjections
 
 	// Back-compat: read the deprecated verifier_profiles / reviewer_profiles /
 	// app_type_verifier_map keys and fold them into the unified stage_profiles +
@@ -1113,6 +1145,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		AuthorityGrants:      a.AuthorityGrants,
 		LayeringPolicy:       a.LayeringPolicy,
 		Manifests:            a.Manifests,
+		GitignoreProjections: a.GitignoreProjections,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
