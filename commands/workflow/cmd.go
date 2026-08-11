@@ -742,7 +742,7 @@ func newWorkflowVerifyRecordCmd() *cobra.Command {
 	verifyRecordCmd.Flags().StringSliceVar(&reviewFailedGates, "failed-gate", nil, "When --kind review: failed verifier or gate slug (repeatable)")
 	verifyRecordCmd.Flags().StringVar(&reviewEscalation, "escalation-reason", "", "When --kind review: required when overall decision is escalate")
 	verifyRecordCmd.Flags().StringVar(&reviewNotes, "reviewer-notes", "", "When --kind review: optional reviewer notes")
-	verifyRecordCmd.Flags().StringVar(&reviewTask, "task", "", "Task id for delegation contract lookup (required for --kind review; optional for other kinds to write a typed result artifact)")
+	verifyRecordCmd.Flags().StringVar(&reviewTask, "task", "", "Task id to scope this record to (required for --kind review; optional for other kinds to write a typed result artifact). Validated against the workflow store; links a delegation contract when one exists at .agents/active/delegation/<task>.yaml, else records plan-scoped with no contract linkage")
 	verifyRecordCmd.Flags().StringVar(&verifyVerifierType, workflowFlagVerifierType, "", "Verifier profile id for typed result artifact stem (e.g. unit, api, batch); defaults to --kind when --task is set")
 	_ = verifyRecordCmd.MarkFlagRequired("kind")
 	_ = verifyRecordCmd.MarkFlagRequired("summary")
