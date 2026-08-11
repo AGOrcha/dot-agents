@@ -1,6 +1,6 @@
 # Evidence Collection Rubric — local transcript analysis
 
-Extends the provadm-agc `workflow-evidence-analysis` toolkit (generic core) with this machine's
+Extends the adminapp-agc `workflow-evidence-analysis` toolkit (generic core) with this machine's
 corpora. Report section order is canonical and MUST match prior analyses:
 **sources → anchors → timeline → coverage/confidence → gaps/unknowns.**
 
@@ -87,5 +87,5 @@ actionable outcome by itself.
 
 - `templates/source-inventory.md` — §1 table.
 - `templates/evidence-item.md` — one item: claim, class, anchors, confidence, `[INFERENCE]` flags.
-- `templates/case-study.md` — canonical section order, cross-referencing prior payout/provadm
+- `templates/case-study.md` — canonical section order, cross-referencing prior payout/adminapp
   reports by their existing IDs.

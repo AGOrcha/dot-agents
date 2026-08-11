@@ -1031,7 +1031,7 @@ func deniedLockError(lockPath string, err error) error {
 // driver. This is the exact work-PC field shape (`mkdir
 // C:\...\.agentsrc.lock.lock: The system cannot find the file specified`
 // with git operating normally in the same directory — see
-// .agents/history/provadm-windows-da-lock-observation.md). Classified
+// .agents/history/windows-workstation-da-lock-observation.md). Classified
 // immediately, not retried: the interference is persistent and burning the
 // acquire budget would misreport it as a lock timeout.
 func notFoundLockError(lockPath string, err error) error {

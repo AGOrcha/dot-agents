@@ -12,7 +12,7 @@ rule4 draws only from the unselected pool).
 import json, math, random, collections, sys, os
 
 SEED = 20260712
-WF = ("payout", "dot-agents", "provadm", "roos", "agent-conf")
+WF = ("payout", "dot-agents", "adminapp", "orga", "org-config")
 
 def bucket(row):  # project-bucket construction
     slug = (row.get("project_slug") or "").lower()

@@ -39,12 +39,12 @@ Algorithm/types and the worked org→team example are in
 ## Downstream unblocks (the "after deps are met" gate)
 On completion of task 3 (and ideally 4), the **content/adoption** plans in the
 config repos become runnable — they are currently **paused** pending this plan:
-- `agent-conf-ext/example-org-repo` → plan `org-layer-buildout`
-- `agent-conf-ext/example-team-repo` → plan `team-config-revamp`
+- `config-workspace/example-org-repo` → plan `org-layer-buildout`
+- `config-workspace/example-team-repo` → plan `team-config-revamp`
 - payout `platform-config-layering` → `team-config-adopt-org-layer`,
   `repo-rollout-manifest-examples`
 
-**Closeout action:** when this plan completes, unpause those two agent-conf-ext
+**Closeout action:** when this plan completes, unpause those two downstream config-repo
 plans (`da workflow plan update <id> --status active`) so the loop picks up the
 content authoring.
 

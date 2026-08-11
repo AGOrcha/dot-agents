@@ -1946,7 +1946,7 @@ func TestLockOccupantStaleUnreadableFileUsesGrace(t *testing.T) {
 }
 
 // TestAcquireNotFoundWithParentPresentFailsFast is the regression guard for
-// the owner's exact work-PC trace (provadm-windows-da-lock-observation.md):
+// the owner's exact work-PC trace (windows-workstation-da-lock-observation.md):
 // the lock create fails ERROR_FILE_NOT_FOUND while the parent directory
 // exists — a filesystem filter driver (OneDrive-redirected Documents, DLP/AV
 // minifilter) intercepting creates. The classification must be IMMEDIATE (no

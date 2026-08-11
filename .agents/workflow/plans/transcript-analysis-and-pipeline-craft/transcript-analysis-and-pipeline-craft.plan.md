@@ -4,7 +4,7 @@
 
 Run a structured, rubric-gated evidence pass over this machine's actual session transcripts,
 synthesize it with the two prior analyses (payout/dot-agents `analysis/top-level-basic-from-coordination-state`,
-provadm/roos `feature/analysis-doc`), and convert the full-loop OMP exercise's craft into three
+adminapp/orga `feature/analysis-doc`), and convert the full-loop OMP exercise's craft into three
 reusable assets: a pipeline-architect skill, a config→materialized-pipeline transformer layer,
 and a 4-axis Pareto experiment harness for stage-level model routing.
 

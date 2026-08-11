@@ -218,7 +218,7 @@ without closing it). None are outright refuted.
 | **OH-C1** | human vs agent found-issue split holds | **still-open** | who-found-what not anchored per-issue here. |
 | **OH-C2** | worst direction changes = unknown-unknowns | **still-open** | direction-change taxonomy not coded locally. |
 | **OH-D1** | credentialing evidence degraded by *Windows* `da` friction | **partial (consistent)** | this corpus is darwin, where `da workflow` is driven heavily and works (`cc-workflow-cli-drives-taskstate`) → consistent with friction being environment-specific, but the Windows counterfactual is unrun. |
-| **OH-D2** | payout influenced ProvAdm design | **still-open** | cross-repo influence outside the local corpus's reach. |
+| **OH-D2** | payout influenced AdminApp design | **still-open** | cross-repo influence outside the local corpus's reach. |
 | **OH-D3** | environment mode materially affects behavior | **still-open** | multi-env sessions observed (`~/proj-docs`, `~/Documents`, `.claude/worktrees`, `<tmp>` in codex token table) but no task-fixed controlled comparison. |
 | **OH-E1** | recency/retention bias does not distort era comparison | **partial (bias real)** | telemetry-density gradient with recency confirmed locally: older codex sessions record rate-limit % but no token totals (`cx-cost-tokengap-01..14`); consistent with EFF-S2/LC2 — a density bias exists, though we run no era comparison to distort. |
 | **OH-E2** | mtime fallback anchors are accurate enough to order cases | **partial (concern upheld)** | cursor records **zero** timestamps (`cursor-gap-no-timestamps`), so for the one harness where mtime would be the only anchor, ordering is unvalidatable → supports our mtime ban (`evidence-rubric.md:16`); direct divergence test not run. |
