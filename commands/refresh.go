@@ -7,7 +7,6 @@ import (
 
 	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/AGOrcha/dot-agents/internal/config"
-	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/AGOrcha/dot-agents/internal/projectsync"
 	"github.com/AGOrcha/dot-agents/internal/ui"
@@ -295,17 +294,21 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 // refresh is idempotent. Dry-run previews the update without touching the file.
 // Returns true when a non-dry-run write failed so the caller withholds the
 // success stamp.
+//
+// The knob check and write/remove decision are shared with `da install` via
+// lifecycle.MaintainManagedGitignore, so the two commands cannot leave different
+// blocks behind on the same repo.
 func ensureManagedGitignoreForRefresh(path string, enabledPlatforms []platform.Platform) bool {
 	if Flags.DryRun {
 		ui.DryRun("Update dot-agents managed .gitignore block")
 		return false
 	}
-	outputs := platform.CollectManagedOutputs(enabledPlatforms)
-	if err := links.EnsureManagedGitignore(path, outputs); err != nil {
+	line, err := lifecycle.MaintainManagedGitignore(path, enabledPlatforms)
+	if err != nil {
 		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: %v", err))
 		return true
 	}
-	ui.Bullet("ok", "managed .gitignore block updated")
+	ui.Bullet("ok", line)
 	return false
 }
 

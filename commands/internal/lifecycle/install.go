@@ -221,6 +221,7 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	if err := createInstallPlatformLinks(projectName, projectPath, opts, packagesUnits, packagesParticipated); err != nil {
 		return err
 	}
+	ensureManagedGitignoreForInstall(projectPath, deps)
 	if err := finalizeInstall(projectName, projectPath, opts); err != nil {
 		return err
 	}
@@ -479,6 +480,39 @@ func createInstallPlatformLink(p platform.Platform, projectName, projectPath str
 	}
 	ui.Bullet("ok", p.DisplayName()+" links created")
 	return nil
+}
+
+// ensureManagedGitignoreForInstall maintains the dot-agents-managed .gitignore
+// block for the project install just projected into (§15 D14 / R8), so the
+// generated outputs are untracked from the very first `da install` rather than
+// only after the next `da refresh` — the gap that left every freshly-installed
+// repo with a handful of untracked generated paths.
+//
+// It runs after the platform links exist so the block describes a projection
+// that has actually happened, and it is keyed off the CONFIG-enabled platform
+// set (platform.EnabledPlatforms) — the same input refresh uses — so install and
+// refresh converge on a byte-identical block instead of fighting over it.
+//
+// Non-fatal by design, matching refresh: a repo whose .gitignore cannot be
+// written (read-only tree, exotic permissions) is a fully working install with
+// noisier `git status`, not a failed one, so this warns and returns rather than
+// unwinding the install.
+func ensureManagedGitignoreForInstall(projectPath string, deps InstallDeps) {
+	if Flags.DryRun {
+		ui.DryRun("Update dot-agents managed .gitignore block")
+		return
+	}
+	cfg, err := deps.LoadConfig()
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: loading config: %v", err))
+		return
+	}
+	line, err := MaintainManagedGitignore(projectPath, platform.EnabledPlatforms(cfg))
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: %v", err))
+		return
+	}
+	ui.Bullet("ok", line)
 }
 
 func finalizeInstall(projectName, projectPath string, opts installOptions) error {
