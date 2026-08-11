@@ -331,6 +331,15 @@ no longer in the resolved set); pass `--inexact` to keep additive behavior.
 **Skills vs rules?** Rules (`.mdc`) are always-active guidelines; skills
 (`SKILL.md`) are on-demand procedures agents invoke when needed.
 
+**Will da clutter my `git status`?** No. `install` and `refresh` maintain a
+delimited managed block in the repo's `.gitignore` covering everything they
+project (platform dirs, generated configs, `*.dot-agents-backup` sidecars), so
+generated files stay out of your way. Your own ignore rules are preserved and
+the block is byte-stable across runs. Note that gitignore only affects
+*untracked* files — if your repo already commits one of those paths on purpose,
+it stays tracked. Opt out with `"gitignore_projections": false` in
+`.agentsrc.json`. See [Commands](docs/COMMANDS.md#managed-gitignore-block).
+
 ## Contributing
 
 Contributions welcome — open an issue or pull request on GitHub.
