@@ -442,16 +442,26 @@ func newWorkflowTaskAddCmd() *cobra.Command {
 
 func newWorkflowTaskUpdateCmd() *cobra.Command {
 	var taskUpdateID, taskUpdateNotes, taskUpdateWriteScope, taskUpdateTitle string
-	var taskUpdateDependsOn, taskUpdateBlocks string
+	var taskUpdateDependsOn, taskUpdateBlocks, taskUpdateAppType string
 	taskUpdateCmd := &cobra.Command{
 		Use:   "update <plan-id>",
-		Short: "Update notes, write-scope, or title for an existing task",
+		Short: "Update notes, write-scope, title, or app_type for an existing task",
 		Example: deps.ExampleBlock(
 			"  da workflow task update loop-orchestrator-layer --task phase-5 --notes \"Needs provider-consumer pairing\"",
+			"  da workflow task update loop-orchestrator-layer --task phase-5 --app-type go-cli",
 		),
 		Args: deps.ExactArgsWithHints(1, cmdHintPlanOwnsTask),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowTaskUpdate(args[0], taskUpdateID, taskUpdateTitle, taskUpdateNotes, taskUpdateWriteScope, taskUpdateDependsOn, taskUpdateBlocks)
+			return runWorkflowTaskUpdate(taskUpdateInputs{
+				PlanID:     args[0],
+				TaskID:     taskUpdateID,
+				Title:      taskUpdateTitle,
+				Notes:      taskUpdateNotes,
+				WriteScope: taskUpdateWriteScope,
+				DependsOn:  taskUpdateDependsOn,
+				Blocks:     taskUpdateBlocks,
+				AppType:    taskUpdateAppType,
+			})
 		},
 	}
 	taskUpdateCmd.Flags().StringVar(&taskUpdateID, "task", "", "Task ID to update (required)")
@@ -460,6 +470,7 @@ func newWorkflowTaskUpdateCmd() *cobra.Command {
 	taskUpdateCmd.Flags().StringVar(&taskUpdateWriteScope, workflowFlagWriteScope, "", "New comma-separated write-scope patterns (replaces existing)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on (replaces existing)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks (replaces existing)")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateAppType, "app-type", "", "App type for verifier dispatch (e.g. go-cli, go-http-service); validated against this repo's execution profile when one is configured")
 	_ = taskUpdateCmd.MarkFlagRequired("task")
 	return taskUpdateCmd
 }
