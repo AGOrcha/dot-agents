@@ -154,6 +154,31 @@ func loadCanonicalTaskByID(projectPath, planID, taskID string) (*CanonicalTask, 
 	return nil, fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
 }
 
+// findCanonicalTaskAnyPlan searches every canonical plan's TASKS.yaml for
+// taskID and returns the owning plan id and task on the first match. Used by
+// `workflow verify record` to validate --task against the workflow store
+// when no delegation contract exists for the task — i.e. direct
+// (non-delegated) work — so a typo'd --task still fails loudly instead of
+// silently recording an unscoped entry.
+func findCanonicalTaskAnyPlan(projectPath, taskID string) (string, *CanonicalTask, error) {
+	planIDs, err := listCanonicalPlanIDs(projectPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("list plans: %w", err)
+	}
+	for _, planID := range planIDs {
+		tf, err := loadCanonicalTasks(projectPath, planID)
+		if err != nil {
+			continue
+		}
+		for i := range tf.Tasks {
+			if tf.Tasks[i].ID == taskID {
+				return planID, &tf.Tasks[i], nil
+			}
+		}
+	}
+	return "", nil, fmt.Errorf("unknown task %q: not found in any workflow plan", taskID)
+}
+
 func graphAdapterForProject(projectPath string) *LocalGraphAdapter {
 	cfg, _ := loadGraphBridgeConfig(projectPath)
 	if cfg == nil {

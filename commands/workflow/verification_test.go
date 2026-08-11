@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"go.yaml.in/yaml/v3"
 )
 
 // TestResolveReviewOverallDecision covers the consolidation rules used by
@@ -790,15 +791,107 @@ func TestWriteVerifyResultArtifact_InvalidStem(t *testing.T) {
 	}
 }
 
-func TestWriteVerifyResultArtifact_ContractMissing(t *testing.T) {
+// TestWriteVerifyResultArtifact_ContractOptionality is the table-driven
+// coverage for the --task contract-linkage contract: a delegation contract
+// links when present (unchanged behavior), a missing contract falls back to
+// direct (non-delegated) plan-scoped recording rather than hard-failing, an
+// unknown task id still errors clearly (no silently-unscoped entry), and a
+// present-but-malformed contract file still errors (only a *missing* file
+// takes the direct-work path).
+func TestWriteVerifyResultArtifact_ContractOptionality(t *testing.T) {
+	t.Run("delegated_task_with_contract_links_it", testWriteVerifyResultArtifactDelegatedWithContract)
+	t.Run("direct_task_without_contract_records_plan_scoped", testWriteVerifyResultArtifactDirectNoContract)
+	t.Run("unknown_task_id_errors", testWriteVerifyResultArtifactUnknownTask)
+	t.Run("malformed_contract_still_errors", testWriteVerifyResultArtifactMalformedContract)
+}
+
+func testWriteVerifyResultArtifactDelegatedWithContract(t *testing.T) {
 	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-x", "plan-x", "deleg-x")
+	rel, err := writeVerifyResultArtifact(verifyResultArtifactInputs{
+		ProjectPath: repo, TaskID: "task-x", Kind: "test", Status: "pass",
+		Summary: "ok", VerifierType: "unit", Now: "2026-05-12T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	doc := readVerificationResultYAMLForTest(t, repo, "task-x", "unit")
+	if doc.ParentPlanID != "plan-x" {
+		t.Fatalf("expected parent_plan_id from contract, got %q", doc.ParentPlanID)
+	}
+	if doc.DelegationID != "deleg-x" {
+		t.Fatalf("expected delegation_id from contract, got %q", doc.DelegationID)
+	}
+	if !strings.HasSuffix(rel, "unit.result.yaml") {
+		t.Fatalf("unexpected rel path: %s", rel)
+	}
+}
+
+func testWriteVerifyResultArtifactDirectNoContract(t *testing.T) {
+	repo := setupTestProject(t) // plan-001 with task-001/task-002, no delegation contract
+	rel, err := writeVerifyResultArtifact(verifyResultArtifactInputs{
+		ProjectPath: repo, TaskID: "task-001", Kind: "custom", Status: "pass",
+		Summary: "direct iteration", VerifierType: "custom", Now: "2026-05-12T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("expected direct (no-contract) task to succeed, got: %v", err)
+	}
+	doc := readVerificationResultYAMLForTest(t, repo, "task-001", "custom")
+	if doc.ParentPlanID != "plan-001" {
+		t.Fatalf("expected plan-scoped parent_plan_id from workflow store, got %q", doc.ParentPlanID)
+	}
+	if doc.DelegationID != "" {
+		t.Fatalf("expected empty delegation_id for direct work, got %q", doc.DelegationID)
+	}
+	if !strings.HasSuffix(rel, "custom.result.yaml") {
+		t.Fatalf("unexpected rel path: %s", rel)
+	}
+}
+
+func testWriteVerifyResultArtifactUnknownTask(t *testing.T) {
+	repo := setupTestProject(t) // plan-001 exists but has no task named "no-such-task"
 	_, err := writeVerifyResultArtifact(verifyResultArtifactInputs{
 		ProjectPath: repo, TaskID: "no-such-task", Kind: "test",
 		VerifierType: "unit", Now: "2026-05-12T00:00:00Z",
 	})
-	if err == nil || !strings.Contains(err.Error(), "load delegation contract") {
-		t.Fatalf("expected load-contract error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown task") {
+		t.Fatalf("expected unknown-task error, got %v", err)
 	}
+}
+
+func testWriteVerifyResultArtifactMalformedContract(t *testing.T) {
+	repo := setupTestProject(t)
+	dir := delegationDir(repo)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Malformed YAML (bad indentation / unterminated mapping) — present but unparseable.
+	if err := os.WriteFile(filepath.Join(dir, "task-001.yaml"), []byte("id: [unterminated\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := writeVerifyResultArtifact(verifyResultArtifactInputs{
+		ProjectPath: repo, TaskID: "task-001", Kind: "test",
+		VerifierType: "unit", Now: "2026-05-12T00:00:00Z",
+	})
+	if err == nil || !strings.Contains(err.Error(), "load delegation contract") {
+		t.Fatalf("expected malformed-contract error, got %v", err)
+	}
+}
+
+// readVerificationResultYAMLForTest reads back the typed result artifact
+// written by writeVerifyResultArtifact for assertions on derived fields.
+func readVerificationResultYAMLForTest(t *testing.T, projectPath, taskID, verifierType string) *VerificationResultDoc {
+	t.Helper()
+	path := filepath.Join(projectPath, ".agents", "active", "verification", taskID, verifierType+".result.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result artifact: %v", err)
+	}
+	var doc VerificationResultDoc
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse result artifact: %v", err)
+	}
+	return &doc
 }
 
 func TestWriteVerifyResultArtifact_WriteYAMLErr(t *testing.T) {
@@ -821,15 +914,37 @@ func TestWriteVerifyResultArtifact_WriteYAMLErr(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowVerifyRecord_WriteArtifactErrPropagates(t *testing.T) {
+// TestRunWorkflowVerifyRecord_DirectTaskNoContract covers the bug this fix
+// closes: `verify record --task <id>` for a task with no delegation contract
+// (direct/non-delegated work) must succeed and record plan-scoped, not
+// hard-fail on the missing contract file.
+func TestRunWorkflowVerifyRecord_DirectTaskNoContract(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirForCov(t, repo)
 	err := runWorkflowVerifyRecord(verifyRecordInputs{
 		Kind: "test", Status: "pass", Scope: "package",
 		Summary: "x", TaskID: "task-001",
 	})
-	if err == nil || !strings.Contains(err.Error(), "load delegation contract") {
-		t.Fatalf("expected propagated load-contract error, got %v", err)
+	if err != nil {
+		t.Fatalf("expected direct-work task to record without error, got: %v", err)
+	}
+	doc := readVerificationResultYAMLForTest(t, repo, "task-001", "test")
+	if doc.ParentPlanID != "plan-001" {
+		t.Fatalf("expected plan-scoped parent_plan_id, got %q", doc.ParentPlanID)
+	}
+}
+
+// TestRunWorkflowVerifyRecord_UnknownTaskErrors ensures a typo'd --task still
+// fails clearly instead of silently recording an unscoped entry.
+func TestRunWorkflowVerifyRecord_UnknownTaskErrors(t *testing.T) {
+	repo := setupTestProject(t)
+	chdirForCov(t, repo)
+	err := runWorkflowVerifyRecord(verifyRecordInputs{
+		Kind: "test", Status: "pass", Scope: "package",
+		Summary: "x", TaskID: "no-such-task",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown task") {
+		t.Fatalf("expected unknown-task error, got %v", err)
 	}
 }
 
