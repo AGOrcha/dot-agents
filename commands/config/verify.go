@@ -298,7 +298,7 @@ func verifyStaleness(cwd string) []VerifyCheck {
 		return []VerifyCheck{{name, verifyWarn, "could not compute staleness: " + err.Error()}}
 	}
 	if res.Fresh {
-		return []VerifyCheck{{name, verifyPass, "local config in sync (inputs_digest " + abbrevSHA(res.ExpectedInputsDigest) + ")"}}
+		return []VerifyCheck{{name, verifyPass, "local config in sync (inputs_digest " + abbrevDigest(res.ExpectedInputsDigest) + ")"}}
 	}
 	// A unit-digest mismatch is ALWAYS a hard failure (review #1): a tampered
 	// store must FAIL verify regardless of whether ordinary local-scope drift
@@ -318,9 +318,7 @@ func verifyStaleness(cwd string) []VerifyCheck {
 	if recorded == "" {
 		return []VerifyCheck{{name, verifyWarn, "no inputs_digest recorded in " + cfg.AgentsLockFile + " — run `da config sync` to create the lock"}}
 	}
-	return []VerifyCheck{{name, verifyWarn, fmt.Sprintf(
-		"local config changed since last resolve (lock %s, now %s) — run `da config sync`",
-		abbrevSHA(recorded), abbrevSHA(res.ExpectedInputsDigest))}}
+	return []VerifyCheck{{name, verifyWarn, staleWarnDetail(res.Reasons, recorded, res.ExpectedInputsDigest)}}
 }
 
 // reasonsContainUnitDigest reports whether a unit-digest mismatch is among the
@@ -336,6 +334,50 @@ func reasonsContainUnitDigest(reasons []cfg.StalenessReason) bool {
 		}
 	}
 	return false
+}
+
+// staleWarnDetail renders the config-staleness warn detail for the non-fresh,
+// non-unit-digest case, naming the SPECIFIC reason(s) that fired instead of
+// always implying an inputs_digest mismatch. res.Reasons can carry
+// ReasonDeclaredSet alone (e.g. a manually edited/incomplete lock) with the
+// recorded and expected inputs_digest IDENTICAL — the prior message printed
+// "(lock X, now X)" verbatim in that case, which read as a truncated-display
+// collision but was really just the wrong sentence for the reason that fired
+// (config-verify-staleness-digest).
+func staleWarnDetail(reasons []cfg.StalenessReason, recorded, expected string) string {
+	var parts []string
+	for _, r := range reasons {
+		switch r {
+		case cfg.ReasonInputsDigest:
+			parts = append(parts, fmt.Sprintf("local config scopes changed since last resolve (lock %s, now %s)", abbrevDigest(recorded), abbrevDigest(expected)))
+		case cfg.ReasonDeclaredSet:
+			parts = append(parts, "the declared `extends`/`packages` set no longer matches the lock")
+		}
+	}
+	if len(parts) == 0 {
+		// Defensive only: Fresh is false and unit-digest was already handled by the
+		// caller, so Reasons is never empty here — but degrade to a generic message
+		// rather than emit "" if a future StalenessReason is added and left
+		// unhandled above.
+		parts = append(parts, "local config changed since last resolve")
+	}
+	return strings.Join(parts, "; ") + " — run `da config sync`"
+}
+
+// abbrevDigest shortens a "sha256:…" content digest for the human render,
+// preserving enough hex past the algorithm prefix that two different digests
+// stay visually distinguishable. abbrevSHA's flat 12-character cut leaves only
+// 5 hex characters once the "sha256:" prefix eats into the budget — a genuine
+// mismatch could easily still look identical at a glance. Falls back to
+// abbrevSHA for a value that does not carry the prefix (e.g. a bare git SHA).
+func abbrevDigest(digest string) string {
+	if rest, ok := strings.CutPrefix(digest, "sha256:"); ok {
+		if len(rest) > 16 {
+			rest = rest[:16]
+		}
+		return "sha256:" + rest
+	}
+	return abbrevSHA(digest)
 }
 
 // recordedInputsDigest reads the inputs_digest the lockfile currently pins, or

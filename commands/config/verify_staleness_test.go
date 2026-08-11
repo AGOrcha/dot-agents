@@ -67,7 +67,7 @@ func TestVerifyStaleness_DriftWarns(t *testing.T) {
 	if c.Status != verifyWarn {
 		t.Fatalf("drift must warn, got %+v", c)
 	}
-	if !strings.Contains(c.Detail, "local config changed") || !strings.Contains(c.Detail, "da config sync") {
+	if !strings.Contains(c.Detail, "local config scopes changed") || !strings.Contains(c.Detail, "da config sync") {
 		t.Errorf("drift detail should explain the change and the fix, got %q", c.Detail)
 	}
 }

@@ -69,6 +69,17 @@ type LockedUnit struct {
 	// and a cache_keys override edit both still register. Omitted for a unit
 	// resolved without a cache key (e.g. a legacy lock migrated on read).
 	CacheKey string `json:"cache_key,omitempty"`
+	// Transitive marks a kind:layer unit that was pulled into the lock because
+	// ANOTHER layer's own `extends` named it (config-transitive-layering), not
+	// because this project's manifest declared it directly. Such a unit has no
+	// top-level manifest identity to compare against declaredUnitRefs, so
+	// declaredSetChanged excludes it from the declared-set comparison — its
+	// consistency is tracked instead by ReasonUnitDigest (its parent layer's
+	// content drifting) and by a normal re-resolve. Omitted (false) for every
+	// directly-declared layer/artifact unit, matching the pre-transitive-
+	// layering lock shape, so every existing lock (and every LockedUnit literal
+	// that predates this field) defaults to "declared" exactly as before.
+	Transitive bool `json:"transitive,omitempty"`
 }
 
 // UnitsLock is the config-owned view of the lockfile under the §7A model: the

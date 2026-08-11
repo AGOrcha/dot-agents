@@ -399,6 +399,100 @@ func TestDeclaredSetChanged_IgnoresDerivedUnits(t *testing.T) {
 	}
 }
 
+// TestDeclaredSetChanged_IgnoresTransitiveLayers is the regression guard for
+// config-verify-staleness-digest: a layer pulled into the lock because ANOTHER
+// layer's own `extends` named it (config-transitive-layering) has no top-level
+// identity in this project's manifest, so — like the derived kind:profile units
+// TestDeclaredSetChanged_IgnoresDerivedUnits guards — it must not trip the
+// declared-set comparison. Before this fix, `da config verify` run immediately
+// after a clean `da config sync` on any project using transitive layering
+// warned "local config changed since last resolve" with an IDENTICAL recorded
+// and computed inputs_digest, because lockedUnitRefs counted the transitive
+// layer as if the manifest had declared it directly.
+func TestDeclaredSetChanged_IgnoresTransitiveLayers(t *testing.T) {
+	rc := AgentsRC{Extends: []LayerRef{{Ref: "acme:org/base.json"}}}
+	units := map[string]LockedUnit{
+		"acme:org/base.json@a1":       {Kind: UnitKindLayer},
+		"acme:org/transitive.json@t1": {Kind: UnitKindLayer, Transitive: true},
+	}
+	if declaredSetChanged(rc, units) {
+		t.Error("a transitively-pulled layer unit must not trip declared-set-changed")
+	}
+	// A layer removed from the manifest's OWN extends still registers as
+	// changed even with a transitive unit present alongside it.
+	rc.Extends = nil
+	if !declaredSetChanged(rc, units) {
+		t.Error("expected declared-set change when the directly-declared layer is removed from the manifest")
+	}
+}
+
+// TestStaleness_FreshImmediatelyAfterTransitiveSync reproduces the reported bug
+// end-to-end through Staleness (not just the declaredSetChanged unit): a
+// project whose manifest directly declares two layers, one of which itself
+// pulls in a third layer transitively. Right after a sync, the lock holds all
+// three (two direct + one Transitive:true) and inputs_digest matches — the
+// lock must be Fresh with zero reasons, exactly like a project with no
+// transitive layering.
+func TestStaleness_FreshImmediatelyAfterTransitiveSync(t *testing.T) {
+	repo, userPath := stalenessSeed(t, `{"extends":["acme:org/base.json","acme:org/svc.json"]}`, "")
+	digest, err := ComputeInputsDigest(repo, userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedUnits(t, repo, digest, map[string]LockedUnit{
+		"acme:org/base.json@a1":       {Kind: UnitKindLayer, Digest: "sha256:d1"},
+		"acme:org/svc.json@a1":        {Kind: UnitKindLayer, Digest: "sha256:d2"},
+		"roos:org/base.json@a1":       {Kind: UnitKindLayer, Digest: "sha256:d3", Transitive: true},
+		"acme:org/base.json:stage-profile:verifier": {Kind: UnitKindProfile, Digest: "sha256:p1"},
+	})
+
+	res, err := Staleness(repo, userPath, nil)
+	if err != nil {
+		t.Fatalf("Staleness: %v", err)
+	}
+	if !res.Fresh || res.IsStale() {
+		t.Fatalf("expected fresh lock immediately after a transitive-layering sync, got %+v", res)
+	}
+	if len(res.Reasons) != 0 {
+		t.Errorf("expected no reasons, got %+v", res.Reasons)
+	}
+}
+
+// TestStaleness_GenuineDriftStillDetectedWithTransitiveLayers is the
+// companion positive case to the fresh-after-sync guard above: with the same
+// transitively-layered lock shape, an actual local edit (a new directly-
+// declared extends entry the lock hasn't caught up to) must still surface as
+// stale — the transitive-layer exemption must not blind the check to real
+// drift.
+func TestStaleness_GenuineDriftStillDetectedWithTransitiveLayers(t *testing.T) {
+	repo, userPath := stalenessSeed(t, `{"extends":["acme:org/base.json","acme:org/svc.json"]}`, "")
+	digest, err := ComputeInputsDigest(repo, userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedUnits(t, repo, digest, map[string]LockedUnit{
+		"acme:org/base.json@a1": {Kind: UnitKindLayer, Digest: "sha256:d1"},
+		"acme:org/svc.json@a1":  {Kind: UnitKindLayer, Digest: "sha256:d2"},
+		"roos:org/base.json@a1": {Kind: UnitKindLayer, Digest: "sha256:d3", Transitive: true},
+	})
+
+	// A directly-declared extends entry is added after the lock was written —
+	// the manifest edit changes BOTH the inputs_digest (repo-local scope bytes
+	// changed) and the declared set.
+	writeManifest(t, repo, `{"extends":["acme:org/base.json","acme:org/svc.json","acme:org/new.json"]}`)
+
+	res, err := Staleness(repo, userPath, nil)
+	if err != nil {
+		t.Fatalf("Staleness: %v", err)
+	}
+	if !res.IsStale() {
+		t.Fatalf("expected genuine drift to still be detected, got %+v", res)
+	}
+	if !hasReason(res, ReasonInputsDigest) || !hasReason(res, ReasonDeclaredSet) {
+		t.Errorf("expected both inputs-digest-mismatch and declared-set-changed, got %+v", res.Reasons)
+	}
+}
+
 func TestDeclaredRefOf(t *testing.T) {
 	cases := map[string]string{
 		"acme:org/base@a1":  "acme:org/base",
