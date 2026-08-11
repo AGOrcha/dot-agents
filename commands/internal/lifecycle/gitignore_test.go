@@ -5,8 +5,10 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -258,6 +260,99 @@ func TestMaintainManagedGitignore_IsPerProject(t *testing.T) {
 	if got := readProjectGitignore(t, optOut); got != "" {
 		t.Errorf("opted-out project must have no block, and its sibling's state must not leak in:\n%s", got)
 	}
+}
+
+// TestMaintainManagedGitignore_WriteErrorsPropagate covers both failure exits:
+// a real write failure must reach the caller (which warns and withholds the
+// success stamp), unlike the unreadable-manifest case above which is a skip.
+func TestMaintainManagedGitignore_WriteErrorsPropagate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits do not gate directory writes the same way on windows")
+	}
+	optOut := false
+
+	tests := []struct {
+		name string
+		knob *bool
+		// seed prepares the project before the directory is frozen read-only.
+		seed func(t *testing.T, dir string)
+	}{
+		{
+			// Knob on -> EnsureManagedGitignore -> atomic write fails.
+			name: "ensure path",
+			knob: nil,
+			seed: func(*testing.T, string) {},
+		},
+		{
+			// Knob off with an existing block -> RemoveManagedGitignore -> the
+			// unlink of the block-only file fails.
+			name: "remove path",
+			knob: &optOut,
+			seed: func(t *testing.T, dir string) {
+				if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t)); err != nil {
+					t.Fatalf("seed block: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			// Seed with the knob ON so the seed step can write a block, then
+			// rewrite the manifest to the case's knob before freezing.
+			writeManifest(t, dir, nil)
+			tc.seed(t, dir)
+			writeManifest(t, dir, tc.knob)
+
+			if err := os.Chmod(dir, 0o555); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chmod(dir, 0o755)
+
+			if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t)); err == nil {
+				t.Error("expected a write error under a read-only project directory, got nil")
+			}
+		})
+	}
+}
+
+// TestEnsureManagedGitignoreForInstall_FailuresAreNonFatal covers install's
+// wrapper: neither a config-load failure nor a gitignore write failure may
+// unwind an otherwise-successful install — they warn and return.
+func TestEnsureManagedGitignoreForInstall_FailuresAreNonFatal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits do not gate directory writes the same way on windows")
+	}
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	t.Cleanup(func() { Flags = saved })
+
+	t.Run("config load error", func(t *testing.T) {
+		dir := t.TempDir()
+		writeManifest(t, dir, nil)
+		deps := fakeInstallDeps{loadConfig: func() (*config.Config, error) {
+			return nil, errors.New("boom")
+		}}
+
+		ensureManagedGitignoreForInstall(dir, deps)
+
+		if got := readProjectGitignore(t, dir); got != "" {
+			t.Errorf("no .gitignore should be written when the config cannot load:\n%s", got)
+		}
+	})
+
+	t.Run("gitignore write error", func(t *testing.T) {
+		dir := t.TempDir()
+		writeManifest(t, dir, nil)
+		if err := os.Chmod(dir, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(dir, 0o755)
+
+		// Must not panic or abort — the warn-and-return path.
+		ensureManagedGitignoreForInstall(dir, fakeInstallDeps{})
+	})
 }
 
 // installFixture stands up an isolated agents home + project dir, chdirs into

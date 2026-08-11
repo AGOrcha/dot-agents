@@ -9,6 +9,7 @@ package links_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -145,6 +146,61 @@ func TestRemoveManagedGitignore_IsIdempotent(t *testing.T) {
 func TestRemoveManagedGitignore_EmptyRepoRootIsError(t *testing.T) {
 	if err := links.RemoveManagedGitignore(""); err == nil {
 		t.Fatal("expected an error for an empty repo root")
+	}
+}
+
+func TestRemoveManagedGitignore_ReadErrorIsPropagated(t *testing.T) {
+	root := t.TempDir()
+	// Make .gitignore a directory so os.ReadFile fails with a non-NotExist
+	// error, exercising the read-error branch rather than the absent-file one.
+	if err := os.Mkdir(filepath.Join(root, ".gitignore"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := links.RemoveManagedGitignore(root); err == nil {
+		t.Error("expected a read error when .gitignore is a directory, got nil")
+	}
+}
+
+func TestRemoveManagedGitignore_RemoveErrorIsPropagated(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits do not gate directory writes the same way on windows")
+	}
+	root := t.TempDir()
+	// A block-only .gitignore takes the delete path; a read-only parent
+	// directory makes that unlink fail, so the error must surface rather than
+	// leaving the caller believing the block was retracted.
+	if err := links.EnsureManagedGitignore(root, []string{".claude/"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(root, 0o755)
+
+	if err := links.RemoveManagedGitignore(root); err == nil {
+		t.Error("expected a remove error under a read-only parent directory, got nil")
+	}
+}
+
+func TestRemoveManagedGitignore_WriteErrorIsPropagated(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits do not gate directory writes the same way on windows")
+	}
+	root := t.TempDir()
+	// User content survives the strip, so this takes the rewrite path instead
+	// of the delete path — a read-only parent makes the atomic write fail.
+	writeGitignore(t, root, "node_modules/\n")
+	if err := links.EnsureManagedGitignore(root, []string{".claude/"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(root, 0o755)
+
+	if err := links.RemoveManagedGitignore(root); err == nil {
+		t.Error("expected a write error under a read-only parent directory, got nil")
 	}
 }
 
