@@ -84,14 +84,27 @@ test("a valid signed fixture assertion reaches dispatch", async () => {
   assert.equal(result.dispatchedPath, "/api/v1/observability/runs");
 });
 
+// claims is a thunk, not a plain object: the fixture ARRAY is built once at
+// module-load time (before crypto.subtle.generateKey and every earlier test
+// have run), but a time-relative claim must be computed relative to when the
+// test actually EXECUTES, not when the array literal was evaluated. A
+// "beyond skew" nbf only has a clockSkewSeconds-sized (60s, access-jwt.ts)
+// margin before the wall clock catches up to it and the gate would legally
+// start accepting it — with a fixed +61 offset captured eagerly, ordinary CI
+// setup latency (RSA keypair generation, prior subtests) can close that
+// 1-second margin and flip the assertion from correctly-rejected (403) to
+// incorrectly-accepted (200), observed as a flaky failure. "expired exp"
+// only drifts further into the past as time passes, so it was never at risk
+// the same way, but every fixture is lazy here for consistency and to avoid
+// the same class of bug recurring for a future time-relative claim.
 for (const fixture of [
-  { name: "wrong audience", claims: { aud: ["other-app"] } },
-  { name: "wrong issuer", claims: { iss: "https://other.cloudflareaccess.com" } },
-  { name: "expired exp", claims: { exp: Math.floor(Date.now() / 1000) - 1 } },
-  { name: "nbf beyond skew", claims: { nbf: Math.floor(Date.now() / 1000) + 61 } },
+  { name: "wrong audience", claims: () => ({ aud: ["other-app"] }) },
+  { name: "wrong issuer", claims: () => ({ iss: "https://other.cloudflareaccess.com" }) },
+  { name: "expired exp", claims: () => ({ exp: Math.floor(Date.now() / 1000) - 1 }) },
+  { name: "nbf beyond skew", claims: () => ({ nbf: Math.floor(Date.now() / 1000) + 61 }) },
 ]) {
   test(`${fixture.name} is rejected before dispatch`, async () => {
-    const result = await gatedRequest(await signedAssertion(fixture.claims));
+    const result = await gatedRequest(await signedAssertion(fixture.claims()));
     assert.equal(result.response.status, 403);
     assert.equal(result.dispatches, 0);
   });
