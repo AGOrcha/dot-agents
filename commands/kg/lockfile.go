@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	crgbridge "github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg-bridge"
 	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/none"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/kg/lockfile"
@@ -28,14 +29,21 @@ func lockfilePath() string {
 }
 
 // builtinRegistry returns a registry with every adapter that ships inside
-// `da` registered. The `none` adapter is the only built-in for this task;
-// later tasks register their adapters here too.
+// `da` registered: the null `none` backend plus the CRG family (the kg-native
+// `crg` adapter and the migration-only `crg-bridge` mirror).
 //
-// registerBuiltins is a seam: production registers the `none` adapter, and a
-// test overrides it to exercise the registration-failure branch (which a
-// fresh registry never hits in production).
+// The family goes through crgbridge.RegisterCRGFamily, not two bare Register
+// calls, because that entry point also runs registry.EnforceReadsFrom — the
+// §11.2 migration_only gate is inert without it.
+//
+// registerBuiltins is a seam: production registers the built-ins, and a test
+// overrides it to exercise the registration-failure branch (which a fresh
+// registry never hits in production).
 var registerBuiltins = func(reg *registry.Registry) error {
-	return none.Register(reg)
+	if err := none.Register(reg); err != nil {
+		return err
+	}
+	return crgbridge.RegisterCRGFamily(reg)
 }
 
 func builtinRegistry() (*registry.Registry, error) {

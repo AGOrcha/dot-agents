@@ -425,6 +425,7 @@ func withIsolatedCRGDiscovery(t *testing.T, fn func()) {
 // TestCollectCodeBridgeResults_ChangeAnalysis_CRGUnavailable exercises the
 // CRG-unavailable fallback for change_analysis.
 func TestCollectCodeBridgeResults_ChangeAnalysis_CRGUnavailable(t *testing.T) {
+	useBridgeBackend(t)
 	home := newTempKG(t)
 	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -446,6 +447,7 @@ func TestCollectCodeBridgeResults_ChangeAnalysis_CRGUnavailable(t *testing.T) {
 // TestCollectCodeBridgeResults_CommunityContext_CRGUnavailable mirrors the
 // change_analysis fallback for community_context.
 func TestCollectCodeBridgeResults_CommunityContext_CRGUnavailable(t *testing.T) {
+	useBridgeBackend(t)
 	home := newTempKG(t)
 	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -1284,6 +1286,7 @@ func TestAppendDecisionSymbolMatches_LimitHitAndSeen(t *testing.T) {
 // TestCollectChangeAnalysisResults_HappyPathEmpty drives the empty
 // resp.Results == nil → init branch (~457-459) when no matches are found.
 func TestCollectChangeAnalysisResults_HappyPathEmpty(t *testing.T) {
+	useBridgeBackend(t)
 	repo := installCRGWithBody(t, `case "$1" in
 detect-changes) printf '%s\n' '{"summary":"none","risk_score":0,"changed_functions":[],"affected_flows":[],"test_gaps":[],"review_priorities":[]}' ;;
 *) exit 0 ;;
@@ -1400,6 +1403,7 @@ func TestLocalFileAdapter_QuerySuccess(t *testing.T) {
 // changes JSON with all three categories and asserts the filter logic surfaces
 // them.
 func TestCollectChangeAnalysisResults_AllCategories(t *testing.T) {
+	useBridgeBackend(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
 
@@ -1436,6 +1440,7 @@ esac`, changesJSON))
 }
 
 func TestCollectChangeAnalysisResults_EmptyQuery(t *testing.T) {
+	useBridgeBackend(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
 	initGitRepo(t, dir)
@@ -1455,6 +1460,7 @@ esac`, changesJSON))
 }
 
 func TestCollectCommunityContextResults_FilterMatches(t *testing.T) {
+	useBridgeBackend(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
 	initGitRepo(t, dir)
@@ -1475,6 +1481,7 @@ func TestCollectCommunityContextResults_FilterMatches(t *testing.T) {
 }
 
 func TestCollectCommunityContextResults_LimitTruncates(t *testing.T) {
+	useBridgeBackend(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
 	initGitRepo(t, dir)

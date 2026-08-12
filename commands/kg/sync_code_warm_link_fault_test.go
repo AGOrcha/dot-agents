@@ -24,6 +24,7 @@ func installCRGWithBody(t *testing.T, body string) string {
 // TestRunKGBuild_BuildReportError exercises the BuildReport-error return
 // (~125-127 of sync_code_warm_link.go).
 func TestRunKGBuild_BuildReportError(t *testing.T) {
+	useBridgeBackend(t)
 	installCRGWithBody(t, `case "$1" in
 build) echo "boom" >&2; exit 1 ;;
 *) exit 0 ;;
@@ -58,6 +59,7 @@ esac`)
 
 // TestRunKGUpdate_UpdateReportError exercises the UpdateReport-error return.
 func TestRunKGUpdate_UpdateReportError(t *testing.T) {
+	useBridgeBackend(t)
 	repo := installCRGWithBody(t, `case "$1" in
 update) echo "boom" >&2; exit 1 ;;
 *) exit 0 ;;
@@ -130,6 +132,7 @@ esac`)
 
 // TestRunKGPostprocess_BridgeError drives the Postprocess-error return.
 func TestRunKGPostprocess_BridgeError(t *testing.T) {
+	useBridgeBackend(t)
 	installCRGWithBody(t, `case "$1" in
 post*) echo "boom" >&2; exit 1 ;;
 *) exit 1 ;;
@@ -146,6 +149,7 @@ esac`)
 
 // TestRunKGFlows_BridgeError drives the ListFlows-error return.
 func TestRunKGFlows_BridgeError(t *testing.T) {
+	useBridgeBackend(t)
 	repo := installCRGWithBody(t, "exit 0")
 	// python3 returns non-zero so runPyQuery (used by ListFlows) fails.
 	binDir := filepath.Join(repo, ".venv", "bin")
@@ -164,6 +168,7 @@ func TestRunKGFlows_BridgeError(t *testing.T) {
 
 // TestRunKGCommunities_BridgeError drives the ListCommunities-error return.
 func TestRunKGCommunities_BridgeError(t *testing.T) {
+	useBridgeBackend(t)
 	repo := installCRGWithBody(t, "exit 0")
 	binDir := filepath.Join(repo, ".venv", "bin")
 	if err := os.WriteFile(filepath.Join(binDir, "python3"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
@@ -181,6 +186,7 @@ func TestRunKGCommunities_BridgeError(t *testing.T) {
 
 // TestRunKGChanges_DetectChangesError drives the DetectChanges-error return.
 func TestRunKGChanges_DetectChangesError(t *testing.T) {
+	useBridgeBackend(t)
 	repo := installCRGWithBody(t, `case "$1" in
 detect-changes) echo "boom" >&2; exit 1 ;;
 *) exit 0 ;;

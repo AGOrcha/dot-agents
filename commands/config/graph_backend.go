@@ -1,18 +1,25 @@
 package config
 
 import (
+	crgbridge "github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg-bridge"
 	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/none"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
 
 // registerBuiltinGraphBackends registers every graph-backend adapter that ships
-// inside `da`. The `none` adapter is the only built-in today; later
-// graph-backend-adapter-contract tasks register their adapters here too. It is a
-// package var so a test can substitute a registry whose registration fails (a
-// path a fresh registry never hits in production), mirroring the seam in
-// commands/kg.
+// inside `da`: the null `none` backend plus the CRG family. The family is
+// registered through crgbridge.RegisterCRGFamily rather than the two Register
+// calls, because that entry point also runs registry.EnforceReadsFrom — without
+// it the §11.2 migration_only gate is registered but inert, so an adapter
+// declaring reads_from the migration-only mirror would load instead of being
+// rejected. It is a package var so a test can substitute a registry whose
+// registration fails (a path a fresh registry never hits in production),
+// mirroring the seam in commands/kg.
 var registerBuiltinGraphBackends = func(reg *registry.Registry) error {
-	return none.Register(reg)
+	if err := none.Register(reg); err != nil {
+		return err
+	}
+	return crgbridge.RegisterCRGFamily(reg)
 }
 
 // builtinGraphRegistry returns a registry pre-populated with the built-in

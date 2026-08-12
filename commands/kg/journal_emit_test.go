@@ -456,6 +456,7 @@ func TestRunKGReweave_PartialFailureJournalsOnlyPersisted(t *testing.T) {
 // is a KGDecisionObserved command, so it must record the resulting node/edge/
 // file counts (like build/update), not just an outcome label.
 func TestRunKGPostprocess_RecordsGraphCounts(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	writeFakeCRGBinary(t, repo, "exit 0")
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
@@ -490,6 +491,7 @@ func TestRunKGPostprocess_RecordsGraphCounts(t *testing.T) {
 // event must reflect the FULL mutation — the code-lane node/edge upserts under
 // --include-code, not just the note lane.
 func TestRunKGWarm_IncludeCodeRecordsCodeCounts(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	writeFakeCRGBinary(t, repo, "exit 0")
 	writeCRGFullSchema(t, repo,

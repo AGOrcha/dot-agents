@@ -289,6 +289,15 @@ type AgentsRCKG struct {
 	// Backend selects the storage backend: "sqlite" (default) or "postgres".
 	// Postgres requires KG_POSTGRES_URL.
 	Backend string `json:"backend,omitempty"`
+	// GraphBackend selects which code-graph adapter serves `da kg build|update|
+	// status|impact|flows|communities|postprocess|changes` and `da kg serve`, as
+	// an adapter-ref resolved against the built-in registry
+	// (graph-backend-adapter-contract §8 / §11.3). Empty means the kg-native
+	// default, `dotagents-builtin:graph/crg@^1.0`. Selecting
+	// `dotagents-builtin:graph/crg-bridge@^0.1` routes back to the legacy Python
+	// subprocess bridge — the §11.4 rollback path, kept until the
+	// decommissioning gate passes.
+	GraphBackend string `json:"graph_backend,omitempty"`
 	// Bridge configures workflow/kg bridge query behaviour for this project.
 	Bridge AgentsRCKGBridge `json:"bridge"`
 }

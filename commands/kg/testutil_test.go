@@ -51,6 +51,19 @@ func fakeCRGEmittingJSON(t *testing.T, repo, body string) {
 	}
 }
 
+// useBridgeBackend pins one test to the legacy Python CRG subprocess backend.
+//
+// After the §11 cutover the default backend is the kg-native engine, so the
+// tests that assert subprocess routing (fake `code-review-graph` / `python3`
+// shims, "no CRG binary" degradation, CRG JSON parsing) must say so explicitly.
+// Keeping them pinned rather than deleting them is deliberate: they are the
+// regression coverage for the §11.4 rollback path, which stays supported until
+// the decommissioning gate passes.
+func useBridgeBackend(t *testing.T) {
+	t.Helper()
+	t.Setenv(graphBackendEnv, "crg-bridge")
+}
+
 // runGit is a tiny helper to invoke git in a workdir.
 func runGit(t *testing.T, dir string, args ...string) ([]byte, error) {
 	t.Helper()

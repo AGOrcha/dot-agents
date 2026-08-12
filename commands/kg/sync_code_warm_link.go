@@ -144,14 +144,15 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	ok := false
 	defer func() { journalKG(root, journal.CmdKGBuild, input, observed, ok) }()
 
-	bridge, err := graphstore.NewCRGBridge(root)
+	provider, release, err := codeGraphProvider(root)
 	if err != nil {
 		return err
 	}
+	defer release()
 	if !commandJSON(cmd) {
 		ui.Info(fmt.Sprintf("Building code graph for %s ...", root))
 	}
-	report, err := bridge.BuildReport(graphstore.BuildOptions{
+	report, err := provider.BuildReport(graphstore.BuildOptions{
 		SkipFlows:       skipFlows,
 		SkipPostprocess: skipPost,
 	})
@@ -200,35 +201,38 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	if root == "" {
 		root = crgRepoRoot()
 	}
-	// code-review-graph is an optional dependency. When it isn't installed,
-	// degrade gracefully (exit 0) instead of erroring — the graph-update
-	// post_tool_use hook runs on every edit and must not fail the session for
-	// users without the tool.
-	if _, err := graphstore.DiscoverCRGBin(root); err != nil {
+	// The selected backend's tooling is an optional dependency. The kg-native
+	// backend is always present, but the crg-bridge rollback path needs the
+	// Python `code-review-graph` CLI installed; when it isn't, degrade
+	// gracefully (exit 0) instead of erroring — the graph-update post_tool_use
+	// hook runs on every edit and must not fail the session.
+	provider, release, err := codeGraphProvider(root)
+	if err != nil {
+		if !codeGraphUnavailable(err) {
+			return err
+		}
 		if !commandJSON(cmd) {
-			ui.Info("code-review-graph not installed; skipping code graph update")
+			ui.Info("code graph backend not installed; skipping code graph update")
 		}
 		return nil
 	}
+	defer release()
+
 	base, _ := cmd.Flags().GetString("base")
 	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
 	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
 
-	// Journal only once we know the tool is present (the graceful no-op above
+	// Journal only once we know the backend is usable (the graceful no-op above
 	// mutates nothing). Decision event: outcome + graph counts, never bodies (D4).
 	input := &journal.KGDecisionInput{Repo: root, Base: base}
 	observed := &journal.KGDecisionObserved{}
 	ok := false
 	defer func() { journalKG(root, journal.CmdKGUpdate, input, observed, ok) }()
 
-	bridge, err := graphstore.NewCRGBridge(root)
-	if err != nil {
-		return err
-	}
 	if !commandJSON(cmd) {
 		ui.Info(fmt.Sprintf("Updating code graph for %s ...", root))
 	}
-	report, err := bridge.UpdateReport(graphstore.UpdateOptions{
+	report, err := provider.UpdateReport(graphstore.UpdateOptions{
 		Base:            base,
 		SkipFlows:       skipFlows,
 		SkipPostprocess: skipPost,
@@ -265,7 +269,7 @@ func runKGCodeStatus(deps Deps, cmd *cobra.Command, _ []string) error {
 	if root == "" {
 		root = crgRepoRoot()
 	}
-	status, err := (&graphstore.CRGBridge{RepoRoot: root}).Status()
+	status, err := crgBridgeStatus(root)
 	if err != nil {
 		return err
 	}
@@ -286,21 +290,39 @@ func runKGCodeStatus(deps Deps, cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// crgStatusState calls Status() on a CRGBridge and returns the state string.
-// If Status() fails (e.g. CRG not installed), "unknown" is returned.
+// crgStatusState returns the selected backend's readiness state string.
+// If status cannot be determined (e.g. the bridge rollback path is selected and
+// its CLI is not installed), "unknown" is returned.
 func crgStatusState(root string) string {
-	status, err := (&graphstore.CRGBridge{RepoRoot: root}).Status()
+	status, err := crgBridgeStatus(root)
 	if err != nil || status == nil {
 		return "unknown"
 	}
 	return status.State
 }
 
-// crgBridgeStatus is a seam over CRGBridge.Status for tests to inject a
-// real-error response (production Status() never returns a non-nil error
-// today, but callers must not silently swallow one if that changes).
+// crgBridgeStatus is the single status seam every readiness check goes through.
+// It opens the configured backend — kg-native by default, the Python bridge
+// when `kg.graph_backend` selects the crg-bridge family — and returns its
+// Status(). Tests substitute it to inject a real-error response (a live
+// Status() never returns a non-nil error today, but callers must not silently
+// swallow one if that changes).
 var crgBridgeStatus = func(root string) (*graphstore.CRGStatus, error) {
-	return (&graphstore.CRGBridge{RepoRoot: root}).Status()
+	provider, release, err := codeGraphProvider(root)
+	if err != nil {
+		if codeGraphUnavailable(err) {
+			// Backend tooling absent is a readiness fact, not a fault: report it
+			// the way the bridge's missing-database branch did.
+			return &graphstore.CRGStatus{
+				LastUpdated: "never",
+				State:       graphstore.CRGReadinessUnbuilt,
+				Message:     err.Error(),
+			}, nil
+		}
+		return nil, err
+	}
+	defer release()
+	return provider.Status()
 }
 
 // checkCRGReadiness calls Status() and emits warnings for unbuilt/busy states.
@@ -364,11 +386,12 @@ func runKGImpact(deps Deps, cmd *cobra.Command, args []string) error {
 		files = args
 	}
 
-	bridge, err := graphstore.NewCRGBridge(root)
+	provider, release, err := codeGraphProvider(root)
 	if err != nil {
 		return err
 	}
-	result, err := bridge.GetImpactRadius(graphstore.ImpactOptions{
+	defer release()
+	result, err := provider.GetImpactRadius(graphstore.ImpactOptions{
 		ChangedFiles: files,
 		MaxDepth:     maxDepth,
 		MaxResults:   maxResults,
@@ -433,11 +456,12 @@ func runKGFlows(deps Deps, cmd *cobra.Command, _ []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
 	sortBy, _ := cmd.Flags().GetString("sort")
 
-	bridge, err := graphstore.NewCRGBridge(root)
+	provider, release, err := codeGraphProvider(root)
 	if err != nil {
 		return err
 	}
-	result, err := bridge.ListFlows(limit, sortBy)
+	defer release()
+	result, err := provider.ListFlows(limit, sortBy)
 	if err != nil {
 		return err
 	}
@@ -468,11 +492,12 @@ func runKGCommunities(deps Deps, cmd *cobra.Command, _ []string) error {
 	minSize, _ := cmd.Flags().GetInt("min-size")
 	sortBy, _ := cmd.Flags().GetString("sort")
 
-	bridge, err := graphstore.NewCRGBridge(root)
+	provider, release, err := codeGraphProvider(root)
 	if err != nil {
 		return err
 	}
-	result, err := bridge.ListCommunities(minSize, sortBy)
+	defer release()
+	result, err := provider.ListCommunities(minSize, sortBy)
 	if err != nil {
 		return err
 	}
@@ -507,12 +532,13 @@ func runKGPostprocess(cmd *cobra.Command, _ []string) error {
 	ok := false
 	defer func() { journalKG(root, journal.CmdKGPostprocess, input, observed, ok) }()
 
-	bridge, err := graphstore.NewCRGBridge(root)
+	provider, release, err := codeGraphProvider(root)
 	if err != nil {
 		return err
 	}
+	defer release()
 	ui.Info(fmt.Sprintf("Running post-processing on %s ...", root))
-	if err := bridge.Postprocess(graphstore.PostprocessOptions{
+	if err := provider.Postprocess(graphstore.PostprocessOptions{
 		NoFlows:       noFlows,
 		NoCommunities: noCommunities,
 		NoFTS:         noFTS,
@@ -523,7 +549,7 @@ func runKGPostprocess(cmd *cobra.Command, _ []string) error {
 	// the same node/edge/file counts build/update journal (the KGDecisionObserved
 	// contract). Status is best-effort: if it fails the postprocess still landed,
 	// so we keep Outcome and just omit the counts rather than fail the command.
-	if status, serr := bridge.Status(); serr == nil {
+	if status, serr := provider.Status(); serr == nil {
 		setDecisionGraphCounts(observed, status)
 	}
 	ok = true
@@ -543,11 +569,12 @@ func runKGChanges(deps Deps, cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	bridge, err := graphstore.NewCRGBridge(root)
+	provider, release, err := codeGraphProvider(root)
 	if err != nil {
 		return err
 	}
-	report, err := bridge.DetectChanges(graphstore.DetectChangesOptions{
+	defer release()
+	report, err := provider.DetectChanges(graphstore.DetectChangesOptions{
 		Base:  base,
 		Brief: brief,
 	})
@@ -630,13 +657,14 @@ func noteToKGNote(note *GraphNote, filePath string) graphstore.KGNote {
 // outer scope, so it depends on the whole-store Store rather than a narrower
 // role.
 func runKGWarmCodeImport(store graphstore.Store, repoRoot string) (nodesImported, edgesImported int, err error) {
-	bridge, berr := graphstore.NewCRGBridge(repoRoot)
+	provider, release, berr := codeGraphProvider(repoRoot)
 	if berr != nil {
-		return 0, 0, fmt.Errorf("CRG not available: %w", berr)
+		return 0, 0, fmt.Errorf("code graph not available: %w", berr)
 	}
-	nodes, nerr := bridge.ReadNodes(0)
+	defer release()
+	nodes, nerr := provider.ReadNodes(0)
 	if nerr != nil {
-		return 0, 0, fmt.Errorf("read CRG nodes: %w", nerr)
+		return 0, 0, fmt.Errorf("read code graph nodes: %w", nerr)
 	}
 	for _, n := range nodes {
 		info := graphstore.NodeInfo{
@@ -656,9 +684,9 @@ func runKGWarmCodeImport(store graphstore.Store, repoRoot string) (nodesImported
 			nodesImported++
 		}
 	}
-	edges, eerr := bridge.ReadEdges(0)
+	edges, eerr := provider.ReadEdges(0)
 	if eerr != nil {
-		return nodesImported, 0, fmt.Errorf("read CRG edges: %w", eerr)
+		return nodesImported, 0, fmt.Errorf("read code graph edges: %w", eerr)
 	}
 	for _, e := range edges {
 		info := graphstore.EdgeInfo{

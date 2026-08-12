@@ -448,6 +448,7 @@ func TestRunKGLinkRemove_NonExistent(t *testing.T) {
 // TestRunKGWarmCodeImport_NoCRGBinary returns a wrapped error when CRG is
 // not discoverable on the system.
 func TestRunKGWarmCodeImport_NoCRGBinary(t *testing.T) {
+	useBridgeBackend(t)
 	home := newTempKG(t)
 	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -465,7 +466,7 @@ func TestRunKGWarmCodeImport_NoCRGBinary(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected CRG-not-available error")
 	}
-	if !strings.Contains(err.Error(), "CRG not available") {
+	if !strings.Contains(err.Error(), "code graph not available") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -711,6 +712,7 @@ func TestWarmNotesInDir_MissingDirReturnsZero(t *testing.T) {
 // TestWarmCodeLane_CRGUnavailable hits the failure path: with no CRG binary
 // on PATH, warmCodeLane returns an empty summary and emits a warning.
 func TestWarmCodeLane_CRGUnavailable(t *testing.T) {
+	useBridgeBackend(t)
 	home := newTempKG(t)
 	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -938,6 +940,7 @@ func TestKGChangesJSONOutput_MarshalShape(t *testing.T) {
 
 // TestRunKGFlows_NoCRGBinary verifies the NewCRGBridge error path.
 func TestRunKGFlows_NoCRGBinary(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	t.Setenv("PATH", t.TempDir())
 	cmd := &cobra.Command{}
@@ -952,6 +955,7 @@ func TestRunKGFlows_NoCRGBinary(t *testing.T) {
 }
 
 func TestRunKGCommunities_NoCRGBinary(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	t.Setenv("PATH", t.TempDir())
 	cmd := &cobra.Command{}
@@ -966,6 +970,7 @@ func TestRunKGCommunities_NoCRGBinary(t *testing.T) {
 }
 
 func TestRunKGPostprocess_NoCRGBinary(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	t.Setenv("PATH", t.TempDir())
 	cmd := &cobra.Command{}
@@ -981,6 +986,7 @@ func TestRunKGPostprocess_NoCRGBinary(t *testing.T) {
 }
 
 func TestRunKGFlows_TextWithFakePython(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	flowsJSON := `{"status":"ok","summary":"2 flows","flows":[{"id":1,"name":"flow-a","entry_point":"pkg::Foo","step_count":3,"criticality":0.8,"kind":"call"},{"id":2,"name":"flow-b","entry_point":"","step_count":1,"criticality":0.1,"kind":"call"}]}`
 	fakeCRGEmittingJSON(t, repo, flowsJSON)
@@ -1048,6 +1054,7 @@ func TestRunKGFlows_EmptyFlowsHintsPostprocess(t *testing.T) {
 }
 
 func TestRunKGCommunities_TextWithFakePython(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	body := `{"status":"ok","summary":"1 community","communities":[{"id":1,"name":"core","size":3,"cohesion":0.7,"dominant_language":"go","description":"core stuff","members":["a","b"]}]}`
 	fakeCRGEmittingJSON(t, repo, body)
@@ -1094,6 +1101,7 @@ func TestRunKGCommunities_JSONWithFakePython(t *testing.T) {
 }
 
 func TestRunKGImpact_JSONFakeCRG(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	impactJSON := `{"status":"ok","summary":"impact","changed_files":[],"changed_nodes":[],"impacted_nodes":[],"impacted_files":[],"total_impacted":0,"truncated":false}`
 	fakeCRGEmittingJSON(t, repo, impactJSON)
@@ -1169,6 +1177,7 @@ func TestCheckCRGReadiness_BusyState_RequireGraph(t *testing.T) {
 }
 
 func TestRunKGImpact_RequireGraphReady(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
@@ -1192,6 +1201,7 @@ func TestRunKGImpact_RequireGraphReady(t *testing.T) {
 }
 
 func TestRunKGChanges_JSONFakeCRG(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	changesJSON := `{"summary":"1 changed function","risk_score":0.5,"changed_functions":[{"name":"Foo","qualified_name":"a.go::Foo","file_path":"a.go","risk_score":0.5}],"affected_flows":[],"test_gaps":[],"review_priorities":[]}`
 	writeFakeCRGBinary(t, repo, fmt.Sprintf(`case "$1" in
@@ -1223,6 +1233,7 @@ esac`, changesJSON))
 }
 
 func TestRunKGChanges_JSONOutputShape(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
@@ -1309,6 +1320,7 @@ func TestRunKGWarmCodeImport_WithCRGNodes(t *testing.T) {
 }
 
 func TestRunKGBuild_NoCRGBinary(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	t.Setenv("PATH", t.TempDir())
 	cmd := &cobra.Command{}
@@ -1325,6 +1337,7 @@ func TestRunKGBuild_NoCRGBinary(t *testing.T) {
 // when code-review-graph is not installed — the graph-update post_tool_use hook
 // must not fail every edit for users without the optional tool.
 func TestRunKGUpdate_NoCRGBinary(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	t.Setenv("PATH", t.TempDir())
 	cmd := &cobra.Command{}
@@ -1365,6 +1378,7 @@ func TestCRGStatusState_Ready(t *testing.T) {
 }
 
 func TestRunKGImpact_NoArgs(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
@@ -1542,6 +1556,7 @@ func TestRunKGBuild_BusyOutcome(t *testing.T) {
 }
 
 func TestCheckCRGReadiness_ReadyNoWarn(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
@@ -1552,6 +1567,7 @@ func TestCheckCRGReadiness_ReadyNoWarn(t *testing.T) {
 }
 
 func TestRunKGChanges_TextAllCategories(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	changesJSON := `{
 		"summary":"all categories",
@@ -1717,6 +1733,7 @@ func TestRunKGImpact_DefaultRepoFromCwd(t *testing.T) {
 }
 
 func TestRunKGImpact_JSONOutputEmpty(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},

@@ -711,7 +711,12 @@ func runKGServe(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	srv := graphstore.NewMCPServer(workDir)
+	// `da kg serve` exposes the same eight MCP tools it always has; the backend
+	// behind them is now the configured one (kg-native by default, the Python
+	// bridge only when kg.graph_backend selects the crg-bridge family).
+	provider, release, perr := codeGraphProvider(workDir)
+	defer release()
+	srv := graphstore.NewMCPServerWithProvider(workDir, provider, perr)
 	return srv.Serve(os.Stdin, os.Stdout)
 }
 
