@@ -136,7 +136,10 @@ type Deps struct {
 	// cross-cluster constants / interfaces (addDeps, importDeps,
 	// importScope*, rel*Dir) can be re-homed into lifecycle. See
 	// .agents/active/fold-back/t07-refresh-body-deferred.md.
-	RunRefresh func(projectFilter string, importAlso, inexact bool) error
+	// allProjects carries the parsed --all flag: false (the default) scopes the
+	// run to the project containing the working directory, true requests the
+	// machine-wide fan-out.
+	RunRefresh func(projectFilter string, importAlso, inexact, allProjects bool) error
 
 	// FlagsFn is an optional closure over the caller's live flag state.
 	// When non-nil it is invoked by NewInstallCmd / NewDoctorCmd /

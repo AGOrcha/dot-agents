@@ -130,12 +130,12 @@ func TestRunRefresh_IdempotentAgentsHome(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("first runRefresh: %v", err)
 	}
 	first := snapshotTree(t, agentsHome)
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("second runRefresh: %v", err)
 	}
 	second := snapshotTree(t, agentsHome)
@@ -155,7 +155,7 @@ func TestRunRefresh_RestoresDeletedManagedFile(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("initial refresh: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestRunRefresh_RestoresDeletedManagedFile(t *testing.T) {
 		t.Fatalf("delete managed rule: %v", err)
 	}
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("repair refresh: %v", err)
 	}
 	if _, err := os.Stat(managedRule); err != nil {
@@ -196,11 +196,11 @@ func TestRunRefresh_StableProjectFilter(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("proj", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{Project: "proj"}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("first filtered refresh: %v", err)
 	}
 	first := snapshotTree(t, agentsHome)
-	if err := runRefresh("proj", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{Project: "proj"}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("second filtered refresh: %v", err)
 	}
 	second := snapshotTree(t, agentsHome)

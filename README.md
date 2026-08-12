@@ -67,7 +67,7 @@ brew tap AGOrcha/tap && brew install da   # or: go install …  (see Install bel
 da --version
 da init                                   # scaffold ~/.agents/
 da add ~/Github/myproject                 # register + link a project
-da refresh                                # project canonical config into each platform's shape
+cd ~/Github/myproject && da refresh       # project canonical config into each platform's shape
 da status --audit && da doctor            # verify
 ```
 
@@ -325,8 +325,11 @@ files unless you pass `--force`.
 git sync is optional and to your own repo.
 
 **What's `da refresh` for?** After pulling `~/.agents/` changes, `refresh`
-re-applies links to all projects. It's **EXACT** by default (prunes managed links
-no longer in the resolved set); pass `--inexact` to keep additive behavior.
+re-applies links into the **current project** — the one containing your working
+directory. Pass `--all` to sweep every project registered on this machine, or
+name one (`da refresh billing-api`). Cross-repo effects are never implicit.
+It's **EXACT** by default (prunes managed links no longer in the resolved set);
+pass `--inexact` to keep additive behavior.
 
 **Skills vs rules?** Rules (`.mdc`) are always-active guidelines; skills
 (`SKILL.md`) are on-demand procedures agents invoke when needed.

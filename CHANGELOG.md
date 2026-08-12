@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BEHAVIOR CHANGE — `da refresh` now defaults to the CURRENT project.** Previously an unqualified `da refresh` iterated the entire machine registry of managed projects, so one invocation at a workspace root mutated every registered repo. It now refreshes only the managed project containing the working directory; the machine-wide sweep moved behind an explicit `--all` flag (deterministic, name-sorted order). Run outside any managed project without `--all`, refresh refuses with recovery hints instead of falling back to the sweep. Naming a project (`da refresh billing-api`) is unchanged and still works from anywhere; `--all` cannot be combined with a project name. **Migration:** any script or habit relying on `da refresh` to update every repo must now say `da refresh --all`. The principle: cross-repo effects must be explicit in the invocation that causes them — this default is what multiplied the blast radius of the recent manifest-injection bug across 21 repos from a single root invocation.
+- **`da sync pull` and `da review approve` no longer fan out.** Both trigger a refresh as a side effect of acting on the current repo's config, so both are now current-project-scoped; if run outside a managed project they skip the projection with a note rather than failing (an approval is no longer rolled back for having nowhere to project). Use `da refresh --all` to propagate a pulled or approved change to every registered project.
+- The pre-refresh `--import` pass inherits the refresh scope: a single-project refresh no longer imports on behalf of every other registered project.
+
 ### Added
 
 - **`da install` now maintains the managed `.gitignore` block.** Previously only `da refresh` wrote it, so a freshly-installed repo carried its projected outputs (`.codex/`, `.mcp.json`, `.vscode/mcp.json`, `AGENTS.md`, `.cursor/`, `.github/copilot-instructions.md`, `.github/hooks/`) as untracked noise until someone happened to run refresh. Install and refresh now share one step and converge on a byte-identical block, derived from the platforms' own declared outputs rather than a hardcoded list.
