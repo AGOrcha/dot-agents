@@ -66,6 +66,9 @@ Checks performed:
                   and for remote (git/http/oci) sources its downloaded assets
                   are present in the local cache at the locked SHA — so remote
                   layers are confirmed offline without re-fetching
+  - prompt-units  each lock-pinned source-qualified prompt file still has its
+                  cached bytes on disk at the locked digest, so a pruned cache
+                  is caught here instead of at ` + "`da workflow resolve-prompt`" + ` time
   - binary        optional integrations are ready (code-review-graph)
 
 Exits non-zero if any check fails. Warnings (optional integration absent, or a
@@ -126,6 +129,7 @@ func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 
 	checks = append(checks, verifySources(opts.cwd, snap)...)
 	checks = append(checks, verifyLayerLocks(opts.cwd)...)
+	checks = append(checks, verifyPromptUnits(opts.cwd)...)
 	checks = append(checks, verifyStaleness(opts.cwd)...)
 	checks = append(checks, verifyPreconditionPolicies(snap)...)
 
@@ -256,6 +260,41 @@ func verifyLayerLocks(cwd string) []VerifyCheck {
 		}
 	}
 	return checks
+}
+
+// verifyPromptUnits cross-checks each lock-pinned source-qualified prompt unit
+// against the on-disk prompt cache (no fetch). A prompt's bytes live in the
+// shared, machine-local ~/.agents cache, so a pruned or never-synced cache leaves
+// a valid lock pointing at nothing — a gap that previously surfaced only when
+// `da workflow resolve-prompt` reported the prompt unresolved mid-dispatch.
+//
+// Status policy mirrors the locked-layers check's advisory side: a missing or
+// mismatched cache entry is a WARN carrying the same "run `da config sync`" hint
+// the offline resolve emits, not a hard failure — the condition is recoverable by
+// re-syncing and must not block CI on a machine that simply has a cold cache.
+// Returns nil when the lock pins no prompt units (nothing to add to the report).
+func verifyPromptUnits(cwd string) []VerifyCheck {
+	statuses, err := cfg.VerifyPromptUnits(cwd)
+	if err != nil {
+		return []VerifyCheck{{"prompt-units", verifyWarn, "could not read lockfile/cache: " + err.Error()}}
+	}
+	if len(statuses) == 0 {
+		return nil
+	}
+	checks := make([]VerifyCheck, 0, len(statuses))
+	for _, s := range statuses {
+		checks = append(checks, promptUnitCheck(s))
+	}
+	return checks
+}
+
+// promptUnitCheck maps one prompt-unit status to its report line.
+func promptUnitCheck(s cfg.PromptUnitStatus) VerifyCheck {
+	name := "prompt:" + s.Key
+	if s.OK() {
+		return VerifyCheck{name, verifyPass, "cached at " + abbrevSHA(s.Digest)}
+	}
+	return VerifyCheck{name, verifyWarn, s.Problem}
 }
 
 // verifyStaleness is the §7A local-scope drift check — the first-class
