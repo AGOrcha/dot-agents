@@ -129,10 +129,13 @@ func gitlinkPaths(dir string) ([]string, error) {
 // argument, and a database ATTACH target. An escaping path (`../`, absolute)
 // is dropped rather than walked.
 func containedIn(path string) bool {
-	if filepath.IsAbs(path) {
+	clean := filepath.Clean(filepath.FromSlash(path))
+	// Absolute, rooted, and volume-qualified paths all leave the checkout.
+	// Windows needs all three tests: `\etc\passwd` is rooted but not absolute
+	// there, and `C:evil` is drive-relative with no separator at all.
+	if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || os.IsPathSeparator(clean[0]) {
 		return false
 	}
-	clean := filepath.Clean(filepath.FromSlash(path))
 	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }
 

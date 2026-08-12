@@ -326,6 +326,9 @@ func TestContainedIn(t *testing.T) {
 		{"parent escape", "../evil", false},
 		{"deep escape", "vendor/../../evil", false},
 		{"absolute", filepath.Join(string(filepath.Separator), "etc", "passwd"), false},
+		// Slash-rooted is how a git index would spell an escaping path. On
+		// Windows it is rooted rather than absolute, which IsAbs alone misses.
+		{"slash rooted", "/etc/passwd", false},
 		{"self", ".", true},
 	}
 	for _, tc := range cases {
