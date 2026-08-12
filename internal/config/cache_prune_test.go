@@ -288,8 +288,11 @@ func TestPruneCacheEntriesSurfacesParentCleanupError(t *testing.T) {
 // blanks dropped, duplicates (including uncleaned spellings) collapsed, output
 // sorted.
 func TestDedupeSortedProjectPaths(t *testing.T) {
-	got := dedupeSorted([]string{"/b/", "  ", "/a/x/..", "/a", "/b"})
-	want := []string{"/a", "/b"}
+	// Built through filepath so the expectations hold on Windows too, where a
+	// cleaned path uses backslash separators.
+	a, b := filepath.FromSlash("/a"), filepath.FromSlash("/b")
+	got := dedupeSorted([]string{b + string(filepath.Separator), "  ", filepath.Join(a, "x", ".."), a, b})
+	want := []string{a, b}
 	if len(got) != len(want) {
 		t.Fatalf("dedupeSorted = %#v, want %#v", got, want)
 	}
