@@ -3,6 +3,7 @@ package crgbehavior
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
@@ -55,7 +56,7 @@ func (l *LiveBridge) ImpactRadius(changedFiles []string, maxDepth, maxResults in
 		MaxResults:   maxResults,
 	})
 	if err != nil {
-		return BridgeImpact{}, err
+		return BridgeImpact{}, classifyQueryError(err)
 	}
 	return BridgeImpact{
 		ChangedIDs:  l.nativeIDs(res.ChangedNodes),
@@ -77,6 +78,32 @@ func RunLive(cfg Config, graphRepoRoot string) (Report, error) {
 		return Report{}, err
 	}
 	return Run(cfg, views, live)
+}
+
+// interpreterFailures are the signatures of a code-review-graph install whose
+// interpreter cannot actually run the bridge — a CLI found on PATH whose
+// sibling interpreter lacks the package (e.g. a `uv tool` install, where the
+// discovered binary's directory holds no venv python). That is the SAME
+// environment fact as "not installed", so it must SKIP the gate rather than be
+// reported as a behavior divergence.
+var interpreterFailures = []string{
+	"ModuleNotFoundError",
+	"No module named",
+	"command not found",
+	"executable file not found",
+	"no such file or directory",
+}
+
+// classifyQueryError marks an unusable legacy interpreter as an unavailable
+// bridge; any other query failure stays a hard error.
+func classifyQueryError(err error) error {
+	msg := strings.ToLower(err.Error())
+	for _, marker := range interpreterFailures {
+		if strings.Contains(msg, strings.ToLower(marker)) {
+			return fmt.Errorf("%w: %v", ErrBridgeUnavailable, err)
+		}
+	}
+	return err
 }
 
 // nativeIDs maps legacy impact nodes onto the kg-native symbol id space so both

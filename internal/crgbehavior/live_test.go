@@ -76,9 +76,33 @@ func TestLiveBridgePropagatesAQueryFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bind bridge: %v", err)
 	}
-	if _, err := live.ImpactRadius([]string{"a.go"}, 2, 100); err == nil {
+	err = liveImpactErr(t, live)
+	if errors.Is(err, ErrBridgeUnavailable) {
+		t.Fatalf("a genuine query failure must NOT be excused as an absent bridge: %v", err)
+	}
+}
+
+func TestLiveBridgeTreatsAnUnusableInterpreterAsUnavailable(t *testing.T) {
+	// A CLI discoverable on PATH whose interpreter lacks the package (the
+	// `uv tool install` shape) is the same environment fact as "not installed".
+	repo := fakeCRGRepo(t, "#!/bin/sh\necho \"ModuleNotFoundError: No module named 'code_review_graph'\" >&2\nexit 1\n")
+	live, err := NewLiveBridge(repo)
+	if err != nil {
+		t.Fatalf("bind bridge: %v", err)
+	}
+	if err := liveImpactErr(t, live); !errors.Is(err, ErrBridgeUnavailable) {
+		t.Fatalf("err = %v, want ErrBridgeUnavailable so the gate SKIPS", err)
+	}
+}
+
+// liveImpactErr runs one impact query and requires it to fail.
+func liveImpactErr(t *testing.T, live *LiveBridge) error {
+	t.Helper()
+	_, err := live.ImpactRadius([]string{"a.go"}, 2, 100)
+	if err == nil {
 		t.Fatal("a failing legacy query must be an error, not an empty answer")
 	}
+	return err
 }
 
 func TestLiveBridgeViewsRequireABuiltGraph(t *testing.T) {
