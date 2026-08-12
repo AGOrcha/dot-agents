@@ -66,10 +66,15 @@ Checks performed:
                   and for remote (git/http/oci) sources its downloaded assets
                   are present in the local cache at the locked SHA — so remote
                   layers are confirmed offline without re-fetching
+  - shadow        repo-local keys that the layer stack underneath also supplies:
+                  REDUNDANT (the repo restates a layer's value — remove the key
+                  and defer to the layers) or OVERRIDE (the repo replaces it,
+                  reported with both values so org rollouts are auditable)
   - binary        optional integrations are ready (code-review-graph)
 
-Exits non-zero if any check fails. Warnings (optional integration absent, or a
-remote layer that cannot be confirmed offline) do not fail the command.
+Exits non-zero if any check fails. Warnings (optional integration absent, a
+remote layer that cannot be confirmed offline, or a redundant repo-local
+shadow) do not fail the command.
 
 This is intentionally narrower than ` + "`da doctor`" + `, which audits the full
 platform link projection; run that for a complete link/health audit.`,
@@ -128,6 +133,7 @@ func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 	checks = append(checks, verifyLayerLocks(opts.cwd)...)
 	checks = append(checks, verifyStaleness(opts.cwd)...)
 	checks = append(checks, verifyPreconditionPolicies(snap)...)
+	checks = append(checks, verifyLayerShadows(snap)...)
 
 	probe := opts.crgProbe
 	if probe == nil {
