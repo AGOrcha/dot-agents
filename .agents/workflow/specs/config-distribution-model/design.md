@@ -1128,7 +1128,10 @@ different purposes and are named distinctly.
 `da` owns a delimited, idempotent block in each consuming project's `.gitignore`: projected links,
 generated platform configs, the `.agentsrc.local.json` overlay, and materialized asset units are
 **ignored**; `.agentsrc.json` and `.agentsrc.lock` stay **committed** (the resolved-state contract,
-like `uv.lock`). Re-runs converge (regenerated, not appended).
+like `uv.lock`). Re-runs converge (regenerated, not appended). The `gitignore_projections` knob
+that gates this is read from the flat manifest directly (`config.LoadAgentsRC`), never through the
+`extends`/layer resolution path — deliberately, so a broken or missing config layer can never
+silently disable the block.
 
 #### D15 — `extends` accepts OCI; source/kind asymmetry removed (extends D8)
 *(the `extends-oci-relax` spec decision; tracked there as "D13" relative to that spec, recorded
