@@ -462,7 +462,9 @@ func TestCountRootRows_MatchesScopeAndPathPrefixes(t *testing.T) {
 	seedGraphDB(t, dbPath, []graphNodeRow{
 		{qualified: "vendor/lib::Scoped", name: "Scoped", filePath: "/elsewhere/a.go"},
 		{qualified: "ByAbsPath", name: "ByAbsPath", filePath: filepath.Join(subAbs, "b.go")},
+		{qualified: "ByAbsSlashPath", name: "ByAbsSlashPath", filePath: filepath.ToSlash(subAbs) + "/d.go"},
 		{qualified: "ByRelPath", name: "ByRelPath", filePath: filepath.Join("vendor", "lib", "c.go")},
+		{qualified: "BySlashRelPath", name: "BySlashRelPath", filePath: "vendor/lib/e.go"},
 		{qualified: "Unrelated", name: "Unrelated", filePath: "/repo/main.go"},
 	}, nil)
 	db := openTestDB(t, dbPath)
@@ -472,8 +474,8 @@ func TestCountRootRows_MatchesScopeAndPathPrefixes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("countRootRows: %v", err)
 	}
-	if nodes != 3 || files != 3 {
-		t.Errorf("countRootRows = %d nodes / %d files, want 3 / 3", nodes, files)
+	if nodes != 5 || files != 5 {
+		t.Errorf("countRootRows = %d nodes / %d files, want 5 / 5", nodes, files)
 	}
 }
 
@@ -524,6 +526,26 @@ func TestPostprocessRoot_UsesTargetRoot(t *testing.T) {
 	bridge := &CRGBridge{RepoRoot: t.TempDir(), Bin: filepath.Join(t.TempDir(), "missing-crg")}
 	if err := bridge.postprocessRoot(bridge.RepoRoot, PostprocessOptions{}); err == nil {
 		t.Fatal("expected the missing CRG binary to surface an error")
+	}
+	dir := t.TempDir()
+	ok := &CRGBridge{RepoRoot: dir, Bin: writeArgvRecorder(t, dir)}
+	if err := ok.postprocessRoot(dir, PostprocessOptions{NoFTS: true}); err != nil {
+		t.Errorf("postprocessRoot against a working binary: %v", err)
+	}
+}
+
+// TestPostprocessArgs pins the flag translation shared by the standalone
+// postprocess command and the build's own postprocess pass.
+func TestPostprocessArgs(t *testing.T) {
+	bare := postprocessArgs("/repo", PostprocessOptions{})
+	if strings.Join(bare, " ") != "postprocess "+crgFlagRepo+" /repo" {
+		t.Errorf("bare args = %v", bare)
+	}
+	full := postprocessArgs("/repo", PostprocessOptions{NoFlows: true, NoCommunities: true, NoFTS: true})
+	for _, want := range []string{"--no-flows", "--no-communities", "--no-fts"} {
+		if !strings.Contains(strings.Join(full, " "), want) {
+			t.Errorf("args %v missing %q", full, want)
+		}
 	}
 }
 

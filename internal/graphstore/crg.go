@@ -239,9 +239,36 @@ func (b *CRGBridge) buildRoot(root string, opts BuildOptions) ([]byte, error) {
 	return b.runCaptured(args...)
 }
 
-// postprocessRoot rebuilds derived state (flows, communities, FTS) for root.
+// postprocessRoot rebuilds derived state (flows, communities, FTS) for root as
+// part of a build.
+//
+// It runs through runCaptured — the same execution path the build itself uses
+// — rather than the streaming path of the standalone Postprocess command. That
+// matters twice over: the wrapper it applies to a Python entrypoint forces
+// SQLite autocommit (this pass writes derived tables), and it invokes the
+// interpreter directly, so a console script with a stale shebang cannot fail a
+// build that would otherwise have succeeded.
 func (b *CRGBridge) postprocessRoot(root string, opts PostprocessOptions) error {
-	return (&CRGBridge{RepoRoot: root, Bin: b.Bin}).Postprocess(opts)
+	out, err := b.runCaptured(postprocessArgs(root, opts)...)
+	if err != nil {
+		return classifyCRGRunError("postprocess", err, out)
+	}
+	return nil
+}
+
+// postprocessArgs builds the CRG postprocess argv for root.
+func postprocessArgs(root string, opts PostprocessOptions) []string {
+	args := []string{"postprocess", crgFlagRepo, root}
+	if opts.NoFlows {
+		args = append(args, "--no-flows")
+	}
+	if opts.NoCommunities {
+		args = append(args, "--no-communities")
+	}
+	if opts.NoFTS {
+		args = append(args, "--no-fts")
+	}
+	return args
 }
 
 // BuildReport triggers a full graph rebuild and returns a structured summary.
@@ -531,20 +558,24 @@ func (b *CRGBridge) applyWorkspaceReadiness(status *CRGStatus, db *sql.DB) {
 // by an external aggregator is still attributed correctly.
 func countRootRows(db *sql.DB, absPath, relPath string) (nodes, files int, err error) {
 	scopePrefix := relPath + scopeSeparator
-	absPrefix := absPath + string(filepath.Separator)
-	relPrefix := filepath.FromSlash(relPath) + string(filepath.Separator)
+	// Both path spellings are checked: CRG writes native separators on some
+	// platforms and slashes on others, and a graph produced by an external
+	// aggregator may store repo-relative paths.
+	nativeAbs := absPath + string(filepath.Separator)
+	slashAbs := filepath.ToSlash(absPath) + "/"
+	nativeRel := filepath.FromSlash(relPath) + string(filepath.Separator)
+	const pathMatch = `instr(file_path, ?) = 1 OR instr(file_path, ?) = 1 OR instr(file_path, ?) = 1 OR instr(file_path, ?) = 1`
 	err = db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT file_path) FROM nodes
-		WHERE instr(qualified_name, ?) = 1 OR instr(file_path, ?) = 1 OR instr(file_path, ?) = 1`,
-		scopePrefix, absPrefix, relPrefix).Scan(&nodes, &files)
+		WHERE instr(qualified_name, ?) = 1 OR `+pathMatch,
+		scopePrefix, nativeAbs, slashAbs, nativeRel, relPath+"/").Scan(&nodes, &files)
 	if err == nil {
 		return nodes, files, nil
 	}
 	// A graph without a qualified_name column (an older or reduced schema) can
 	// still be attributed by file path. Falling back keeps the honest-readiness
 	// check working instead of dropping it on a schema difference.
-	err = db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT file_path) FROM nodes
-		WHERE instr(file_path, ?) = 1 OR instr(file_path, ?) = 1`,
-		absPrefix, relPrefix).Scan(&nodes, &files)
+	err = db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT file_path) FROM nodes WHERE `+pathMatch,
+		nativeAbs, slashAbs, nativeRel, relPath+"/").Scan(&nodes, &files)
 	return nodes, files, err
 }
 
@@ -1049,17 +1080,7 @@ type PostprocessOptions struct {
 
 // Postprocess runs flows/communities/FTS rebuilding via `code-review-graph postprocess`.
 func (b *CRGBridge) Postprocess(opts PostprocessOptions) error {
-	args := []string{"postprocess", crgFlagRepo, b.RepoRoot}
-	if opts.NoFlows {
-		args = append(args, "--no-flows")
-	}
-	if opts.NoCommunities {
-		args = append(args, "--no-communities")
-	}
-	if opts.NoFTS {
-		args = append(args, "--no-fts")
-	}
-	return b.runStreamed(args...)
+	return b.runStreamed(postprocessArgs(b.RepoRoot, opts)...)
 }
 
 // DetectChanges returns the change-impact report for the current diff.
