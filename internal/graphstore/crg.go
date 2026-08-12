@@ -44,6 +44,11 @@ type CRGBridge struct {
 	// Bin is the path to the code-review-graph executable. If empty,
 	// DiscoverCRGBin() is called to auto-detect it.
 	Bin string
+	// runner overrides how per-root builds and postprocess passes are
+	// executed. Production leaves it nil (the bridge shells out to Bin);
+	// tests inject a runner to drive the multi-root build without the Python
+	// CRG installed.
+	runner crgRunner
 }
 
 // NewCRGBridge returns a CRGBridge rooted at repoRoot, auto-detecting the CRG
@@ -180,6 +185,12 @@ type BuildOptions struct {
 	SkipFlows bool
 	// SkipPostprocess skips all post-processing (raw parse only).
 	SkipPostprocess bool
+	// NoRecurseSubmodules opts out of indexing the repository's submodules.
+	// The default (false) recurses: a superproject build that ignored its
+	// submodules would index a fraction of the workspace and still report
+	// success. Opting out does not hide the submodules — they are reported as
+	// explicitly excluded in the build summary and the readiness status.
+	NoRecurseSubmodules bool
 }
 
 // CRGOperationReport captures a build/update outcome for CLI callers.
@@ -190,21 +201,78 @@ type CRGOperationReport struct {
 	ChangedFiles []string   `json:"changed_files,omitempty"`
 	Status       *CRGStatus `json:"status,omitempty"`
 	RawOutput    string     `json:"raw_output,omitempty"`
+	// Workspace is the resolved set of indexed roots and skipped submodules.
+	// It is present whenever the repository could be enumerated, so a caller
+	// can always see what the reported counts actually cover.
+	Workspace *WorkspacePlan `json:"workspace,omitempty"`
+	// Merged reports the rows folded in from submodule graphs.
+	Merged *MergeStats `json:"merged,omitempty"`
 }
 
-// BuildReport triggers a full graph rebuild and returns a structured summary.
-func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) {
-	args := []string{"build", crgFlagRepo, b.RepoRoot}
+// crgRunner is the subprocess seam the workspace build drives: one CRG build
+// per root, then one postprocess over the merged superproject graph. Tests
+// substitute a runner that seeds graph databases directly so the multi-root
+// orchestration is exercised without the Python CRG installed.
+type crgRunner interface {
+	buildRoot(root string, opts BuildOptions) ([]byte, error)
+	postprocessRoot(root string, opts PostprocessOptions) error
+}
+
+// activeRunner returns the injected runner, defaulting to the bridge itself
+// (which shells out to the CRG binary).
+func (b *CRGBridge) activeRunner() crgRunner {
+	if b.runner != nil {
+		return b.runner
+	}
+	return b
+}
+
+// buildRoot runs `code-review-graph build` against one repository root.
+func (b *CRGBridge) buildRoot(root string, opts BuildOptions) ([]byte, error) {
+	args := []string{"build", crgFlagRepo, root}
 	if opts.SkipFlows {
 		args = append(args, "--skip-flows")
 	}
 	if opts.SkipPostprocess {
 		args = append(args, "--skip-postprocess")
 	}
-	out, err := b.runCaptured(args...)
+	return b.runCaptured(args...)
+}
+
+// postprocessRoot rebuilds derived state (flows, communities, FTS) for root.
+func (b *CRGBridge) postprocessRoot(root string, opts PostprocessOptions) error {
+	return (&CRGBridge{RepoRoot: root, Bin: b.Bin}).Postprocess(opts)
+}
+
+// BuildReport triggers a full graph rebuild and returns a structured summary.
+//
+// In a superproject the build is workspace-wide: the root and every
+// initialized submodule are built, the submodule graphs are merged into the
+// root graph under a per-repository scope, and postprocess runs once over the
+// merged result. Postprocess is deliberately deferred to the end — merging
+// base rows after a postprocess pass would leave the FTS index, flows, and
+// communities describing only the root repository while the graph "looked"
+// complete.
+func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) {
+	plan, planErr := PlanWorkspace(b.RepoRoot, !opts.NoRecurseSubmodules)
+	subRoots := plan.Submodules()
+
+	// Root build. When submodule graphs still have to be merged in, defer
+	// postprocess until after the merge rather than running it twice.
+	rootOpts := opts
+	if len(subRoots) > 0 {
+		rootOpts.SkipPostprocess = true
+	}
+	out, err := b.activeRunner().buildRoot(b.RepoRoot, rootOpts)
 	if err != nil {
 		return nil, classifyCRGRunError("build", err, out)
 	}
+
+	merged, mergeErr := b.buildAndMergeSubmodules(subRoots, opts)
+	if mergeErr != nil {
+		return nil, mergeErr
+	}
+
 	status, statusErr := b.Status()
 	if statusErr != nil {
 		return nil, statusErr
@@ -214,11 +282,20 @@ func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) 
 		Operation: "build",
 		Status:    status,
 		RawOutput: strings.TrimSpace(string(out)),
+		Merged:    merged,
+	}
+	if planErr == nil {
+		planCopy := plan
+		report.Workspace = &planCopy
 	}
 	switch {
 	case status.Ready:
 		report.Outcome = string(CRGReadinessReady)
 		report.Summary = fmt.Sprintf("Build complete: %d nodes, %d edges, %d files", status.Nodes, status.Edges, status.Files)
+	case status.State == CRGReadinessIncomplete:
+		report.Outcome = CRGReadinessIncomplete
+		report.Summary = fmt.Sprintf("Build incomplete: %d nodes, %d edges, %d files — %s",
+			status.Nodes, status.Edges, status.Files, status.Message)
 	case status.State == string(CRGReadinessUnbuilt):
 		report.Outcome = string(CRGReadinessUnbuilt)
 		report.Summary = "Build completed but the code graph is still unbuilt."
@@ -232,10 +309,55 @@ func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) 
 			report.Summary = "Build completed, but code graph status could not be determined."
 		}
 	}
+	if report.Workspace != nil && report.Summary != "" {
+		report.Summary += "\nRoots: " + report.Workspace.Summary()
+	}
 	if report.RawOutput != "" && report.Summary == "" {
 		report.Summary = report.RawOutput
 	}
 	return report, nil
+}
+
+// buildAndMergeSubmodules builds each submodule root, merges its graph into
+// the superproject graph under the submodule's scope, and then runs the single
+// postprocess pass that rebuilds derived state over the merged rows. It
+// returns nil stats when there is nothing to merge.
+func (b *CRGBridge) buildAndMergeSubmodules(subRoots []WorkspaceRoot, opts BuildOptions) (*MergeStats, error) {
+	if len(subRoots) == 0 {
+		return nil, nil
+	}
+	// Submodule graphs are merged before any derived state is computed, so
+	// each submodule build skips its own postprocess: the only postprocess
+	// that matters runs over the merged superproject graph below.
+	subOpts := BuildOptions{SkipFlows: opts.SkipFlows, SkipPostprocess: true}
+	merged := &MergeStats{}
+	db, err := sql.Open("sqlite", CRGDBPath(b.RepoRoot))
+	if err != nil {
+		return nil, fmt.Errorf("open superproject graph: %w", err)
+	}
+	defer db.Close()
+	for _, sub := range subRoots {
+		out, buildErr := b.activeRunner().buildRoot(sub.AbsPath, subOpts)
+		if buildErr != nil {
+			return nil, classifyCRGRunError("build "+sub.Path, buildErr, out)
+		}
+		stats, mergeErr := MergeGraphDB(db, CRGDBPath(sub.AbsPath), sub.Scope)
+		if mergeErr != nil {
+			return nil, fmt.Errorf("merge submodule %s: %w", sub.Path, mergeErr)
+		}
+		merged.Nodes += stats.Nodes
+		merged.Edges += stats.Edges
+	}
+	if opts.SkipPostprocess {
+		return merged, nil
+	}
+	if err := b.activeRunner().postprocessRoot(b.RepoRoot, PostprocessOptions{
+		NoFlows:       opts.SkipFlows,
+		NoCommunities: opts.SkipFlows,
+	}); err != nil {
+		return nil, fmt.Errorf("postprocess merged graph: %w", err)
+	}
+	return merged, nil
 }
 
 // Build triggers a full graph rebuild via `code-review-graph build`.
@@ -336,6 +458,94 @@ type CRGStatus struct {
 	State       string `json:"state"`
 	Ready       bool   `json:"ready"`
 	Message     string `json:"message,omitempty"`
+	// Roots breaks the counts down per indexed repository — the superproject
+	// first, then every submodule detected in the checkout. It is populated
+	// only for superprojects; a plain repository has a single implicit root
+	// and omits it.
+	Roots []RootStatus `json:"roots,omitempty"`
+}
+
+// RootStatus is one repository's contribution to the graph.
+type RootStatus struct {
+	// Path is the root's path relative to the superproject ("." for the
+	// superproject itself).
+	Path string `json:"path"`
+	// Nodes and Files are the rows in the graph attributed to this root.
+	Nodes int `json:"nodes"`
+	Files int `json:"files"`
+	// Indexed reports whether this root contributed anything to the graph.
+	Indexed bool `json:"indexed"`
+	// Note explains a root that is present in the checkout but absent from
+	// the graph.
+	Note string `json:"note,omitempty"`
+}
+
+// applyWorkspaceReadiness attributes the graph's rows to the superproject and
+// each submodule, and downgrades readiness when a submodule exists in the
+// checkout but contributed nothing.
+//
+// This is the honest-readiness rule: a build that indexed 2 of 885 files
+// because it never descended into the submodules must not report READY. When
+// git cannot enumerate (not a repo, git unavailable) or the repo has no
+// submodules, the status is left exactly as the single-repo path produced it.
+func (b *CRGBridge) applyWorkspaceReadiness(status *CRGStatus, db *sql.DB) {
+	subs, err := DiscoverSubmodules(b.RepoRoot)
+	if err != nil || len(subs) == 0 {
+		return
+	}
+	roots := []RootStatus{{Path: ".", Indexed: true}}
+	subNodes, subFiles := 0, 0
+	var missing []string
+	for _, sub := range subs {
+		nodes, files, countErr := countRootRows(db, sub.AbsPath(b.RepoRoot), sub.Path)
+		if countErr != nil {
+			return
+		}
+		root := RootStatus{Path: sub.Path, Nodes: nodes, Files: files, Indexed: nodes > 0}
+		if !root.Indexed {
+			root.Note = "present in the checkout but absent from the graph"
+			if !sub.Initialized {
+				root.Note = SkipReasonUninitialized
+			}
+			missing = append(missing, sub.Path)
+		}
+		subNodes += nodes
+		subFiles += files
+		roots = append(roots, root)
+	}
+	roots[0].Nodes = status.Nodes - subNodes
+	roots[0].Files = status.Files - subFiles
+	status.Roots = roots
+	if len(missing) == 0 {
+		return
+	}
+	status.Ready = false
+	status.State = CRGReadinessIncomplete
+	status.Message = fmt.Sprintf("submodules detected but not indexed: %s — rerun 'da kg build' (or init them first); "+
+		"queries against these paths will return nothing", strings.Join(missing, ", "))
+}
+
+// countRootRows counts the graph rows attributed to one submodule root. Rows
+// are matched by the scope prefix the merge stamps onto qualified names, and
+// by file-path prefix (absolute or superproject-relative) so a graph produced
+// by an external aggregator is still attributed correctly.
+func countRootRows(db *sql.DB, absPath, relPath string) (nodes, files int, err error) {
+	scopePrefix := relPath + scopeSeparator
+	absPrefix := absPath + string(filepath.Separator)
+	relPrefix := filepath.FromSlash(relPath) + string(filepath.Separator)
+	err = db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT file_path) FROM nodes
+		WHERE instr(qualified_name, ?) = 1 OR instr(file_path, ?) = 1 OR instr(file_path, ?) = 1`,
+		scopePrefix, absPrefix, relPrefix).Scan(&nodes, &files)
+	if err == nil {
+		return nodes, files, nil
+	}
+	// A graph without a qualified_name column (an older or reduced schema) can
+	// still be attributed by file path. Falling back keeps the honest-readiness
+	// check working instead of dropping it on a schema difference.
+	err = db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT file_path) FROM nodes
+		WHERE instr(file_path, ?) = 1 OR instr(file_path, ?) = 1`,
+		absPrefix, relPrefix).Scan(&nodes, &files)
+	return nodes, files, err
 }
 
 // Status returns the current graph stats from `code-review-graph status`.
@@ -389,6 +599,7 @@ func (b *CRGBridge) Status() (*CRGStatus, error) {
 	if status.Nodes > 0 && status.Files > 0 && status.LastUpdated != "never" {
 		status.State = string(CRGReadinessReady)
 		status.Ready = true
+		b.applyWorkspaceReadiness(status, db)
 		return status, nil
 	}
 
@@ -419,6 +630,11 @@ const (
 	CRGReadinessReady        = "ready"
 	CRGReadinessBusyOrLocked = "busy_or_locked"
 	CRGReadinessError        = "error"
+	// CRGReadinessIncomplete means the graph was built and has rows, but a
+	// repository root that exists in the checkout (a submodule) is not in it.
+	// Queries still work; they silently under-report, which is why this is not
+	// `ready`.
+	CRGReadinessIncomplete = "incomplete"
 )
 
 func (b *CRGBridge) runCaptured(args ...string) ([]byte, error) {
