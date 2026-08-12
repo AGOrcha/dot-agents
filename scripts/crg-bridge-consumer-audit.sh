@@ -103,12 +103,24 @@ C_N="$(printf '%s\n' "$C_PROFILES" | nlines)"
 
 # ── [D] named / out-of-tree consumers of the CRG graph (via the Python CLI) ──
 D_CI="$(present_if .github/workflows/test.yml 'code-review-graph')"
-D_HOOK="$(present_if commands/kg/sync_code_warm_link.go 'code-review-graph not installed')"
+D_HOOK="$(present_if commands/kg/sync_code_warm_link.go 'skipping code graph update')"
 D_MCP="$(present_if commands/kg/kg.go 'NewMCPServer')"
 
 # ── [E] does workflow drift actually run the reads_from:[crg-bridge] sweep? ──
 E_DRIFT_WIRED="$(if grep -rqF 'BridgeConsumers(' commands/workflow 2>/dev/null; \
   then echo wired; else echo UNWIRED; fi)"
+
+# ── [E3] is a kg-native replacement actually serving the `da kg` surface? ──
+# Condition 3 of §11.4 is met only when the built-in registries carry the CRG
+# family AND the command path constructs the kg-native engine (rather than the
+# Python bridge) as its default backend.
+if grep -rqF 'codegraph.Open(' commands/kg 2>/dev/null && [[ "$B_REG_N" -gt 0 ]]; then
+  E_NATIVE="MET — kg-native backend is the default"
+  E_NATIVE_NOTE="builtin registries register the CRG family; the bridge is opt-in via kg.graph_backend"
+else
+  E_NATIVE="NOT MET — no kg-native replacement wired"
+  E_NATIVE_NOTE="both builtin registries register only 'none'"
+fi
 
 # ── Verdict (derivable half of §11.4): bridge is deletable only when the
 # Python machinery has zero live consumers AND no view reads the mirror. The
@@ -140,7 +152,9 @@ $(printf '%s\n' "$A_PROD" | sed '/^$/d' | while read -r f; do printf '      %s  
     STATUS: $( { [[ "$B_REG_N" -eq 0 ]] && [[ "$B_READS_N" -eq 0 ]] && [[ "$B_MIRROR_N" -eq 0 ]]; } && echo 'DEAD WEIGHT — registered nowhere; zero consumers.' || echo 'has consumers — see counts.' )
 
 [C] graph_backend profile references selecting crg-bridge : ${C_N}
-    (built-in graph backends are crg / none; the migration-only mirror is not selectable)
+    (built-in graph backends are crg / crg-bridge / none; selecting the crg-bridge
+     ref routes da kg back to the legacy Python runtime — the §11.4 rollback path.
+     It does NOT permit a materialized view to declare reads_from:[crg-bridge].)
 
 [D] Named / out-of-tree consumers of the CRG graph (bound to the Python CLI)
     CI KG CODE lane (.github/workflows/test.yml)            : ${D_CI}
@@ -153,8 +167,8 @@ $(printf '%s\n' "$A_PROD" | sed '/^$/d' | while read -r f; do printf '      %s  
 [E] §11.4 decommission gate (all four required before t6d deletes the bridge)
     1. parity matrix 8 rows x 3wk CI      : EXTERNAL — owned by t6a/t6b (t6b pending)
     2. behavior-preservation gate         : EXTERNAL — owned by t6b
-    3. out-of-tree consumer migration     : NOT MET — no kg-native replacement wired
-                                            (both builtin registries register only 'none';
+    3. out-of-tree consumer migration     : ${E_NATIVE}
+                                            (${E_NATIVE_NOTE};
                                              RegisterCRGFamily prod callers = ${B_REG_N})
     4. zero reads_from:[crg-bridge]        : in-repo count ${B_READS_N}; cross-repo sweep
                                             NOT automated — workflow drift is ${E_DRIFT_WIRED}
