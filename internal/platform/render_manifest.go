@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -205,10 +206,25 @@ func recordRenderHash(io platformIO, dst, hash string) {
 // seam-interface-di-migration plan does not target this var.
 var BackupBeforeOverwrite = func(dst string) error { return sidecarBackup(stdPlatformIO{}, dst) }
 
-// backupSuffix is the sibling suffix dot-agents appends to a genuine user file
+// BackupSuffix is the sibling suffix dot-agents appends to a genuine user file
 // it preserves before installing a managed link over the owned path (the
-// established repo convention: <path>.dot-agents-backup).
-const backupSuffix = ".dot-agents-backup"
+// established repo convention: <path>.dot-agents-backup). Exported as the
+// single canonical source: commands/internal/lifecycle (a different package)
+// mirrors this same convention for its own --force sidecar backup and must
+// build the suffix from this const rather than repeat the literal.
+const BackupSuffix = ".dot-agents-backup"
+
+// HasBackupSuffix reports whether name carries the dot-agents backup marker
+// anywhere in it (not just as a trailing suffix) — the matching semantics
+// already relied on across this package's rendered-artifact listing/pruning
+// code (cursor.go) and mirrored by commands/internal/lifecycle.IsBackupArtifact.
+// Contains, not strings.HasSuffix, is deliberate: it also catches a backup
+// sibling whose own name later gets a further platform-specific suffix
+// appended (e.g. during a rename/dedupe pass), not only the exact
+// "<path>.dot-agents-backup" shape sidecarBackup writes.
+func HasBackupSuffix(name string) bool {
+	return strings.Contains(name, BackupSuffix)
+}
 
 // sidecarBackup is the default BackupBeforeOverwrite impl. It is also the
 // production-side call when render_manifest internals invoke the backup
@@ -220,7 +236,7 @@ func sidecarBackup(io platformIO, dst string) error {
 	if err != nil {
 		return fmt.Errorf("read %s for backup: %w", dst, err)
 	}
-	bak := dst + backupSuffix
+	bak := dst + BackupSuffix
 	if err := io.WriteFile(bak, data, 0644); err != nil {
 		return fmt.Errorf("write backup %s: %w", bak, err)
 	}

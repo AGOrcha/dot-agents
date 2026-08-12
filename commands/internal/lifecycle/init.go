@@ -379,15 +379,18 @@ func warnLegacyManifestInCwd() {
 // sidecarBackupFile preserves an unmanaged occupant before links replaces it
 // with a managed link in init's --force path. It mirrors the established
 // internal/platform convention: write the existing bytes to a sibling
-// <path>.dot-agents-backup. links calls this BEFORE removing the entry and
-// only proceeds with replacement if it returns nil, so a backup failure
-// aborts the replace and leaves the user's file intact (no data loss).
+// <path>.dot-agents-backup, built from the same platform.BackupSuffix const
+// render_manifest.go's sidecarBackup uses — the single canonical source for
+// this suffix, so both packages stay byte-for-byte in sync if it ever
+// changes. links calls this BEFORE removing the entry and only proceeds with
+// replacement if it returns nil, so a backup failure aborts the replace and
+// leaves the user's file intact (no data loss).
 func sidecarBackupFile(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read %s for backup: %w", path, err)
 	}
-	bak := path + ".dot-agents-backup"
+	bak := path + platform.BackupSuffix
 	if err := os.WriteFile(bak, data, 0644); err != nil {
 		return fmt.Errorf("write backup %s: %w", bak, err)
 	}
