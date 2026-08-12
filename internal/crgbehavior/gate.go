@@ -122,14 +122,44 @@ func Run(cfg Config, views BridgeViews, impact ImpactQuerier) (Report, error) {
 		GraphFiles:    views.FilesIndexed,
 		NativeSymbols: len(native.fileByID),
 	}
+	report.UnavailableViews = unavailableViews(views)
+	unavailable := setOf(report.UnavailableViews)
 	for _, task := range cfg.tasks() {
-		tr, err := evaluateTask(cfg, task, views, native, impact)
+		tr, err := evaluateTask(cfg, task, views, native, impact, unavailable)
 		if err != nil {
 			return Report{}, err
 		}
 		report.Tasks = append(report.Tasks, tr)
 	}
 	return report, nil
+}
+
+// unavailableViews names the derived views the legacy build never computed —
+// an EMPTY bridge-side table is not a per-task divergence, it means that
+// materialized view does not exist in this graph (code-review-graph releases
+// differ in which postprocess steps they run, and some need optional native
+// dependencies). Those surfaces are skipped rather than failed, and the report
+// says so, so an unexercised surface is never mistaken for an agreeing one.
+func unavailableViews(views BridgeViews) []string {
+	var out []string
+	if len(views.FlowMemberships) == 0 {
+		out = append(out, SurfaceFlows, SurfaceFlowOrder)
+	}
+	if views.CommunitiesAssigned == 0 {
+		out = append(out, SurfaceCommunities)
+	}
+	if len(views.RiskIndex) == 0 {
+		out = append(out, SurfaceRiskIndex)
+	}
+	if len(views.FTS) == 0 {
+		out = append(out, SurfaceFTS)
+	}
+	return out
+}
+
+// unavailableReason explains a surface the legacy build did not compute.
+func unavailableReason(surface string) string {
+	return "the legacy bridge persisted no " + surface + " data — this graph build did not compute that view"
 }
 
 // checkNormalized fails fast when the bridge graph's paths did not normalize to
@@ -198,7 +228,8 @@ func bootstrapNative(store sdk.Store, views BridgeViews, commit string) (nativeS
 }
 
 // evaluateTask replays one review task against both sides.
-func evaluateTask(cfg Config, task Task, views BridgeViews, native nativeSide, impact ImpactQuerier) (TaskReport, error) {
+func evaluateTask(cfg Config, task Task, views BridgeViews, native nativeSide,
+	impact ImpactQuerier, unavailable map[string]bool) (TaskReport, error) {
 	tr := TaskReport{Commit: task.Commit, Subject: task.Subject, ChangedFiles: task.ChangedFiles}
 	bridge, err := impact.ImpactRadius(task.ChangedFiles, cfg.Depth, cfg.MaxResults)
 	if err != nil {
@@ -210,13 +241,15 @@ func evaluateTask(cfg Config, task Task, views BridgeViews, native nativeSide, i
 		tr.SkipReason = "no symbol in either graph for the changed files (commit outside the built graph)"
 		return tr, nil
 	}
-	tr.Surfaces = taskSurfaces(cfg, task, views, native, seeds, bridge)
+	tr.Surfaces = taskSurfaces(cfg, task, views, native, seeds, bridge, unavailable)
 	return tr, nil
 }
 
-// taskSurfaces runs every review-relevant query comparison for one task.
-func taskSurfaces(cfg Config, task Task, views BridgeViews, native nativeSide, seeds []string, bridge BridgeImpact) []Surface {
-	return []Surface{
+// taskSurfaces runs every review-relevant query comparison for one task,
+// skipping the surfaces whose legacy view this graph build never computed.
+func taskSurfaces(cfg Config, task Task, views BridgeViews, native nativeSide,
+	seeds []string, bridge BridgeImpact, unavailable map[string]bool) []Surface {
+	surfaces := []Surface{
 		changedNodesSurface(seeds, bridge),
 		impactSurface(cfg, native, seeds, bridge),
 		flowsSurface(native, views, seeds),
@@ -225,6 +258,12 @@ func taskSurfaces(cfg Config, task Task, views BridgeViews, native nativeSide, s
 		riskSurface(cfg, native, views, seeds),
 		ftsSurface(native, views, task.Identifiers),
 	}
+	for i, s := range surfaces {
+		if unavailable[s.Name] {
+			surfaces[i] = skippedSurface(s.Name, unavailableReason(s.Name))
+		}
+	}
+	return surfaces
 }
 
 // seedsFor resolves the changed files to native symbol ids, from the PERSISTED

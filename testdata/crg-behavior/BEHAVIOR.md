@@ -79,6 +79,26 @@ regressions. Numbers below are from a 21-task run against this repository
   deterministic sorted BFS. So `flows` gates on membership and `flow_order`
   reports the numbering separately.
 
+## Uncomputed legacy views are skipped, loudly
+
+Which materialized views a legacy graph actually holds depends on the
+`code-review-graph` release and on optional native dependencies (community
+detection falls back to a file-based algorithm without `igraph`; some releases
+persist no `flow_memberships` rows at all). A view the legacy build never
+computed is **not** a behavior divergence, so its surface skips on every task —
+but the report states it up front and again in the summary:
+
+```
+NOT EXERCISED: the legacy build computed no flows, flow_order data; those surfaces skip on every task
+...
+  surface(s) NOT exercised (legacy view not computed): flows, flow_order
+```
+
+Read that line before reading `GATE: PASS`: a pass with `flows` unexercised is
+much weaker evidence than a pass with every surface live. Observed in practice:
+the CI-installed release persisted zero `flow_memberships` rows for this repo
+while a locally installed 2.1.0 populated 4,762 flows.
+
 Running with `-strict` promotes every advisory surface to gating. That flag is
 the §11.4 sign-off switch: no code change is needed to tighten the gate once
 these differences are resolved or explicitly accepted.

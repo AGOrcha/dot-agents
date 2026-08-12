@@ -94,7 +94,7 @@ func TestRenderNamesSidesAndPrintsNoControlCharacters(t *testing.T) {
 
 func TestFailingSurfacesCountsBothTiers(t *testing.T) {
 	views := fixtureViews()
-	views.FlowMemberships = nil
+	views.FlowMemberships = views.FlowMemberships[:1]
 	views.Communities = map[string]string{idEntry: "c1", idStep: "c2", idWidget: "c3", idLone: "c4"}
 	report, err := Run(fixtureConfig(), views, agreeingImpact())
 	if err != nil {

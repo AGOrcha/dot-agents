@@ -49,7 +49,11 @@ type Report struct {
 	GraphEdges    int
 	GraphFiles    int
 	NativeSymbols int
-	Tasks         []TaskReport
+	// UnavailableViews names the derived views the legacy build never computed.
+	// Their surfaces are skipped on every task, so the report states them up
+	// front: an unexercised surface must never read as an agreeing one.
+	UnavailableViews []string
+	Tasks            []TaskReport
 }
 
 // Pass is the gate verdict: at least one task actually ran, and every gating
@@ -115,7 +119,12 @@ func (r Report) renderHeader(w io.Writer) {
 	fmt.Fprintf(w, "corpus: %d pinned review task(s) at %s\n", len(r.Tasks), short(r.Head))
 	fmt.Fprintf(w, "graph:  %d bridge symbols / %d references / %d files; %d symbols ingested natively\n",
 		r.GraphSymbols, r.GraphEdges, r.GraphFiles, r.NativeSymbols)
-	fmt.Fprintf(w, "mode:   %s\n\n", modeLabel(r.Strict))
+	fmt.Fprintf(w, "mode:   %s\n", modeLabel(r.Strict))
+	if len(r.UnavailableViews) > 0 {
+		fmt.Fprintf(w, "NOT EXERCISED: the legacy build computed no %s data; those surfaces skip on every task\n",
+			strings.Join(r.UnavailableViews, ", "))
+	}
+	fmt.Fprintln(w)
 }
 
 // modeLabel names the gating mode in the report header.
@@ -171,6 +180,10 @@ func verdict(s Surface) string {
 
 func (r Report) renderSummary(w io.Writer) {
 	fmt.Fprintf(w, "%d of %d task(s) executed\n", r.ExecutedTasks(), len(r.Tasks))
+	if len(r.UnavailableViews) > 0 {
+		fmt.Fprintf(w, "  surface(s) NOT exercised (legacy view not computed): %s\n",
+			strings.Join(r.UnavailableViews, ", "))
+	}
 	failing := r.FailingSurfaces()
 	for _, name := range sortedKeys(failing) {
 		fmt.Fprintf(w, "  divergent surface %-14s on %d task(s)%s\n", name, failing[name], advisorySuffix(name))

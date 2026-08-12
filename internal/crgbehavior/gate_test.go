@@ -39,9 +39,10 @@ func fixtureViews() BridgeViews {
 		Communities: map[string]string{
 			idEntry: "c1", idStep: "c1", idWidget: "c1", idLone: "c2",
 		},
-		RiskIndex:    map[string]float64{idEntry: 2, idStep: 1, idWidget: 1, idLone: 0},
-		FTS:          []string{"a.go::Entry", "a.go::Step", "b.go::Lone", "b.go::Widget"},
-		FilesIndexed: 2,
+		RiskIndex:           map[string]float64{idEntry: 2, idStep: 1, idWidget: 1, idLone: 0},
+		FTS:                 []string{"a.go::Entry", "a.go::Step", "b.go::Lone", "b.go::Widget"},
+		FilesIndexed:        2,
+		CommunitiesAssigned: 4,
 	}
 }
 
@@ -207,11 +208,33 @@ func TestRunSkipsTasksOutsideTheBuiltGraph(t *testing.T) {
 	}
 }
 
+func TestSurfacesSkipWhenTheLegacyViewWasNeverComputed(t *testing.T) {
+	views := fixtureViews()
+	views.FlowMemberships = nil   // the legacy build ran no flow detection
+	views.CommunitiesAssigned = 0 // nor community detection
+	views.RiskIndex = map[string]float64{}
+	views.FTS = nil
+	report, err := Run(fixtureConfig(), views, agreeingImpact())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, name := range []string{SurfaceFlows, SurfaceFlowOrder, SurfaceCommunities, SurfaceRiskIndex, SurfaceFTS} {
+		s := surfaceNamed(t, report, name)
+		if !s.Skipped || !strings.Contains(s.SkipReason, "did not compute that view") {
+			t.Fatalf("%s must skip as an uncomputed legacy view, not fail as a divergence: %+v", name, s)
+		}
+	}
+	if !report.Pass() {
+		t.Fatalf("an uncomputed legacy view is not a divergence: %v", report.FailingSurfaces())
+	}
+	out := renderOf(t, report)
+	if !strings.Contains(out, "NOT EXERCISED") || !strings.Contains(out, "surface(s) NOT exercised") {
+		t.Fatalf("the report must state which surfaces were never exercised:\n%s", out)
+	}
+}
+
 func TestSurfacesSkipWhenTheTaskCannotExerciseThem(t *testing.T) {
 	views := fixtureViews()
-	views.FlowMemberships = nil
-	views.Communities = map[string]string{}
-	views.RiskIndex = map[string]float64{}
 	cfg := fixtureConfig(Task{
 		Commit:       "3333333333333333",
 		ChangedFiles: []string{"b.go"},
@@ -222,7 +245,7 @@ func TestSurfacesSkipWhenTheTaskCannotExerciseThem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	for _, name := range []string{SurfaceFlows, SurfaceFlowOrder, SurfaceRiskIndex, SurfaceFTS} {
+	for _, name := range []string{SurfaceFlows, SurfaceFlowOrder, SurfaceFTS} {
 		if s := surfaceNamed(t, report, name); !s.Skipped || s.SkipReason == "" {
 			t.Fatalf("%s must skip with a reason on this task: %+v", name, s)
 		}

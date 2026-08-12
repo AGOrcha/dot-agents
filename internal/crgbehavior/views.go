@@ -53,6 +53,11 @@ type BridgeViews struct {
 	FTS []string
 	// FilesIndexed is the count of distinct file paths in the bridge graph.
 	FilesIndexed int
+	// CommunitiesAssigned counts the nodes the bridge actually placed in a
+	// community. Zero means the legacy build never ran community detection —
+	// an unavailable view, not a divergence (every node would otherwise look
+	// like its own singleton cluster).
+	CommunitiesAssigned int
 }
 
 // Corpus lowers the bridge's graph to the kg-native ingestion corpus for
@@ -148,7 +153,11 @@ func viewsFromNodes(nodes []bridgeNode) BridgeViews {
 	symbols := make([]crg.Symbol, 0, len(nodes))
 	communities := make(map[string]string, len(nodes))
 	files := map[string]bool{}
+	assigned := 0
 	for _, n := range nodes {
+		if n.communityID.Valid {
+			assigned++
+		}
 		sym := crg.Symbol{
 			QualifiedName: n.qualifiedName,
 			Kind:          n.kind,
@@ -161,7 +170,12 @@ func viewsFromNodes(nodes []bridgeNode) BridgeViews {
 		files[n.filePath] = true
 		communities[crg.SymbolID(sym)] = communityID(n)
 	}
-	return BridgeViews{Symbols: symbols, Communities: communities, FilesIndexed: len(files)}
+	return BridgeViews{
+		Symbols:             symbols,
+		Communities:         communities,
+		FilesIndexed:        len(files),
+		CommunitiesAssigned: assigned,
+	}
 }
 
 // communityID is the bridge's cluster id for a node. A node the bridge left
