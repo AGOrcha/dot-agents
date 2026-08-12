@@ -846,17 +846,14 @@ func warmCodeLane(store graphstore.Store) (nodes, edges int, summary string) {
 	return nodesIn, edgesIn, fmt.Sprintf("  code-lane: %d nodes, %d edges imported from CRG", nodesIn, edgesIn)
 }
 
-// validLinkKinds is the set of accepted note→symbol link kinds, shared by
-// `kg link add` and `kg link import`.
-var validLinkKinds = map[string]bool{
-	"mentions": true, "implements": true, "documents": true,
-	"decides": true, "references": true,
-}
+// The note→symbol link-kind vocabulary is declared once as kgLinkKindEnum in
+// enums.go, which also generates the `--kind` help text and completions, so
+// `kg link add` and `kg link import` validate against exactly what help lists.
 
-// validLinkKindList is the human-readable comma-separated form for errors.
-const validLinkKindList = "mentions, implements, documents, decides, references"
+// validLinkKindList is the pipe-joined form used in error messages.
+var validLinkKindList = kgLinkKindEnum.ValueList()
 
-func isValidLinkKind(k string) bool { return validLinkKinds[k] }
+func isValidLinkKind(k string) bool { return k != "" && kgLinkKindEnum.Contains(k) }
 
 // runKGLinkAdd creates a note→symbol link.
 func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {

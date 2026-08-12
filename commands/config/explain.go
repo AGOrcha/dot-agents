@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -229,10 +230,10 @@ The layer stack (lowest precedence first) is:
 	cmd.Flags().BoolVar(&opts.flags, "flags", false, "Print resolved feature flags (features.*) across all layers")
 	cmd.Flags().BoolVar(&opts.valueOnly, "value-only", false, "Print only the effective value (JSON-encoded for non-scalars)")
 	cmd.Flags().BoolVar(&opts.originOnly, "origin-only", false, "Print only the winning layer identifier")
-	cmd.Flags().StringVar(&opts.role, "role", "", "Resolve the effective profile bundle for this runtime role (profile context)")
-	cmd.Flags().StringVar(&opts.appType, "app-type", "", "Resolve the effective profile bundle for this app_type (profile context)")
-	cmd.Flags().StringVar(&opts.stage, "stage", "", "Resolve the effective profile bundle for this stage (profile context)")
-	cmd.Flags().StringVar(&opts.harness, "harness", "", "Resolve the effective profile bundle for this harness (profile context)")
+	cmdutil.RegisterEnum(cmd, &opts.role, profileRoleSelector)
+	cmdutil.RegisterEnum(cmd, &opts.appType, profileAppTypeSelector)
+	cmdutil.RegisterEnum(cmd, &opts.stage, profileStageSelector)
+	cmdutil.RegisterEnum(cmd, &opts.harness, profileHarnessSelector)
 	return cmd
 }
 

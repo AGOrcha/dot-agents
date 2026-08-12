@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -239,9 +240,9 @@ D4). The recompute envelope is documented on the recomputeResult type.`,
 			return runRelevance(opts, deps)
 		},
 	}
-	cmd.Flags().StringVar(&opts.filter, "filter", filterAll, "Facet to render: units | topology | lenses | graph | lessons | all")
-	cmd.Flags().StringVar(&opts.appType, "app-type", "", "app_type to resolve the profile for (overridden by --task's own app_type)")
-	cmd.Flags().StringVar(&opts.stage, "stage", "", "Restrict the units facet to one stage (e.g. orchestrate, verify, review)")
+	cmdutil.RegisterEnum(cmd, &opts.filter, relevanceFilterEnum)
+	cmdutil.RegisterEnum(cmd, &opts.appType, relevanceAppTypeSelector)
+	cmdutil.RegisterEnum(cmd, &opts.stage, relevanceStageSelector)
 	cmd.Flags().StringVar(&opts.task, "task", "", "Resolve app_type from a task: <plan-id>/<task-id> (or just <task-id> when --app-type names the plan context)")
 	cmd.Flags().StringArrayVar(&opts.paths, "path", nil, "Touched path to include when matching the lessons facet (repeatable; --task write_scope is included automatically)")
 	cmd.Flags().StringArrayVar(&opts.packages, "package", nil, "Touched package/import path to include when matching the lessons facet (repeatable)")
