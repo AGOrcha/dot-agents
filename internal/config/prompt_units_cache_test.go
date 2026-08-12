@@ -93,6 +93,15 @@ func TestFetchTargetDefaultsToLayerFileName(t *testing.T) {
 	if _, ok := readCachedUnit(target, "abc"); !ok {
 		t.Fatal("bytes written under the default name must read back")
 	}
+	// A directory sitting where the cached file belongs makes the atomic write
+	// fail rather than silently reporting success.
+	blocked := FetchTarget{Dir: t.TempDir(), FileName: "prompt.md"}
+	if err := os.MkdirAll(blocked.pathFor("abc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCachedUnit(blocked, "abc", []byte("x")); err == nil {
+		t.Fatal("expected the blocked write to fail")
+	}
 }
 
 // TestPromptUnitCachesUnderRealBasename is the item-1 contract: a fetched prompt
@@ -266,8 +275,9 @@ func TestGitFetcherMemoizesCloneFailure(t *testing.T) {
 // default fetcher instance to every unit of a type within a resolve (the sharing
 // the clone memo rides on) and a fresh instance after beginResolve.
 func TestDefaultFetcherIsSharedWithinOneResolve(t *testing.T) {
+	// A resolver used without an explicit beginResolve (the direct-call path a
+	// test or a future caller may take) still memoizes from a nil map.
 	r := NewLayeredResolver()
-	r.beginResolve()
 	first, err := r.fetcherFor("git")
 	if err != nil {
 		t.Fatal(err)

@@ -161,25 +161,29 @@ func referencedCacheDirs(projectPath string) (map[string]struct{}, bool, error) 
 // contributes arbitrarily many intermediate directories). A missing cache root
 // yields no entries.
 func walkCacheEntries(root string) ([]CacheEntry, error) {
+	if _, err := os.Stat(root); err != nil {
+		// No cache on this machine yet: nothing to scan, nothing to prune.
+		return nil, nil
+	}
 	sizes := map[string]int64{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			// An unreadable directory means the scan cannot see everything it is
+			// about to reason about, and a partial view is exactly what must not
+			// drive a delete — surface it instead.
+			return walkErr
 		}
 		if d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
+		// A file that vanished between enumeration and stat contributes no size
+		// rather than failing the whole scan; its entry is still discovered.
+		if info, err := d.Info(); err == nil {
+			sizes[filepath.Dir(path)] += info.Size()
 		}
-		sizes[filepath.Dir(path)] += info.Size()
 		return nil
 	})
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil {
 		return nil, err
 	}
 	dirs := make([]string, 0, len(sizes))
@@ -189,20 +193,24 @@ func walkCacheEntries(root string) ([]CacheEntry, error) {
 	sort.Strings(dirs)
 	out := make([]CacheEntry, 0, len(dirs))
 	for _, dir := range dirs {
-		out = append(out, newCacheEntry(root, dir, sizes[dir]))
+		out = append(out, newCacheEntry(cacheEntryRel(root, dir), dir, sizes[dir]))
 	}
 	return out, nil
 }
 
-// newCacheEntry splits an entry directory back into its (source, unit path,
-// digest) coordinates relative to the cache root.
-func newCacheEntry(root, dir string, bytes int64) CacheEntry {
+// cacheEntryRel is an entry directory's path relative to the cache root, in
+// slash form. Every discovered entry lives under root by construction, so this is
+// a prefix trim rather than a fallible path computation.
+func cacheEntryRel(root, dir string) string {
+	return strings.TrimPrefix(filepath.ToSlash(dir), filepath.ToSlash(root)+"/")
+}
+
+// newCacheEntry splits an entry's root-relative path back into its (source, unit
+// path, digest) coordinates. A path too shallow to carry both a source and a
+// digest yields only what it does carry.
+func newCacheEntry(rel, dir string, bytes int64) CacheEntry {
 	entry := CacheEntry{Path: dir, Bytes: bytes, Digest: filepath.Base(dir)}
-	rel, err := filepath.Rel(root, dir)
-	if err != nil {
-		return entry
-	}
-	segments := strings.Split(filepath.ToSlash(rel), "/")
+	segments := strings.Split(rel, "/")
 	if len(segments) < 2 {
 		return entry
 	}

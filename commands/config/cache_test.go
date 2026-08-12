@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -286,6 +287,76 @@ func TestHumanBytes(t *testing.T) {
 		if got := humanBytes(n); got != want {
 			t.Fatalf("humanBytes(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+// withGetwd points the shared cwd seam at a project for the duration of a test,
+// so a cobra-level run resolves into the sandbox rather than the real cwd.
+func withGetwd(t *testing.T, project string) {
+	t.Helper()
+	prev := getwd
+	getwd = func() (string, error) { return project, nil }
+	t.Cleanup(func() { getwd = prev })
+}
+
+// TestCachePruneCommandRunE drives the command through cobra: a successful run
+// against the sandboxed fixture, and the cwd-resolution failure branch.
+func TestCachePruneCommandRunE(t *testing.T) {
+	fx := newPruneFixture(t)
+	withGetwd(t, fx.project)
+	cmd := newCachePruneCmd(testDeps())
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs(nil)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cache prune: %v", err)
+	}
+	if !strings.Contains(out.String(), "would rm") {
+		t.Fatalf("cobra run output = %q", out.String())
+	}
+
+	prev := getwd
+	getwd = func() (string, error) { return "", errors.New("no cwd") }
+	t.Cleanup(func() { getwd = prev })
+	failing := newCachePruneCmd(testDeps())
+	failing.SetOut(&bytes.Buffer{})
+	failing.SetArgs(nil)
+	if err := failing.Execute(); err == nil {
+		t.Fatal("expected an unresolvable cwd to fail the command")
+	}
+}
+
+// TestRegisteredProjectPathsUnreadableRegistry proves a malformed home config is
+// reported rather than silently treated as an empty project set (which would
+// widen the prunable set).
+func TestRegisteredProjectPathsUnreadableRegistry(t *testing.T) {
+	withRepoLayer(t, `{"version": 2}`, "")
+	if err := os.WriteFile(filepath.Join(cfg.AgentsHome(), "config.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registeredProjectPaths(); err == nil {
+		t.Fatal("expected a malformed registry to surface an error")
+	}
+}
+
+// TestRunCachePruneApplyFailureSurfaces proves a removal that cannot complete is
+// reported with the count already removed, not swallowed into an OK report.
+func TestRunCachePruneApplyFailureSurfaces(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions do not gate removal for this platform/user")
+	}
+	fx := newPruneFixture(t)
+	for _, dir := range fx.dead {
+		if err := os.Chmod(filepath.Dir(dir), 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(filepath.Dir(dir), 0o755) })
+	}
+	opts := prunerOptions(fx.project, false)
+	opts.apply = true
+	if err := runCachePrune(opts, testDeps()); err == nil {
+		t.Fatal("expected the blocked removal to fail the prune")
 	}
 }
 

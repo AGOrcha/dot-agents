@@ -62,6 +62,7 @@ func TestScanConfigCacheMarksReferencedEntries(t *testing.T) {
 		"team:team/base.json":         {Kind: UnitKindLayer, Digest: live},
 		"team:verifiers/ts-lint.md":   {Kind: UnitKindPrompt, Digest: promptLive},
 		"team:tools/fmt@1.0.0":        {Kind: UnitKindArtifact, Digest: "sha256:abc"},
+		"team:digestless.json":        {Kind: UnitKindLayer},
 		"repo-local:stage:verifier":   {Kind: UnitKindProfile, Digest: "sha256:def"},
 		"malformed-key-without-colon": {Kind: UnitKindLayer, Digest: live},
 	})
@@ -232,6 +233,57 @@ func TestPruneCacheEntriesSurfacesRemovalError(t *testing.T) {
 	}
 }
 
+// skipWithoutPermissionGating skips a test on platforms/users where directory
+// permissions do not actually gate reads or removals.
+func skipWithoutPermissionGating(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions do not gate access for this platform/user")
+	}
+}
+
+// TestScanConfigCacheFailsOnUnreadableEntry proves the scan refuses to report a
+// PARTIAL view of the cache: an unreadable directory is an error, because a
+// partial view is exactly what must never drive a delete.
+func TestScanConfigCacheFailsOnUnreadableEntry(t *testing.T) {
+	skipWithoutPermissionGating(t)
+	repo := prunableProject(t, map[string]LockedUnit{})
+	dir := seedCacheEntry(t, "team", "base.json", "shahidden", layerCacheFileName, []byte("x"))
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	if _, err := ScanConfigCache([]string{repo}); err == nil {
+		t.Fatal("an unreadable cache directory must fail the scan")
+	}
+}
+
+// TestPruneCacheEntriesSurfacesParentCleanupError proves a failure while cleaning
+// up an emptied parent is reported (with the entry already counted as removed)
+// rather than swallowed.
+func TestPruneCacheEntriesSurfacesParentCleanupError(t *testing.T) {
+	skipWithoutPermissionGating(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	root := configCacheRoot()
+	dir := seedCacheEntry(t, "team", "base.json", "shacleanup", layerCacheFileName, []byte("x"))
+	// The entry's own removal succeeds (its parent is writable), but removing the
+	// then-empty parent needs write access on the source directory.
+	source := filepath.Join(root, "team")
+	if err := os.Chmod(source, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(source, 0o755) })
+
+	removed, _, err := PruneCacheEntries(root, []CacheEntry{{Path: dir}})
+	if err == nil {
+		t.Fatal("expected the blocked parent cleanup to surface an error")
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want the entry counted before the cleanup failure", removed)
+	}
+}
+
 // TestDedupeSortedProjectPaths covers the path normalization the scan relies on:
 // blanks dropped, duplicates (including uncleaned spellings) collapsed, output
 // sorted.
@@ -252,11 +304,13 @@ func TestDedupeSortedProjectPaths(t *testing.T) {
 // coordinate split: a directory directly under the root carries no unit path.
 func TestNewCacheEntryHandlesShallowPaths(t *testing.T) {
 	root := filepath.Join("/tmp", "cache", "config")
-	shallow := newCacheEntry(root, filepath.Join(root, "loose-file-dir"), 7)
+	loose := filepath.Join(root, "loose-file-dir")
+	shallow := newCacheEntry(cacheEntryRel(root, loose), loose, 7)
 	if shallow.SourceID != "" || shallow.UnitPath != "" || shallow.Digest != "loose-file-dir" {
 		t.Fatalf("shallow entry = %#v", shallow)
 	}
-	nested := newCacheEntry(root, filepath.Join(root, "team", "a", "b", "sha"), 9)
+	deep := filepath.Join(root, "team", "a", "b", "sha")
+	nested := newCacheEntry(cacheEntryRel(root, deep), deep, 9)
 	if nested.SourceID != "team" || nested.UnitPath != "a/b" || nested.Digest != "sha" {
 		t.Fatalf("nested entry = %#v", nested)
 	}
