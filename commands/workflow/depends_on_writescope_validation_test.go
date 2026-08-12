@@ -71,35 +71,48 @@ func TestValidateDependsOnRefs(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			warnings, err := validateDependsOnRefs(proj, "main-plan", localTasks, c.deps)
 			if len(c.wantErrSub) > 0 {
-				if err == nil {
-					t.Fatalf("expected error, got nil (warnings=%v)", warnings)
-				}
-				for _, sub := range c.wantErrSub {
-					if !strings.Contains(err.Error(), sub) {
-						t.Errorf("error %q missing substring %q", err.Error(), sub)
-					}
-				}
+				assertDependsOnRefsError(t, err, warnings, c.wantErrSub)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(warnings) != c.wantWarnLen {
-				t.Fatalf("warnings = %v, want %d entries", warnings, c.wantWarnLen)
-			}
-			if c.wantWarnSub != "" {
-				found := false
-				for _, w := range warnings {
-					if strings.Contains(w, c.wantWarnSub) {
-						found = true
-					}
-				}
-				if !found {
-					t.Errorf("expected a warning containing %q, got %v", c.wantWarnSub, warnings)
-				}
-			}
+			assertDependsOnRefsWarnings(t, err, warnings, c.wantWarnLen, c.wantWarnSub)
 		})
 	}
+}
+
+// assertDependsOnRefsError fails t unless err is non-nil and its message
+// contains every substring in wantSubs.
+func assertDependsOnRefsError(t *testing.T, err error, warnings []string, wantSubs []string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error, got nil (warnings=%v)", warnings)
+	}
+	for _, sub := range wantSubs {
+		if !strings.Contains(err.Error(), sub) {
+			t.Errorf("error %q missing substring %q", err.Error(), sub)
+		}
+	}
+}
+
+// assertDependsOnRefsWarnings fails t unless err is nil, warnings has exactly
+// wantLen entries, and (when wantSub is non-empty) at least one warning
+// contains wantSub.
+func assertDependsOnRefsWarnings(t *testing.T, err error, warnings []string, wantLen int, wantSub string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(warnings) != wantLen {
+		t.Fatalf("warnings = %v, want %d entries", warnings, wantLen)
+	}
+	if wantSub == "" {
+		return
+	}
+	for _, w := range warnings {
+		if strings.Contains(w, wantSub) {
+			return
+		}
+	}
+	t.Errorf("expected a warning containing %q, got %v", wantSub, warnings)
 }
 
 // ── runWorkflowTaskAdd / runWorkflowTaskUpdate depends_on integration ───────
@@ -304,22 +317,30 @@ func TestDependencyHoldReasons(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			reasons := dependencyHoldReasons(proj, localTasks, c.deps)
-			if c.wantReason == "" {
-				if len(reasons) != 0 {
-					t.Fatalf("expected no hold reasons, got %v", reasons)
-				}
-				return
-			}
-			if len(reasons) != 1 {
-				t.Fatalf("expected exactly one hold reason, got %v", reasons)
-			}
-			if reasons[0].Ref != c.wantRef {
-				t.Errorf("ref = %q, want %q", reasons[0].Ref, c.wantRef)
-			}
-			if !strings.Contains(reasons[0].Reason, c.wantReason) {
-				t.Errorf("reason %q missing %q", reasons[0].Reason, c.wantReason)
-			}
+			assertHeldReasons(t, reasons, c.wantRef, c.wantReason)
 		})
+	}
+}
+
+// assertHeldReasons fails t unless reasons matches the expected shape: zero
+// entries when wantReason is empty, otherwise exactly one entry whose Ref
+// equals wantRef and whose Reason contains wantReason.
+func assertHeldReasons(t *testing.T, reasons []HeldReason, wantRef, wantReason string) {
+	t.Helper()
+	if wantReason == "" {
+		if len(reasons) != 0 {
+			t.Fatalf("expected no hold reasons, got %v", reasons)
+		}
+		return
+	}
+	if len(reasons) != 1 {
+		t.Fatalf("expected exactly one hold reason, got %v", reasons)
+	}
+	if reasons[0].Ref != wantRef {
+		t.Errorf("ref = %q, want %q", reasons[0].Ref, wantRef)
+	}
+	if !strings.Contains(reasons[0].Reason, wantReason) {
+		t.Errorf("reason %q missing %q", reasons[0].Reason, wantReason)
 	}
 }
 

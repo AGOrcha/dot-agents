@@ -36,6 +36,7 @@ const (
 	errTaskNotFoundInPlanFmt   = "task %q not found in plan %q"
 	errTasksForPlanNotFoundFmt = "tasks for plan %q not found: %w"
 	errParseFileFmt            = "parse %s: %w"
+	errUnknownDependsOnFmt     = "depends_on references unknown task %q in plan %q; valid task ids: %s"
 	planTaskSliceIDPrefix      = "slice:"
 	gitFlagNameOnly            = "--name-only"
 	gitSubcmdRevParse          = "rev-parse"
@@ -3044,62 +3045,64 @@ func dependencyHoldReasons(projectPath string, localTasks []CanonicalTask, deps 
 	cache := make(map[string]*CanonicalTaskFile)
 	var reasons []HeldReason
 	for _, dep := range deps {
-		if !strings.Contains(dep, "/") {
-			status, known := statusByID[dep]
-			if !known {
-				reasons = append(reasons, HeldReason{
-					Ref:    dep,
-					Reason: fmt.Sprintf("dangling reference: task %q not found in this plan", dep),
-				})
-				continue
-			}
-			if !depSatisfiesDownstream(status) {
-				reasons = append(reasons, HeldReason{
-					Ref:    dep,
-					Reason: fmt.Sprintf("unmet dependency: task %q status=%s (needs completed or awaiting_owner_review)", dep, status),
-				})
-			}
-			continue
+		var reason *HeldReason
+		if strings.Contains(dep, "/") {
+			reason = crossPlanDependencyHoldReason(projectPath, dep, cache)
+		} else {
+			reason = localDependencyHoldReason(dep, statusByID)
 		}
-
-		slashIdx := strings.Index(dep, "/")
-		refPlanID := dep[:slashIdx]
-		refTaskID := dep[slashIdx+1:]
-		tf, loadErr := loadCrossPlanTasksCached(projectPath, refPlanID, cache)
-		if tf == nil {
-			detail := "not found locally"
-			if loadErr != nil {
-				detail = loadErr.Error()
-			}
-			reasons = append(reasons, HeldReason{
-				Ref:    dep,
-				Reason: fmt.Sprintf("dangling reference: plan %q %s", refPlanID, detail),
-			})
-			continue
-		}
-
-		found := false
-		for _, t := range tf.Tasks {
-			if t.ID != refTaskID {
-				continue
-			}
-			found = true
-			if !depSatisfiesDownstream(t.Status) {
-				reasons = append(reasons, HeldReason{
-					Ref:    dep,
-					Reason: fmt.Sprintf("unmet dependency: task %q status=%s (needs completed or awaiting_owner_review)", dep, t.Status),
-				})
-			}
-			break
-		}
-		if !found {
-			reasons = append(reasons, HeldReason{
-				Ref:    dep,
-				Reason: fmt.Sprintf("dangling reference: task %q not found in plan %q", refTaskID, refPlanID),
-			})
+		if reason != nil {
+			reasons = append(reasons, *reason)
 		}
 	}
 	return reasons
+}
+
+// localDependencyHoldReason classifies a single local depends_on ref (no
+// "/") against statusByID: an unknown id is a dangling reference; a known id
+// whose status doesn't satisfy depSatisfiesDownstream is an unmet
+// dependency; a satisfied dep returns nil (no hold).
+func localDependencyHoldReason(dep string, statusByID map[string]string) *HeldReason {
+	status, known := statusByID[dep]
+	if !known {
+		return &HeldReason{Ref: dep, Reason: fmt.Sprintf("dangling reference: task %q not found in this plan", dep)}
+	}
+	if !depSatisfiesDownstream(status) {
+		return &HeldReason{Ref: dep, Reason: fmt.Sprintf("unmet dependency: task %q status=%s (needs completed or awaiting_owner_review)", dep, status)}
+	}
+	return nil
+}
+
+// crossPlanDependencyHoldReason classifies a single cross-plan depends_on ref
+// (dep string containing "/"): a plan that can't be loaded is a dangling
+// reference naming the plan; a task not found within a loaded plan is a
+// dangling reference naming the task; a found task whose status doesn't
+// satisfy depSatisfiesDownstream is an unmet dependency; a satisfied dep
+// returns nil (no hold).
+func crossPlanDependencyHoldReason(projectPath, dep string, cache map[string]*CanonicalTaskFile) *HeldReason {
+	slashIdx := strings.Index(dep, "/")
+	refPlanID := dep[:slashIdx]
+	refTaskID := dep[slashIdx+1:]
+
+	tf, loadErr := loadCrossPlanTasksCached(projectPath, refPlanID, cache)
+	if tf == nil {
+		detail := "not found locally"
+		if loadErr != nil {
+			detail = loadErr.Error()
+		}
+		return &HeldReason{Ref: dep, Reason: fmt.Sprintf("dangling reference: plan %q %s", refPlanID, detail)}
+	}
+
+	for _, t := range tf.Tasks {
+		if t.ID != refTaskID {
+			continue
+		}
+		if depSatisfiesDownstream(t.Status) {
+			return nil
+		}
+		return &HeldReason{Ref: dep, Reason: fmt.Sprintf("unmet dependency: task %q status=%s (needs completed or awaiting_owner_review)", dep, t.Status)}
+	}
+	return &HeldReason{Ref: dep, Reason: fmt.Sprintf("dangling reference: task %q not found in plan %q", refTaskID, refPlanID)}
 }
 
 // validateDependsOnRefs is the write-time counterpart to dependencyHoldReasons:
@@ -3130,36 +3133,48 @@ func validateDependsOnRefs(projectPath, planID string, localTasks []CanonicalTas
 	cache := make(map[string]*CanonicalTaskFile)
 	for _, dep := range deps {
 		if !strings.Contains(dep, "/") {
-			if !localIDs[dep] {
-				return warnings, fmt.Errorf("depends_on references unknown task %q in plan %q; valid task ids: %s", dep, planID, strings.Join(validLocalIDs, ", "))
+			if localIDs[dep] {
+				continue
 			}
-			continue
+			return warnings, fmt.Errorf(errUnknownDependsOnFmt, dep, planID, strings.Join(validLocalIDs, ", "))
 		}
 
-		slashIdx := strings.Index(dep, "/")
-		refPlanID := dep[:slashIdx]
-		refTaskID := dep[slashIdx+1:]
-		tf, loadErr := loadCrossPlanTasksCached(projectPath, refPlanID, cache)
-		if tf == nil {
-			warnings = append(warnings, fmt.Sprintf("depends_on %q: plan %q not found locally; not validated now, will need to resolve once it exists (%v)", dep, refPlanID, loadErr))
-			continue
+		warning, depErr := validateCrossPlanDependsOnRef(projectPath, dep, cache)
+		if depErr != nil {
+			return warnings, depErr
 		}
-
-		found := false
-		refValidIDs := make([]string, 0, len(tf.Tasks))
-		for _, t := range tf.Tasks {
-			refValidIDs = append(refValidIDs, t.ID)
-			if t.ID == refTaskID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			sort.Strings(refValidIDs)
-			return warnings, fmt.Errorf("depends_on references unknown task %q in plan %q; valid task ids: %s", refTaskID, refPlanID, strings.Join(refValidIDs, ", "))
+		if warning != "" {
+			warnings = append(warnings, warning)
 		}
 	}
 	return warnings, nil
+}
+
+// validateCrossPlanDependsOnRef validates a single cross-plan depends_on ref
+// (dep string containing "/") for validateDependsOnRefs. A referenced plan
+// that can't be loaded locally yet returns a non-empty warning (not
+// blocking — it may arrive later); a referenced plan that loads but doesn't
+// contain the referenced task returns an error listing that plan's valid
+// ids; a resolved ref returns ("", nil).
+func validateCrossPlanDependsOnRef(projectPath, dep string, cache map[string]*CanonicalTaskFile) (warning string, err error) {
+	slashIdx := strings.Index(dep, "/")
+	refPlanID := dep[:slashIdx]
+	refTaskID := dep[slashIdx+1:]
+
+	tf, loadErr := loadCrossPlanTasksCached(projectPath, refPlanID, cache)
+	if tf == nil {
+		return fmt.Sprintf("depends_on %q: plan %q not found locally; not validated now, will need to resolve once it exists (%v)", dep, refPlanID, loadErr), nil
+	}
+
+	refValidIDs := make([]string, 0, len(tf.Tasks))
+	for _, t := range tf.Tasks {
+		refValidIDs = append(refValidIDs, t.ID)
+		if t.ID == refTaskID {
+			return "", nil
+		}
+	}
+	sort.Strings(refValidIDs)
+	return "", fmt.Errorf(errUnknownDependsOnFmt, refTaskID, refPlanID, strings.Join(refValidIDs, ", "))
 }
 
 // warnEmptyWriteScope emits a WARN (never blocks — write scopes drive
@@ -3899,6 +3914,36 @@ func applyTaskFieldUpdates(task *CanonicalTask, in taskUpdateInputs) map[string]
 	return changed
 }
 
+// canonicalTaskIndex returns the index of the task with the given id in
+// tf.Tasks, or -1 when absent.
+func canonicalTaskIndex(tf *CanonicalTaskFile, id string) int {
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// applyValidatedTaskUpdate is the per-task body of runWorkflowTaskUpdate's
+// task scan, extracted to keep that scan's own cognitive complexity low: it
+// validates in.DependsOn (when provided) against the plan's other tasks,
+// applies the field updates, and warns on an empty final write_scope.
+func applyValidatedTaskUpdate(projectPath, planID string, tf *CanonicalTaskFile, idx int, in taskUpdateInputs) (map[string]string, error) {
+	if strings.TrimSpace(in.DependsOn) != "" {
+		depWarnings, depErr := validateDependsOnRefs(projectPath, planID, tf.Tasks, splitTrimmedCSV(in.DependsOn))
+		if depErr != nil {
+			return nil, depErr
+		}
+		for _, w := range depWarnings {
+			ui.Warn(w)
+		}
+	}
+	changed := applyTaskFieldUpdates(&tf.Tasks[idx], in)
+	warnEmptyWriteScope(&tf.Tasks[idx])
+	return changed, nil
+}
+
 func runWorkflowTaskUpdate(in taskUpdateInputs) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -3917,27 +3962,14 @@ func runWorkflowTaskUpdate(in taskUpdateInputs) error {
 		if loadErr != nil {
 			return fmt.Errorf(errTasksForPlanNotFoundFmt, in.PlanID, loadErr)
 		}
-		found := false
-		for i := range tf.Tasks {
-			if tf.Tasks[i].ID != in.TaskID {
-				continue
-			}
-			if strings.TrimSpace(in.DependsOn) != "" {
-				depWarnings, depErr := validateDependsOnRefs(project.Path, in.PlanID, tf.Tasks, splitTrimmedCSV(in.DependsOn))
-				if depErr != nil {
-					return depErr
-				}
-				for _, w := range depWarnings {
-					ui.Warn(w)
-				}
-			}
-			changed = applyTaskFieldUpdates(&tf.Tasks[i], in)
-			warnEmptyWriteScope(&tf.Tasks[i])
-			found = true
-			break
-		}
-		if !found {
+		idx := canonicalTaskIndex(tf, in.TaskID)
+		if idx == -1 {
 			return fmt.Errorf(errTaskNotFoundInPlanFmt, in.TaskID, in.PlanID)
+		}
+		var updateErr error
+		changed, updateErr = applyValidatedTaskUpdate(project.Path, in.PlanID, tf, idx, in)
+		if updateErr != nil {
+			return updateErr
 		}
 		// Bump PLAN.yaml first so the single choke-point mirror in
 		// saveCanonicalTasksMirrored captures the fresh plan + the updated task
