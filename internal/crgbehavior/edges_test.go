@@ -104,10 +104,21 @@ func TestLooksAbsoluteAcceptsBothPlatformSpellings(t *testing.T) {
 			t.Fatalf("%q must be recognized as absolute on any host", p)
 		}
 	}
-	relative := []string{"pkg/a.go", `pkg\a.go`, "C:relative.go", "1:/notadrive.go", "ab"}
+	relative := []string{"pkg/a.go", `pkg\a.go`, "ab"}
 	for _, p := range relative {
 		if looksAbsolute(p) {
 			t.Fatalf("%q is not an absolute path", p)
+		}
+	}
+	// hasDriveLetter is asserted directly: what filepath.IsAbs accepts for a
+	// drive-shaped prefix is host-specific, this helper is not.
+	drives := map[string]bool{
+		`C:\x`: true, "c:/x": true,
+		"C:x": false, "1:/x": false, "ab": false, "/abs": false,
+	}
+	for path, want := range drives {
+		if got := hasDriveLetter(path); got != want {
+			t.Fatalf("hasDriveLetter(%q) = %v, want %v", path, got, want)
 		}
 	}
 }
