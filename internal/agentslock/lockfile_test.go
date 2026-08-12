@@ -2086,11 +2086,38 @@ func TestAcquireReleaseConcurrentChurn(t *testing.T) {
 // clobbers another's key with a stale whole-section snapshot. The same
 // workload through an unsynchronized Open→read→SetSection→Flush loses keys
 // because the read happens outside the flush lock.
+//
+// Budget note: lockAcquireTimeout bounds each writer's OWN AcquireFileLock
+// call, but all `writers` goroutines here serialize through one lock name —
+// a tail writer's call does not even start making progress until every
+// writer ahead of it in the queue has finished its own acquire+RMW+release
+// cycle. So the wall-clock budget this test needs is proportional to
+// `writers`, not a fixed per-call constant: git history shows this exact
+// test family got its flat budget widened 3+ times (see "widen ... budget",
+// "loosen ... timing" in `git log -- internal/agentslock`) as -race
+// (10-20x slower, no wakeup is ever lost under the pure-polling acquire
+// loop — only scheduling latency) plus loaded Windows CI runners pushed the
+// serialized total past whatever constant was last chosen. Scaling the
+// override by writer count fixes the root cause instead of re-bumping a
+// number: the budget now tracks the actual amount of serialized work this
+// test performs, so it stays correct if `writers` ever changes. It does NOT
+// touch the production lockAcquireTimeout default (still 5s) or weaken what
+// the test proves — every writer must still succeed and no key may be lost;
+// only the wall-clock ceiling for the whole contended batch is what scales.
 func TestUpdate_SerializesConcurrentReadModifyWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".agentsrc.lock")
 
 	const writers = 16
+	// A generous per-writer slice: production's single-writer default (5s)
+	// is already far above a real acquire+read+write cycle, so this stays a
+	// large multiple of the expected per-writer hold even after -race
+	// inflation. Scaled by writer count, the total budget covers the worst
+	// case where a writer queues behind all `writers-1` others.
+	const perWriterAcquireBudget = 1 * time.Second
+	restoreAcquireTimeout := SetAcquireTimeout(writers * perWriterAcquireBudget)
+	defer restoreAcquireTimeout()
+
 	var wg sync.WaitGroup
 	wg.Add(writers)
 	errs := make([]error, writers)
