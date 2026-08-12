@@ -27,6 +27,12 @@ func commandJSON(cmd *cobra.Command) bool {
 
 const warmStoreOpenErrFmt = "open warm store: %w"
 
+// noRecurseSubmodulesFlag opts a build out of indexing the repository's
+// submodules. It exists so the exclusion is a deliberate, visible choice —
+// the default indexes them, because a superproject build that quietly covered
+// the root alone is the defect this flag's absence used to be.
+const noRecurseSubmodulesFlag = "no-recurse-submodules"
+
 // ── Phase 6C: kg sync ─────────────────────────────────────────────────────────
 
 // runKGSync is a thin wrapper: git pull (or push) followed by kg lint.
@@ -135,6 +141,7 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	}
 	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
 	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
+	noRecurse, _ := cmd.Flags().GetBool(noRecurseSubmodulesFlag)
 
 	// KG decision event: record the build outcome + resulting graph counts
 	// (KGDecisionObserved), never node/edge bodies (D4). repoPath is the graphed
@@ -152,8 +159,9 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 		ui.Info(fmt.Sprintf("Building code graph for %s ...", root))
 	}
 	report, err := bridge.BuildReport(graphstore.BuildOptions{
-		SkipFlows:       skipFlows,
-		SkipPostprocess: skipPost,
+		SkipFlows:           skipFlows,
+		SkipPostprocess:     skipPost,
+		NoRecurseSubmodules: noRecurse,
 	})
 	if err != nil {
 		return err
@@ -172,6 +180,8 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	switch report.Outcome {
 	case string(graphstore.CRGReadinessReady):
 		ui.SuccessBox(report.Summary)
+	case graphstore.CRGReadinessIncomplete:
+		ui.WarnBox("Code graph is incomplete", report.Summary)
 	case string(graphstore.CRGReadinessUnbuilt):
 		ui.InfoBox("Code graph remains unbuilt", report.Summary)
 	case string(graphstore.CRGReadinessBusyOrLocked):
@@ -247,6 +257,7 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 		fmt.Println(string(data))
 		return nil
 	}
+	warnIncompleteWorkspace(report.Status)
 	switch report.Outcome {
 	case "no_diff":
 		ui.InfoBox("No code diff to update", report.Summary)
@@ -283,7 +294,42 @@ func runKGCodeStatus(deps Deps, cmd *cobra.Command, _ []string) error {
 	if status.Message != "" {
 		ui.Info(fmt.Sprintf("  State:        %s", status.Message))
 	}
+	printRootBreakdown(status.Roots)
 	return nil
+}
+
+// warnIncompleteWorkspace reports, after an incremental update, that the graph
+// is missing a root — and that an incremental update never refreshes submodule
+// roots even when they are present, so the operator knows a full build is the
+// only way to pick their changes up.
+func warnIncompleteWorkspace(status *graphstore.CRGStatus) {
+	if status == nil {
+		return
+	}
+	if status.State == graphstore.CRGReadinessIncomplete {
+		ui.WarnBox("Code graph is incomplete", status.Message)
+		return
+	}
+	if len(status.Roots) > 1 {
+		ui.Info("Note: an incremental update covers the superproject only — run 'da kg build' to refresh submodule roots.")
+	}
+}
+
+// printRootBreakdown renders the per-repository row attribution so an operator
+// can see at a glance which roots the counts above actually cover — the
+// superproject and every submodule, indexed or not.
+func printRootBreakdown(roots []graphstore.RootStatus) {
+	if len(roots) == 0 {
+		return
+	}
+	ui.Info("  Roots:")
+	for _, r := range roots {
+		if r.Indexed {
+			ui.Info(fmt.Sprintf("    %-32s %d nodes, %d files", r.Path, r.Nodes, r.Files))
+			continue
+		}
+		ui.Info(fmt.Sprintf("    %-32s NOT INDEXED — %s", r.Path, r.Note))
+	}
 }
 
 // crgStatusState calls Status() on a CRGBridge and returns the state string.
@@ -328,6 +374,15 @@ func checkCRGReadiness(root string, requireGraph bool) error {
 		ui.WarnBox("Code graph is busy or locked", "Wait for concurrent operation to finish and retry.")
 		if requireGraph {
 			return fmt.Errorf("code graph is busy or locked")
+		}
+	case graphstore.CRGReadinessIncomplete:
+		// The graph has rows but is missing a repository root that exists in
+		// the checkout. Results are not empty — they are silently partial,
+		// which is the harder failure to notice, so it is never a bare warning
+		// under --require-graph.
+		ui.WarnBox("Code graph is incomplete", status.Message)
+		if requireGraph {
+			return fmt.Errorf("code graph is incomplete: %s", status.Message)
 		}
 	}
 	return nil

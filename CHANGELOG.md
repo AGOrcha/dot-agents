@@ -12,9 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`da install` now maintains the managed `.gitignore` block.** Previously only `da refresh` wrote it, so a freshly-installed repo carried its projected outputs (`.codex/`, `.mcp.json`, `.vscode/mcp.json`, `AGENTS.md`, `.cursor/`, `.github/copilot-instructions.md`, `.github/hooks/`) as untracked noise until someone happened to run refresh. Install and refresh now share one step and converge on a byte-identical block, derived from the platforms' own declared outputs rather than a hardcoded list.
 - **`gitignore_projections` in `.agentsrc.json`.** Optional boolean opting a project out of the managed block; absent means enabled, and an explicit `false` also removes a block a previous run wrote.
 
+- **`kg build --no-recurse-submodules`.** Opts a superproject build out of indexing its submodules. The exclusion is reported, not silent: the skipped roots are named in the build summary and the graph is reported as `incomplete`.
+
 ### Fixed
 
 - The managed `.gitignore` block now covers the `*.dot-agents-backup` sidecars install writes when it displaces a pre-existing user file (e.g. `AGENTS.md.dot-agents-backup`), which were previously left untracked.
+- **`da kg build` no longer ignores git submodules.** Enumeration went through `git ls-files`, which reports a submodule as a single gitlink and none of the files inside it, so a superproject build indexed only root-level source and still reported READY — measured live at 47 nodes / 2 files where the workspace held 5,946 nodes / 885 files. A build now indexes the superproject and every initialized submodule, merging their graphs under a per-repository namespace.
+- **`da kg code-status` reports what was actually indexed.** Status carries a per-root breakdown (nodes, files, indexed) and a new `incomplete` state: a submodule that exists in the checkout but is absent from the graph is named, with the reason, and `ready` is false. `--require-graph` consumers refuse an incomplete graph instead of silently querying a partial one.
+- **Merged graph data now goes through postprocess.** Submodule graphs are merged before any derived state is computed, and one postprocess pass rebuilds flows, communities, and the FTS index over the merged rows — closing the trap where merged base tables sat next to an empty search index that still looked healthy.
+- **No more cross-repository false edges.** CRG resolves edge endpoints by qualified name, so merging two repositories linked every `Button` to every other `Button`. Merged node names and both edge endpoints are now namespaced per repository, so an edge can only form where a real reference exists.
 
 ## [0.5.0] - 2026-07-20
 
