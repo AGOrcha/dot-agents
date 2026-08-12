@@ -82,13 +82,33 @@ func TestRunRejectsUnnormalizedOrEmptyGraphs(t *testing.T) {
 		!strings.Contains(err.Error(), "no symbols") {
 		t.Fatalf("err = %v, want the empty-graph guard", err)
 	}
-	absolute := fixtureViews()
-	for i := range absolute.Symbols {
-		absolute.Symbols[i].FilePath = "/abs/repo/" + absolute.Symbols[i].FilePath
+	// Both spellings must trip the guard: a graph built under a POSIX root is
+	// still un-normalized when the gate runs on Windows, where
+	// filepath.IsAbs("/abs/repo/a.go") is false.
+	for _, root := range []string{"/abs/repo/", `C:\abs\repo\`} {
+		absolute := fixtureViews()
+		for i := range absolute.Symbols {
+			absolute.Symbols[i].FilePath = root + absolute.Symbols[i].FilePath
+		}
+		_, err := Run(fixtureConfig(), absolute, agreeingImpact())
+		if err == nil || !strings.Contains(err.Error(), "still absolute") {
+			t.Fatalf("root %q: err = %v, want the root-mismatch guard (it would otherwise read as total divergence)", root, err)
+		}
 	}
-	_, err := Run(fixtureConfig(), absolute, agreeingImpact())
-	if err == nil || !strings.Contains(err.Error(), "still absolute") {
-		t.Fatalf("err = %v, want the root-mismatch guard (it would otherwise read as total divergence)", err)
+}
+
+func TestLooksAbsoluteAcceptsBothPlatformSpellings(t *testing.T) {
+	absolute := []string{"/abs/repo/a.go", `C:\abs\repo\a.go`, "c:/abs/repo/a.go"}
+	for _, p := range absolute {
+		if !looksAbsolute(p) {
+			t.Fatalf("%q must be recognized as absolute on any host", p)
+		}
+	}
+	relative := []string{"pkg/a.go", `pkg\a.go`, "C:relative.go", "1:/notadrive.go", "ab"}
+	for _, p := range relative {
+		if looksAbsolute(p) {
+			t.Fatalf("%q is not an absolute path", p)
+		}
 	}
 }
 

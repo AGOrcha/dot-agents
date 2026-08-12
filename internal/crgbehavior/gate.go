@@ -157,6 +157,27 @@ func unavailableViews(views BridgeViews) []string {
 	return out
 }
 
+// looksAbsolute reports whether a stored path is absolute in the host's
+// convention OR in the other platform's. A graph built elsewhere must still be
+// recognized as un-normalized: filepath.IsAbs("/repo/a.go") is false on
+// Windows and filepath.IsAbs(`C:\repo\a.go`) is false on POSIX, so either
+// spelling would otherwise slip past the guard.
+func looksAbsolute(path string) bool {
+	return filepath.IsAbs(path) || strings.HasPrefix(path, "/") || hasDriveLetter(path)
+}
+
+// hasDriveLetter reports whether path starts with a Windows drive root.
+func hasDriveLetter(path string) bool {
+	if len(path) < 3 || path[1] != ':' {
+		return false
+	}
+	if path[2] != '\\' && path[2] != '/' {
+		return false
+	}
+	c := path[0] | ' ' // fold case
+	return c >= 'a' && c <= 'z'
+}
+
 // unavailableReason explains a surface the legacy build did not compute.
 func unavailableReason(surface string) string {
 	return "the legacy bridge persisted no " + surface + " data — this graph build did not compute that view"
@@ -172,7 +193,7 @@ func checkNormalized(views BridgeViews) error {
 		return fmt.Errorf("crgbehavior: the bridge graph holds no symbols to compare")
 	}
 	for _, s := range views.Symbols {
-		if !filepath.IsAbs(s.FilePath) {
+		if !looksAbsolute(s.FilePath) {
 			return nil
 		}
 	}
