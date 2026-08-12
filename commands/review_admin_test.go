@@ -408,7 +408,8 @@ func TestReviewUsersAddRejectsInvalidRoleAndDuplicates(t *testing.T) {
 
 	_, err := execUsersCmd(t, deps, "add", "x@example.com", "--role", "owner",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
-	mustErrContain(t, err, "unknown role", "reviewer|admin|readonly")
+	// The enum PreRunE now rejects the value, naming the vocabulary itself.
+	mustErrContain(t, err, "--role must be one of", "reviewer|admin|readonly")
 
 	_, err = execUsersCmd(t, deps, "add", "admin@example.com", "--role", "reviewer",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
@@ -602,7 +603,7 @@ func TestReviewUsersSetRoleErrorsAndJSON(t *testing.T) {
 
 	_, err := execUsersCmd(t, deps, "set-role", "rev@example.com", "--role", "supreme",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
-	mustErrContain(t, err, "unknown role")
+	mustErrContain(t, err, "--role must be one of", "reviewer|admin|readonly")
 
 	_, err = execUsersCmd(t, deps, "set-role", "ghost@example.com", "--role", "admin",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")

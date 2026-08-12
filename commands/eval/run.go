@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	evalcore "github.com/AGOrcha/dot-agents/internal/eval"
 	"github.com/AGOrcha/dot-agents/internal/eval/harness"
 	"github.com/AGOrcha/dot-agents/internal/eval/runner"
@@ -63,11 +64,11 @@ func newRunCmd(runE handlerFunc) *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: runE,
 	}
-	cmd.Flags().String(languageFlagName, "", languageFlagHelp+" (inferred from --task when given)")
+	cmdutil.RegisterEnumFlag(cmd, languageEnum.WithNote("inferred from --task when that is given"))
 	cmd.Flags().String(taskFlagName, "", "Run a pre-generated TaskSpec YAML instead of generating one")
-	cmd.Flags().String(difficultyFlagName, "", "Constrain the generated difficulty band (ignored with --task)")
+	cmdutil.RegisterEnumFlag(cmd, difficultyEnum.WithNote("ignored with --task"))
 	cmd.Flags().String(templateFlagName, "", "Task template id (ignored with --task)")
-	cmd.Flags().String(agentFlagName, defaultAdapter, "Agent adapter: claude, codex, or copilot")
+	cmdutil.RegisterEnumFlag(cmd, agentAdapterEnum)
 	cmd.Flags().String(repoDirFlagName, "", repoDirFlagHelp)
 	return cmd
 }

@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	wf "github.com/AGOrcha/dot-agents/commands/workflow"
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
@@ -50,6 +51,15 @@ const reviewTokenEnv = "DA_REVIEW_TOKEN"
 // reviewRoleFlag is the shared --role flag name on `users add` / `users
 // set-role`.
 const reviewRoleFlag = "role"
+
+// reviewRoleEnum is the review-service role vocabulary, declared once so both
+// `users add` and `users set-role` document and validate the same three values
+// (docs/CLI_HELP_CONVENTIONS.md).
+var reviewRoleEnum = cmdutil.EnumSpec{
+	Name:     reviewRoleFlag,
+	Values:   []string{"reviewer", "admin", "readonly"},
+	Required: true,
+}
 
 // reviewBeforeYearFlag is the --before-year flag name on `audit prune`.
 const reviewBeforeYearFlag = "before-year"
@@ -220,7 +230,7 @@ func newReviewUsersAddCmd(deps reviewAdminDeps, opts *reviewAdminOpts) *cobra.Co
 			return runReviewUsersAdd(cmd.OutOrStdout(), deps, opts, args[0], role)
 		},
 	}
-	cmd.Flags().StringVar(&role, reviewRoleFlag, "", "Role to grant: reviewer, admin, or readonly")
+	cmdutil.RegisterEnum(cmd, &role, reviewRoleEnum.WithUsage("Role to grant the new user"))
 	_ = cmd.MarkFlagRequired(reviewRoleFlag)
 	return cmd
 }
@@ -270,7 +280,7 @@ func newReviewUsersSetRoleCmd(deps reviewAdminDeps, opts *reviewAdminOpts) *cobr
 			return runReviewUsersSetRole(cmd.OutOrStdout(), deps, opts, args[0], role)
 		},
 	}
-	cmd.Flags().StringVar(&role, reviewRoleFlag, "", "New role: reviewer, admin, or readonly")
+	cmdutil.RegisterEnum(cmd, &role, reviewRoleEnum.WithUsage("Role to move the user to"))
 	_ = cmd.MarkFlagRequired(reviewRoleFlag)
 	return cmd
 }

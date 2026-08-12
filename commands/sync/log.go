@@ -11,8 +11,9 @@ import (
 
 func newLogCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "log",
-		Short: "Show recent commit history in ~/.agents/",
+		Use:     "log",
+		Short:   "Show recent commit history in ~/.agents/",
+		Example: "  da sync log",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentsHome := config.AgentsHome()
 			out, err := execabs.Command("git", "-C", agentsHome, "log", "--oneline", "--decorate", "-n", "10").CombinedOutput()
