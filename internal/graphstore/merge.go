@@ -16,8 +16,13 @@ type MergeStats struct {
 }
 
 // srcSchema is the alias the source graph is attached under for the duration
-// of a merge.
-const srcSchema = "src"
+// of a merge, with the two statements that manage it. The source path is
+// bound, never interpolated.
+const (
+	srcSchema       = "src"
+	attachSourceSQL = `ATTACH DATABASE ? AS src`
+	detachSourceSQL = `DETACH DATABASE src`
+)
 
 // idColumn is the autoincrement primary key every CRG graph table carries. It
 // is never copied: the destination assigns its own ids, so two graphs merge
@@ -124,10 +129,10 @@ func MergeGraphDB(db *sql.DB, srcPath, scope string) (MergeStats, error) {
 	}
 	defer conn.Close()
 
-	if _, err := conn.ExecContext(ctx, `ATTACH DATABASE ? AS `+srcSchema, srcPath); err != nil {
+	if _, err := conn.ExecContext(ctx, attachSourceSQL, srcPath); err != nil {
 		return MergeStats{}, fmt.Errorf("attach source graph %s: %w", srcPath, err)
 	}
-	defer func() { _, _ = conn.ExecContext(ctx, `DETACH DATABASE `+srcSchema) }()
+	defer func() { _, _ = conn.ExecContext(ctx, detachSourceSQL) }()
 
 	// BEGIN IMMEDIATE takes the write lock up front: a merge that cannot write
 	// must fail before it has copied half a repository.
