@@ -2262,6 +2262,14 @@ type eligibleOutput struct {
 	TotalEligible int                 `json:"total_eligible"`
 	MaxParallel   int                 `json:"max_parallel"`
 	DraftPlans    []string            `json:"draft_plans"`
+	// HeldTasks is additive (existing fields above are unchanged): the
+	// pending/in_progress tasks that were NOT included in EligibleTasks
+	// because of an unmet or dangling depends_on ref, each annotated with why
+	// (see HeldTask/HeldReason). Tasks held only by an active delegation lock
+	// are not included — that hold is already visible via `workflow
+	// delegation list` and isn't the ambiguous case the
+	// dangling-depends-on-silent fold-back flagged.
+	HeldTasks []HeldTask `json:"held_tasks"`
 }
 
 // writeScopeConflictResult is the output of computeWriteScopeConflicts.
@@ -2528,7 +2536,27 @@ func renderEligibleOutput(out eligibleOutput, maxWorkers, limit int) {
 		fmt.Fprintln(os.Stdout)
 		renderDraftPlansHint(os.Stdout, out.DraftPlans)
 	}
+	renderHeldTasks(out.HeldTasks)
 	fmt.Fprintln(os.Stdout)
+}
+
+// renderHeldTasks prints the "why not eligible" suffix section: for each held
+// task, one line naming the ref and one line per HeldReason explaining
+// whether it's an unmet dependency or a dangling reference. A no-op (prints
+// nothing) when there are no held tasks, so a repo with none sees the exact
+// same output as before this field existed.
+func renderHeldTasks(held []HeldTask) {
+	if len(held) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stdout)
+	ui.Header("Held Tasks (not eligible)")
+	for _, h := range held {
+		fmt.Fprintf(os.Stdout, "  [%s/%s] %s  (%s)\n", h.PlanID, h.TaskID, h.TaskTitle, h.Status)
+		for _, r := range h.HeldBy {
+			fmt.Fprintf(os.Stdout, "      held by %s: %s\n", r.Ref, r.Reason)
+		}
+	}
 }
 
 func runWorkflowEligible(planFilter string, limit int) error {
@@ -2548,6 +2576,10 @@ func runWorkflowEligible(planFilter string, limit int) error {
 	if err != nil {
 		return err
 	}
+	heldTasks, err := selectAllHeldTasks(project.Path, planIDs)
+	if err != nil {
+		return err
+	}
 
 	if effectiveLimit > 0 && len(tasks) > effectiveLimit {
 		tasks = tasks[:effectiveLimit]
@@ -2562,12 +2594,16 @@ func runWorkflowEligible(planFilter string, limit int) error {
 		TotalEligible: len(annotated),
 		MaxParallel:   len(conflictResult.MaxBatch),
 		DraftPlans:    collectDraftPlanIDs(project.Path),
+		HeldTasks:     heldTasks,
 	}
 	if out.EligibleTasks == nil {
 		out.EligibleTasks = []AnnotatedTask{}
 	}
 	if out.DraftPlans == nil {
 		out.DraftPlans = []string{}
+	}
+	if out.HeldTasks == nil {
+		out.HeldTasks = []HeldTask{}
 	}
 
 	if deps.Flags.JSON() {
@@ -2963,6 +2999,190 @@ func incompleteCanonicalDependenciesCrossplan(projectPath string, localTasks []C
 	return incomplete
 }
 
+// HeldReason names a single depends_on ref that is keeping a task non-eligible,
+// and why: either the referenced task exists but hasn't reached a satisfying
+// status ("unmet dependency"), or it (or its plan) cannot be found at all
+// ("dangling reference"). This is the distinction the dangling-depends-on-silent
+// fold-back flagged as missing — `workflow eligible` previously left both cases
+// indistinguishable from "legitimately blocked".
+type HeldReason struct {
+	Ref    string `json:"ref"`
+	Reason string `json:"reason"`
+}
+
+// HeldTask is a pending/in_progress task that is NOT eligible, annotated with
+// the specific depends_on refs holding it back. It is the complementary "why
+// not" view to workflowNextTaskSuggestion/AnnotatedTask's "eligible" list.
+type HeldTask struct {
+	PlanID    string       `json:"plan_id"`
+	PlanTitle string       `json:"plan_title"`
+	TaskID    string       `json:"task_id"`
+	TaskTitle string       `json:"task_title"`
+	Status    string       `json:"status"`
+	HeldBy    []HeldReason `json:"held_by"`
+}
+
+// dependencyHoldReasons inspects deps and classifies every unsatisfied entry
+// as either an unmet dependency (referenced task found, status doesn't satisfy
+// depSatisfiesDownstream) or a dangling reference (referenced task, or its
+// plan, cannot be found). Cross-plan refs (dep string containing "/") resolve
+// the same way incompleteCanonicalDependenciesCrossplan does: a plan that
+// cannot be loaded locally yet is reported as dangling here (mirroring that
+// function's "not found in this pass, may resolve later" treatment) rather
+// than blocking anything — dependencyHoldReasons is purely explanatory, it
+// never gates a write. Returns nil when every dep is satisfied.
+func dependencyHoldReasons(projectPath string, localTasks []CanonicalTask, deps []string) []HeldReason {
+	if len(deps) == 0 {
+		return nil
+	}
+
+	statusByID := make(map[string]string, len(localTasks))
+	for _, task := range localTasks {
+		statusByID[task.ID] = task.Status
+	}
+
+	cache := make(map[string]*CanonicalTaskFile)
+	var reasons []HeldReason
+	for _, dep := range deps {
+		if !strings.Contains(dep, "/") {
+			status, known := statusByID[dep]
+			if !known {
+				reasons = append(reasons, HeldReason{
+					Ref:    dep,
+					Reason: fmt.Sprintf("dangling reference: task %q not found in this plan", dep),
+				})
+				continue
+			}
+			if !depSatisfiesDownstream(status) {
+				reasons = append(reasons, HeldReason{
+					Ref:    dep,
+					Reason: fmt.Sprintf("unmet dependency: task %q status=%s (needs completed or awaiting_owner_review)", dep, status),
+				})
+			}
+			continue
+		}
+
+		slashIdx := strings.Index(dep, "/")
+		refPlanID := dep[:slashIdx]
+		refTaskID := dep[slashIdx+1:]
+		tf, loadErr := loadCrossPlanTasksCached(projectPath, refPlanID, cache)
+		if tf == nil {
+			detail := "not found locally"
+			if loadErr != nil {
+				detail = loadErr.Error()
+			}
+			reasons = append(reasons, HeldReason{
+				Ref:    dep,
+				Reason: fmt.Sprintf("dangling reference: plan %q %s", refPlanID, detail),
+			})
+			continue
+		}
+
+		found := false
+		for _, t := range tf.Tasks {
+			if t.ID != refTaskID {
+				continue
+			}
+			found = true
+			if !depSatisfiesDownstream(t.Status) {
+				reasons = append(reasons, HeldReason{
+					Ref:    dep,
+					Reason: fmt.Sprintf("unmet dependency: task %q status=%s (needs completed or awaiting_owner_review)", dep, t.Status),
+				})
+			}
+			break
+		}
+		if !found {
+			reasons = append(reasons, HeldReason{
+				Ref:    dep,
+				Reason: fmt.Sprintf("dangling reference: task %q not found in plan %q", refTaskID, refPlanID),
+			})
+		}
+	}
+	return reasons
+}
+
+// validateDependsOnRefs is the write-time counterpart to dependencyHoldReasons:
+// it rejects depends_on refs that can never resolve, so `task add`/`task
+// update` catch a typo'd or renamed task id at write time instead of letting
+// it sit silently non-eligible forever (the dangling-depends-on-silent
+// fold-back). Local refs (no "/") must name a task already in localTasks — an
+// unknown one is a hard error listing the plan's valid ids, mirroring
+// validateTaskAppType's "valid values" error shape. Cross-plan refs
+// (<plan-id>/<task-id>) are resolved against that plan's TASKS.yaml when the
+// plan exists locally (unknown task within an existing plan is also a hard
+// error); when the referenced plan itself cannot be loaded, that's degraded to
+// a warning rather than blocked, since a fanned-out plan can legitimately
+// arrive after this one references it.
+func validateDependsOnRefs(projectPath, planID string, localTasks []CanonicalTask, deps []string) (warnings []string, err error) {
+	if len(deps) == 0 {
+		return nil, nil
+	}
+
+	localIDs := make(map[string]bool, len(localTasks))
+	validLocalIDs := make([]string, 0, len(localTasks))
+	for _, t := range localTasks {
+		localIDs[t.ID] = true
+		validLocalIDs = append(validLocalIDs, t.ID)
+	}
+	sort.Strings(validLocalIDs)
+
+	cache := make(map[string]*CanonicalTaskFile)
+	for _, dep := range deps {
+		if !strings.Contains(dep, "/") {
+			if !localIDs[dep] {
+				return warnings, fmt.Errorf("depends_on references unknown task %q in plan %q; valid task ids: %s", dep, planID, strings.Join(validLocalIDs, ", "))
+			}
+			continue
+		}
+
+		slashIdx := strings.Index(dep, "/")
+		refPlanID := dep[:slashIdx]
+		refTaskID := dep[slashIdx+1:]
+		tf, loadErr := loadCrossPlanTasksCached(projectPath, refPlanID, cache)
+		if tf == nil {
+			warnings = append(warnings, fmt.Sprintf("depends_on %q: plan %q not found locally; not validated now, will need to resolve once it exists (%v)", dep, refPlanID, loadErr))
+			continue
+		}
+
+		found := false
+		refValidIDs := make([]string, 0, len(tf.Tasks))
+		for _, t := range tf.Tasks {
+			refValidIDs = append(refValidIDs, t.ID)
+			if t.ID == refTaskID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			sort.Strings(refValidIDs)
+			return warnings, fmt.Errorf("depends_on references unknown task %q in plan %q; valid task ids: %s", refTaskID, refPlanID, strings.Join(refValidIDs, ", "))
+		}
+	}
+	return warnings, nil
+}
+
+// warnEmptyWriteScope emits a WARN (never blocks — write scopes drive
+// delegation bounding/disjointness downstream, but plenty of legitimate task
+// records have none) when a task's final write_scope is empty AND the task
+// isn't research-mode. The task-record field this keys off is deriveScopeMode
+// (already used by `plan derive-scope` to pick a scope-lane strategy from
+// app_type + notes markers like "research task"/"doc only"/"skill
+// instruction" + write_scope shape): "research" mode is the schema's existing
+// signal for write_scope being legitimately n/a. "doc" mode can never apply
+// here because deriveScopeMode only infers it from a non-empty write_scope, so
+// the only two outcomes possible on an empty write_scope are "research" (skip)
+// and "code" (warn).
+func warnEmptyWriteScope(task *CanonicalTask) {
+	if len(task.WriteScope) > 0 {
+		return
+	}
+	if deriveScopeMode(task) == "research" {
+		return
+	}
+	ui.Warn(fmt.Sprintf("task %q has no write_scope declared; write scopes drive delegation bounding/disjointness — set one with --write-scope, or note why it doesn't apply (e.g. \"research task\", \"doc only\") if that's intentional", task.ID))
+}
+
 // selectAllEligibleTasks returns ALL unblocked pending/in_progress tasks across active
 // plans, optionally filtered to the plans named in planFilter (comma-separated IDs or
 // a pre-split []string passed directly). Tasks are excluded when:
@@ -3069,8 +3289,7 @@ func collectEligibleTasksForPlan(projectPath, id string, activeDelegations map[s
 		if activeDelegations[task.ID] {
 			continue
 		}
-		var depWarnings []string
-		if len(incompleteCanonicalDependenciesCrossplan(projectPath, tf.Tasks, task.DependsOn, &depWarnings)) > 0 {
+		if len(dependencyHoldReasons(projectPath, tf.Tasks, task.DependsOn)) > 0 {
 			continue
 		}
 		ws := task.WriteScope
@@ -3088,6 +3307,78 @@ func collectEligibleTasksForPlan(projectPath, id string, activeDelegations map[s
 			VerificationRequired: task.VerificationRequired,
 			DependsOn:            append([]string(nil), task.DependsOn...),
 			AppType:              task.AppType,
+		})
+	}
+	return out
+}
+
+// selectAllHeldTasks returns HeldTask entries — the "why not eligible" view —
+// for pending/in_progress tasks across active plans (optionally filtered to
+// planFilter) that were excluded from selectAllEligibleTasks by an unmet or
+// dangling depends_on ref. Mirrors selectAllEligibleTasks' plan iteration and
+// filtering exactly, but for the complementary side. Returns an empty slice
+// (not nil) when nothing is held.
+func selectAllHeldTasks(projectPath string, planFilter []string) ([]HeldTask, error) {
+	ids, err := listCanonicalPlanIDs(projectPath)
+	if err != nil {
+		return []HeldTask{}, err
+	}
+	if len(ids) == 0 {
+		return []HeldTask{}, nil
+	}
+
+	ids, err = applyEligiblePlanFilter(ids, planFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	activeDelegations, err := loadActiveDelegationTaskSet(projectPath)
+	if err != nil {
+		return []HeldTask{}, err
+	}
+
+	var held []HeldTask
+	for _, id := range ids {
+		held = append(held, collectHeldTasksForPlan(projectPath, id, activeDelegations)...)
+	}
+	if held == nil {
+		held = []HeldTask{}
+	}
+	return held, nil
+}
+
+// collectHeldTasksForPlan is collectEligibleTasksForPlan's complement: same
+// plan-active / status / active-delegation filtering, but it keeps (rather
+// than discards) tasks whose depends_on isn't satisfied, annotated with
+// dependencyHoldReasons.
+func collectHeldTasksForPlan(projectPath, id string, activeDelegations map[string]bool) []HeldTask {
+	plan, err := loadCanonicalPlan(projectPath, id)
+	if err != nil || plan.Status != "active" {
+		return nil
+	}
+	tf, err := loadCanonicalTasks(projectPath, id)
+	if err != nil {
+		return nil
+	}
+	var out []HeldTask
+	for _, task := range tf.Tasks {
+		if task.Status != "pending" && task.Status != "in_progress" {
+			continue
+		}
+		if activeDelegations[task.ID] {
+			continue
+		}
+		reasons := dependencyHoldReasons(projectPath, tf.Tasks, task.DependsOn)
+		if len(reasons) == 0 {
+			continue
+		}
+		out = append(out, HeldTask{
+			PlanID:    plan.ID,
+			PlanTitle: plan.Title,
+			TaskID:    task.ID,
+			TaskTitle: task.Title,
+			Status:    task.Status,
+			HeldBy:    reasons,
 		})
 	}
 	return out
@@ -3508,6 +3799,14 @@ func runWorkflowTaskAdd(in taskAddInputs) error {
 				return fmt.Errorf("task %q already exists in plan %q", in.TaskID, in.PlanID)
 			}
 		}
+		dependsOn := splitTrimmedCSV(in.DependsOn)
+		depWarnings, depErr := validateDependsOnRefs(project.Path, in.PlanID, tf.Tasks, dependsOn)
+		if depErr != nil {
+			return depErr
+		}
+		for _, w := range depWarnings {
+			ui.Warn(w)
+		}
 		task = CanonicalTask{
 			ID:                   in.TaskID,
 			Title:                in.Title,
@@ -3516,10 +3815,11 @@ func runWorkflowTaskAdd(in taskAddInputs) error {
 			Notes:                in.Notes,
 			AppType:              in.AppType,
 			VerificationRequired: in.VerificationRequired,
-			DependsOn:            splitTrimmedCSV(in.DependsOn),
+			DependsOn:            dependsOn,
 			Blocks:               splitTrimmedCSV(in.Blocks),
 			WriteScope:           splitTrimmedCSV(in.WriteScope),
 		}
+		warnEmptyWriteScope(&task)
 		tf.Tasks = append(tf.Tasks, task)
 		// Bump PLAN.yaml first so the single choke-point mirror in
 		// saveCanonicalTasksMirrored captures the fresh plan + the new task in
@@ -3622,7 +3922,17 @@ func runWorkflowTaskUpdate(in taskUpdateInputs) error {
 			if tf.Tasks[i].ID != in.TaskID {
 				continue
 			}
+			if strings.TrimSpace(in.DependsOn) != "" {
+				depWarnings, depErr := validateDependsOnRefs(project.Path, in.PlanID, tf.Tasks, splitTrimmedCSV(in.DependsOn))
+				if depErr != nil {
+					return depErr
+				}
+				for _, w := range depWarnings {
+					ui.Warn(w)
+				}
+			}
 			changed = applyTaskFieldUpdates(&tf.Tasks[i], in)
+			warnEmptyWriteScope(&tf.Tasks[i])
 			found = true
 			break
 		}
