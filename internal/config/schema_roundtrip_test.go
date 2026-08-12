@@ -505,6 +505,61 @@ func TestSchemaValidate_RejectsBadSourceType(t *testing.T) {
 	}
 }
 
+// appTypeProfileManifest wraps one app_type profile body in the minimal valid
+// manifest envelope, so a facet-shape assertion carries no unrelated noise.
+func appTypeProfileManifest(profile map[string]any) map[string]any {
+	return map[string]any{
+		"version":  2,
+		"hooks":    false,
+		"mcp":      false,
+		"settings": false,
+		"sources":  []any{map[string]any{"type": "local"}},
+		"execution_profile": map[string]any{
+			"by_app_type": map[string]any{"go-cli": profile},
+		},
+	}
+}
+
+// TestSchemaValidate_AppTypeProfileModelFacet pins facet 5's schema shape
+// (.agents/proposals/model-facet-apptypeprofile.md §D2): model is an OPEN string
+// — any ref form validates, no enum — while the empty string and a non-string are
+// rejected, and additionalProperties: false still rejects an unknown sibling key.
+func TestSchemaValidate_AppTypeProfileModelFacet(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+
+	accepted := map[string]any{
+		"bare tier alias":     "sonnet",
+		"provider-qualified":  "anthropic:claude-opus-4-8",
+		"non-anthropic ref":   "openai:gpt-5",
+		"source-defined ref":  "acme-models:tier/cheap@^1.0",
+		"omitted (inherited)": nil,
+	}
+	for name, model := range accepted {
+		t.Run("accepts "+name, func(t *testing.T) {
+			profile := map[string]any{"graph_backend": "crg"}
+			if model != nil {
+				profile["model"] = model
+			}
+			if err := sch.Validate(appTypeProfileManifest(profile)); err != nil {
+				t.Errorf("model %v must validate (open string, no enum): %v", model, err)
+			}
+		})
+	}
+
+	rejected := map[string]map[string]any{
+		"empty string":          {"model": ""},
+		"non-string":            {"model": 3},
+		"unknown facet sibling": {"model": "sonnet", "modl": "typo"},
+	}
+	for name, profile := range rejected {
+		t.Run("rejects "+name, func(t *testing.T) {
+			if err := sch.Validate(appTypeProfileManifest(profile)); err == nil {
+				t.Errorf("expected validation error for %s", name)
+			}
+		})
+	}
+}
+
 // TestSchemaValidate_RejectsBadVersion confirms versions other than 1 or 2 fail.
 func TestSchemaValidate_RejectsBadVersion(t *testing.T) {
 	sch := compileAgentsRCSchema(t)

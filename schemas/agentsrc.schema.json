@@ -782,7 +782,7 @@
     "appTypeProfile": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The execution facets for one app_type: unit relevance, topology, lenses, and the graph_backend adapter-ref. Each facet is independently scope-overridable.",
+      "description": "The execution facets for one app_type: unit relevance, topology, lenses, the graph_backend adapter-ref, and the model route. Each facet is independently scope-overridable.",
       "properties": {
         "relevance": {
           "type": "object",
@@ -801,6 +801,11 @@
           "type": "string",
           "minLength": 1,
           "description": "Facet 4: the graph-backend adapter-ref this app_type selects (app-type-profiles §2.6/§3.1). An open adapter-ref of the form 'dotagents-builtin:graph/<name>@<constraint>' (or a bare '<name>'), resolved against the graph-backend adapter registry (graph-backend-adapter-contract §4/§8) — not a closed enum. Omit to inherit the pipeline default backend (crg)."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Facet 5: the model route this app_type defaults to (model-facet-apptypeprofile proposal; task-tier-model-suggestion D4's flat per-app_type pin). An OPEN adapter-ref-style string — a bare tier alias ('haiku', 'sonnet', 'opus') or a provider-qualified ref ('anthropic:claude-opus-4-8') — deliberately not a closed enum, so model churn is not a schema bump (task-tier-model-suggestion D5). Omit to inherit: an explicit stage_profiles[<stage>][<slug>].model always wins, and an omitted value at one scope inherits the merged value from the layers below (org → team → repo → project-local). Empty means no opinion; the harness default applies."
         }
       }
     },

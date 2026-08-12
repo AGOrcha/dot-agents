@@ -293,6 +293,7 @@ type delegationBundleYAML struct {
 		RegressionCommands         []string                  `yaml:"regression_commands,omitempty"`
 		AppType                    string                    `yaml:"app_type,omitempty"`
 		VerifierSequence           []string                  `yaml:"verifier_sequence,omitempty"`
+		Model                      string                    `yaml:"model,omitempty"`
 		EvidencePolicy             *delegationEvidencePolicy `yaml:"evidence_policy,omitempty"`
 	} `yaml:"verification"`
 	Closeout struct {

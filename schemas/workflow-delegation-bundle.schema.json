@@ -197,6 +197,12 @@
             "minLength": 1
           }
         },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Resolved model route for this task, read from execution_profile.by_app_type[app_type].model on the same path that resolves verifier_sequence. An open ref (bare tier alias like 'sonnet', or provider-qualified like 'anthropic:claude-opus-4-8'). Omitted when the app_type pins no model — absence means the worker's harness default applies, never a fabricated model. See .agents/proposals/model-facet-apptypeprofile.md.",
+          "$comment": "Additive optional field; existing bundles without it stay valid."
+        },
         "evidence_policy": {
           "type": "object",
           "additionalProperties": false,

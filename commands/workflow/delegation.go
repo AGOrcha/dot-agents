@@ -1707,6 +1707,40 @@ func executionVerifierSequence(ep *config.ExecutionProfile, appType string) []st
 	return append([]string(nil), prof.Topology.VerifierSequence...)
 }
 
+// mappedAppTypeModel resolves the app_type's model route (execution_profile facet
+// 5) through the same scope-merged, lock-backed dispatch config that resolves the
+// verifier sequence, so the bundle's model and verifier_sequence always come from
+// one effective config. Returns "" without error — never a fabricated model — when
+// there is no manifest, no app_type, or no pinned model, and the worker then falls
+// back to its harness default; a config resolution error propagates. See
+// .agents/proposals/model-facet-apptypeprofile.md §D3/§D4.
+func mappedAppTypeModel(projectPath, appType string) (string, error) {
+	if appType == "" {
+		return "", nil
+	}
+	d, err := loadFanoutDispatch(projectPath)
+	if err != nil {
+		return "", err
+	}
+	if d == nil {
+		return "", nil
+	}
+	return executionAppTypeModel(d.execution, appType), nil
+}
+
+// executionAppTypeModel returns the app_type's declared model route, or "" when
+// the profile, app_type entry, or model pin is absent (absence = inherit).
+func executionAppTypeModel(ep *config.ExecutionProfile, appType string) string {
+	if ep == nil || ep.ByAppType == nil {
+		return ""
+	}
+	prof, ok := ep.ByAppType[appType]
+	if !ok {
+		return ""
+	}
+	return prof.ModelRef()
+}
+
 func resolveFanoutVerifierDispatch(projectPath string, cmd *cobra.Command, plan *CanonicalPlan, task *CanonicalTask) (appType string, sequence []string, err error) {
 	appType = strings.TrimSpace(task.AppType)
 	if appType == "" && plan != nil {
@@ -1921,6 +1955,14 @@ func buildDelegationBundleForFanout(req fanoutBundleRequest) (*delegationBundleY
 	}
 	if len(verifierSeq) > 0 {
 		b.Verification.VerifierSequence = verifierSeq
+	}
+
+	model, err := mappedAppTypeModel(req.ProjectPath, appType)
+	if err != nil {
+		return nil, err
+	}
+	if model != "" {
+		b.Verification.Model = model
 	}
 
 	applyFanoutEvidencePolicy(&b, f)
