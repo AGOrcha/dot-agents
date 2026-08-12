@@ -329,11 +329,19 @@ structured project memory, bridge queries, and code-to-note context.
 In a superproject, `kg build` indexes every initialized submodule as well as the
 root and merges their graphs under a per-repository namespace
 (`<submodule-path>::<qualified-name>`), then runs one postprocess pass over the
-merged result. `kg code-status` reports the counts per root; a submodule that is
-present in the checkout but missing from the graph (uninitialized, or excluded
-with `--no-recurse-submodules`) puts the graph in the `incomplete` state rather
-than `ready`, and `--require-graph` consumers refuse it. An incremental
-`kg update` covers the superproject only — run `kg build` to refresh submodules.
+merged result. `kg code-status` reports the counts per root.
+
+A submodule that is present in the checkout but absent from the graph — an
+uninitialized one, or one a build never reached — puts the graph in the
+`incomplete` state rather than `ready`, and `--require-graph` consumers refuse
+it. Two things are *not* incomplete: a submodule the build indexed and found no
+symbols in, and one excluded with `--no-recurse-submodules`. Each build records
+which roots it covered (`.code-review-graph/da-workspace.json`) so later status
+reads can tell those apart from a root that was never looked at; both are still
+named in the per-root breakdown.
+
+An incremental `kg update` covers the superproject only — run `kg build` to
+refresh submodules.
 
 ## Sync
 

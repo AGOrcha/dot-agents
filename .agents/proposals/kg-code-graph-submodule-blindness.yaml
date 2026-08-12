@@ -49,21 +49,29 @@ content: |
        initialized submodule. Recursion is the default; `--no-recurse-submodules`
        opts out and the exclusion is REPORTED, never silent.
 
-    2. **Readiness is honest.** `CRGStatus` carries a per-root breakdown
-       (`roots[]`: path, nodes, files, indexed, note). A submodule that exists
-       in the checkout but contributed no rows downgrades the graph to the new
-       `incomplete` state (ready=false) with a message naming it and why
-       (uninitialized vs excluded vs absent). `kg code-status` prints the
-       breakdown; `--require-graph` refuses an incomplete graph.
+    2. **Readiness is honest, and escapable.** `CRGStatus` carries a per-root
+       breakdown (`roots[]`: path, nodes, files, indexed, note). A submodule
+       that exists in the checkout but is absent from the graph downgrades it
+       to the new `incomplete` state (ready=false), named and explained;
+       `kg code-status` prints the breakdown and `--require-graph` refuses an
+       incomplete graph. Two cases are deliberately NOT incomplete — a root the
+       build indexed and found no symbols in, and one excluded via
+       `--no-recurse-submodules` — because otherwise a docs-only submodule or a
+       declared partial scope could never report ready again. Each build
+       records the roots it covered in a sidecar
+       (`.code-review-graph/da-workspace.json`) so a later status read can tell
+       those from a root that was never looked at.
 
     3. **The merge runs through postprocess.** `internal/graphstore/merge.go`
        owns the merge, and `BuildReport` orders it: build each root with
        postprocess deferred → merge → ONE postprocess pass over the merged
        graph. The invariant "rows changed => derived data rebuilt" is now
        structural for the build path rather than a convention a hand-rolled
-       aggregator can forget. The merge is transactional and idempotent
-       (INSERT OR IGNORE), and copies base tables only — FTS, flows, and
-       communities are rebuilt, never copied.
+       aggregator can forget. The merge is transactional and AUTHORITATIVE for
+       its scope (it clears the scope's rows before copying), so re-merging
+       neither duplicates edges — `edges` has no unique constraint, unlike
+       `nodes` — nor strands symbols deleted upstream. It copies base tables
+       only: FTS, flows, and communities are rebuilt, never copied.
 
     4. **Cross-repo false edges are gone.** Merged rows are namespaced per
        repository (`<submodule-path>::<qualified_name>`, applied to node names
@@ -82,6 +90,9 @@ content: |
     Not in scope: `kg update` still refreshes the superproject only (git diff
     does not descend into gitlinks). It now says so, and reports the graph as
     incomplete when a root is missing; a full `kg build` refreshes submodules.
+    Also unaddressed: readiness detects a WHOLLY missing root, not a root that
+    indexed a fraction of its own files — that needs a language-aware
+    denominator per root and is a separate piece of work.
 
     ## Observation
 
