@@ -41,12 +41,20 @@ type composedPromptView struct {
 }
 
 // composedPromptEntry is one resolved prompt_files reference, preserving the
-// profile's declared (base-first) order.
+// profile's declared (base-first) order. Source and Hint are additive (omitempty):
+// an existing consumer reading ref/resolved/scope/exists is unaffected.
 type composedPromptEntry struct {
-	Ref      string `json:"ref"`      // the raw prompt_files entry
+	Ref      string `json:"ref"`      // the canonical prompt_files entry (source-qualified refs render as "source:path[@version]")
 	Resolved string `json:"resolved"` // the file it resolved to (display path), empty if unresolved
-	Scope    string `json:"scope"`    // literal | repo-local | shared-home | unresolved
+	Scope    string `json:"scope"`    // literal | repo-local | shared-home | source | unresolved
 	Exists   bool   `json:"exists"`
+	// Source is the config source id a source-qualified entry is pinned to,
+	// empty for a local-path entry.
+	Source string `json:"source,omitempty"`
+	// Hint is the operator-facing next step when the entry could not be resolved
+	// (e.g. a source-qualified prompt that was never synced or whose cache was
+	// pruned). Empty when the entry resolved.
+	Hint string `json:"hint,omitempty"`
 }
 
 func validateProfileKind(kind string) error {
@@ -62,10 +70,12 @@ func validateProfileKind(kind string) error {
 // the effective (scope-merged) config. The second return reports whether a
 // profile entry for slug exists at all (so an empty prompt_files on a real
 // profile is distinguishable from a missing profile). Each prompt_files entry is
-// either a bare string (legacy local path) or a source-aware object
-// {source, path, version}; both forms contribute their path here (source
-// resolution is a separate concern from local composition).
-func decodeProfilePromptFiles(raw map[string]any, stage, slug string) ([]string, bool) {
+// either a bare string (a local path, or a "source-id:path[@version]" ref) or the
+// canonical source-aware object {source, path, version}; BOTH forms are carried
+// through as a typed config.PromptFileRef so the source/version provenance
+// survives to resolution — flattening to a bare path here is what made every
+// source-qualified prompt unresolvable.
+func decodeProfilePromptFiles(raw map[string]any, stage, slug string) ([]config.PromptFileRef, bool) {
 	stages, ok := raw["stage_profiles"].(map[string]any)
 	if !ok {
 		return nil, false
@@ -82,10 +92,10 @@ func decodeProfilePromptFiles(raw map[string]any, stage, slug string) ([]string,
 	if !ok {
 		return nil, true // profile exists, no prompt_files declared
 	}
-	out := make([]string, 0, len(pf))
+	out := make([]config.PromptFileRef, 0, len(pf))
 	for _, e := range pf {
-		if p := strings.TrimSpace(promptRefPath(e)); p != "" {
-			out = append(out, p)
+		if ref, ok := promptRefEntry(e); ok {
+			out = append(out, ref)
 		}
 	}
 	return out, true
@@ -112,24 +122,74 @@ func decodeProfileModelRoute(raw map[string]any, stage, slug string) (model, fam
 	return strings.TrimSpace(model), strings.TrimSpace(family)
 }
 
-// promptRefPath extracts the path from a prompt_files entry in either form: a
-// bare string, or a {source, path, version} object (object form contributes its
-// "path"). Anything else yields "".
-func promptRefPath(e any) string {
+// promptRefEntry decodes one raw prompt_files entry into a typed
+// config.PromptFileRef: a bare string becomes {Path: <string>} (the source, if
+// any, is classified later against the declared source set), and a
+// {source, path, version} object keeps all three fields. A blank/pathless or
+// otherwise malformed entry yields ok=false and is dropped.
+func promptRefEntry(e any) (config.PromptFileRef, bool) {
+	var ref config.PromptFileRef
 	switch v := e.(type) {
 	case string:
-		return v
+		ref.Path = v
 	case map[string]any:
-		if p, ok := v["path"].(string); ok {
-			return p
-		}
+		ref.Source, _ = v["source"].(string)
+		ref.Path, _ = v["path"].(string)
+		ref.Version, _ = v["version"].(string)
+	default:
+		return config.PromptFileRef{}, false
 	}
-	return ""
+	ref.Source = strings.TrimSpace(ref.Source)
+	ref.Path = strings.TrimSpace(ref.Path)
+	ref.Version = strings.TrimSpace(ref.Version)
+	if ref.Path == "" {
+		return config.PromptFileRef{}, false
+	}
+	return ref, true
 }
 
-// resolvePromptRef resolves a single prompt_files entry across the scope search
-// path, preserving the caller's (base-first) list order. Per-file precedence,
-// highest first:
+// promptResolveEnv is the read-only environment one composition resolves
+// against: the local search roots plus the two offline inputs a source-qualified
+// prompt needs — the effective config's declared sources (which decide whether a
+// bare "a:b" string is a source ref at all) and the lock's units (which pin the
+// digest its cached bytes live under). Both are gathered ONCE per composition.
+type promptResolveEnv struct {
+	projectPath string
+	agentsHome  string
+	sources     map[string]config.Source
+	units       map[string]config.LockedUnit
+}
+
+// resolvePromptRef resolves a single prompt_files entry, preserving the caller's
+// (base-first) list order. A SOURCE-QUALIFIED entry (a typed {source,…} object,
+// or a bare string whose prefix before ':' names a declared source) resolves from
+// the lock + content cache: the pinned prompt unit's digest locates the cached
+// bytes `da config sync` fetched, yielding scope "source". It is strictly offline
+// — a never-synced or cache-pruned prompt is unresolved WITH a sync hint, never a
+// fetch trigger, which is the contract `da workflow resolve-prompt` inherits from
+// ResolveLocked.
+//
+// A LOCAL entry keeps the historical scope search path (see
+// resolveLocalPromptRef).
+func resolvePromptRef(env promptResolveEnv, ref config.PromptFileRef) composedPromptEntry {
+	unit, qualified := config.PromptUnitRefFor(ref, env.sources)
+	if !qualified {
+		return resolveLocalPromptRef(env.projectPath, env.agentsHome, ref.Path)
+	}
+	e := composedPromptEntry{Ref: unit.Key(), Source: unit.SourceID}
+	if path, ok := config.LockedPromptFile(env.units, unit); ok {
+		e.Resolved = config.DisplayPath(path)
+		e.Scope = "source"
+		e.Exists = true
+		return e
+	}
+	e.Scope = "unresolved"
+	e.Hint = fmt.Sprintf("prompt %q is not pinned in %s or its cached bytes are missing; run `da config sync`", unit.Key(), config.AgentsLockFile)
+	return e
+}
+
+// resolveLocalPromptRef resolves a local (non source-qualified) prompt path
+// across the scope search path. Per-file precedence, highest first:
 //  1. an absolute path that exists                          -> literal
 //  2. <projectPath>/<entry> exists (a full .agents/... ref) -> repo-local
 //  3. <projectPath>/.agents/prompts/<entry> exists          -> repo-local
@@ -139,7 +199,7 @@ func promptRefPath(e any) string {
 // Repo-local committed files win over the shared-home (product/starter) copy, so
 // a project can override the product base by placing a same-named file under
 // .agents/prompts/; the shared home holds the materialized starter baseline.
-func resolvePromptRef(projectPath, agentsHome, entry string) composedPromptEntry {
+func resolveLocalPromptRef(projectPath, agentsHome, entry string) composedPromptEntry {
 	e := composedPromptEntry{Ref: entry}
 	try := func(p, scope string) bool {
 		if info, err := os.Stat(p); err == nil && !info.IsDir() {
@@ -190,10 +250,33 @@ func composeProfilePrompt(projectPath, agentsHome, kind, slug string) (composedP
 	entries, matched := decodeProfilePromptFiles(raw, kind, slug)
 	model, family := decodeProfileModelRoute(raw, kind, slug)
 	view := composedPromptView{Kind: kind, Slug: slug, Matched: matched, Model: model, ModelFamily: family}
+	env, err := newPromptResolveEnv(projectPath, agentsHome, snap)
+	if err != nil {
+		return composedPromptView{}, err
+	}
 	for _, entry := range entries {
-		view.Entries = append(view.Entries, resolvePromptRef(projectPath, agentsHome, entry))
+		view.Entries = append(view.Entries, resolvePromptRef(env, entry))
 	}
 	return view, nil
+}
+
+// newPromptResolveEnv gathers the per-composition resolution environment: the
+// effective config's declared sources (from the same snapshot the profile was
+// read out of) and the lock's units section. Reading the lock is offline and
+// non-mutating; a project with no lockfile yields an empty units map, so a purely
+// local composition behaves exactly as it did before source qualification existed.
+func newPromptResolveEnv(projectPath, agentsHome string, snap *config.Snapshot) (promptResolveEnv, error) {
+	env := promptResolveEnv{
+		projectPath: projectPath,
+		agentsHome:  agentsHome,
+		sources:     config.SourceIndex(snap.Effective.Sources),
+	}
+	units, err := config.ReadUnits(projectPath)
+	if err != nil {
+		return promptResolveEnv{}, err
+	}
+	env.units = units.Units
+	return env, nil
 }
 
 func newWorkflowResolvePromptCmd() *cobra.Command {
@@ -263,8 +346,11 @@ func renderComposedPrompt(view composedPromptView) {
 	for i, e := range view.Entries {
 		if e.Exists {
 			fmt.Fprintf(os.Stdout, "    %d. %s  [%s -> %s]\n", i+1, e.Ref, e.Scope, e.Resolved)
-		} else {
-			fmt.Fprintf(os.Stdout, "    %d. %s  [%s]\n", i+1, e.Ref, e.Scope)
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "    %d. %s  [%s]\n", i+1, e.Ref, e.Scope)
+		if e.Hint != "" {
+			fmt.Fprintf(os.Stdout, "       %s\n", e.Hint)
 		}
 	}
 }

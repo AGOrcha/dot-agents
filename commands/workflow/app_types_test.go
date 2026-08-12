@@ -44,12 +44,12 @@ func TestWorkflowAppTypesJSONSingleRecommended(t *testing.T) {
 
 func TestWorkflowAppTypesTextShowsAliasRecommendation(t *testing.T) {
 	repo := setupWorkflowAppTypesProject(t, `{
-  "project":"prov-provider-admin-ui",
+  "project":"acme-admin-ui",
   "version":1,
   "sources":[{"type":"local"}],
   "app_type_verifier_map":{
-    "pa-angular-ui":["pa-ui-unit","pa-ui-lint","pa-ui-e2e"],
-    "prov-provider-admin-ui":["pa-ui-unit","pa-ui-lint","pa-ui-e2e"]
+    "acme-angular-ui":["acme-ui-unit","acme-ui-lint","acme-ui-e2e"],
+    "acme-admin-ui":["acme-ui-unit","acme-ui-lint","acme-ui-e2e"]
   }
 }`)
 
@@ -59,11 +59,11 @@ func TestWorkflowAppTypesTextShowsAliasRecommendation(t *testing.T) {
 
 	for _, want := range []string{
 		"Workflow App Types",
-		"pa-angular-ui",
+		"acme-angular-ui",
 		"recommended",
-		"prov-provider-admin-ui",
-		"alias of pa-angular-ui",
-		"--app-type pa-angular-ui",
+		"acme-admin-ui",
+		"alias of acme-angular-ui",
+		"--app-type acme-angular-ui",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
@@ -177,12 +177,12 @@ func mustReadAll(t *testing.T, r *os.File) string {
 
 func TestWorkflowAppTypesVerboseShowsSourceAndReason(t *testing.T) {
 	repo := setupWorkflowAppTypesProject(t, `{
-  "project":"prov-provider-admin-ui",
+  "project":"acme-admin-ui",
   "version":1,
   "sources":[{"type":"local"}],
   "app_type_verifier_map":{
-    "pa-angular-ui":["pa-ui-unit","pa-ui-lint","pa-ui-e2e"],
-    "prov-provider-admin-ui":["pa-ui-unit","pa-ui-lint","pa-ui-e2e"]
+    "acme-angular-ui":["acme-ui-unit","acme-ui-lint","acme-ui-e2e"],
+    "acme-admin-ui":["acme-ui-unit","acme-ui-lint","acme-ui-e2e"]
   }
 }`)
 
@@ -193,8 +193,8 @@ func TestWorkflowAppTypesVerboseShowsSourceAndReason(t *testing.T) {
 	for _, want := range []string{
 		"Details",
 		"source:",
-		"pa-angular-ui: non-repo alias preferred for authoring",
-		"prov-provider-admin-ui: alias of pa-angular-ui",
+		"acme-angular-ui: non-repo alias preferred for authoring",
+		"acme-admin-ui: alias of acme-angular-ui",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)

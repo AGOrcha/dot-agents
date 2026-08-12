@@ -154,6 +154,31 @@ func loadCanonicalTaskByID(projectPath, planID, taskID string) (*CanonicalTask, 
 	return nil, fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
 }
 
+// findCanonicalTaskAnyPlan searches every canonical plan's TASKS.yaml for
+// taskID and returns the owning plan id and task on the first match. Used by
+// `workflow verify record` to validate --task against the workflow store
+// when no delegation contract exists for the task — i.e. direct
+// (non-delegated) work — so a typo'd --task still fails loudly instead of
+// silently recording an unscoped entry.
+func findCanonicalTaskAnyPlan(projectPath, taskID string) (string, *CanonicalTask, error) {
+	planIDs, err := listCanonicalPlanIDs(projectPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("list plans: %w", err)
+	}
+	for _, planID := range planIDs {
+		tf, err := loadCanonicalTasks(projectPath, planID)
+		if err != nil {
+			continue
+		}
+		for i := range tf.Tasks {
+			if tf.Tasks[i].ID == taskID {
+				return planID, &tf.Tasks[i], nil
+			}
+		}
+	}
+	return "", nil, fmt.Errorf("unknown task %q: not found in any workflow plan", taskID)
+}
+
 func graphAdapterForProject(projectPath string) *LocalGraphAdapter {
 	cfg, _ := loadGraphBridgeConfig(projectPath)
 	if cfg == nil {
@@ -3524,73 +3549,102 @@ func runWorkflowTaskAdd(in taskAddInputs) error {
 	return nil
 }
 
+// taskUpdateInputs bundles the inputs to runWorkflowTaskUpdate so the call site
+// stays under the function-parameter limit while keeping each field
+// individually addressable from the caller (mirrors taskAddInputs).
+type taskUpdateInputs struct {
+	PlanID     string
+	TaskID     string
+	Title      string
+	Notes      string
+	WriteScope string
+	DependsOn  string
+	Blocks     string
+	AppType    string
+}
+
 // applyTaskFieldUpdates mutates task in place for any non-empty field value that
 // differs from the current one, and returns the set of changed fields keyed by
 // field name (the value being the new value, used for the journal delta).
-func applyTaskFieldUpdates(task *CanonicalTask, title, notes, writeScope, dependsOn, blocks string) map[string]string {
+//
+// in.AppType is expected to have already passed validateTaskAppType — this
+// function only applies it, matching the "replace when non-empty and
+// different" semantics every other field here follows.
+func applyTaskFieldUpdates(task *CanonicalTask, in taskUpdateInputs) map[string]string {
 	changed := map[string]string{}
-	if title != "" && title != task.Title {
-		task.Title = title
-		changed["title"] = title
+	if in.Title != "" && in.Title != task.Title {
+		task.Title = in.Title
+		changed["title"] = in.Title
 	}
-	if notes != "" && notes != task.Notes {
-		task.Notes = notes
-		changed["notes"] = notes
+	if in.Notes != "" && in.Notes != task.Notes {
+		task.Notes = in.Notes
+		changed["notes"] = in.Notes
 	}
-	if ws := splitTrimmedCSV(writeScope); writeScope != "" && strings.Join(ws, ",") != strings.Join(task.WriteScope, ",") {
+	if ws := splitTrimmedCSV(in.WriteScope); in.WriteScope != "" && strings.Join(ws, ",") != strings.Join(task.WriteScope, ",") {
 		task.WriteScope = ws
-		changed["write_scope"] = writeScope
+		changed["write_scope"] = in.WriteScope
 	}
-	if do := splitTrimmedCSV(dependsOn); dependsOn != "" && strings.Join(do, ",") != strings.Join(task.DependsOn, ",") {
+	if do := splitTrimmedCSV(in.DependsOn); in.DependsOn != "" && strings.Join(do, ",") != strings.Join(task.DependsOn, ",") {
 		task.DependsOn = do
-		changed["depends_on"] = dependsOn
+		changed["depends_on"] = in.DependsOn
 	}
-	if bl := splitTrimmedCSV(blocks); blocks != "" && strings.Join(bl, ",") != strings.Join(task.Blocks, ",") {
+	if bl := splitTrimmedCSV(in.Blocks); in.Blocks != "" && strings.Join(bl, ",") != strings.Join(task.Blocks, ",") {
 		task.Blocks = bl
-		changed["blocks"] = blocks
+		changed["blocks"] = in.Blocks
+	}
+	if in.AppType != "" && in.AppType != task.AppType {
+		task.AppType = in.AppType
+		changed["app_type"] = in.AppType
 	}
 	return changed
 }
 
-func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope, dependsOn, blocks string) error {
+func runWorkflowTaskUpdate(in taskUpdateInputs) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
 	}
+	warning, err := validateTaskAppType(project.Path, in.AppType)
+	if err != nil {
+		return err
+	}
+	if warning != "" {
+		ui.Warn(warning)
+	}
 	changed := map[string]string{}
-	lockErr := withTasksLock(project.Path, planID, func() error {
-		tf, loadErr := loadCanonicalTasks(project.Path, planID)
+	lockErr := withTasksLock(project.Path, in.PlanID, func() error {
+		tf, loadErr := loadCanonicalTasks(project.Path, in.PlanID)
 		if loadErr != nil {
-			return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, loadErr)
+			return fmt.Errorf(errTasksForPlanNotFoundFmt, in.PlanID, loadErr)
 		}
 		found := false
 		for i := range tf.Tasks {
-			if tf.Tasks[i].ID != taskID {
+			if tf.Tasks[i].ID != in.TaskID {
 				continue
 			}
-			changed = applyTaskFieldUpdates(&tf.Tasks[i], title, notes, writeScope, dependsOn, blocks)
+			changed = applyTaskFieldUpdates(&tf.Tasks[i], in)
 			found = true
 			break
 		}
 		if !found {
-			return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
+			return fmt.Errorf(errTaskNotFoundInPlanFmt, in.TaskID, in.PlanID)
 		}
 		// Bump PLAN.yaml first so the single choke-point mirror in
 		// saveCanonicalTasksMirrored captures the fresh plan + the updated task
 		// in ONE ref commit. Plan-save error is non-fatal (as before).
-		plan, planErr := loadCanonicalPlan(project.Path, planID)
+		plan, planErr := loadCanonicalPlan(project.Path, in.PlanID)
 		if planErr != nil {
 			return planErr
 		}
 		plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		_ = saveCanonicalPlan(project.Path, plan)
-		return saveCanonicalTasksMirrored(project.Path, tf, taskID)
+		return saveCanonicalTasksMirrored(project.Path, tf, in.TaskID)
 	})
 	if lockErr != nil {
 		return lockErr
 	}
-	emitWorkflowDelta(project.Path, journal.CmdTaskUpdate, planID, taskID, changed)
-	ui.Success(fmt.Sprintf("Updated task %q in plan %q", taskID, planID))
+	emitWorkflowDelta(project.Path, journal.CmdTaskUpdate, in.PlanID, in.TaskID, changed)
+	ui.Success(fmt.Sprintf("Updated task %q in plan %q", in.TaskID, in.PlanID))
 	return nil
 }
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`da install` now maintains the managed `.gitignore` block.** Previously only `da refresh` wrote it, so a freshly-installed repo carried its projected outputs (`.codex/`, `.mcp.json`, `.vscode/mcp.json`, `AGENTS.md`, `.cursor/`, `.github/copilot-instructions.md`, `.github/hooks/`) as untracked noise until someone happened to run refresh. Install and refresh now share one step and converge on a byte-identical block, derived from the platforms' own declared outputs rather than a hardcoded list.
+- **`gitignore_projections` in `.agentsrc.json`.** Optional boolean opting a project out of the managed block; absent means enabled, and an explicit `false` also removes a block a previous run wrote.
+
+### Fixed
+
+- The managed `.gitignore` block now covers the `*.dot-agents-backup` sidecars install writes when it displaces a pre-existing user file (e.g. `AGENTS.md.dot-agents-backup`), which were previously left untracked.
+
 ## [0.5.0] - 2026-07-20
 
 A large feature release: a git-backed workflow WorkStore, a first-class worktree

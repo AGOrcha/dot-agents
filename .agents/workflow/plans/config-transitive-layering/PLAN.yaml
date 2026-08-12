@@ -2,7 +2,7 @@ schema_version: 1
 id: config-transitive-layering
 title: Transitive org→team→repo config layering (resolver + scope schema + layered consumers)
 status: active
-summary: 'The dot-agents CODE work that unblocks the platform-config-layering rollout: spec + Source.scope/owner schema + the transitive extends resolver (resolveExtendsGraph) + migrating relevance/verify consumers onto the layered snapshot. Extracted from payout:platform-config-layering (dot-agents-repo: tasks); the da loop implements it here. On completion, unpause the agent-conf-ext content plans.'
+summary: 'The dot-agents CODE work that unblocks the platform-config-layering rollout: spec + Source.scope/owner schema + the transitive extends resolver (resolveExtendsGraph) + migrating relevance/verify consumers onto the layered snapshot. Extracted from payout:platform-config-layering (dot-agents-repo: tasks); the da loop implements it here. On completion, unpause the downstream config-repo content plans.'
 created_at: "2026-07-11T12:10:04Z"
 updated_at: "2026-07-23T13:04:13Z"
 owner: NikashPrakash

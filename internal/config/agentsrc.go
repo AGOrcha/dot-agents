@@ -160,6 +160,29 @@ func isDirEntry(path string) (bool, error) {
 	return info.IsDir(), nil
 }
 
+// declaredOrAbsent converts a scan result into a manifest declaration: a
+// pointer when the scan actually found something, nil when it found nothing.
+//
+// "Nothing detected" must serialize as an ABSENT key, not `false`. An explicit
+// `"hooks": false` is a repo-local override that wins the layer merge and
+// disables an org layer's hooks — which is emphatically not what "this repo has
+// no local hooks directory" means. Absent lets the layer stack decide.
+func declaredOrAbsent(s StringsOrBool) *StringsOrBool {
+	if !s.IsEnabled() {
+		return nil
+	}
+	return &s
+}
+
+// boolOrAbsent is the bool analog of declaredOrAbsent: true is a declaration,
+// false is "nothing detected" and stays absent so layers still apply.
+func boolOrAbsent(b bool) *bool {
+	if !b {
+		return nil
+	}
+	return &b
+}
+
 // StringsOrBool holds either a boolean flag (all/none) or a named list.
 // It marshals/unmarshals as either a JSON bool or a JSON string array:
 //
@@ -172,12 +195,26 @@ type StringsOrBool struct {
 }
 
 // IsEnabled returns true if any resources are enabled (All or at least one name).
-func (s StringsOrBool) IsEnabled() bool {
+//
+// The receiver is a pointer so an ABSENT manifest key (a nil *StringsOrBool on
+// AgentsRC.Hooks/MCP) answers false without the caller nil-guarding. Absent and
+// explicit-false resolve to the same effective answer here; the distinction that
+// matters — "defer to the layer stack" vs "override the layer stack" — is decided
+// by key presence in the raw manifest during the layer merge (resolver.go
+// resolveSnapshot), never by this method.
+func (s *StringsOrBool) IsEnabled() bool {
+	if s == nil {
+		return false
+	}
 	return s.All || len(s.Names) > 0
 }
 
 // Contains returns true if name is covered (either All=true or name is in Names).
-func (s StringsOrBool) Contains(name string) bool {
+// Nil-safe for the same reason as IsEnabled: an absent key covers nothing.
+func (s *StringsOrBool) Contains(name string) bool {
+	if s == nil {
+		return false
+	}
 	if s.All {
 		return true
 	}
@@ -495,15 +532,31 @@ func (a *AgentsRC) UseGitRefBackend() bool {
 //
 // See specs config-distribution-model §3-§5 + org-config-resolution §15.2.
 type AgentsRC struct {
-	Schema        string                 `json:"$schema,omitempty"`
-	Version       int                    `json:"version"`
-	Project       string                 `json:"project,omitempty"`
-	Skills        []string               `json:"skills,omitempty"`
-	Rules         []string               `json:"rules,omitempty"`
-	Agents        []string               `json:"agents,omitempty"`
-	Hooks         StringsOrBool          `json:"hooks"`
-	MCP           StringsOrBool          `json:"mcp"`
-	Settings      bool                   `json:"settings"`
+	Schema  string   `json:"$schema,omitempty"`
+	Version int      `json:"version"`
+	Project string   `json:"project,omitempty"`
+	Skills  []string `json:"skills,omitempty"`
+	Rules   []string `json:"rules,omitempty"`
+	Agents  []string `json:"agents,omitempty"`
+	// Hooks/MCP/Settings are POINTERS so "absent" stays distinguishable from
+	// "explicitly false" across a load→save round trip (see [[schema-usage]]:
+	// pointer types where the zero value must differ from absent).
+	//
+	// This is load-bearing, not cosmetic. The layer merge in
+	// resolver.go/resolveSnapshot is key-presence driven: a layer only competes
+	// for a key that is physically present in its raw JSON. As non-pointer
+	// fields these three had no usable `omitempty` (encoding/json does not look
+	// inside a struct, and a bare bool's zero value IS false), so every manifest
+	// da wrote re-emitted `"hooks": false, "mcp": false, "settings": false` —
+	// silently converting "I never declared this, defer to my org layer" into an
+	// explicit repo-local false that WINS the merge and disables the org layer's
+	// hooks/mcp/settings projection.
+	//
+	// nil  => key omitted => defer to the layer stack / product defaults.
+	// set  => key emitted => repo-local declaration that overrides lower layers.
+	Hooks         *StringsOrBool         `json:"hooks,omitempty"`
+	MCP           *StringsOrBool         `json:"mcp,omitempty"`
+	Settings      *bool                  `json:"settings,omitempty"`
 	Sources       []Source               `json:"sources"`
 	KG            *AgentsRCKG            `json:"kg,omitempty"`
 	Observability *AgentsRCObservability `json:"observability,omitempty"`
@@ -595,6 +648,18 @@ type AgentsRC struct {
 	// manifest.go. Its owning authority is SOURCE-derived, never authored here (D4).
 	Manifests map[string]ManifestSpec `json:"manifests,omitempty"`
 
+	// GitignoreProjections opts the project out of the managed `.gitignore`
+	// block `da install` / `da refresh` maintain for the outputs they project
+	// into this repo (config-distribution-model §15 / D14 / R8).
+	//
+	// Tri-state on purpose: absent (nil) means DEFAULT-ON — the overwhelmingly
+	// common case, so an unannotated manifest still gets its generated outputs
+	// ignored — while an explicit `false` is a deliberate opt-out that also
+	// REMOVES a previously-written block. A plain `bool` could not tell "the
+	// author wrote false" from "the key is missing", which is exactly the
+	// distinction the removal behavior turns on.
+	GitignoreProjections *bool `json:"gitignore_projections,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
@@ -607,6 +672,21 @@ type AgentsRC struct {
 	// surface a deprecation warning without re-parsing the file (config-v2
 	// §15.3 deprecation cadence). Not serialized.
 	LegacyKeys []string `json:"-"`
+}
+
+// GitignoreProjectionsEnabled reports whether install/refresh should maintain
+// the managed `.gitignore` block for this project's projected outputs (§15 D14).
+//
+// Default-on: a nil receiver (manifest-less project) and an absent key both
+// answer true, so the block appears without anyone opting in. Only an explicit
+// `"gitignore_projections": false` disables it — and that case is a positive
+// instruction to REMOVE any block a previous run wrote, not merely to skip
+// writing one, which is why the field is a *bool rather than a bool.
+func (a *AgentsRC) GitignoreProjectionsEnabled() bool {
+	if a == nil || a.GitignoreProjections == nil {
+		return true
+	}
+	return *a.GitignoreProjections
 }
 
 // PredicateSpec is the config-facing mirror of the commands/workflow Predicate:
@@ -965,6 +1045,8 @@ var agentsRCKnown = map[string]bool{
 	"locks": true, "authority_grants": true,
 	// unified-config-profiles (L1): scope-attached layering policy unit
 	"layering_policy": true,
+	// gitignore_projections: managed-.gitignore opt-out (§15 D14)
+	"gitignore_projections": true,
 	// distributable-config-manifest (L2): scope-attached manifest units
 	"manifests": true,
 	// deprecated legacy keys — read and folded into stage_profiles /
@@ -980,15 +1062,18 @@ var agentsRCKnown = map[string]bool{
 // infinite recursion while still using the standard json encoder.
 // Per [[schema-usage]]: this MUST mirror AgentsRC's typed fields exactly.
 type agentsRCCore struct {
-	Schema        string                 `json:"$schema,omitempty"`
-	Version       int                    `json:"version"`
-	Project       string                 `json:"project,omitempty"`
-	Skills        []string               `json:"skills,omitempty"`
-	Rules         []string               `json:"rules,omitempty"`
-	Agents        []string               `json:"agents,omitempty"`
-	Hooks         StringsOrBool          `json:"hooks"`
-	MCP           StringsOrBool          `json:"mcp"`
-	Settings      bool                   `json:"settings"`
+	Schema  string   `json:"$schema,omitempty"`
+	Version int      `json:"version"`
+	Project string   `json:"project,omitempty"`
+	Skills  []string `json:"skills,omitempty"`
+	Rules   []string `json:"rules,omitempty"`
+	Agents  []string `json:"agents,omitempty"`
+	// Pointers + omitempty so an absent hooks/mcp/settings key round-trips as
+	// absent rather than being re-emitted as an explicit false. MUST mirror
+	// AgentsRC exactly (see [[schema-usage]]).
+	Hooks         *StringsOrBool         `json:"hooks,omitempty"`
+	MCP           *StringsOrBool         `json:"mcp,omitempty"`
+	Settings      *bool                  `json:"settings,omitempty"`
 	Sources       []Source               `json:"sources"`
 	KG            *AgentsRCKG            `json:"kg,omitempty"`
 	Observability *AgentsRCObservability `json:"observability,omitempty"`
@@ -1009,6 +1094,8 @@ type agentsRCCore struct {
 	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
 	LayeringPolicy  *LayeringPolicy           `json:"layering_policy,omitempty"`
 	Manifests       map[string]ManifestSpec   `json:"manifests,omitempty"`
+
+	GitignoreProjections *bool `json:"gitignore_projections,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -1041,6 +1128,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.AuthorityGrants = core.AuthorityGrants
 	a.LayeringPolicy = core.LayeringPolicy
 	a.Manifests = core.Manifests
+	a.GitignoreProjections = core.GitignoreProjections
 
 	// Back-compat: read the deprecated verifier_profiles / reviewer_profiles /
 	// app_type_verifier_map keys and fold them into the unified stage_profiles +
@@ -1113,6 +1201,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		AuthorityGrants:      a.AuthorityGrants,
 		LayeringPolicy:       a.LayeringPolicy,
 		Manifests:            a.Manifests,
+		GitignoreProjections: a.GitignoreProjections,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -1320,15 +1409,15 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 
 	hooks, err := detectHookEvents(agentsHome, projectName)
 	errs = append(errs, err)
-	rc.Hooks = hooks
+	rc.Hooks = declaredOrAbsent(hooks)
 
 	mcp, err := detectMCPServers(agentsHome, projectName)
 	errs = append(errs, err)
-	rc.MCP = mcp
+	rc.MCP = declaredOrAbsent(mcp)
 
 	settings, err := detectPlatformSettings(agentsHome, projectName)
 	errs = append(errs, err)
-	rc.Settings = settings
+	rc.Settings = boolOrAbsent(settings)
 
 	if joined := errors.Join(errs...); joined != nil {
 		return nil, joined
@@ -1338,11 +1427,15 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 }
 
 // MergeGenerateAgentsRC overlays a freshly generated manifest onto an existing
-// on-disk manifest. Scan-derived lists (skills, rules, agents, hooks, mcp,
-// settings) come from generated; an existing non-empty project name, unknown
-// JSON keys (ExtraFields), and supplemental sources (e.g. git remotes not
-// produced by GenerateAgentsRC) are preserved. Source entries are unioned with
-// deduplication so the default local source is not duplicated when merging.
+// on-disk manifest. Scan-derived lists (skills, rules, agents) come from
+// generated. hooks/mcp/settings also prefer generated, but only when the scan
+// actually detected something: an empty scan leaves the existing declaration
+// intact rather than erasing it (see the pickStringsOrBool call below).
+//
+// An existing non-empty project name, unknown JSON keys (ExtraFields), and
+// supplemental sources (e.g. git remotes not produced by GenerateAgentsRC) are
+// preserved. Source entries are unioned with deduplication so the default local
+// source is not duplicated when merging.
 func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	if existing == nil {
 		return generated
@@ -1393,6 +1486,45 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	if len(existing.Manifests) > 0 {
 		out.Manifests = cloneManifests(existing.Manifests)
 	}
+	// hooks/mcp/settings are scan-derived, so a FRESH detection wins — but a
+	// scan that found nothing yields nil ("no declaration"), and nil must not
+	// delete a declaration the author committed. Absent-generated therefore
+	// falls back to the existing value instead of clobbering it, which keeps
+	// `da install --generate` from silently dropping an explicit `"hooks": false`
+	// (or an explicit true) that the repo deliberately set to override its
+	// org layer. Copy through the pointers so out never aliases existing.
+	out.Hooks = pickStringsOrBool(generated.Hooks, existing.Hooks)
+	out.MCP = pickStringsOrBool(generated.MCP, existing.MCP)
+	out.Settings = pickBool(generated.Settings, existing.Settings)
+	return &out
+}
+
+// pickStringsOrBool returns a copy of generated when the scan produced a
+// declaration, otherwise a copy of existing. Copies (never the input pointers)
+// so the merged manifest does not alias either input.
+func pickStringsOrBool(generated, existing *StringsOrBool) *StringsOrBool {
+	src := generated
+	if src == nil {
+		src = existing
+	}
+	if src == nil {
+		return nil
+	}
+	out := *src
+	out.Names = append([]string(nil), src.Names...)
+	return &out
+}
+
+// pickBool is the bool analog of pickStringsOrBool.
+func pickBool(generated, existing *bool) *bool {
+	src := generated
+	if src == nil {
+		src = existing
+	}
+	if src == nil {
+		return nil
+	}
+	out := *src
 	return &out
 }
 

@@ -31,6 +31,41 @@ and each section below links to the guide that explains the area in depth. Run
 
 See [Getting Started](GETTING_STARTED.md) for the three setup paths (adopt / install / fresh).
 
+### Managed `.gitignore` block
+
+`install` and `refresh` both maintain a delimited, dot-agents-owned block in the
+consuming repo's `.gitignore` so the files they project (platform links,
+generated configs, and the `*.dot-agents-backup` sidecars install writes when it
+displaces a pre-existing user file) do not show up as untracked noise:
+
+```gitignore
+# >>> dot-agents managed (project outputs) >>>
+*.dot-agents-backup
+.agentsrc.local.json
+.claude/
+.codex/
+.mcp.json
+AGENTS.md
+# <<< dot-agents managed (project outputs) <<<
+```
+
+The block's contents come from the enabled platforms themselves, so it lists
+exactly what da projects into *that* repo. It is regenerated (not appended) on
+every run, sorted and de-duplicated, and everything outside the markers is
+preserved verbatim — so re-running is byte-stable and the file is safe to
+commit. `.agentsrc.json` and `.agentsrc.lock` are deliberately never ignored:
+they are the committed resolved-state contract, the `uv.lock` analog.
+
+**Only untracked files are affected.** `.gitignore` has no effect on a path git
+already tracks, so a repo that intentionally commits one of these projections —
+a team that keeps `AGENTS.md` in version control, say — is unchanged: the
+tracked copy stays tracked and keeps showing up in diffs. That is the intended
+behavior, and it is why there is no per-path policy knob.
+
+To opt out entirely, set `"gitignore_projections": false` in `.agentsrc.json`.
+The next `install`/`refresh` removes the block (leaving your own ignore rules
+untouched) and stops maintaining it. Omitting the key means enabled.
+
 ## Worktrees
 
 `da worktree` creates and merges back managed sub-branch worktrees stacked on a

@@ -265,19 +265,36 @@ func writeVerifyResultArtifact(in verifyResultArtifactInputs) (string, error) {
 			"Use a profile id like `unit`, `api`, `batch`, or omit --verifier-type to derive it from --kind.",
 		)
 	}
+	// A delegation contract exists for tasks executed by `workflow fanout` /
+	// `workflow contract create`. Direct (non-delegated) work has no
+	// contract file at all, which is expected — not an error — so only a
+	// missing file takes the direct-work path below. A malformed contract
+	// (present but unparseable) still fails loudly, since that indicates a
+	// genuinely broken artifact rather than the absence of one.
+	var parentPlanID, delegationID string
 	contract, cerr := loadDelegationContract(in.ProjectPath, in.TaskID)
-	if cerr != nil {
+	switch {
+	case cerr == nil:
+		parentPlanID = contract.ParentPlanID
+		delegationID = contract.ID
+	case os.IsNotExist(cerr):
+		planID, _, terr := findCanonicalTaskAnyPlan(in.ProjectPath, in.TaskID)
+		if terr != nil {
+			return "", terr
+		}
+		parentPlanID = planID
+	default:
 		return "", fmt.Errorf("load delegation contract for task %q: %w", in.TaskID, cerr)
 	}
 	doc := &VerificationResultDoc{
 		SchemaVersion: 1,
 		TaskID:        in.TaskID,
-		ParentPlanID:  contract.ParentPlanID,
+		ParentPlanID:  parentPlanID,
 		VerifierType:  vt,
 		Status:        in.Status,
 		Summary:       strings.TrimSpace(in.Summary),
 		RecordedAt:    in.Now,
-		DelegationID:  contract.ID,
+		DelegationID:  delegationID,
 		RecordedBy:    verifyRecordedByLabel,
 	}
 	if strings.TrimSpace(in.Command) != "" {

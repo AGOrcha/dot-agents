@@ -2,8 +2,8 @@
 
 What the prior analyses' method actually *did* (mechanically, per the `workflow-evidence-analysis`
 toolkit they shipped) versus what our `methodology/` rubrics add on top. Every "their method" claim
-cites `file:line` in the provadm-agc toolkit (all under
-`provadm-agc @ feature/analysis-doc : tools/workflow-evidence-analysis/`, ref `bce2a6e7…85a54`).
+cites `file:line` in the adminapp-agc toolkit (all under
+`adminapp-agc @ feature/analysis-doc : tools/workflow-evidence-analysis/`, ref `bce2a6e7…85a54`).
 "Ours" cites our rubric files under
 `.agents/workflow/plans/transcript-analysis-and-pipeline-craft/methodology/`.
 
@@ -11,7 +11,7 @@ Toolkit script/schema digests (R4, whole-file sha256, `feature/analysis-doc`):
 `correlate-case-study.py`, `score-workflow-evidence.py`, `export-session-events.py`,
 `inventory-transcript-sources.ps1`, `render-case-study-report.py` and the three
 `schema/*.json` — re-derivable via `git show feature/analysis-doc:<path> | shasum -a 256` in the
-provadm-agc checkout; refs are stable on that branch.
+adminapp-agc checkout; refs are stable on that branch.
 
 ---
 

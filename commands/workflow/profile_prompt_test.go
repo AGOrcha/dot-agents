@@ -41,18 +41,21 @@ func TestDecodeProfilePromptFiles(t *testing.T) {
 			},
 		},
 	}
-	// matched + entries (blank dropped, order preserved, object path extracted)
+	// matched + entries (blank dropped, order preserved, source/version preserved)
 	got, matched := decodeProfilePromptFiles(raw, "verifier", "cli-runner")
 	if !matched {
 		t.Fatal("cli-runner should be matched")
 	}
-	want := []string{"verifiers/verifier.base.md", "verifiers/cli-runner.md"}
+	want := []config.PromptFileRef{
+		{Path: "verifiers/verifier.base.md"},
+		{Source: "acme", Path: "verifiers/cli-runner.md", Version: "v2"},
+	}
 	if len(got) != len(want) {
 		t.Fatalf("entries = %#v, want %#v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("entry[%d] = %q, want %q", i, got[i], want[i])
+			t.Fatalf("entry[%d] = %#v, want %#v", i, got[i], want[i])
 		}
 	}
 	// profile exists, no prompt_files
@@ -138,7 +141,7 @@ func TestResolvePromptRef(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			e := resolvePromptRef(project, home, tc.entry)
+			e := resolveLocalPromptRef(project, home, tc.entry)
 			if e.Ref != tc.entry {
 				t.Fatalf("ref = %q, want %q", e.Ref, tc.entry)
 			}
@@ -299,7 +302,7 @@ func TestResolvePromptRef_AbsoluteLiteral(t *testing.T) {
 	if err := os.WriteFile(abs, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := resolvePromptRef(t.TempDir(), "", abs)
+	e := resolveLocalPromptRef(t.TempDir(), "", abs)
 	if e.Scope != "literal" || !e.Exists {
 		t.Fatalf("absolute existing path should be literal+exists, got scope=%q exists=%t", e.Scope, e.Exists)
 	}
@@ -362,6 +365,224 @@ func TestRunWorkflowResolvePrompt_JSON(t *testing.T) {
 	}
 	if !v.Matched || v.Kind != profileKindReviewer || v.Slug != "architecture-standards" {
 		t.Fatalf("json view = %#v", v)
+	}
+}
+
+// --- source-qualified prompt files -----------------------------------------
+
+// promptPin is one prompt unit staged into a fixture: the ref, the digest the
+// lock pins it at, and whether its content-addressed cache entry exists.
+type promptPin struct {
+	ref    config.PromptUnitRef
+	digest string
+	cached bool
+}
+
+// promptSourceFixture builds an isolated AGENTS_HOME + project whose
+// .agentsrc.lock pins the given prompt units, optionally materializing each
+// unit's cached bytes. It returns the project path, the home path, and the
+// lock's units map (the exact offline inputs resolvePromptRef consumes).
+func promptSourceFixture(t *testing.T, pins ...promptPin) (string, string, map[string]config.LockedUnit) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	project := t.TempDir()
+	units := map[string]config.LockedUnit{}
+	for _, p := range pins {
+		units[p.ref.Key()] = config.LockedUnit{Kind: config.UnitKindPrompt, Digest: p.digest}
+		if !p.cached {
+			continue
+		}
+		path := config.CachedPromptPath(p.ref, p.digest)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("# prompt\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := config.WriteUnitsLock(project, config.UnitsLock{Units: units}); err != nil {
+		t.Fatal(err)
+	}
+	read, err := config.ReadUnits(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return project, home, read.Units
+}
+
+func TestResolvePromptRef_SourceQualified(t *testing.T) {
+	base := config.PromptUnitRef{SourceID: "team", Path: "verifiers/verifier.base.md"}
+	tsLint := config.PromptUnitRef{SourceID: "team", Path: "verifiers/ts-lint.md"}
+	pruned := config.PromptUnitRef{SourceID: "team", Path: "verifiers/pruned.md"}
+	project, home, units := promptSourceFixture(t,
+		promptPin{ref: base, digest: "aaa111", cached: true},
+		promptPin{ref: tsLint, digest: "bbb222", cached: true},
+		promptPin{ref: pruned, digest: "ccc333"}, // pinned, cache never populated
+	)
+	env := promptResolveEnv{
+		projectPath: project,
+		agentsHome:  home,
+		sources:     config.SourceIndex([]config.Source{{ID: "team", Type: "git", URL: "file:///team"}}),
+		units:       units,
+	}
+
+	cases := []struct {
+		name       string
+		entry      config.PromptFileRef
+		wantRef    string
+		wantScope  string
+		wantSource string
+		wantExists bool
+		wantHint   bool
+	}{
+		{
+			name:       "typed object resolves from the cache",
+			entry:      config.PromptFileRef{Source: "team", Path: "verifiers/verifier.base.md"},
+			wantRef:    "team:verifiers/verifier.base.md",
+			wantScope:  "source",
+			wantSource: "team",
+			wantExists: true,
+		},
+		{
+			name:       "colon string with a declared source prefix",
+			entry:      config.PromptFileRef{Path: "team:verifiers/ts-lint.md"},
+			wantRef:    "team:verifiers/ts-lint.md",
+			wantScope:  "source",
+			wantSource: "team",
+			wantExists: true,
+		},
+		{
+			// The prefix names no declared source, so the whole string keeps
+			// local-path semantics (and resolves nowhere in this fixture).
+			name:      "colon string with an undeclared prefix stays a local path",
+			entry:     config.PromptFileRef{Path: "nope:verifiers/ts-lint.md"},
+			wantRef:   "nope:verifiers/ts-lint.md",
+			wantScope: "unresolved",
+		},
+		{
+			name:       "pruned cache is unresolved with a sync hint",
+			entry:      config.PromptFileRef{Source: "team", Path: "verifiers/pruned.md"},
+			wantRef:    "team:verifiers/pruned.md",
+			wantScope:  "unresolved",
+			wantSource: "team",
+			wantHint:   true,
+		},
+		{
+			name:       "never-synced prompt is unresolved with a sync hint",
+			entry:      config.PromptFileRef{Source: "team", Path: "verifiers/new.md"},
+			wantRef:    "team:verifiers/new.md",
+			wantScope:  "unresolved",
+			wantSource: "team",
+			wantHint:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := resolvePromptRef(env, tc.entry)
+			if e.Ref != tc.wantRef {
+				t.Fatalf("ref = %q, want %q", e.Ref, tc.wantRef)
+			}
+			if e.Scope != tc.wantScope || e.Exists != tc.wantExists {
+				t.Fatalf("scope/exists = %q/%t, want %q/%t", e.Scope, e.Exists, tc.wantScope, tc.wantExists)
+			}
+			if e.Source != tc.wantSource {
+				t.Fatalf("source = %q, want %q", e.Source, tc.wantSource)
+			}
+			if tc.wantHint && !strings.Contains(e.Hint, "da config sync") {
+				t.Fatalf("hint = %q, want a `da config sync` hint", e.Hint)
+			}
+			if !tc.wantHint && e.Hint != "" {
+				t.Fatalf("unexpected hint %q", e.Hint)
+			}
+			if tc.wantExists && !strings.Contains(e.Resolved, "cache") {
+				t.Fatalf("resolved = %q, want a path under the config cache", e.Resolved)
+			}
+		})
+	}
+}
+
+// TestComposeProfilePrompt_SourceQualified is the end-to-end command view: a team
+// layer's stage profile mixing typed source refs, a source-prefixed string, and a
+// local path composes base-first with per-entry scopes.
+func TestComposeProfilePrompt_SourceQualified(t *testing.T) {
+	base := config.PromptUnitRef{SourceID: "team", Path: "verifiers/verifier.base.md"}
+	tsLint := config.PromptUnitRef{SourceID: "team", Path: "verifiers/ts-lint.md"}
+	project, home, _ := promptSourceFixture(t,
+		promptPin{ref: base, digest: "aaa111", cached: true},
+		promptPin{ref: tsLint, digest: "bbb222", cached: true},
+	)
+	local := filepath.Join(project, ".agents", "prompts", "verifiers", "local.md")
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := appTypeSnapshot
+	t.Cleanup(func() { appTypeSnapshot = orig })
+	appTypeSnapshot = func(string) (*config.Snapshot, error) {
+		return &config.Snapshot{Effective: config.AgentsRC{
+			Version: 1,
+			Sources: []config.Source{{ID: "team", Type: "git", URL: "file:///team"}},
+			StageProfiles: map[string]map[string]config.StageProfile{
+				profileKindVerifier: {"ts-lint": {PromptFiles: []config.PromptFileRef{
+					{Source: "team", Path: "verifiers/verifier.base.md"},
+					{Path: "team:verifiers/ts-lint.md"},
+					{Path: "verifiers/local.md"},
+				}}},
+			},
+		}}, nil
+	}
+
+	view, err := composeProfilePrompt(project, home, profileKindVerifier, "ts-lint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Matched || len(view.Entries) != 3 {
+		t.Fatalf("matched=%t entries=%d, want matched 3", view.Matched, len(view.Entries))
+	}
+	wantScope := []string{"source", "source", "repo-local"}
+	for i, e := range view.Entries {
+		if !e.Exists {
+			t.Fatalf("entry %d (%s) unresolved: %s", i, e.Ref, e.Hint)
+		}
+		if e.Scope != wantScope[i] {
+			t.Fatalf("entry %d scope = %q, want %q", i, e.Scope, wantScope[i])
+		}
+	}
+	if view.Entries[0].Source != "team" || view.Entries[2].Source != "" {
+		t.Fatalf("source provenance = %q/%q, want team/empty", view.Entries[0].Source, view.Entries[2].Source)
+	}
+}
+
+// TestComposeProfilePrompt_CorruptLock proves the offline lock read is a real
+// input, not a best-effort one: an unreadable .agentsrc.lock surfaces as an error
+// rather than silently composing with zero prompt pins.
+func TestComposeProfilePrompt_CorruptLock(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, config.AgentsLockFile), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshotWithProfiles(t, `{"unit":{"prompt_files":["verifiers/unit.md"]}}`, "")
+	if _, err := composeProfilePrompt(project, t.TempDir(), profileKindVerifier, "unit"); err == nil {
+		t.Fatal("expected a corrupt lock to fail the composition")
+	}
+}
+
+func TestRenderComposedPrompt_SourceHint(t *testing.T) {
+	out := captureWorkflowStdout(t, func() {
+		renderComposedPrompt(composedPromptView{Kind: "verifier", Slug: "ts-lint", Matched: true, Entries: []composedPromptEntry{
+			{Ref: "team:verifiers/verifier.base.md", Resolved: "~/.agents/cache/config/team/base", Scope: "source", Source: "team", Exists: true},
+			{Ref: "team:verifiers/ts-lint.md", Scope: "unresolved", Source: "team", Hint: "run `da config sync`"},
+		}})
+	})
+	if !strings.Contains(out, "source -> ~/.agents/cache/config/team/base") {
+		t.Fatalf("resolved source entry should render its cached path:\n%s", out)
+	}
+	if !strings.Contains(out, "team:verifiers/ts-lint.md") || !strings.Contains(out, "da config sync") {
+		t.Fatalf("unresolved source entry should render its hint:\n%s", out)
 	}
 }
 

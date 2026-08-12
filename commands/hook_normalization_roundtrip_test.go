@@ -135,7 +135,7 @@ func runCanonicalImportSingle(t *testing.T, sourceRoot, sourcePath string) impor
 		project:    canonicalImportProject,
 		sourceRoot: sourceRoot,
 		sourcePath: sourcePath,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("canonicalImportOutputs: %v", err)
 	}

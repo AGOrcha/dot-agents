@@ -221,6 +221,7 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	if err := createInstallPlatformLinks(projectName, projectPath, opts, packagesUnits, packagesParticipated); err != nil {
 		return err
 	}
+	ensureManagedGitignoreForInstall(projectPath, deps)
 	if err := finalizeInstall(projectName, projectPath, opts); err != nil {
 		return err
 	}
@@ -481,6 +482,39 @@ func createInstallPlatformLink(p platform.Platform, projectName, projectPath str
 	return nil
 }
 
+// ensureManagedGitignoreForInstall maintains the dot-agents-managed .gitignore
+// block for the project install just projected into (§15 D14 / R8), so the
+// generated outputs are untracked from the very first `da install` rather than
+// only after the next `da refresh` — the gap that left every freshly-installed
+// repo with a handful of untracked generated paths.
+//
+// It runs after the platform links exist so the block describes a projection
+// that has actually happened, and it is keyed off the CONFIG-enabled platform
+// set (platform.EnabledPlatforms) — the same input refresh uses — so install and
+// refresh converge on a byte-identical block instead of fighting over it.
+//
+// Non-fatal by design, matching refresh: a repo whose .gitignore cannot be
+// written (read-only tree, exotic permissions) is a fully working install with
+// noisier `git status`, not a failed one, so this warns and returns rather than
+// unwinding the install.
+func ensureManagedGitignoreForInstall(projectPath string, deps InstallDeps) {
+	if Flags.DryRun {
+		ui.DryRun("Update dot-agents managed .gitignore block")
+		return
+	}
+	cfg, err := deps.LoadConfig()
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: loading config: %v", err))
+		return
+	}
+	line, err := MaintainManagedGitignore(projectPath, platform.EnabledPlatforms(cfg))
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: %v", err))
+		return
+	}
+	ui.Bullet("ok", line)
+}
+
 func finalizeInstall(projectName, projectPath string, opts installOptions) error {
 	if Flags.DryRun {
 		return nil
@@ -549,9 +583,9 @@ func runInstallGenerate(deps InstallDeps, opts installOptions) error {
 		ui.DryRun(fmt.Sprintf("  skills:   %v", rc.Skills))
 		ui.DryRun(fmt.Sprintf("  rules:    %v", rc.Rules))
 		ui.DryRun(fmt.Sprintf("  agents:   %v", rc.Agents))
-		ui.DryRun(fmt.Sprintf("  hooks:    %v", rc.Hooks))
-		ui.DryRun(fmt.Sprintf("  mcp:      %v", rc.MCP))
-		ui.DryRun(fmt.Sprintf("  settings: %v", rc.Settings))
+		ui.DryRun(fmt.Sprintf("  hooks:    %s", describeStringsOrBool(rc.Hooks)))
+		ui.DryRun(fmt.Sprintf("  mcp:      %s", describeStringsOrBool(rc.MCP)))
+		ui.DryRun(fmt.Sprintf("  settings: %s", describeOptionalBool(rc.Settings)))
 		return nil
 	}
 
@@ -568,6 +602,28 @@ func runInstallGenerate(deps InstallDeps, opts installOptions) error {
 	fmt.Fprintf(os.Stdout, "  2. Commit:  git add %s && git commit -m 'Add da manifest'\n", config.AgentsRCFile)
 	fmt.Fprintln(os.Stdout, "  3. Others:  da install   (after cloning)")
 	return nil
+}
+
+// describeStringsOrBool renders an optional hooks/mcp declaration for the
+// --dry-run preview. A nil pointer means the key will be OMITTED from the
+// manifest (deferring to the layer stack), which is materially different from
+// an explicit `false`, so the preview must not collapse the two.
+func describeStringsOrBool(s *config.StringsOrBool) string {
+	if s == nil {
+		return "(absent — inherited from config layers)"
+	}
+	if len(s.Names) > 0 {
+		return fmt.Sprintf("%v", s.Names)
+	}
+	return fmt.Sprintf("%v", s.All)
+}
+
+// describeOptionalBool is the bool analog of describeStringsOrBool.
+func describeOptionalBool(b *bool) string {
+	if b == nil {
+		return "(absent — inherited from config layers)"
+	}
+	return fmt.Sprintf("%v", *b)
 }
 
 // ─── source resolution ───────────────────────────────────────────────────────

@@ -50,10 +50,15 @@ const (
 
 // alwaysIgnored are the entries the managed block always carries regardless of
 // the caller's projected-output set: the machine-local overlay manifest is
-// per-machine state and must never be committed (D14). It is added even when
-// the caller passes no projected paths, so the block is present (not empty) for
-// any resolved project.
-var alwaysIgnored = []string{".agentsrc.local.json"}
+// per-machine state and must never be committed (D14), and `*.dot-agents-backup`
+// covers the sibling copies install writes when it displaces a pre-existing user
+// file (platform.backupSuffix — e.g. AGENTS.md.dot-agents-backup). A backup is
+// per-machine salvage of what WAS there, not content the repo wants to carry, so
+// it is ignored wherever it lands; a glob is used because the set of displaced
+// files is not knowable ahead of the projection. Both are added even when the
+// caller passes no projected paths, so the block is present (not empty) for any
+// resolved project.
+var alwaysIgnored = []string{".agentsrc.local.json", "*.dot-agents-backup"}
 
 // neverIgnored are the committed resolved-state contract files. They are the
 // `uv.lock`-style record the whole model depends on being tracked, so they are
@@ -124,6 +129,46 @@ func EnsureManagedGitignore(repoRoot string, ignorePaths []string) error {
 		return fmt.Errorf("links: gitignore auto-fill: mkdir %s: %w", filepath.Dir(path), err)
 	}
 	return fsops.WriteFileAtomic(path, []byte(next))
+}
+
+// RemoveManagedGitignore strips the da-owned block from the consuming project's
+// `.gitignore`, leaving every user-authored line outside the markers verbatim.
+// It is the opt-out half of EnsureManagedGitignore (`gitignore_projections:
+// false`): opting out must actively retract a block an earlier run wrote, not
+// merely stop refreshing it, or the stale block would keep ignoring outputs the
+// project has since decided to manage itself.
+//
+// It is a no-op when there is no `.gitignore` or no managed block, and it does
+// not delete a file it did not create — but a file left with nothing BUT
+// whitespace once the block is gone was created solely for the block, so it is
+// removed rather than left behind as an empty artifact. Like the writer, it
+// skips the write entirely when the result is byte-identical to disk.
+func RemoveManagedGitignore(repoRoot string) error {
+	if strings.TrimSpace(repoRoot) == "" {
+		return fmt.Errorf("links: gitignore opt-out: empty repo root")
+	}
+	target := filepath.Join(repoRoot, managedGitignoreFile)
+	existing, err := readManagedGitignore(target)
+	if err != nil {
+		return err
+	}
+	if existing == "" {
+		return nil
+	}
+	outside := stripManagedGitignoreBlock(existing)
+	if strings.TrimSpace(outside) == "" {
+		// fsopsRemove (not os.Remove) so the Windows read-only-attribute
+		// handling in fsops applies, and so tests can fault-inject the seam.
+		if err := fsopsRemove(target); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("links: gitignore opt-out: remove %s: %w", target, err)
+		}
+		return nil
+	}
+	next := strings.TrimRight(outside, "\n") + "\n"
+	if next == existing {
+		return nil
+	}
+	return fsops.WriteFileAtomic(target, []byte(next))
 }
 
 // readManagedGitignore reads the .gitignore at path, treating a missing file as

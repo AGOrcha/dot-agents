@@ -39,13 +39,20 @@
       "$ref": "#/$defs/stringList"
     },
     "hooks": {
-      "$ref": "#/$defs/stringsOrBool"
+      "$ref": "#/$defs/stringsOrBool",
+      "description": "Hook projection for this repo. OPTIONAL: omitting the key defers to the config layer stack (an org/team layer pulled in via extends, then product defaults). Present-and-false is NOT the same as absent — it is an explicit repo-local override that wins the layer merge and disables hooks even when an org layer enables them."
     },
     "mcp": {
-      "$ref": "#/$defs/stringsOrBool"
+      "$ref": "#/$defs/stringsOrBool",
+      "description": "MCP server projection for this repo. OPTIONAL: omitting the key defers to the config layer stack. Present-and-false is an explicit repo-local override that wins the layer merge."
     },
     "settings": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Platform settings projection for this repo. OPTIONAL: omitting the key defers to the config layer stack. Present-and-false is an explicit repo-local override that wins the layer merge."
+    },
+    "gitignore_projections": {
+      "type": "boolean",
+      "description": "Whether `da install` / `da refresh` maintain the dot-agents-managed block in this repo's .gitignore covering the outputs they project (platform links, generated configs, *.dot-agents-backup). Absent means enabled; set false to skip the block and remove one a previous run wrote. Only untracked files are affected — a projection the repo already commits stays tracked."
     },
     "sources": {
       "type": "array",

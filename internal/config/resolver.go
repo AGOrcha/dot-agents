@@ -655,6 +655,19 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 	}
 	snap.Warnings = append(snap.Warnings, importWarnings...)
 
+	// Source-qualified prompt files (stage-profile-and-routing-consolidation
+	// § Source-Qualified Prompt Files): the effective config is now known, so the
+	// prompt files its stage_profiles pin to a config source are fetched HERE —
+	// on the one network-touching path — and pinned as UnitKindPrompt units below.
+	// This is what makes `da workflow resolve-prompt` able to stay offline while
+	// still resolving a team-layer prompt: the bytes are already cached and the
+	// digest is already in the lock.
+	promptUnits, promptWarnings, err := r.promptUnits(trace, projectPath, snap)
+	if err != nil {
+		return nil, err
+	}
+	snap.Warnings = append(snap.Warnings, promptWarnings...)
+
 	// Field-level audit derives from the produced snapshot so the shared merge
 	// core (resolveSnapshot) stays unchanged: overrides come from the provenance
 	// stacks, protection violations from the recorded warnings.
@@ -671,7 +684,7 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 	// repairs a stale lock must write exactly those. The legacy §7 `config`
 	// section is no longer written — units-only is the steady state; a legacy
 	// config-only lock is upgraded once on read (see ReadUnits).
-	if err := r.writeUnitsLock(projectPath, snap, locked); err != nil {
+	if err := r.writeUnitsLock(projectPath, snap, locked, promptUnits); err != nil {
 		return nil, fmt.Errorf("writing %s units: %w", AgentsLockFile, err)
 	}
 	return snap, nil
@@ -686,7 +699,7 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 // like-for-like. A flat/local-only project (no extends) still gets a lockfile
 // carrying a non-empty inputs_digest and an empty units map — the property §7A
 // wires in.
-func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, locked map[string]LockedLayer) error {
+func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, locked map[string]LockedLayer, promptUnits map[string]LockedUnit) error {
 	digest, err := ComputeInputsDigest(projectPath, r.effectiveUserLocalPath())
 	if err != nil {
 		return err
@@ -727,7 +740,7 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, loc
 		if _, err := lf.Section(LockSectionUnits, &existing); err != nil {
 			return err
 		}
-		merged := mergeLockUnits(existing, layerUnits, profileUnits)
+		merged := mergeLockUnits(existing, layerUnits, promptUnits, profileUnits)
 		if err := lf.SetSection(LockSectionUnits, merged); err != nil {
 			return err
 		}
@@ -738,18 +751,27 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, loc
 
 // mergeLockUnits builds the merged §7A units map: it preserves the
 // kind:artifact units a concurrent packages pass committed (read under the
-// same lock), overwrites with the freshly resolved layer units, and finally
-// applies the profile units. A profile key never collides with a layer/
-// artifact ref; on the impossible collision the profile entry wins (mirrors
-// UnitsLock.allUnits).
-func mergeLockUnits(existing, layerUnits, profileUnits map[string]LockedUnit) map[string]LockedUnit {
-	merged := make(map[string]LockedUnit, len(layerUnits)+len(profileUnits))
+// same lock), overwrites with the freshly resolved layer units, then the
+// source-qualified prompt units, and finally applies the profile units. A
+// profile key never collides with a layer/artifact ref; on the impossible
+// collision the profile entry wins (mirrors UnitsLock.allUnits).
+//
+// promptUnits is pass 1's OWN derived set (from the effective config's
+// stage_profiles), so it replaces the previous prompt set wholesale — a
+// prompt_files entry deleted from the config drops out of the lock. Entries the
+// resolver could not re-fetch were already carried forward into promptUnits by
+// promptUnits(), so a transient failure does not un-pin a working prompt.
+func mergeLockUnits(existing, layerUnits, promptUnits, profileUnits map[string]LockedUnit) map[string]LockedUnit {
+	merged := make(map[string]LockedUnit, len(layerUnits)+len(promptUnits)+len(profileUnits))
 	for ref, u := range existing {
 		if u.Kind == UnitKindArtifact {
 			merged[ref] = u
 		}
 	}
 	for ref, u := range layerUnits {
+		merged[ref] = u
+	}
+	for ref, u := range promptUnits {
 		merged[ref] = u
 	}
 	for key, u := range profileUnits {

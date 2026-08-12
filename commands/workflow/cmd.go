@@ -442,16 +442,26 @@ func newWorkflowTaskAddCmd() *cobra.Command {
 
 func newWorkflowTaskUpdateCmd() *cobra.Command {
 	var taskUpdateID, taskUpdateNotes, taskUpdateWriteScope, taskUpdateTitle string
-	var taskUpdateDependsOn, taskUpdateBlocks string
+	var taskUpdateDependsOn, taskUpdateBlocks, taskUpdateAppType string
 	taskUpdateCmd := &cobra.Command{
 		Use:   "update <plan-id>",
-		Short: "Update notes, write-scope, or title for an existing task",
+		Short: "Update notes, write-scope, title, or app_type for an existing task",
 		Example: deps.ExampleBlock(
 			"  da workflow task update loop-orchestrator-layer --task phase-5 --notes \"Needs provider-consumer pairing\"",
+			"  da workflow task update loop-orchestrator-layer --task phase-5 --app-type go-cli",
 		),
 		Args: deps.ExactArgsWithHints(1, cmdHintPlanOwnsTask),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowTaskUpdate(args[0], taskUpdateID, taskUpdateTitle, taskUpdateNotes, taskUpdateWriteScope, taskUpdateDependsOn, taskUpdateBlocks)
+			return runWorkflowTaskUpdate(taskUpdateInputs{
+				PlanID:     args[0],
+				TaskID:     taskUpdateID,
+				Title:      taskUpdateTitle,
+				Notes:      taskUpdateNotes,
+				WriteScope: taskUpdateWriteScope,
+				DependsOn:  taskUpdateDependsOn,
+				Blocks:     taskUpdateBlocks,
+				AppType:    taskUpdateAppType,
+			})
 		},
 	}
 	taskUpdateCmd.Flags().StringVar(&taskUpdateID, "task", "", "Task ID to update (required)")
@@ -460,6 +470,7 @@ func newWorkflowTaskUpdateCmd() *cobra.Command {
 	taskUpdateCmd.Flags().StringVar(&taskUpdateWriteScope, workflowFlagWriteScope, "", "New comma-separated write-scope patterns (replaces existing)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on (replaces existing)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks (replaces existing)")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateAppType, "app-type", "", "App type for verifier dispatch (e.g. go-cli, go-http-service); validated against this repo's execution profile when one is configured")
 	_ = taskUpdateCmd.MarkFlagRequired("task")
 	return taskUpdateCmd
 }
@@ -742,7 +753,7 @@ func newWorkflowVerifyRecordCmd() *cobra.Command {
 	verifyRecordCmd.Flags().StringSliceVar(&reviewFailedGates, "failed-gate", nil, "When --kind review: failed verifier or gate slug (repeatable)")
 	verifyRecordCmd.Flags().StringVar(&reviewEscalation, "escalation-reason", "", "When --kind review: required when overall decision is escalate")
 	verifyRecordCmd.Flags().StringVar(&reviewNotes, "reviewer-notes", "", "When --kind review: optional reviewer notes")
-	verifyRecordCmd.Flags().StringVar(&reviewTask, "task", "", "Task id for delegation contract lookup (required for --kind review; optional for other kinds to write a typed result artifact)")
+	verifyRecordCmd.Flags().StringVar(&reviewTask, "task", "", "Task id to scope this record to (required for --kind review; optional for other kinds to write a typed result artifact). Validated against the workflow store; links a delegation contract when one exists at .agents/active/delegation/<task>.yaml, else records plan-scoped with no contract linkage")
 	verifyRecordCmd.Flags().StringVar(&verifyVerifierType, workflowFlagVerifierType, "", "Verifier profile id for typed result artifact stem (e.g. unit, api, batch); defaults to --kind when --task is set")
 	_ = verifyRecordCmd.MarkFlagRequired("kind")
 	_ = verifyRecordCmd.MarkFlagRequired("summary")

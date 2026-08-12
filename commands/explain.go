@@ -99,9 +99,9 @@ func printManifestExplanation() {
 		{"skills", "Names of skills to link from sources"},
 		{"agents", "Names of subagents to link from sources"},
 		{"rules", `Scopes: "global", "project"`},
-		{"hooks", `true (all), false, or ["PreToolUse", "PostToolUse", ...]`},
-		{"mcp", `true (all), false, or ["github", "filesystem", ...]`},
-		{"settings", "true/false — link platform settings (Cursor, etc.)"},
+		{"hooks", `true (all), false, or ["PreToolUse", ...]; omit to inherit from layers`},
+		{"mcp", `true (all), false, or ["github", ...]; omit to inherit from layers`},
+		{"settings", "true/false — link platform settings; omit to inherit from layers"},
 		{"sources", `[{"type":"local"} | {"type":"git","url":"...","ref":"..."}]`},
 	}
 	for _, f := range fields {
