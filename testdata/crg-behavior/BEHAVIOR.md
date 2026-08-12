@@ -103,6 +103,24 @@ Running with `-strict` promotes every advisory surface to gating. That flag is
 the §11.4 sign-off switch: no code change is needed to tighten the gate once
 these differences are resolved or explicitly accepted.
 
+## Open finding: `flows` is release-sensitive
+
+The gate's first CI runs recorded a divergence worth carrying into the §11.4
+sign-off discussion:
+
+| environment | `code-review-graph` | `flows` verdict |
+|---|---|---|
+| local | 2.1.0 | **PASS on all 21 tasks** — the kg-native derivation reproduces the bridge's `flow_memberships` exactly (4,762 of 4,762 flows, mean Jaccard 1.0) |
+| CI | current release from PyPI | **FAIL on 18 of 21 tasks**, and an earlier run of the same job persisted no `flow_memberships` rows at all |
+
+The CI divergence is two-way (rows only in NATIVE *and* rows only in BRIDGE),
+so it is not merely a partially populated table. Either the newer bridge release
+derives flows differently, or its flow view is unstable across builds. This is
+exactly the signal criterion 2 exists to produce: it is **not** resolved by this
+change, and the `crg-behavior-gate` job is expected to be red on the current
+release until it is. Resolve it before the criterion-2 sign-off — do not silence
+it by downgrading `flows` to advisory.
+
 ## Running it locally
 
 ```sh
