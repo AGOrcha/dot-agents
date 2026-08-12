@@ -311,6 +311,32 @@ func TestDiscoverSubmodules_DepthBound(t *testing.T) {
 	}
 }
 
+// TestContainedIn rejects the gitlink paths that would escape the checkout.
+// Submodule paths come out of a repository's own index — untrusted input for a
+// clone of someone else's superproject — and are used as a working directory,
+// a --repo argument, and a database ATTACH target.
+func TestContainedIn(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"plain child", "vendor/lib", true},
+		{"nested child", "a/b/c", true},
+		{"parent escape", "../evil", false},
+		{"deep escape", "vendor/../../evil", false},
+		{"absolute", filepath.Join(string(filepath.Separator), "etc", "passwd"), false},
+		{"self", ".", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := containedIn(tc.path); got != tc.want {
+				t.Errorf("containedIn(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 // contains reports whether haystack holds needle.
 func contains(haystack []string, needle string) bool {
 	for _, s := range haystack {

@@ -94,10 +94,16 @@ func (s mergeScope) selectExpr(col string) (expr string, arg any) {
 // MergeGraphDB folds the submodule graph at srcPath into the already-open
 // superproject graph db, namespacing every qualified name under scope.
 //
-// The merge is idempotent (INSERT OR IGNORE against the qualified_name unique
-// index), transactional, and schema-drift tolerant: only columns present in
-// BOTH databases are copied, so a source produced by a different CRG version
-// merges instead of failing outright.
+// The merge is AUTHORITATIVE for its scope: it first deletes every row already
+// carrying this scope, then copies the source's rows in. That makes it
+// genuinely idempotent — `nodes` would survive on its unique qualified_name,
+// but `edges` carries no unique constraint, so a re-merge would otherwise
+// duplicate every edge — and it is also what lets a re-merge drop symbols the
+// submodule deleted instead of leaving them behind forever.
+//
+// The merge is transactional and schema-drift tolerant: only columns present
+// in BOTH databases are copied, so a source produced by a different CRG
+// version merges instead of failing outright.
 //
 // Callers MUST run postprocess on the destination afterwards. Merging writes
 // base rows only, which leaves the FTS index, flows, and communities stale —
@@ -168,6 +174,12 @@ func mergeTable(ctx context.Context, conn *sql.Conn, table string, scope mergeSc
 		return 0, fmt.Errorf("source and destination %s tables share no columns", table)
 	}
 
+	// Clear this scope's previous rows first: the merge owns everything under
+	// its namespace, so a re-merge replaces rather than accumulates.
+	if err := clearScope(ctx, conn, table, cols, scope); err != nil {
+		return 0, err
+	}
+
 	exprs := make([]string, len(cols))
 	var args []any
 	for i, col := range cols {
@@ -186,6 +198,28 @@ func mergeTable(ctx context.Context, conn *sql.Conn, table string, scope mergeSc
 	// RowsAffected is a report-only count; SQLite always supplies it.
 	inserted, _ := res.RowsAffected()
 	return int(inserted), nil
+}
+
+// clearScope deletes the destination rows that already belong to this scope,
+// matching on whichever qualified-name columns the table actually has. A table
+// with no qualified-name column carries no scope and is left alone.
+func clearScope(ctx context.Context, conn *sql.Conn, table string, cols []string, scope mergeScope) error {
+	var predicates []string
+	var args []any
+	for _, col := range cols {
+		if qualifiedNameColumns[col] {
+			predicates = append(predicates, "instr("+quoteIdent(col)+", ?) = 1")
+			args = append(args, scope.prefix)
+		}
+	}
+	if len(predicates) == 0 {
+		return nil
+	}
+	del := "DELETE FROM main." + table + " WHERE " + strings.Join(predicates, " OR ")
+	if _, err := conn.ExecContext(ctx, del, args...); err != nil {
+		return fmt.Errorf("clear previous %s rows for scope: %w", table, err)
+	}
+	return nil
 }
 
 // tableColumns returns the copyable columns of schema.table — everything but

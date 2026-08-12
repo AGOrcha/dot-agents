@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -207,6 +208,11 @@ type CRGOperationReport struct {
 	Workspace *WorkspacePlan `json:"workspace,omitempty"`
 	// Merged reports the rows folded in from submodule graphs.
 	Merged *MergeStats `json:"merged,omitempty"`
+	// EnumerationError is set when the repository could not be enumerated at
+	// all (not a git checkout, git unavailable). The build still ran over the
+	// given root, but nothing can be said about submodules — which is a fact
+	// the caller has to see rather than infer from a missing Workspace.
+	EnumerationError string `json:"enumeration_error,omitempty"`
 }
 
 // crgRunner is the subprocess seam the workspace build drives: one CRG build
@@ -299,6 +305,14 @@ func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) 
 	if mergeErr != nil {
 		return nil, mergeErr
 	}
+	if planErr == nil {
+		// Record what this build covered BEFORE reading status back: readiness
+		// distinguishes "never looked at" from "looked and found nothing" (and
+		// from "deliberately excluded") using this record.
+		if err := writeCoverage(b.RepoRoot, plan); err != nil {
+			return nil, fmt.Errorf("record workspace coverage: %w", err)
+		}
+	}
 
 	status, statusErr := b.Status()
 	if statusErr != nil {
@@ -314,6 +328,10 @@ func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) 
 	if planErr == nil {
 		planCopy := plan
 		report.Workspace = &planCopy
+	} else {
+		// Enumeration failed, so the build silently covered the root only.
+		// Say so rather than letting it look like a normal single-repo build.
+		report.EnumerationError = planErr.Error()
 	}
 	switch {
 	case status.Ready:
@@ -339,10 +357,34 @@ func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) 
 	if report.Workspace != nil && report.Summary != "" {
 		report.Summary += "\nRoots: " + report.Workspace.Summary()
 	}
+	if report.EnumerationError != "" && report.Summary != "" {
+		report.Summary += "\nRoots: not enumerated (" + report.EnumerationError +
+			") — this build covered the given root only."
+	}
 	if report.RawOutput != "" && report.Summary == "" {
 		report.Summary = report.RawOutput
 	}
 	return report, nil
+}
+
+// mergeWriteDSN carries the write pragmas every merge connection needs.
+// busy_timeout matches the rest of this package's writers (see sqlite.go): a
+// concurrent MCP server or a parallel `da kg` holding the database must make
+// the merge wait, not fail — the per-root builds that precede it are minutes
+// of work to redo.
+const mergeWriteDSN = "?_pragma=busy_timeout(5000)"
+
+// mergeSubmoduleGraph folds one submodule's graph into the superproject graph
+// on a connection of its own. A fresh handle per submodule keeps a failed
+// merge (a rolled-back transaction, an undone ATTACH) from reaching the next
+// one, so a failure is always attributed to the submodule that caused it.
+func (b *CRGBridge) mergeSubmoduleGraph(sub WorkspaceRoot) (MergeStats, error) {
+	db, err := sql.Open("sqlite", CRGDBPath(b.RepoRoot)+mergeWriteDSN)
+	if err != nil {
+		return MergeStats{}, fmt.Errorf("open superproject graph: %w", err)
+	}
+	defer db.Close()
+	return MergeGraphDB(db, CRGDBPath(sub.AbsPath), sub.Scope)
 }
 
 // buildAndMergeSubmodules builds each submodule root, merges its graph into
@@ -358,17 +400,12 @@ func (b *CRGBridge) buildAndMergeSubmodules(subRoots []WorkspaceRoot, opts Build
 	// that matters runs over the merged superproject graph below.
 	subOpts := BuildOptions{SkipFlows: opts.SkipFlows, SkipPostprocess: true}
 	merged := &MergeStats{}
-	db, err := sql.Open("sqlite", CRGDBPath(b.RepoRoot))
-	if err != nil {
-		return nil, fmt.Errorf("open superproject graph: %w", err)
-	}
-	defer db.Close()
 	for _, sub := range subRoots {
 		out, buildErr := b.activeRunner().buildRoot(sub.AbsPath, subOpts)
 		if buildErr != nil {
 			return nil, classifyCRGRunError("build "+sub.Path, buildErr, out)
 		}
-		stats, mergeErr := MergeGraphDB(db, CRGDBPath(sub.AbsPath), sub.Scope)
+		stats, mergeErr := b.mergeSubmoduleGraph(sub)
 		if mergeErr != nil {
 			return nil, fmt.Errorf("merge submodule %s: %w", sub.Path, mergeErr)
 		}
@@ -520,63 +557,140 @@ func (b *CRGBridge) applyWorkspaceReadiness(status *CRGStatus, db *sql.DB) {
 	if err != nil || len(subs) == 0 {
 		return
 	}
-	roots := []RootStatus{{Path: ".", Indexed: true}}
-	subNodes, subFiles := 0, 0
+	counts, err := countRootRows(db, b.RepoRoot, subs)
+	if err != nil {
+		return
+	}
+	coverage := readCoverage(b.RepoRoot)
+	roots := []RootStatus{{
+		Path:    ".",
+		Nodes:   counts[superprojectRoot].Nodes,
+		Files:   counts[superprojectRoot].Files,
+		Indexed: counts[superprojectRoot].Nodes > 0,
+	}}
 	var missing []string
 	for _, sub := range subs {
-		nodes, files, countErr := countRootRows(db, sub.AbsPath(b.RepoRoot), sub.Path)
-		if countErr != nil {
-			return
-		}
-		root := RootStatus{Path: sub.Path, Nodes: nodes, Files: files, Indexed: nodes > 0}
-		if !root.Indexed {
-			root.Note = "present in the checkout but absent from the graph"
-			if !sub.Initialized {
-				root.Note = SkipReasonUninitialized
-			}
+		root := rootStatusFor(sub, counts[sub.Path], coverage)
+		if !root.Indexed && !coverage.excluded(sub.Path) {
 			missing = append(missing, sub.Path)
 		}
-		subNodes += nodes
-		subFiles += files
 		roots = append(roots, root)
 	}
-	roots[0].Nodes = status.Nodes - subNodes
-	roots[0].Files = status.Files - subFiles
 	status.Roots = roots
 	if len(missing) == 0 {
 		return
 	}
 	status.Ready = false
 	status.State = CRGReadinessIncomplete
-	status.Message = fmt.Sprintf("submodules detected but not indexed: %s — rerun 'da kg build' (or init them first); "+
-		"queries against these paths will return nothing", strings.Join(missing, ", "))
+	status.Message = fmt.Sprintf("submodules detected but not indexed: %s — initialize them and rerun 'da kg build', "+
+		"or rebuild with --no-recurse-submodules to declare them out of scope; until then, queries against these "+
+		"paths return nothing", strings.Join(missing, ", "))
 }
 
-// countRootRows counts the graph rows attributed to one submodule root. Rows
-// are matched by the scope prefix the merge stamps onto qualified names, and
-// by file-path prefix (absolute or superproject-relative) so a graph produced
-// by an external aggregator is still attributed correctly.
-func countRootRows(db *sql.DB, absPath, relPath string) (nodes, files int, err error) {
-	scopePrefix := relPath + scopeSeparator
-	// Both path spellings are checked: CRG writes native separators on some
-	// platforms and slashes on others, and a graph produced by an external
-	// aggregator may store repo-relative paths.
-	nativeAbs := absPath + string(filepath.Separator)
-	slashAbs := filepath.ToSlash(absPath) + "/"
-	nativeRel := filepath.FromSlash(relPath) + string(filepath.Separator)
-	const pathMatch = `instr(file_path, ?) = 1 OR instr(file_path, ?) = 1 OR instr(file_path, ?) = 1 OR instr(file_path, ?) = 1`
-	err = db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT file_path) FROM nodes
-		WHERE instr(qualified_name, ?) = 1 OR `+pathMatch,
-		scopePrefix, nativeAbs, slashAbs, nativeRel, relPath+"/").Scan(&nodes, &files)
-	if err == nil {
-		return nodes, files, nil
+// rootStatusFor renders one submodule's row attribution, explaining an empty
+// root in terms the operator can act on.
+//
+// A root the last build deliberately covered is reported as indexed even at
+// zero rows: the build looked and found no symbols (a docs-only or
+// unsupported-language submodule), which is a complete answer, not a missing
+// one. A root the last build was told to exclude is reported as excluded. Only
+// a root that is genuinely absent counts as missing.
+func rootStatusFor(sub Submodule, count rootCount, coverage buildCoverage) RootStatus {
+	root := RootStatus{Path: sub.Path, Nodes: count.Nodes, Files: count.Files, Indexed: count.Nodes > 0}
+	switch {
+	case root.Indexed:
+		return root
+	case coverage.excluded(sub.Path):
+		root.Note = "excluded from the last build (--no-recurse-submodules)"
+	case coverage.indexed(sub.Path):
+		root.Indexed = true
+		root.Note = "indexed; no symbols found in this submodule"
+	case !sub.Initialized:
+		root.Note = SkipReasonUninitialized
+	default:
+		root.Note = "present in the checkout but absent from the graph"
 	}
-	// A graph without a qualified_name column (an older or reduced schema) can
-	// still be attributed by file path. Falling back keeps the honest-readiness
-	// check working instead of dropping it on a schema difference.
-	err = db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT file_path) FROM nodes WHERE `+pathMatch,
-		nativeAbs, slashAbs, nativeRel, relPath+"/").Scan(&nodes, &files)
-	return nodes, files, err
+	return root
+}
+
+// superprojectRoot is the key rootCount uses for rows belonging to no
+// submodule — the superproject's own code.
+const superprojectRoot = "."
+
+// rootCount is one root's share of the graph.
+type rootCount struct {
+	Nodes int
+	Files int
+}
+
+// countRootRows attributes every node row to exactly one root in a single
+// pass.
+//
+// Exclusivity is what makes nested submodules add up: `a/b`'s rows also sit
+// under `a`'s path prefix, so counting each root independently would count
+// them twice and could drive the superproject's share negative. The CASE arms
+// are emitted deepest-path-first and SQLite takes the first that matches, so
+// each row lands in its innermost root and the superproject keeps exactly what
+// no submodule claimed.
+//
+// Rows are matched by the scope prefix the merge stamps onto qualified names,
+// and by file path (absolute or superproject-relative). Path comparison is
+// done on a slash-normalized copy so a graph written with either separator
+// style — CRG on Windows, or an external aggregator — attributes the same.
+func countRootRows(db *sql.DB, repoRoot string, subs []Submodule) (map[string]rootCount, error) {
+	ordered := make([]Submodule, len(subs))
+	copy(ordered, subs)
+	sort.Slice(ordered, func(i, j int) bool { return len(ordered[i].Path) > len(ordered[j].Path) })
+
+	counts, err := queryRootCounts(db, repoRoot, ordered, true)
+	if err == nil {
+		return counts, nil
+	}
+	// A graph whose nodes table has no qualified_name column (an older or
+	// reduced schema) can still be attributed by file path alone. Falling back
+	// keeps the readiness check working instead of dropping it on a schema
+	// difference.
+	return queryRootCounts(db, repoRoot, ordered, false)
+}
+
+// queryRootCounts runs the single-pass attribution. withQualifiedName selects
+// whether the merge's scope prefix participates in the match.
+func queryRootCounts(db *sql.DB, repoRoot string, ordered []Submodule, withQualifiedName bool) (map[string]rootCount, error) {
+	var arms strings.Builder
+	var args []any
+	for _, sub := range ordered {
+		if withQualifiedName {
+			arms.WriteString(" WHEN instr(qualified_name, ?) = 1 OR instr(norm_path, ?) = 1 OR instr(norm_path, ?) = 1 THEN ?")
+			args = append(args, sub.Path+scopeSeparator)
+		} else {
+			arms.WriteString(" WHEN instr(norm_path, ?) = 1 OR instr(norm_path, ?) = 1 THEN ?")
+		}
+		args = append(args, filepath.ToSlash(sub.AbsPath(repoRoot))+"/", sub.Path+"/", sub.Path)
+	}
+	selected := "file_path, replace(file_path, '\\', '/') AS norm_path"
+	if withQualifiedName {
+		selected += ", qualified_name"
+	}
+	query := `WITH attributed AS (SELECT ` + selected + ` FROM nodes)
+	SELECT CASE` + arms.String() + ` ELSE ? END AS root, COUNT(*), COUNT(DISTINCT file_path)
+	FROM attributed GROUP BY root`
+	args = append(args, superprojectRoot)
+
+	rows, err := db.Query(query, args...) //nolint:gosec // the query is assembled from bound placeholders only
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[string]rootCount{}
+	for rows.Next() {
+		var root string
+		var c rootCount
+		if err := rows.Scan(&root, &c.Nodes, &c.Files); err != nil {
+			return nil, err
+		}
+		counts[root] = c
+	}
+	return counts, rows.Err()
 }
 
 // Status returns the current graph stats from `code-review-graph status`.

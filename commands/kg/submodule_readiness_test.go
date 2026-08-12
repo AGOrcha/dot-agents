@@ -33,6 +33,18 @@ func superprojectWithSubmodule(t *testing.T) string {
 	return super
 }
 
+// clonedSuperprojectWithUninitializedSubmodule returns a clone of the
+// superproject fixture: the gitlink is present but its working tree was never
+// populated, which is what `git clone` (and `git worktree add`) leave behind.
+func clonedSuperprojectWithUninitializedSubmodule(t *testing.T) string {
+	t.Helper()
+	super := superprojectWithSubmodule(t)
+	base := t.TempDir()
+	clone := filepath.Join(base, "clone")
+	runGitFixture(t, base, "clone", "--quiet", filepath.ToSlash(super), clone)
+	return clone
+}
+
 // runGitFixture runs a git command in dir, failing the test on error.
 func runGitFixture(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -127,8 +139,10 @@ func TestRunKGBuild_NoRecurseSubmodulesReportsExclusion(t *testing.T) {
 	if err := json.Unmarshal(out, &report); err != nil {
 		t.Fatalf("invalid JSON: %v\nraw: %s", err, out)
 	}
-	if report.Outcome != graphstore.CRGReadinessIncomplete {
-		t.Errorf("outcome = %q, want incomplete", report.Outcome)
+	// The operator declared the scope, so the graph is ready — and the
+	// exclusion is still recorded rather than silently applied.
+	if report.Outcome != graphstore.CRGReadinessReady {
+		t.Errorf("outcome = %q, want ready", report.Outcome)
 	}
 	if report.Workspace == nil || len(report.Workspace.Skipped) != 1 ||
 		report.Workspace.Skipped[0].Reason != graphstore.SkipReasonExcluded {
@@ -137,9 +151,10 @@ func TestRunKGBuild_NoRecurseSubmodulesReportsExclusion(t *testing.T) {
 }
 
 // TestRunKGBuild_IncompleteTextOutput: the human-readable build path warns
-// instead of printing a success box when a root is missing from the graph.
+// instead of printing a success box when a root is missing from the graph —
+// here a submodule that exists in the checkout but was never initialized.
 func TestRunKGBuild_IncompleteTextOutput(t *testing.T) {
-	repo := superprojectWithSubmodule(t)
+	repo := clonedSuperprojectWithUninitializedSubmodule(t)
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: filepath.Join(repo, "main.go"), Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
 	})
@@ -149,7 +164,7 @@ func TestRunKGBuild_IncompleteTextOutput(t *testing.T) {
 	cmd.Flags().String("repo", repo, "")
 	cmd.Flags().Bool("skip-flows", false, "")
 	cmd.Flags().Bool("skip-postprocess", false, "")
-	cmd.Flags().Bool(noRecurseSubmodulesFlag, true, "")
+	cmd.Flags().Bool(noRecurseSubmodulesFlag, false, "")
 	cmd.Flags().Bool("json", false, "")
 
 	out := captureStdout(t, func() {

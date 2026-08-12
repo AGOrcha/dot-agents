@@ -114,11 +114,26 @@ func gitlinkPaths(dir string) ([]string, error) {
 	var paths []string
 	for _, entry := range strings.Split(out, "\x00") {
 		mode, path, ok := parseStageEntry(entry)
-		if ok && mode == gitlinkMode {
+		if ok && mode == gitlinkMode && containedIn(path) {
 			paths = append(paths, path)
 		}
 	}
 	return paths, nil
+}
+
+// containedIn reports whether an index-supplied submodule path stays inside
+// the repository it came from.
+//
+// A gitlink path is untrusted input when the superproject was cloned from
+// elsewhere, and it becomes a subprocess working directory, a `--repo`
+// argument, and a database ATTACH target. An escaping path (`../`, absolute)
+// is dropped rather than walked.
+func containedIn(path string) bool {
+	if filepath.IsAbs(path) {
+		return false
+	}
+	clean := filepath.Clean(filepath.FromSlash(path))
+	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }
 
 // parseStageEntry splits one `git ls-files --stage -z` record

@@ -50,6 +50,9 @@ type fakeCRGRunner struct {
 	// emptySeedRoot writes an unusable (table-less) graph for the root whose
 	// path contains it, standing in for a build that produced nothing mergeable.
 	emptySeedRoot string
+	// emptyGraphRoot writes a well-formed but EMPTY graph for the root whose
+	// path contains it — a submodule CRG indexed and found no symbols in.
+	emptyGraphRoot string
 	// postprocessErr is returned by every postprocess pass when set.
 	postprocessErr error
 }
@@ -64,6 +67,8 @@ func (f *fakeCRGRunner) buildRoot(root string, opts BuildOptions) ([]byte, error
 	case f.emptySeedRoot != "" && strings.Contains(filepath.ToSlash(root), f.emptySeedRoot):
 		seedGraphDB(f.t, CRGDBPath(root), nil, nil)
 		dropGraphTables(f.t, CRGDBPath(root))
+	case f.emptyGraphRoot != "" && strings.Contains(filepath.ToSlash(root), f.emptyGraphRoot):
+		seedGraphDB(f.t, CRGDBPath(root), nil, nil)
 	case !f.skipSeed:
 		seedRootGraph(f.t, root)
 	}
@@ -273,17 +278,62 @@ func TestBuildReport_OptOutReportsSkippedSubmodule(t *testing.T) {
 	if report.Merged != nil {
 		t.Errorf("nothing should have been merged: %+v", report.Merged)
 	}
-	if report.Outcome != CRGReadinessIncomplete {
-		t.Errorf("outcome = %q, want incomplete", report.Outcome)
-	}
-	if report.Status.Ready {
-		t.Error("a graph missing a whole repository must not report ready")
+	// An explicit exclusion is a declared scope, not a missing root, so the
+	// graph stays ready — but the exclusion itself is never hidden.
+	if report.Outcome != CRGReadinessReady || !report.Status.Ready {
+		t.Errorf("outcome = %q ready = %v, want a ready graph", report.Outcome, report.Status.Ready)
 	}
 	if !strings.Contains(report.Summary, "vendor/lib: SKIPPED ("+SkipReasonExcluded+")") {
 		t.Errorf("summary must name the excluded submodule and why: %q", report.Summary)
 	}
-	if !strings.Contains(report.Status.Message, "vendor/lib") {
-		t.Errorf("status message must name the missing root: %q", report.Status.Message)
+	excluded := report.Status.Roots[1]
+	if excluded.Path != "vendor/lib" || excluded.Indexed || !strings.Contains(excluded.Note, "excluded") {
+		t.Errorf("status root = %+v, want vendor/lib flagged as excluded", excluded)
+	}
+}
+
+// TestBuildReport_OptOutSurvivesLaterStatusReads: the exclusion is recorded
+// with the build, so a later `code-status` — which has no way to know what the
+// build was asked to do — still reports the graph as ready rather than
+// nagging about a root the operator deliberately left out.
+func TestBuildReport_OptOutSurvivesLaterStatusReads(t *testing.T) {
+	super := superprojectFixture(t)
+	bridge, _ := workspaceBridge(t, super)
+	if _, err := bridge.BuildReport(BuildOptions{NoRecurseSubmodules: true}); err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+
+	status, err := (&CRGBridge{RepoRoot: super}).Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if !status.Ready || status.State != CRGReadinessReady {
+		t.Errorf("status = %+v, want ready for a declared-scope graph", status)
+	}
+	if !strings.Contains(status.Roots[1].Note, "excluded") {
+		t.Errorf("root note = %q, want it to state the exclusion", status.Roots[1].Note)
+	}
+}
+
+// TestBuildReport_EmptySubmoduleIsCoveredNotMissing: a submodule the build DID
+// index but found no symbols in (docs-only, or a language CRG cannot parse) is
+// a complete answer. Treating it as missing would leave such a workspace
+// permanently un-ready with no action that could fix it.
+func TestBuildReport_EmptySubmoduleIsCoveredNotMissing(t *testing.T) {
+	super := superprojectFixture(t)
+	bridge, runner := workspaceBridge(t, super)
+	runner.emptyGraphRoot = "vendor/lib"
+
+	report, err := bridge.BuildReport(BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if report.Outcome != CRGReadinessReady || !report.Status.Ready {
+		t.Errorf("outcome = %q ready = %v, want ready", report.Outcome, report.Status.Ready)
+	}
+	root := report.Status.Roots[1]
+	if !root.Indexed || root.Nodes != 0 || !strings.Contains(root.Note, "no symbols") {
+		t.Errorf("root = %+v, want it reported as indexed-but-empty", root)
 	}
 }
 
@@ -453,8 +503,8 @@ func TestApplyWorkspaceReadiness_CountErrorLeavesStatusAlone(t *testing.T) {
 
 // TestCountRootRows_MatchesScopeAndPathPrefixes: rows are attributed to a
 // submodule by the merge's scope prefix or by file path (absolute or
-// superproject-relative), so an externally aggregated graph is read correctly
-// too.
+// superproject-relative, either separator style), so an externally aggregated
+// graph is read correctly too.
 func TestCountRootRows_MatchesScopeAndPathPrefixes(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "graph.db")
@@ -470,12 +520,51 @@ func TestCountRootRows_MatchesScopeAndPathPrefixes(t *testing.T) {
 	db := openTestDB(t, dbPath)
 	defer db.Close()
 
-	nodes, files, err := countRootRows(db, subAbs, "vendor/lib")
+	counts, err := countRootRows(db, dir, []Submodule{{Path: "vendor/lib", Initialized: true}})
 	if err != nil {
 		t.Fatalf("countRootRows: %v", err)
 	}
-	if nodes != 5 || files != 5 {
-		t.Errorf("countRootRows = %d nodes / %d files, want 5 / 5", nodes, files)
+	if got := counts["vendor/lib"]; got.Nodes != 5 || got.Files != 5 {
+		t.Errorf("submodule count = %+v, want 5 nodes / 5 files", got)
+	}
+	if got := counts[superprojectRoot]; got.Nodes != 1 {
+		t.Errorf("superproject count = %+v, want the 1 unrelated row", got)
+	}
+}
+
+// TestCountRootRows_NestedRootsAreExclusive: a row inside a nested submodule
+// belongs to the nested root only. Counting each root independently would
+// count it twice and could drive the superproject's share negative.
+func TestCountRootRows_NestedRootsAreExclusive(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "graph.db")
+	outer := filepath.Join(dir, "vendor", "mid")
+	nested := filepath.Join(outer, "deps", "leaf")
+	seedGraphDB(t, dbPath, []graphNodeRow{
+		{qualified: "Root", name: "Root", filePath: filepath.Join(dir, "main.go")},
+		{qualified: "Outer", name: "Outer", filePath: filepath.Join(outer, "mid.go")},
+		{qualified: "Leaf1", name: "Leaf1", filePath: filepath.Join(nested, "a.go")},
+		{qualified: "Leaf2", name: "Leaf2", filePath: filepath.Join(nested, "b.go")},
+	}, nil)
+	db := openTestDB(t, dbPath)
+	defer db.Close()
+
+	counts, err := countRootRows(db, dir, []Submodule{
+		{Path: "vendor/mid", Initialized: true},
+		{Path: "vendor/mid/deps/leaf", Initialized: true},
+	})
+	if err != nil {
+		t.Fatalf("countRootRows: %v", err)
+	}
+	want := map[string]rootCount{
+		superprojectRoot:       {Nodes: 1, Files: 1},
+		"vendor/mid":           {Nodes: 1, Files: 1},
+		"vendor/mid/deps/leaf": {Nodes: 2, Files: 2},
+	}
+	for root, expected := range want {
+		if counts[root] != expected {
+			t.Errorf("%s = %+v, want %+v", root, counts[root], expected)
+		}
 	}
 }
 
@@ -497,12 +586,37 @@ func TestCountRootRows_FallsBackToPathsWithoutQualifiedName(t *testing.T) {
 		}
 	}
 
-	nodes, files, err := countRootRows(db, subAbs, "vendor/lib")
+	counts, err := countRootRows(db, dir, []Submodule{{Path: "vendor/lib", Initialized: true}})
 	if err != nil {
 		t.Fatalf("countRootRows: %v", err)
 	}
-	if nodes != 1 || files != 1 {
-		t.Errorf("countRootRows = %d nodes / %d files, want 1 / 1", nodes, files)
+	if got := counts["vendor/lib"]; got.Nodes != 1 || got.Files != 1 {
+		t.Errorf("submodule count = %+v, want 1 node / 1 file", got)
+	}
+}
+
+// TestStatus_UnindexedSubmoduleIsNamed is the defect in miniature: a graph
+// built over the superproject alone, in a checkout whose submodule is right
+// there and initialized. Status must call it out instead of reporting READY.
+func TestStatus_UnindexedSubmoduleIsNamed(t *testing.T) {
+	super := superprojectFixture(t)
+	seedGraphDB(t, CRGDBPath(super), []graphNodeRow{
+		{qualified: "main", name: "main", filePath: filepath.Join(super, "main.go")},
+	}, nil)
+
+	status, err := (&CRGBridge{RepoRoot: super}).Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Ready || status.State != CRGReadinessIncomplete {
+		t.Fatalf("status = %+v, want an incomplete, not-ready graph", status)
+	}
+	missing := status.Roots[1]
+	if missing.Indexed || missing.Note != "present in the checkout but absent from the graph" {
+		t.Errorf("root = %+v, want it reported as present-but-unindexed", missing)
+	}
+	if !strings.Contains(status.Message, "vendor/lib") {
+		t.Errorf("message = %q, want it to name the missing root", status.Message)
 	}
 }
 
@@ -514,7 +628,7 @@ func TestCountRootRows_NoNodesTable(t *testing.T) {
 	if _, err := db.Exec(`CREATE TABLE placeholder (id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := countRootRows(db, "/x/vendor/lib", "vendor/lib"); err == nil {
+	if _, err := countRootRows(db, "/x", []Submodule{{Path: "vendor/lib"}}); err == nil {
 		t.Fatal("expected an error when the nodes table is missing")
 	}
 }

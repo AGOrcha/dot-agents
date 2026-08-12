@@ -222,23 +222,61 @@ func TestMergeGraphDB_ScopingPreventsCrossRepoEdges(t *testing.T) {
 	}
 }
 
-// TestMergeGraphDB_Idempotent: re-merging the same submodule inserts nothing
-// new, so a rebuilt workspace does not accumulate duplicates.
+// TestMergeGraphDB_Idempotent: re-merging the same submodule replaces its
+// rows rather than adding to them. `edges` carries no unique constraint, so a
+// merge that only inserted would silently double every submodule edge on the
+// second run and inflate impact radius and flow detection.
 func TestMergeGraphDB_Idempotent(t *testing.T) {
 	dst, src := twoRepoFixture(t)
 
 	if _, err := mergeInto(t, dst, src, "vendor/lib"); err != nil {
 		t.Fatalf("first merge: %v", err)
 	}
-	second, err := mergeInto(t, dst, src, "vendor/lib")
-	if err != nil {
+	nodesAfterFirst, edgesAfterFirst := countRows(t, dst, "nodes"), countRows(t, dst, "edges")
+
+	if _, err := mergeInto(t, dst, src, "vendor/lib"); err != nil {
 		t.Fatalf("second merge: %v", err)
 	}
-	if second.Nodes != 0 {
-		t.Errorf("second merge inserted %d nodes, want 0", second.Nodes)
+	if n := countRows(t, dst, "nodes"); n != nodesAfterFirst {
+		t.Errorf("node count after re-merge = %d, want %d", n, nodesAfterFirst)
 	}
-	if n := countRows(t, dst, "nodes"); n != 4 {
-		t.Errorf("node count after re-merge = %d, want 4", n)
+	if n := countRows(t, dst, "edges"); n != edgesAfterFirst {
+		t.Errorf("edge count after re-merge = %d, want %d", n, edgesAfterFirst)
+	}
+	if nodesAfterFirst != 4 || edgesAfterFirst != 2 {
+		t.Errorf("fixture drift: %d nodes / %d edges after the first merge", nodesAfterFirst, edgesAfterFirst)
+	}
+}
+
+// TestMergeGraphDB_ReplacesStaleScopeRows: the merge owns its namespace, so a
+// symbol the submodule deleted disappears from the superproject graph instead
+// of lingering forever.
+func TestMergeGraphDB_ReplacesStaleScopeRows(t *testing.T) {
+	dst, src := twoRepoFixture(t)
+	if _, err := mergeInto(t, dst, src, "vendor/lib"); err != nil {
+		t.Fatalf("first merge: %v", err)
+	}
+
+	// The submodule is rebuilt with FullCheck removed.
+	dir := t.TempDir()
+	rebuilt := filepath.Join(dir, "rebuilt.db")
+	seedGraphDB(t, rebuilt,
+		[]graphNodeRow{{qualified: "Button", name: "Button", filePath: "/repo/sub/widgets/Button.tsx"}}, nil)
+
+	if _, err := mergeInto(t, dst, rebuilt, "vendor/lib"); err != nil {
+		t.Fatalf("second merge: %v", err)
+	}
+	db := openTestDB(t, dst)
+	defer db.Close()
+	var remaining int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM nodes WHERE qualified_name = 'vendor/lib::FullCheck'`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Error("a symbol removed from the submodule must not survive the re-merge")
+	}
+	if n := countRows(t, dst, "nodes"); n != 3 {
+		t.Errorf("node count = %d, want 3 (2 superproject + 1 submodule)", n)
 	}
 }
 
@@ -419,8 +457,8 @@ func TestMergeGraphDB_RowInsertFailureRollsBack(t *testing.T) {
 	db.Close()
 
 	_, err := mergeInto(t, dst, src, "vendor/lib")
-	if err == nil || !strings.Contains(err.Error(), "merge nodes rows") {
-		t.Fatalf("expected a row-insert error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "nodes") {
+		t.Fatalf("expected the nodes write to fail, got %v", err)
 	}
 	if n := countRows(t, dst, "stored"); n != 0 {
 		t.Errorf("failed merge left %d rows behind", n)
@@ -455,6 +493,62 @@ func TestMergeGraphDB_CommitFailureRollsBack(t *testing.T) {
 	}
 	if n := countRows(t, dst, "nodes"); n != 0 {
 		t.Errorf("failed commit left %d rows behind", n)
+	}
+}
+
+// TestMergeGraphDB_InsertFailureRollsBack: a destination that accepts the
+// scope-clearing delete but rejects the rows themselves still aborts the whole
+// merge rather than leaving the scope emptied and unrefilled.
+func TestMergeGraphDB_InsertFailureRollsBack(t *testing.T) {
+	dst, src := twoRepoFixture(t)
+	if _, err := mergeInto(t, dst, src, "vendor/lib"); err != nil {
+		t.Fatalf("seed merge: %v", err)
+	}
+	db := openTestDB(t, dst)
+	if _, err := db.Exec(`CREATE TRIGGER reject_nodes BEFORE INSERT ON nodes
+		BEGIN SELECT RAISE(ABORT, 'nodes are frozen'); END`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	_, err := mergeInto(t, dst, src, "vendor/lib")
+	if err == nil || !strings.Contains(err.Error(), "merge nodes rows") {
+		t.Fatalf("expected a row-insert error, got %v", err)
+	}
+	// The rollback must restore the scope the merge had already cleared.
+	if n := countRows(t, dst, "nodes"); n != 4 {
+		t.Errorf("node count after the failed merge = %d, want the pre-merge 4", n)
+	}
+}
+
+// TestMergeGraphDB_TableWithoutQualifiedNames: a table that carries no
+// qualified-name column has no scope to clear, so the merge copies it without
+// deleting anything.
+func TestMergeGraphDB_TableWithoutQualifiedNames(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "dst.db")
+	src := filepath.Join(dir, "src.db")
+	ddl := `CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, qualified_name TEXT UNIQUE, file_path TEXT);
+		CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, file_path TEXT, note TEXT)`
+	for _, path := range []string{dst, src} {
+		db := openTestDB(t, path)
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+		db.Close()
+	}
+	srcDB := openTestDB(t, src)
+	if _, err := srcDB.Exec(`INSERT INTO edges (file_path, note) VALUES ('a.go', 'unscoped')`); err != nil {
+		t.Fatal(err)
+	}
+	srcDB.Close()
+
+	stats, err := mergeInto(t, dst, src, "vendor/lib")
+	if err != nil {
+		t.Fatalf("MergeGraphDB: %v", err)
+	}
+	if stats.Edges != 1 {
+		t.Errorf("stats = %+v, want the unscoped row copied", stats)
 	}
 }
 
