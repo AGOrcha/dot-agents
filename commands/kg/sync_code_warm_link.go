@@ -33,6 +33,11 @@ const warmStoreOpenErrFmt = "open warm store: %w"
 // the root alone is the defect this flag's absence used to be.
 const noRecurseSubmodulesFlag = "no-recurse-submodules"
 
+// incompleteGraphTitle heads every warning about a graph that is missing a
+// repository root. One spelling so build, update, and the readiness gate all
+// name the same condition.
+const incompleteGraphTitle = "Code graph is incomplete"
+
 // ── Phase 6C: kg sync ─────────────────────────────────────────────────────────
 
 // runKGSync is a thin wrapper: git pull (or push) followed by kg lint.
@@ -181,7 +186,7 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	case string(graphstore.CRGReadinessReady):
 		ui.SuccessBox(report.Summary)
 	case graphstore.CRGReadinessIncomplete:
-		ui.WarnBox("Code graph is incomplete", report.Summary)
+		ui.WarnBox(incompleteGraphTitle, report.Summary)
 	case string(graphstore.CRGReadinessUnbuilt):
 		ui.InfoBox("Code graph remains unbuilt", report.Summary)
 	case string(graphstore.CRGReadinessBusyOrLocked):
@@ -307,7 +312,7 @@ func warnIncompleteWorkspace(status *graphstore.CRGStatus) {
 		return
 	}
 	if status.State == graphstore.CRGReadinessIncomplete {
-		ui.WarnBox("Code graph is incomplete", status.Message)
+		ui.WarnBox(incompleteGraphTitle, status.Message)
 		return
 	}
 	if len(status.Roots) > 1 {
@@ -380,7 +385,7 @@ func checkCRGReadiness(root string, requireGraph bool) error {
 		// the checkout. Results are not empty — they are silently partial,
 		// which is the harder failure to notice, so it is never a bare warning
 		// under --require-graph.
-		ui.WarnBox("Code graph is incomplete", status.Message)
+		ui.WarnBox(incompleteGraphTitle, status.Message)
 		if requireGraph {
 			return fmt.Errorf("code graph is incomplete: %s", status.Message)
 		}

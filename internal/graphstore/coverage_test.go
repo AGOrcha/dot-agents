@@ -59,18 +59,24 @@ func TestReadCoverage_TreatsUnusableRecordsAsAbsent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := t.TempDir()
 			if tc.write {
-				dir := filepath.Dir(coveragePath(repo))
-				if err := os.MkdirAll(dir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(coveragePath(repo), []byte(tc.content), 0o644); err != nil {
-					t.Fatal(err)
-				}
+				writeRawCoverage(t, repo, tc.content)
 			}
 			if got := readCoverage(repo); got.indexed("vendor/lib") || got.excluded("vendor/lib") {
 				t.Errorf("unusable record must read as empty, got %+v", got)
 			}
 		})
+	}
+}
+
+// writeRawCoverage plants an arbitrary sidecar body, bypassing writeCoverage so
+// malformed records can be exercised.
+func writeRawCoverage(t *testing.T, repo, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(coveragePath(repo)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(coveragePath(repo), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

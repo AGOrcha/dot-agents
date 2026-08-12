@@ -325,42 +325,8 @@ func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) 
 		RawOutput: strings.TrimSpace(string(out)),
 		Merged:    merged,
 	}
-	if planErr == nil {
-		planCopy := plan
-		report.Workspace = &planCopy
-	} else {
-		// Enumeration failed, so the build silently covered the root only.
-		// Say so rather than letting it look like a normal single-repo build.
-		report.EnumerationError = planErr.Error()
-	}
-	switch {
-	case status.Ready:
-		report.Outcome = string(CRGReadinessReady)
-		report.Summary = fmt.Sprintf("Build complete: %d nodes, %d edges, %d files", status.Nodes, status.Edges, status.Files)
-	case status.State == CRGReadinessIncomplete:
-		report.Outcome = CRGReadinessIncomplete
-		report.Summary = fmt.Sprintf("Build incomplete: %d nodes, %d edges, %d files — %s",
-			status.Nodes, status.Edges, status.Files, status.Message)
-	case status.State == string(CRGReadinessUnbuilt):
-		report.Outcome = string(CRGReadinessUnbuilt)
-		report.Summary = "Build completed but the code graph is still unbuilt."
-	case status.State == string(CRGReadinessBusyOrLocked):
-		report.Outcome = string(CRGReadinessBusyOrLocked)
-		report.Summary = "Build completed, but the code graph is busy or locked."
-	default:
-		report.Outcome = string(CRGReadinessError)
-		report.Summary = status.Message
-		if report.Summary == "" {
-			report.Summary = "Build completed, but code graph status could not be determined."
-		}
-	}
-	if report.Workspace != nil && report.Summary != "" {
-		report.Summary += "\nRoots: " + report.Workspace.Summary()
-	}
-	if report.EnumerationError != "" && report.Summary != "" {
-		report.Summary += "\nRoots: not enumerated (" + report.EnumerationError +
-			") — this build covered the given root only."
-	}
+	report.applyWorkspace(plan, planErr)
+	report.applyBuildOutcome(status)
 	if report.RawOutput != "" && report.Summary == "" {
 		report.Summary = report.RawOutput
 	}
@@ -385,6 +351,60 @@ func (b *CRGBridge) mergeSubmoduleGraph(sub WorkspaceRoot) (MergeStats, error) {
 	}
 	defer db.Close()
 	return MergeGraphDB(db, CRGDBPath(sub.AbsPath), sub.Scope)
+}
+
+// applyWorkspace attaches the resolved root plan, or — when the repository
+// could not be enumerated at all — records why, so a build that silently
+// covered the root alone cannot pass for a normal single-repo build.
+func (r *CRGOperationReport) applyWorkspace(plan WorkspacePlan, planErr error) {
+	if planErr != nil {
+		r.EnumerationError = planErr.Error()
+		return
+	}
+	planCopy := plan
+	r.Workspace = &planCopy
+}
+
+// applyBuildOutcome maps the post-build readiness state onto the report's
+// outcome and summary, then appends the per-root coverage line.
+func (r *CRGOperationReport) applyBuildOutcome(status *CRGStatus) {
+	switch {
+	case status.Ready:
+		r.Outcome = string(CRGReadinessReady)
+		r.Summary = fmt.Sprintf("Build complete: %d nodes, %d edges, %d files", status.Nodes, status.Edges, status.Files)
+	case status.State == CRGReadinessIncomplete:
+		r.Outcome = CRGReadinessIncomplete
+		r.Summary = fmt.Sprintf("Build incomplete: %d nodes, %d edges, %d files — %s",
+			status.Nodes, status.Edges, status.Files, status.Message)
+	case status.State == string(CRGReadinessUnbuilt):
+		r.Outcome = string(CRGReadinessUnbuilt)
+		r.Summary = "Build completed but the code graph is still unbuilt."
+	case status.State == string(CRGReadinessBusyOrLocked):
+		r.Outcome = string(CRGReadinessBusyOrLocked)
+		r.Summary = "Build completed, but the code graph is busy or locked."
+	default:
+		r.Outcome = string(CRGReadinessError)
+		r.Summary = status.Message
+		if r.Summary == "" {
+			r.Summary = "Build completed, but code graph status could not be determined."
+		}
+	}
+	r.appendRootsLine()
+}
+
+// appendRootsLine adds the per-root enumeration to a non-empty summary.
+func (r *CRGOperationReport) appendRootsLine() {
+	if r.Summary == "" {
+		return
+	}
+	if r.Workspace != nil {
+		r.Summary += "\nRoots: " + r.Workspace.Summary()
+		return
+	}
+	if r.EnumerationError != "" {
+		r.Summary += "\nRoots: not enumerated (" + r.EnumerationError +
+			") — this build covered the given root only."
+	}
 }
 
 // buildAndMergeSubmodules builds each submodule root, merges its graph into
