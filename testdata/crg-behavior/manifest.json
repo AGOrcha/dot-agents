@@ -1,0 +1,368 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-12T17:48:49Z",
+  "generated_from": "origin/master",
+  "head": "6638e339a1e566bf33b5e996f0c90906be04c1eb",
+  "tasks": [
+    {
+      "commit": "685a09a76790468b8ce8140bf8ae559f6cd31f9b",
+      "subject": "test(agentslock): widen acquire budget for the 16-way RMW contention test",
+      "changed_files": [
+        "internal/agentslock/lockfile_test.go"
+      ],
+      "identifiers": []
+    },
+    {
+      "commit": "b5c805dc61aad809bb5bd34bd8c6d09ea4c02e97",
+      "subject": "test(obs): make the nbf-beyond-skew access-gate test deterministic",
+      "changed_files": [
+        "obs/test/access-gate.test.ts"
+      ],
+      "identifiers": []
+    },
+    {
+      "commit": "c48243b29b3401e55bedf1972273b716f5954bdb",
+      "subject": "test: extract assertion helpers to clear the S3776 complexity gate",
+      "changed_files": [
+        "commands/config/sync_manifest_untouched_test.go",
+        "commands/refresh_fanout_manifest_test.go",
+        "internal/config/agentsrc_optional_keys_test.go",
+        "internal/projectsync/refresh_manifest_untouched_test.go"
+      ],
+      "identifiers": [
+        "assertFileUnchanged",
+        "assertKeysAbsent",
+        "assertKeysEqual",
+        "assertLinkedManifestUntouched",
+        "assertLockWritten",
+        "assertManifestUntouched",
+        "roundTripManifest",
+        "seedBackdatedManifest",
+        "seedLinkedProject",
+        "snapshotBackdated"
+      ]
+    },
+    {
+      "commit": "054193c6cdd19a875f58e0e2a4888e3e69ebddfd",
+      "subject": "config: gofmt fix and coverage for staleness warn detail",
+      "changed_files": [
+        "commands/config/verify_staleness_test.go",
+        "internal/config/staleness_test.go"
+      ],
+      "identifiers": [
+        "TestAbbrevDigest",
+        "TestStaleWarnDetail",
+        "TestVerifyStaleness_DeclaredSetOnlyWarnsWithIdenticalDigests"
+      ]
+    },
+    {
+      "commit": "ef20c0ce3d4f7a141781b34a61c2a29c6ccd52de",
+      "subject": "lifecycle: cover the dry-run optional-declaration preview helpers",
+      "changed_files": [
+        "commands/internal/lifecycle/install_describe_test.go"
+      ],
+      "identifiers": [
+        "TestDescribeOptionalBool",
+        "TestDescribeStringsOrBool"
+      ]
+    },
+    {
+      "commit": "47116d279e5a0f0042c457682809a101b8c9514c",
+      "subject": "test: cover the error branches the new-code coverage gate flagged",
+      "changed_files": [
+        "commands/internal/lifecycle/gitignore_test.go",
+        "internal/links/gitignore_optout_test.go",
+        "internal/platform/enabled_platforms_test.go"
+      ],
+      "identifiers": [
+        "TestEnabledPlatforms",
+        "TestEnabledPlatforms_IgnoresInstallState",
+        "TestEnsureManagedGitignoreForInstall_FailuresAreNonFatal",
+        "TestMaintainManagedGitignore_WriteErrorsPropagate",
+        "TestRemoveManagedGitignore_ReadErrorIsPropagated",
+        "TestRemoveManagedGitignore_RemoveErrorIsPropagated",
+        "TestRemoveManagedGitignore_WriteErrorIsPropagated",
+        "idsOf"
+      ]
+    },
+    {
+      "commit": "ee7ca8ca407150d8246146823aa14a2bed832165",
+      "subject": "docs: clarify dry-run responsibility on MaintainManagedGitignore",
+      "changed_files": [
+        "commands/internal/lifecycle/gitignore.go"
+      ],
+      "identifiers": []
+    },
+    {
+      "commit": "7c8b21d39890e17f84eb9ca46d9c193395e29a03",
+      "subject": "test: pin per-project isolation of the managed .gitignore step",
+      "changed_files": [
+        "commands/internal/lifecycle/gitignore_test.go"
+      ],
+      "identifiers": [
+        "TestMaintainManagedGitignore_IsPerProject"
+      ]
+    },
+    {
+      "commit": "dfdc1cf2b22d1ec471c365f07aaedcd91db391fa",
+      "subject": "config: add sync + refresh-fanout manifest-untouched regression tests",
+      "changed_files": [
+        "commands/config/sync_manifest_untouched_test.go",
+        "commands/refresh_fanout_manifest_test.go"
+      ],
+      "identifiers": [
+        "TestRunRefresh_FanOutLeavesEveryLinkedManifestUntouched",
+        "TestRunSync_DoesNotInjectOptionalKeys",
+        "TestRunSync_LeavesManifestUntouched"
+      ]
+    },
+    {
+      "commit": "479e8e39d5bb4869d0c509b551f3cfa42052e044",
+      "subject": "config: fix false-positive staleness warning after sync",
+      "changed_files": [
+        "commands/config/verify.go",
+        "commands/config/verify_staleness_test.go",
+        "internal/config/lock_units.go",
+        "internal/config/resolver.go",
+        "internal/config/staleness.go",
+        "internal/config/staleness_test.go"
+      ],
+      "identifiers": [
+        "TestDeclaredSetChanged_IgnoresTransitiveLayers",
+        "TestStaleness_FreshImmediatelyAfterTransitiveSync",
+        "TestStaleness_GenuineDriftStillDetectedWithTransitiveLayers",
+        "abbrevDigest",
+        "staleWarnDetail",
+        "walk"
+      ]
+    },
+    {
+      "commit": "fbabbda560e71ea3075c14ac8f5ea2b9a0ff6672",
+      "subject": "install: maintain managed .gitignore block for projections",
+      "changed_files": [
+        "commands/internal/lifecycle/gitignore.go",
+        "commands/internal/lifecycle/gitignore_test.go",
+        "commands/internal/lifecycle/install.go",
+        "commands/refresh.go"
+      ],
+      "identifiers": [
+        "MaintainManagedGitignore",
+        "TestMaintainManagedGitignore_CorruptManifestSkips",
+        "TestMaintainManagedGitignore_KnobStates",
+        "TestMaintainManagedGitignore_OptOutRemovesAnExistingBlock",
+        "TestMaintainManagedGitignore_PreservesUserContentAndIsByteStable",
+        "TestMaintainManagedGitignore_UpdatesInPlaceWhenProjectionSetChanges",
+        "TestRunInstall_DryRunWritesNoGitignore",
+        "TestRunInstall_MaintainsManagedGitignore",
+        "TestRunInstall_ManagedGitignoreIsByteStableAcrossRuns",
+        "claudeAndCodex",
+        "ensureManagedGitignoreForInstall",
+        "installFixture",
+        "readProjectGitignore",
+        "writeManifest"
+      ]
+    },
+    {
+      "commit": "ccaee4d052edfd1b6054995f5cce6f3b3e48e871",
+      "subject": "config: add gitignore_projections opt-out knob to AgentsRC",
+      "changed_files": [
+        "internal/config/agentsrc.go",
+        "internal/config/agentsrc_gitignore_test.go"
+      ],
+      "identifiers": [
+        "GitignoreProjectionsEnabled",
+        "TestAgentsRCGitignoreProjectionsEnabled",
+        "TestAgentsRCGitignoreProjections_DecodeRoundTrip"
+      ]
+    },
+    {
+      "commit": "00e76bf2ce95a3455e746c0f8be02fb86d369bf0",
+      "subject": "workflow: add --app-type to task update",
+      "changed_files": [
+        "commands/workflow/app_types.go",
+        "commands/workflow/cmd.go",
+        "commands/workflow/journal_emit_test.go",
+        "commands/workflow/plan_task.go",
+        "commands/workflow/plan_task_test.go",
+        "commands/workflow/state_ref_test.go"
+      ],
+      "identifiers": [
+        "TestRunWorkflowTaskUpdate_AppType",
+        "TestRunWorkflowTaskUpdate_AppTypeDoesNotDisturbOtherFields",
+        "applyTaskFieldUpdates",
+        "runWorkflowTaskUpdate",
+        "stubAppTypeProfile",
+        "taskUpdateInputs",
+        "validateTaskAppType"
+      ]
+    },
+    {
+      "commit": "ddb4a0824947e158ad9b2e1c754eaa6abe6ed675",
+      "subject": "links: ignore backup sidecars and support managed-block removal",
+      "changed_files": [
+        "internal/links/gitignore.go",
+        "internal/links/gitignore_optout_test.go",
+        "internal/platform/config_platform.go"
+      ],
+      "identifiers": [
+        "EnabledPlatforms",
+        "RemoveManagedGitignore",
+        "TestEnsureManagedGitignore_AlwaysIgnoresBackupSidecars",
+        "TestRemoveManagedGitignore",
+        "TestRemoveManagedGitignore_EmptyRepoRootIsError",
+        "TestRemoveManagedGitignore_IsIdempotent",
+        "writeGitignore"
+      ]
+    },
+    {
+      "commit": "bcac7eb5ef8abfdababd8e10d5d891953a50aa0c",
+      "subject": "chore: anonymize company-specific example sources and evidence artifacts",
+      "changed_files": [
+        ".agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/items/generate-sampling-manifest.py",
+        "commands/workflow/app_types_test.go",
+        "internal/agentslock/lockfile.go",
+        "internal/agentslock/lockfile_test.go"
+      ],
+      "identifiers": []
+    },
+    {
+      "commit": "8dbe9fcf153b934aa3a7071eb68dd81c50b6ee59",
+      "subject": "test: cover the source-qualified prompt failure branches",
+      "changed_files": [
+        "commands/workflow/profile_prompt_test.go",
+        "internal/config/prompt_units_test.go"
+      ],
+      "identifiers": [
+        "TestComposeProfilePrompt_CorruptLock",
+        "TestFetchPromptUnitErrors",
+        "TestLockedPromptFileRejectsUnusableUnits",
+        "TestPromptUnitsSurfacesLockReadError",
+        "isImportReason"
+      ]
+    },
+    {
+      "commit": "d45a5bc12084b966fd8be29c16d1f088683701cb",
+      "subject": "config: deep-merge intermediate paths in config explain",
+      "changed_files": [
+        "commands/config/explain.go",
+        "commands/config/explain_test.go",
+        "internal/config/snapshot.go"
+      ],
+      "identifiers": [
+        "TestExplainField_IntermediateMergeMatchesLeafDrillDown",
+        "TestExplainField_IntermediateObjectPath"
+      ]
+    },
+    {
+      "commit": "fe4fa02fcaaa02335c8c1cfe4196fc942643e66a",
+      "subject": "config: stop refresh rewriting the user-authored manifest",
+      "changed_files": [
+        "commands/refresh.go",
+        "commands/refresh_test.go",
+        "internal/projectsync/projectsync.go",
+        "internal/projectsync/projectsync_test.go",
+        "internal/projectsync/refresh_manifest_untouched_test.go"
+      ],
+      "identifiers": [
+        "TestWriteRefreshToLock_CreatesManifestWritesLockRemovesLegacy",
+        "TestWriteRefreshToLock_DoesNotCreateManifestWhenAbsent",
+        "TestWriteRefreshToLock_LeavesManifestByteIdentical",
+        "TestWriteRefreshToLock_LoadError",
+        "TestWriteRefreshToLock_LoadErrorRegularFileProjectPath",
+        "TestWriteRefreshToLock_SaveError",
+        "TestWriteRefreshToLock_UnparseableManifestIsUntouched",
+        "TestWriteRefreshToLock_WritesLockRemovesLegacyNeverCreatesManifest",
+        "WriteRefreshToLock"
+      ]
+    },
+    {
+      "commit": "85482d55dd5e9f70ab66fb41d3304979a872c074",
+      "subject": "import: skip re-capture of bundle-rendered hook entries",
+      "changed_files": [
+        "commands/hook_import_fixed_point_test.go",
+        "commands/hook_normalization_roundtrip_test.go",
+        "commands/import.go",
+        "commands/import_test.go",
+        "commands/internal/lifecycle/project.go"
+      ],
+      "identifiers": [
+        "TestCanonicalHookOutputsForSpecs_AllOwnedStaysHandled",
+        "TestDropBundleRenderedHookSpecs",
+        "TestHookImportCapturesHandAuthoredEntryExactlyOnce",
+        "TestHookImportCapturesOneBundleForACommandInTwoHarnessFiles",
+        "TestHookImportDoesNotDuplicateAcrossHarnesses",
+        "TestHookImportDoesNotGrowAlternateSuffixedBundles",
+        "TestHookRefreshImportIsFixedPoint",
+        "canonicalHookBundleOutputsFromClaudeCompatFile",
+        "canonicalHookBundleOutputsFromCodexFile",
+        "canonicalHookBundleOutputsFromCopilotFile",
+        "canonicalHookBundleOutputsFromCursorFile",
+        "canonicalHookOutputsForSpecs",
+        "canonicalImportOutputs",
+        "canonicalImportOutputsNonPlugin",
+        "dropBundleRenderedHookSpecs",
+        "equalStrings",
+        "hookBundleNames",
+        "hookFixtureHome",
+        "importGlobal",
+        "readFileOrEmpty",
+        "renderHooks",
+        "writeHookBundle"
+      ]
+    },
+    {
+      "commit": "2840d06779d6eb673729a9477c8b3cf0e7333aa8",
+      "subject": "config: preserve absent hooks/mcp/settings across manifest round-trip",
+      "changed_files": [
+        "commands/explain.go",
+        "commands/internal/lifecycle/install.go",
+        "internal/config/agentsrc.go",
+        "internal/config/agentsrc_optional_keys_test.go",
+        "internal/config/agentsrc_test.go",
+        "internal/config/resolver_optional_keys_test.go",
+        "internal/config/schema_roundtrip_test.go"
+      ],
+      "identifiers": [
+        "Contains",
+        "IsEnabled",
+        "TestAgentsRC_AbsentOptionalKeysDecodeToNil",
+        "TestAgentsRC_AbsentOptionalKeysSurviveRoundTrip",
+        "TestResolveSnapshot_AbsentRepoLocalKeepsOrgLayerForAllThree",
+        "TestResolveSnapshot_OptionalKeyLayerPrecedence",
+        "boolOrAbsent",
+        "boolVal",
+        "declaredOrAbsent",
+        "describeOptionalBool",
+        "describeStringsOrBool",
+        "jsonEqual",
+        "optBool",
+        "optSOB",
+        "pbool",
+        "pickBool",
+        "pickStringsOrBool",
+        "sob",
+        "sobAll",
+        "sobNames"
+      ]
+    },
+    {
+      "commit": "06292a908df9204b4ddf342c2691b699edbc83fb",
+      "subject": "platform: identify hook entries rendered from canonical bundles",
+      "changed_files": [
+        "internal/platform/hooks_provenance.go",
+        "internal/platform/hooks_provenance_test.go"
+      ],
+      "identifiers": [
+        "HookProvenance",
+        "NewHookProvenance",
+        "Owner",
+        "TestHookProvenance_DegradesToOwnsNothing",
+        "TestHookProvenance_OwnerCases",
+        "TestHookProvenance_OwnsRenderedCommands",
+        "indexScope",
+        "ownerOfPath",
+        "writeProvenanceBundle"
+      ]
+    }
+  ]
+}
