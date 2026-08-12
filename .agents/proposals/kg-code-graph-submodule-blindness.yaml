@@ -1,12 +1,21 @@
 schema_version: 1
 id: kg-code-graph-submodule-blindness
-status: open
+status: promoted
 type: observation
 action: investigate
 target: internal/kg (code graph build + postprocess surface)
 scope: global
 created_at: "2026-07-25T05:00:00Z"
 created_by: payout session 2026-07-25 (workspace CRG helper revamp)
+reviewed_at: "2026-08-12T00:00:00Z"
+promoted_at: "2026-08-12T00:00:00Z"
+review_reason: |-
+    Addressed directly in code on branch fix/kg-submodule-blindness (no
+    intermediate spec/plan — the prescription in this artifact was already
+    concrete). All three gaps plus the secondary finding are implemented in
+    internal/graphstore (submodule.go, merge.go, crg.go) and surfaced through
+    commands/kg. See the Resolution section in content for what landed, what
+    the behavior is now, and the one deliberate trade-off.
 rationale: |
     `da kg build` indexes via git ls-files. In a superproject, submodules are
     gitlinks, not trees, so every file inside them is invisible to the build.
@@ -26,6 +35,53 @@ rationale: |
     seed Phase 3 write-scopes.
 content: |
     # `da kg` code graph is blind to git submodules
+
+    ## Resolution (2026-08-12, branch `fix/kg-submodule-blindness`)
+
+    All three gaps and the secondary finding are fixed at the enumeration /
+    store / merge layer, so the fix composes with the in-flight native-CRG
+    cutover instead of colliding with it.
+
+    1. **Enumeration is submodule-aware.** `internal/graphstore/submodule.go`
+       discovers gitlink roots from the git index (`ls-files --stage`,
+       including nested submodules) and `PlanWorkspace` resolves the roots a
+       build will index. `kg build` now builds the superproject AND every
+       initialized submodule. Recursion is the default; `--no-recurse-submodules`
+       opts out and the exclusion is REPORTED, never silent.
+
+    2. **Readiness is honest.** `CRGStatus` carries a per-root breakdown
+       (`roots[]`: path, nodes, files, indexed, note). A submodule that exists
+       in the checkout but contributed no rows downgrades the graph to the new
+       `incomplete` state (ready=false) with a message naming it and why
+       (uninitialized vs excluded vs absent). `kg code-status` prints the
+       breakdown; `--require-graph` refuses an incomplete graph.
+
+    3. **The merge runs through postprocess.** `internal/graphstore/merge.go`
+       owns the merge, and `BuildReport` orders it: build each root with
+       postprocess deferred → merge → ONE postprocess pass over the merged
+       graph. The invariant "rows changed => derived data rebuilt" is now
+       structural for the build path rather than a convention a hand-rolled
+       aggregator can forget. The merge is transactional and idempotent
+       (INSERT OR IGNORE), and copies base tables only — FTS, flows, and
+       communities are rebuilt, never copied.
+
+    4. **Cross-repo false edges are gone.** Merged rows are namespaced per
+       repository (`<submodule-path>::<qualified_name>`, applied to node names
+       and BOTH edge endpoints), so `Button` in one repository can no longer
+       resolve to `Button` in another. Superproject rows stay unscoped, so a
+       single-repo graph is bit-identical to before. Relative `file_path`
+       values are rebased onto the submodule path (absolute ones — what CRG
+       writes today — are untouched).
+
+    Deliberate trade-off: scoping trades recall for precision. A genuine
+    parent→submodule reference that only resolved by bare name no longer forms
+    an edge. Under the previous behavior such an edge was indistinguishable
+    from a false one, so impact radius on a merged graph is now a lower bound
+    rather than an unquantified upper bound.
+
+    Not in scope: `kg update` still refreshes the superproject only (git diff
+    does not descend into gitlinks). It now says so, and reports the graph as
+    incomplete when a root is missing; a full `kg build` refreshes submodules.
 
     ## Observation
 
