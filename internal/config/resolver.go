@@ -423,6 +423,15 @@ type LockedLayer struct {
 	// — means the SHA-addressed cache may no longer be served and the upstream must
 	// be re-checked. Omitted for a pre-cache-key lock (treated as stale on read).
 	CacheKey string `json:"cache_key,omitempty"`
+	// Transitive marks a layer resolved because another layer's OWN `extends`
+	// named it (config-transitive-layering), not because this project's own
+	// manifest declared it directly. Set by extendsGraphState.walk based on
+	// which loop admitted the entry (root rc.Extends vs a recursed childRC.Extends)
+	// and carried into LockedUnit.Transitive by writeUnitsLock, so staleness's
+	// declared-set comparison (§7A.3) — which only knows the manifest's own
+	// top-level extends/packages — does not require a transitively-pulled layer
+	// to also appear there.
+	Transitive bool
 }
 
 // cacheKeyInputs reconstructs the minimal CacheKeyInputs an offline re-derive
@@ -698,9 +707,10 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, loc
 	layerUnits := make(map[string]LockedUnit, len(locked))
 	for ref, l := range locked {
 		layerUnits[ref] = LockedUnit{
-			Kind:     UnitKindLayer,
-			Digest:   l.ResolvedSHA,
-			CacheKey: l.CacheKey,
+			Kind:       UnitKindLayer,
+			Digest:     l.ResolvedSHA,
+			CacheKey:   l.CacheKey,
+			Transitive: l.Transitive,
 		}
 	}
 	// kind:profile units (R2): the resolved profile fragments are recorded as
@@ -927,7 +937,7 @@ func (r *LayeredResolver) resolveExtendsGraph(trace auditTrace, projectPath stri
 	st.prevLocked = prevLocked
 	rootEnv := sourceEnv(indexSources(rc.Sources))
 	for _, entry := range rc.Extends {
-		if err := st.walk(r, entry, rootEnv); err != nil {
+		if err := st.walk(r, entry, rootEnv, true); err != nil {
 			trace.emit(importFailedEvent(asImportError(entry.Ref, err), entry.Optional))
 			if entry.Optional {
 				st.warnings = append(st.warnings, optionalSkipWarning(entry.Ref, err))
@@ -944,7 +954,16 @@ func (r *LayeredResolver) resolveExtendsGraph(trace auditTrace, projectPath stri
 // post-order precedence (a declared org layer lands before the team layer that
 // extends it). Dedupe and cycle detection guard against divergent-digest
 // re-resolution and extends loops.
-func (st *extendsGraphState) walk(r *LayeredResolver, entry LayerRef, env sourceEnv) error {
+//
+// isRoot is true only for entries admitted from the outer loop in
+// resolveExtendsGraph — i.e. named directly in THIS project's manifest — and
+// false for every entry reached by recursing into a childRC.Extends (a layer
+// pulled in transitively because another layer's own extends named it). It is
+// stamped onto the LockedLayer as Transitive (=!isRoot) so the lock records
+// which units the manifest actually declares (config-transitive-layering);
+// staleness's declared-set comparison reads that back to avoid requiring a
+// transitively-pulled layer to also appear in the manifest's own extends list.
+func (st *extendsGraphState) walk(r *LayeredResolver, entry LayerRef, env sourceEnv, isRoot bool) error {
 	parts, err := ParseLayerRef(entry.Ref)
 	if err != nil {
 		return &ImportError{Ref: entry.Ref, Reason: ReasonSchema, Err: err}
@@ -961,6 +980,7 @@ func (st *extendsGraphState) walk(r *LayeredResolver, entry LayerRef, env source
 	if err != nil {
 		return err
 	}
+	lock.Transitive = !isRoot
 	if prev, seen := st.digestByRef[key]; seen {
 		if prev != lock.ResolvedSHA {
 			return &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonContent, Err: fmt.Errorf("ref %q resolves to conflicting digests (%s vs %s); refusing to merge ambiguous policy", entry.Ref, prev, lock.ResolvedSHA)}
@@ -977,7 +997,7 @@ func (st *extendsGraphState) walk(r *LayeredResolver, entry LayerRef, env source
 	childEnv := env.child(childRC.Sources)
 	st.onStack[key] = true
 	for _, child := range childRC.Extends {
-		if err := st.walk(r, child, childEnv); err != nil {
+		if err := st.walk(r, child, childEnv, false); err != nil {
 			st.trace.emit(importFailedEvent(asImportError(child.Ref, err), child.Optional))
 			if child.Optional {
 				st.warnings = append(st.warnings, optionalSkipWarning(child.Ref, err))
