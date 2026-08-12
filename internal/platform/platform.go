@@ -83,6 +83,18 @@ func All() []Platform {
 	}
 }
 
+// IDs returns the ordered platform identifiers. CLI flags that accept a
+// platform derive their documented value set from here, so registering a new
+// platform in All updates every `--help` listing and validation at once.
+func IDs() []string {
+	all := All()
+	out := make([]string, 0, len(all))
+	for _, p := range all {
+		out = append(out, p.ID())
+	}
+	return out
+}
+
 // ByID returns the platform with the given ID, or nil.
 func ByID(id string) Platform {
 	for _, p := range All() {
