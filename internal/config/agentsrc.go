@@ -549,11 +549,22 @@ type AgentsRC struct {
 	// inside a struct, and a bare bool's zero value IS false), so every manifest
 	// da wrote re-emitted `"hooks": false, "mcp": false, "settings": false` —
 	// silently converting "I never declared this, defer to my org layer" into an
-	// explicit repo-local false that WINS the merge and disables the org layer's
-	// hooks/mcp/settings projection.
+	// explicit repo-local false that WINS the merge, so `da config explain hooks`
+	// reported the repo's fabricated false instead of the org layer's true.
 	//
 	// nil  => key omitted => defer to the layer stack / product defaults.
 	// set  => key emitted => repo-local declaration that overrides lower layers.
+	//
+	// SCOPE OF THE EFFECT, as audited: these three keys participate in the layer
+	// merge and surface through `da config explain`, but NO projection path
+	// consumes them. `da refresh` / `da install` project hooks, MCP configs, and
+	// settings purely from what exists under ~/.agents/{hooks,mcp,settings}/
+	// <scope>/ (internal/platform resolveHookSpec / resolveScopedFile), so the
+	// effective value gates nothing today. Wiring it in is a deliberate behavior
+	// change, not a bug fix: manifests written before the pointer migration carry
+	// an injected `"hooks": false` their authors never wrote, and honoring it
+	// would disable hook projection for every such repo at once. The invariant is
+	// pinned by TestRunRefresh_ProjectionIgnoresHooksMCPSettingsFlags.
 	Hooks         *StringsOrBool         `json:"hooks,omitempty"`
 	MCP           *StringsOrBool         `json:"mcp,omitempty"`
 	Settings      *bool                  `json:"settings,omitempty"`
