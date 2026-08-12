@@ -6,8 +6,10 @@ This audit proves what still depends on the CRG "bridge" and makes the drift
 check reproducible. Task: `graph-backend-adapter-contract / t6c-consumer-audit`
 (anti-scope: no deletion; if any consumer still needs `reads_from:[crg-bridge]`,
 keep the bridge). The bridge is decommissioned by t6d only when **all four**
-§11.4 gate conditions hold; today two are unmet in-repo and two are external
-(t6a/t6b CI soak) and also unmet.
+§11.4 gate conditions hold; today condition 3 is unmet in-repo, condition 4's
+in-repo check is automated and clear (the managed-repo sweep still needs to be
+run and confirmed clean on the target installation — see the runbook below),
+and conditions 1–2 are external (t6a/t6b CI soak) and also unmet.
 
 Regenerate this report at any time:
 
@@ -76,9 +78,14 @@ removes together: [A] Python subprocess bridge, [B] crg-bridge mirror adapter.
     3. out-of-tree consumer migration     : NOT MET — no kg-native replacement wired
                                             (both builtin registries register only 'none';
                                              RegisterCRGFamily prod callers = 0)
-    4. zero reads_from:[crg-bridge]        : in-repo count 0; cross-repo sweep
-                                            NOT automated — workflow drift is UNWIRED
-                                            for graphstore.BridgeConsumers()
+    4. zero reads_from:[crg-bridge]        : in-repo grep count 0; `workflow drift`
+                                            (da workflow drift --path . --json) reports
+                                            bridge_consumer_status=not_a_kg_repo
+                                            (0 live consumer(s) here).
+                                            Managed-repo sweep: `da workflow drift --json`
+                                            (no --path) walks every registered project and
+                                            summarizes bridge_sweep.{consumers_found,clean,
+                                            not_a_kg_repo}_repos.
 
 VERDICT: NOT-READY — KEEP THE BRIDGE
 ```
@@ -123,7 +130,9 @@ callers) before deletion is even mechanically possible.
   mirror could legally declare it — and none does.
 - `graphstore.BridgeConsumers` (`internal/graphstore/parity_drift.go:29`) is the
   lockfile scanner that implements the §11.4-condition-4 check; it returns empty
-  for any in-repo lockfile.
+  for any in-repo lockfile. `workflow drift` (`commands/workflow/drift.go`) now
+  calls it for every repo it checks (`driftBridgeConsumerPhase`) — see the
+  runbook below.
 
 The mirror is dead weight and could be dropped on its own, but §11.4 mandates the
 two surfaces retire **together**, gated on the parity soak that validates [A]'s
@@ -149,8 +158,8 @@ All route through the Python `code-review-graph` CLI (surface [A]), which is why
 - **Cross-repo sweep target** — the §11.4 lockfile sweep runs across the
   dot-agents **managed repo set**, which is `~/.agents/config.json`
   (`commands/workflow/drift.go:loadManagedProjects`), i.e. per-install and **not
-  enumerable from this repo alone**. The audit's in-repo `reads_from:[crg-bridge]`
-  count is 0; the managed-repo sweep must be run on the target installation.
+  enumerable from this repo alone**. `da workflow drift --json` (no `--path`)
+  now performs that sweep automatically — see the runbook below.
 
 ## §11.4 decommission gate — condition-by-condition
 
@@ -159,7 +168,28 @@ All route through the Python `code-review-graph` CLI (surface [A]), which is why
 | 1 | Parity matrix (8 rows) passing in CI 3 consecutive weeks | **Not met (external)** | Owned by t6a/t6b; `t6b-gate-automation` is `pending` |
 | 2 | Behavior-preservation gate on recent-review corpus | **Not met (external)** | Owned by t6b |
 | 3 | Migration plan for consumers of the `kg …` surface | **Not met** | No kg-native replacement wired; production registries register only `none`; `RegisterCRGFamily` prod callers = 0 |
-| 4 | Zero `reads_from:[crg-bridge]` across managed lockfiles | **In-repo clear; sweep not automated** | in-repo count 0, but `workflow drift` does not call `graphstore.BridgeConsumers`; managed-repo sweep is per-install |
+| 4 | Zero `reads_from:[crg-bridge]` across managed lockfiles | **Automated; in-repo clear** | `workflow drift` now calls `graphstore.BridgeConsumers` for every repo it checks (in-repo: `bridge_consumer_status=not_a_kg_repo`); run the runbook below on the target installation to sweep the full managed set |
+
+## Runbook: §11.4 criterion 4 (zero `reads_from:[crg-bridge]`)
+
+```bash
+# This repo only, independent of the ~/.agents/config.json registry:
+da workflow drift --path . --json | jq '.reports[0].bridge_consumer_status, .reports[0].bridge_consumers'
+
+# Every registered project (the managed-repo sweep §11.4 criterion 4 requires):
+da workflow drift --json | jq '.bridge_sweep'
+# → {consumers_found_repos: [...], clean_repos: [...], not_a_kg_repo_repos: [...], error_repos: [...]}
+# Criterion 4 is satisfied iff consumers_found_repos is empty.
+
+# Or the human-readable form (either scope), which also prints per-repo
+# bridge_consumer_status inline as a drift warning when consumers are found:
+da workflow drift            # full managed-repo sweep
+da workflow drift --path .   # this repo only
+
+# scripts/crg-bridge-consumer-audit.sh's [E] section shells out to
+# `da workflow drift --path . --json` for this same finding, so the two
+# can't diverge — see that script's header comment.
+```
 
 ## To make t6d READY, in order
 
@@ -173,9 +203,10 @@ All route through the Python `code-review-graph` CLI (surface [A]), which is why
    path. **Widen t6d's write_scope to include `commands/kg/`** (currently absent).
 3. **Land + soak the parity gate (t6a/t6b).** Conditions 1–2: 8-row parity matrix
    and behavior-preservation harness green in CI for 3 consecutive weeks.
-4. **Automate condition 4.** Wire `graphstore.BridgeConsumers` into
-   `workflow drift`, then run the sweep across the managed repo set and confirm
-   zero `reads_from:[crg-bridge]`.
+4. ~~**Automate condition 4.**~~ **Done.** `workflow drift` calls
+   `graphstore.BridgeConsumers` for every repo it checks; run the runbook above
+   across the managed repo set on the target installation and confirm
+   `bridge_sweep.consumers_found_repos` is empty.
 5. **Retire the out-of-tree bindings.** Remove the CI `.venv` `code-review-graph`
    install (`ci-venv-crg-interim.md`), repoint the hook + MCP + review skills at
    the kg-native surface.
