@@ -440,9 +440,9 @@ func TestStaleness_FreshImmediatelyAfterTransitiveSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedUnits(t, repo, digest, map[string]LockedUnit{
-		"acme:org/base.json@a1":       {Kind: UnitKindLayer, Digest: "sha256:d1"},
-		"acme:org/svc.json@a1":        {Kind: UnitKindLayer, Digest: "sha256:d2"},
-		"roos:org/base.json@a1":       {Kind: UnitKindLayer, Digest: "sha256:d3", Transitive: true},
+		"acme:org/base.json@a1":                     {Kind: UnitKindLayer, Digest: "sha256:d1"},
+		"acme:org/svc.json@a1":                      {Kind: UnitKindLayer, Digest: "sha256:d2"},
+		"roos:org/base.json@a1":                     {Kind: UnitKindLayer, Digest: "sha256:d3", Transitive: true},
 		"acme:org/base.json:stage-profile:verifier": {Kind: UnitKindProfile, Digest: "sha256:p1"},
 	})
 
