@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
@@ -292,7 +293,7 @@ motivating use case.`,
 	createCmd.Flags().String(workflowFlagWriteScope, "", "Comma-separated file/dir patterns this contract covers (defaults to TASKS.yaml write_scope)")
 	createCmd.Flags().Bool("direct", false, "Materialize a direct-mode contract (default; orchestrator owns the work)")
 	createCmd.Flags().Bool("delegated", false, "Materialize a delegated-mode contract (for tests / parity with fanout)")
-	createCmd.Flags().String("mode", "", "Contract mode: direct or delegated (overrides --direct/--delegated when set)")
+	cmdutil.RegisterEnumFlag(createCmd, contractModeEnum)
 	createCmd.Flags().Bool("force", false, "Overwrite any existing contract for this task")
 	_ = createCmd.MarkFlagRequired("plan")
 	_ = createCmd.MarkFlagRequired("task")

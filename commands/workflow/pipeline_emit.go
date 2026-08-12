@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/platform"
@@ -50,6 +51,10 @@ func newWorkflowPipelineCmd() *cobra.Command {
 		Long: `Projects the resolved profile IR (stage_profiles + execution_profile topology)
 into a target harness's materialized per-task pipeline. The emitted swarm YAML is
 a generated build artifact — regenerate it from config rather than hand-editing.`,
+		Example: deps.ExampleBlock(
+			"  da workflow pipeline emit --platform claude-code",
+			"  da workflow pipeline emit --platform omp --app-type go-cli",
+		),
 	}
 	cmd.AddCommand(newWorkflowPipelineEmitCmd())
 	return cmd
@@ -82,8 +87,8 @@ YAML, and a config digest is stamped in the header comment (no wall-clock).`,
 			return runWorkflowPipelineEmit(cmd, platformID, appType, plan)
 		},
 	}
-	cmd.Flags().StringVar(&platformID, "platform", "", "target harness platform: "+strings.Join(platform.SupportedPipelinePlatforms(), ", ")+" (required)")
-	cmd.Flags().StringVar(&appType, "app-type", "", "specialize the pipeline for this app_type (default: app_type-agnostic skeleton)")
+	cmdutil.RegisterEnum(cmd, &platformID, pipelinePlatformEnum)
+	cmdutil.RegisterEnum(cmd, &appType, taskAppTypeEnum.WithUsage("Specialize the pipeline for this app_type").WithNote("omit for an app_type-agnostic skeleton"))
 	cmd.Flags().StringVar(&plan, "plan", "", "canonical plan this pipeline serves (validated when set; the emitted pipeline is plan-agnostic)")
 	cmd.Flags().Bool("dry-run", false, "preview the emission without writing any file")
 	return cmd

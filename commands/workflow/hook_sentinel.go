@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spf13/cobra"
 )
@@ -1002,18 +1003,18 @@ func newWorkflowHookSentinelWriteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&runID, hookSentinelRunIDFlag, "", "Caller-supplied run identifier (required, filename-safe)")
 	cmd.Flags().StringVar(&planID, "plan", "", "Canonical plan ID (required)")
 	cmd.Flags().StringVar(&taskID, "task", "", "Task ID within the plan (required)")
-	cmd.Flags().StringVar(&agentType, "agent-type", "", "Caller agent role: main or loop-worker (required)")
+	cmdutil.RegisterEnum(cmd, &agentType, hookSentinelAgentTypeEnum)
 	cmd.Flags().StringArrayVar(&expectedArtifacts, "expect", nil, "Repo-relative artifact path the terminal gate must find (repeatable)")
 	cmd.Flags().StringArrayVar(&writeScope, "write-scope", nil, "Allowed repo-relative path or glob (repeatable; loop-worker gate diffs edits against this list)")
 	cmd.Flags().BoolVar(&eligibleSnapshotLoadedFlag, "eligible-snapshot-loaded", false, "ISP gate signal: orchestrator loaded the eligible-task snapshot at session-start")
 	cmd.Flags().IntVar(&maxBatch, "max-batch", 0, "ISP gate signal: declared maximum bundles to materialize this turn")
 	// Companion flags
-	cmd.Flags().StringVar(&operation, "operation", "", "Companion-gate operation discriminator: fanout_handoff | existing_bundle_handoff | parent_closeout")
+	cmdutil.RegisterEnum(cmd, &operation, hookSentinelOperationEnum)
 	cmd.Flags().StringVar(&delegationPath, "delegation-path", "", "Companion: repo-relative delegation YAML path (handoff operations)")
 	cmd.Flags().StringVar(&bundlePath, "bundle-path", "", "Companion: repo-relative delegation-bundle YAML path (handoff operations)")
 	cmd.Flags().StringVar(&requiredSidecarPath, "required-sidecar-path", "", "Companion: optional repo-relative sidecar path (fanout_handoff)")
 	cmd.Flags().StringVar(&evidenceConfidence, "evidence-confidence", "", "Companion: optional evidence-confidence label (fanout_handoff)")
-	cmd.Flags().StringVar(&decision, "decision", "", "Companion: parent_closeout decision: accept | reject")
+	cmdutil.RegisterEnum(cmd, &decision, hookSentinelDecisionEnum)
 	cmd.Flags().StringArrayVar(&expectedArchiveArtifacts, "expected-archive-artifact", nil, "Companion: repo-relative artifact path the closeout expects in the archive (repeatable; parent_closeout)")
 	cmd.Flags().StringArrayVar(&expectedCleanupPaths, "expected-cleanup-path", nil, "Companion: repo-relative active path the closeout expects to clear (repeatable; parent_closeout)")
 	cmd.PreRunE = func(c *cobra.Command, args []string) error {

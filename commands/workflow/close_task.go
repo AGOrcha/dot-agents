@@ -27,6 +27,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/scoring"
 	"github.com/spf13/cobra"
@@ -82,7 +83,7 @@ func newWorkflowCloseTaskCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&task, "task", "", "Task ID to close (required)")
-	cmd.Flags().StringVar(&scoreRecompute, "score-recompute", "current", "Recompute scope: current (default; the just-closed iter only) | recent-N | all")
+	cmdutil.RegisterEnum(cmd, &scoreRecompute, scoreRecomputeEnum)
 	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "Skip the workflow-state commit step (caller will batch elsewhere)")
 	cmd.Flags().StringVar(&nextFocus, "next-focus", "", "Override the auto-picked next focus task (default: first eligible task in the same plan)")
 	cmd.Flags().StringVar(&repoDir, "repo-dir", "", "Repository root for git topology (default: current working directory)")

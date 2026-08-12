@@ -161,7 +161,9 @@ func TestPipelineEmitMissingPlatform(t *testing.T) {
 func TestPipelineEmitUnknownPlatform(t *testing.T) {
 	withPipelineFixture(t, func(string) (*config.Snapshot, error) { return pipelineFixtureSnapshot(), nil })
 	_, err := runPipelineEmit(t, false, "--platform", "bogus")
-	if err == nil || !strings.Contains(err.Error(), "unknown pipeline platform") {
+	// The enum PreRunE fires first and lists the supported platforms, which the
+	// runner's "unknown pipeline platform" message did not.
+	if err == nil || !strings.Contains(err.Error(), "--platform must be one of claude-code|omp") {
 		t.Fatalf("want unknown-platform error, got %v", err)
 	}
 }

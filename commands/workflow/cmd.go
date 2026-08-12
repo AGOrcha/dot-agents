@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/spf13/cobra"
 )
 
@@ -147,10 +148,10 @@ func newWorkflowCheckpointCmd() *cobra.Command {
 		},
 	}
 	checkpointCmd.Flags().StringVar(&checkpointMessage, "message", "", "Checkpoint message")
-	checkpointCmd.Flags().StringVar(&checkpointVerificationState, "verification-status", workflowDefaultVerificationState, "Verification status: pass, fail, partial, or unknown")
+	cmdutil.RegisterEnum(checkpointCmd, &checkpointVerificationState, checkpointVerificationStatusEnum)
 	checkpointCmd.Flags().StringVar(&checkpointVerificationText, "verification-summary", "", "Verification summary text")
 	checkpointCmd.Flags().IntVar(&checkpointLogToIter, workflowFlagLogToIter, 0, "Write a schema-validated iteration log stub for N (>=1) to .agents/active/iteration-log/iter-N.yaml")
-	checkpointCmd.Flags().StringVar(&checkpointLogToIterRole, "role", "", "With --log-to-iter: merge only the impl, verifier, or review block")
+	cmdutil.RegisterEnum(checkpointCmd, &checkpointLogToIterRole, checkpointRoleEnum)
 	checkpointCmd.Flags().StringVar(&checkpointLogToIterVerifierType, workflowFlagVerifierType, "", "Verifier slug when --role verifier (for example unit)")
 	return checkpointCmd
 }
@@ -267,7 +268,7 @@ func newWorkflowPlanUpdateCmd() *cobra.Command {
 			return runWorkflowPlanUpdate(args[0], planUpdateStatus, planUpdateTitle, planUpdateSummary, planUpdateFocus, planUpdateSuccessCriteria, planUpdateVerificationStrategy)
 		},
 	}
-	planUpdateCmd.Flags().StringVar(&planUpdateStatus, "status", "", "New plan status (draft|active|paused|completed|archived)")
+	cmdutil.RegisterEnum(planUpdateCmd, &planUpdateStatus, planStatusEnum)
 	planUpdateCmd.Flags().StringVar(&planUpdateTitle, "title", "", "New plan title")
 	planUpdateCmd.Flags().StringVar(&planUpdateSummary, "summary", "", "New plan summary")
 	planUpdateCmd.Flags().StringVar(&planUpdateFocus, "focus", "", "New current_focus_task value")
@@ -433,7 +434,7 @@ func newWorkflowTaskAddCmd() *cobra.Command {
 	taskAddCmd.Flags().StringVar(&taskAddDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on")
 	taskAddCmd.Flags().StringVar(&taskAddBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks")
 	taskAddCmd.Flags().StringVar(&taskAddWriteScope, workflowFlagWriteScope, "", "Comma-separated file/dir patterns this task may touch")
-	taskAddCmd.Flags().StringVar(&taskAddAppType, "app-type", "", "App type for verifier dispatch (e.g. go-cli, go-http-service)")
+	cmdutil.RegisterEnum(taskAddCmd, &taskAddAppType, taskAppTypeEnum)
 	taskAddCmd.Flags().BoolVar(&taskAddVerification, "verification-required", true, "Whether verification is required before marking complete")
 	_ = taskAddCmd.MarkFlagRequired("id")
 	_ = taskAddCmd.MarkFlagRequired("title")
@@ -470,7 +471,7 @@ func newWorkflowTaskUpdateCmd() *cobra.Command {
 	taskUpdateCmd.Flags().StringVar(&taskUpdateWriteScope, workflowFlagWriteScope, "", "New comma-separated write-scope patterns (replaces existing)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on (replaces existing)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks (replaces existing)")
-	taskUpdateCmd.Flags().StringVar(&taskUpdateAppType, "app-type", "", "App type for verifier dispatch (e.g. go-cli, go-http-service); validated against this repo's execution profile when one is configured")
+	cmdutil.RegisterEnum(taskUpdateCmd, &taskUpdateAppType, taskAppTypeEnum.WithNote("validated against this repo's execution_profile when one is configured"))
 	_ = taskUpdateCmd.MarkFlagRequired("task")
 	return taskUpdateCmd
 }
@@ -650,9 +651,28 @@ func newWorkflowAdvanceCmd() *cobra.Command {
 	advanceCmd := &cobra.Command{
 		Use:   "advance <plan-id>",
 		Short: "Advance a task's status within a canonical plan",
+		Long: "Move one task to a new status in TASKS.yaml. This is the only supported way to\n" +
+			"change task status — hand-editing TASKS.yaml bypasses the state machine and the\n" +
+			"focus-task bookkeeping.\n\n" +
+			"Status vocabulary, in state-machine order:\n" +
+			"  pending               created; not yet picked up\n" +
+			"  in_progress           a worker holds it and is implementing\n" +
+			"  awaiting_agent_review branch pushed, verifiers green, lens reviewers running\n" +
+			"  awaiting_owner_review lens verdicts accepted; the human owns the merge\n" +
+			"  blocked               cannot proceed; manual recovery required\n" +
+			"  completed             terminal success (e.g. PR merged)\n" +
+			"  cancelled             terminal manual abandonment\n\n" +
+			"Not every pair is reachable: the transition graph rejects illegal edges and the\n" +
+			"error names the statuses legal from where the task actually is.\n\n" +
+			"Direct (non-delegated) work advances to `completed` itself. A delegated worker\n" +
+			"does NOT advance — it runs `da workflow merge-back` and the parent decides.",
 		Example: deps.ExampleBlock(
+			"  # direct work: pick the task up, then close it out",
 			"  da workflow advance loop-orchestrator-layer --task phase-5 --status in_progress",
-			"  da workflow advance my-plan --task t1 --status completed --commit-state",
+			"  da workflow advance loop-orchestrator-layer --task phase-5 --status completed --commit-state",
+			"  # staged/PR path: hand off to review, then record the merge",
+			"  da workflow advance my-plan --task t1 --status awaiting_agent_review",
+			"  da workflow advance my-plan --task t1 --status completed",
 		),
 		Args: deps.ExactArgsWithHints(1, cmdHintPlanOwnsTask),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -675,7 +695,7 @@ func newWorkflowAdvanceCmd() *cobra.Command {
 		},
 	}
 	advanceCmd.Flags().StringVar(&advanceTask, "task", "", "Task ID to advance (required)")
-	advanceCmd.Flags().StringVar(&advanceStatus, "status", "", "New task status (required)")
+	cmdutil.RegisterEnum(advanceCmd, &advanceStatus, taskStatusEnum)
 	advanceCmd.Flags().BoolVar(&advanceCommitState, workflowFlagCommitState, false, "After advancing, stage + commit the workflow-state mutation (iteration-close integration)")
 	_ = advanceCmd.MarkFlagRequired("task")
 	_ = advanceCmd.MarkFlagRequired("status")
@@ -718,10 +738,23 @@ func newWorkflowVerifyRecordCmd() *cobra.Command {
 	verifyRecordCmd := &cobra.Command{
 		Use:   "record",
 		Short: "Record a verification run",
+		Long: "Append a verification result to the workflow log, and — when --task is given —\n" +
+			"write the typed result artifact a delegation contract is gated on.\n\n" +
+			"Two shapes, selected by --kind:\n" +
+			"  --kind test|lint|build|format|custom  requires --status\n" +
+			"  --kind review                         requires --phase1-decision and\n" +
+			"                                        --phase2-decision, and --task; --status\n" +
+			"                                        must be omitted (it is derived)\n\n" +
+			"Direct work records plan-scoped (no --task) or task-scoped, then advances the\n" +
+			"task itself. A delegated worker records task-scoped so the artifact lands next\n" +
+			"to its contract, then runs `da workflow merge-back` instead of advancing.",
 		Example: deps.ExampleBlock(
+			"  # direct work: record the suite you ran",
 			"  da workflow verify record --kind test --status pass --command \"go test ./...\" --summary \"all packages passed\"",
+			"  # delegated work: task-scoped, writes the typed artifact the contract gates on",
 			"  da workflow verify record --kind test --status pass --task t1 --verifier-type unit --summary \"go test ./...\"",
-			"  da workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"ready to merge\"",
+			"  # review gate: verdict derives from the two phase decisions",
+			"  da workflow verify record --kind review --task t1 --phase1-decision accept --phase2-decision accept --summary \"ready to merge\"",
 		),
 		Args: deps.NoArgsWithHints("Provide verification details through flags such as `--kind`, `--status`, and `--summary`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -742,14 +775,14 @@ func newWorkflowVerifyRecordCmd() *cobra.Command {
 			})
 		},
 	}
-	verifyRecordCmd.Flags().StringVar(&verifyKind, "kind", "", "Kind: test|lint|build|format|custom|review (required)")
-	verifyRecordCmd.Flags().StringVar(&verifyStatus, "status", "", "Status: pass|fail|partial|unknown (required unless --kind review)")
+	cmdutil.RegisterEnum(verifyRecordCmd, &verifyKind, verifyKindEnum)
+	cmdutil.RegisterEnum(verifyRecordCmd, &verifyStatus, verifyStatusEnum)
 	verifyRecordCmd.Flags().StringVar(&verifyCommand, "command", "", "Command that was run")
-	verifyRecordCmd.Flags().StringVar(&verifyScope, "scope", "repo", "Scope: file|package|repo|custom")
+	cmdutil.RegisterEnum(verifyRecordCmd, &verifyScope, verifyScopeEnum)
 	verifyRecordCmd.Flags().StringVar(&verifySummary, "summary", "", "Summary of the run (required)")
-	verifyRecordCmd.Flags().StringVar(&reviewPhase1, "phase1-decision", "", "When --kind review: first phase decision (accept|reject|escalate)")
-	verifyRecordCmd.Flags().StringVar(&reviewPhase2, "phase2-decision", "", "When --kind review: second phase decision (accept|reject|escalate)")
-	verifyRecordCmd.Flags().StringVar(&reviewOverall, "overall-decision", "", "When --kind review: optional; must match derived consolidation from phase decisions if set")
+	cmdutil.RegisterEnum(verifyRecordCmd, &reviewPhase1, reviewPhase1DecisionEnum)
+	cmdutil.RegisterEnum(verifyRecordCmd, &reviewPhase2, reviewPhase2DecisionEnum)
+	cmdutil.RegisterEnum(verifyRecordCmd, &reviewOverall, reviewOverallDecisionEnum)
 	verifyRecordCmd.Flags().StringSliceVar(&reviewFailedGates, "failed-gate", nil, "When --kind review: failed verifier or gate slug (repeatable)")
 	verifyRecordCmd.Flags().StringVar(&reviewEscalation, "escalation-reason", "", "When --kind review: required when overall decision is escalate")
 	verifyRecordCmd.Flags().StringVar(&reviewNotes, "reviewer-notes", "", "When --kind review: optional reviewer notes")
@@ -935,8 +968,8 @@ func newWorkflowGraphCmd() *cobra.Command {
 		),
 		RunE: runWorkflowGraphQuery,
 	}
-	graphQueryCmd.Flags().String("intent", "", "Bridge intent: plan_context|decision_lookup|entity_context|workflow_memory|contradictions; code-structure intents are forwarded to `da kg bridge query`")
-	graphQueryCmd.Flags().String("scope", "", "Optional scope filter")
+	cmdutil.RegisterEnumFlag(graphQueryCmd, graphQueryIntentEnum)
+	graphQueryCmd.Flags().String("scope", "", "Narrow the query to one plan id, note type, or repo path")
 
 	graphHealthCmd := &cobra.Command{
 		Use:   "health",
@@ -995,6 +1028,11 @@ func newWorkflowMergeBackCmd() *cobra.Command {
 	mergeBackCmd := &cobra.Command{
 		Use:   "merge-back",
 		Short: "Record a sub-agent's completed work as a merge-back artifact",
+		Long: "Close out a delegated task. A worker runs this INSTEAD OF `da workflow advance`:\n" +
+			"it writes the merge-back artifact and the typed verification result, and leaves\n" +
+			"the status flip to the parent, which reads the artifact at closeout.\n\n" +
+			"Run it after `da workflow verify record --task <id>`, so the verdict you pass to\n" +
+			"--verification-status is the one the verifier actually produced.",
 		Example: deps.ExampleBlock(
 			"  da workflow merge-back --task phase-5 --summary \"worker finished transport slice\" --verification-status pass",
 			"  da workflow merge-back --task t1 --summary \"...\" --commit-state",
@@ -1016,7 +1054,7 @@ func newWorkflowMergeBackCmd() *cobra.Command {
 	}
 	mergeBackCmd.Flags().String("task", "", "Task ID that was delegated (required)")
 	mergeBackCmd.Flags().String("summary", "", "Summary of what was done (required)")
-	mergeBackCmd.Flags().String("verification-status", "unknown", "pass|fail|partial|unknown")
+	cmdutil.RegisterEnumFlag(mergeBackCmd, mergeBackVerificationStatusEnum)
 	mergeBackCmd.Flags().String("integration-notes", "", "Guidance for the parent agent")
 	mergeBackCmd.Flags().Bool(workflowFlagCommitState, false, "After recording the merge-back, stage + commit the workflow-state mutation (iteration-close integration)")
 	_ = mergeBackCmd.MarkFlagRequired("task")
@@ -1028,7 +1066,11 @@ func newWorkflowFoldBackCmd() *cobra.Command {
 	foldBackCmd := &cobra.Command{
 		Use:   "fold-back",
 		Short: "Route loop observations into durable plan artifacts or proposals",
-		Long:  `Records loop observations and routes them into TASKS.yaml notes, plan summary, or a ~/.agents proposal file.`,
+		Example: deps.ExampleBlock(
+			"  da workflow fold-back create --plan my-plan --task my-task --observation \"API edge case\"",
+			"  da workflow fold-back list --plan my-plan",
+		),
+		Long: `Records loop observations and routes them into TASKS.yaml notes, plan summary, or a ~/.agents proposal file.`,
 	}
 	foldBackCreateCmd := &cobra.Command{
 		Use:   "create",
@@ -1086,6 +1128,10 @@ func newWorkflowDelegationCmd() *cobra.Command {
 	delegationCmd := &cobra.Command{
 		Use:   "delegation",
 		Short: "Parent-driven delegation lifecycle helpers",
+		Example: deps.ExampleBlock(
+			"  da workflow delegation gate --task my-task",
+			"  da workflow delegation closeout --plan my-plan --task my-task --decision accept",
+		),
 	}
 	delegationCloseoutCmd := &cobra.Command{
 		Use:   "closeout",
@@ -1099,7 +1145,7 @@ func newWorkflowDelegationCmd() *cobra.Command {
 	}
 	delegationCloseoutCmd.Flags().String("plan", "", cmdFlagCanonicalPlanIDDescr)
 	delegationCloseoutCmd.Flags().String("task", "", "Delegated task ID (required)")
-	delegationCloseoutCmd.Flags().String("decision", "", "accept|reject — parent integration decision (required)")
+	cmdutil.RegisterEnumFlag(delegationCloseoutCmd, delegationDecisionEnum)
 	delegationCloseoutCmd.Flags().String("note", "", "Optional note (typically used with --decision reject)")
 	_ = delegationCloseoutCmd.MarkFlagRequired("plan")
 	_ = delegationCloseoutCmd.MarkFlagRequired("task")
@@ -1185,6 +1231,11 @@ func newWorkflowAppTypesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "app-types",
 		Short: "List available app_type values for the current repo",
+		Long: "Prints the live app_type vocabulary for this repo. app_type is config-derived\n" +
+			"(execution_profile.by_app_type in .agentsrc.json), so no fixed list can appear in\n" +
+			"the help for the flags that consume it — this command is that list.\n\n" +
+			"Consumers: `da workflow task add|update --app-type`, `da worktree create --app-type`,\n" +
+			"`da config relevance --app-type`, `da config explain --app-type`.",
 		Example: deps.ExampleBlock(
 			"  da workflow app-types",
 			"  da --json workflow app-types",
@@ -1196,7 +1247,7 @@ func newWorkflowAppTypesCmd() *cobra.Command {
 			return runWorkflowAppTypes(format, verbose)
 		},
 	}
-	cmd.Flags().StringVar(&format, "format", "", "Print only the recommended authoring snippet: flag, task, plan, or doc")
+	cmdutil.RegisterEnum(cmd, &format, appTypesFormatEnum)
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show source and recommendation details for each app_type")
 	return cmd
 }
@@ -1205,6 +1256,10 @@ func newWorkflowStateRefCmd() *cobra.Command {
 	stateRefCmd := &cobra.Command{
 		Use:   "state-ref",
 		Short: "Inspect and reconcile the machine coordination state ref (refs/agents/state)",
+		Example: deps.ExampleBlock(
+			"  da workflow state-ref reconcile --dry-run",
+			"  da workflow state-ref reconcile",
+		),
 	}
 	stateRefCmd.AddCommand(newWorkflowStateRefReconcileCmd())
 	return stateRefCmd

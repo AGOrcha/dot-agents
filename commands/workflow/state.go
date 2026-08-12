@@ -1030,13 +1030,10 @@ func gitModifiedFiles(projectPath string) ([]string, error) {
 	return parseGitModifiedFiles(gitOutput(projectPath, "status", "--short")), nil
 }
 
+// isValidVerificationStatus reads the same vocabulary the --verification-status
+// help text is generated from (verificationStatusValues in enums.go).
 func isValidVerificationStatus(status string) bool {
-	switch status {
-	case "pass", "fail", "partial", "unknown":
-		return true
-	default:
-		return false
-	}
+	return status != "" && checkpointVerificationStatusEnum.Contains(status)
 }
 
 func plansBaseDir(projectPath string) string {
