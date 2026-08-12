@@ -36,47 +36,60 @@ func TestRunSync_LeavesManifestUntouched(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			project := withTwoLocalLayers(t)
 			manifestPath := filepath.Join(project, cfg.AgentsRCFile)
-
-			before, err := os.ReadFile(manifestPath)
-			if err != nil {
-				t.Fatalf("read manifest: %v", err)
-			}
-			// Backdate so an mtime change is unambiguous.
-			old := time.Now().Add(-time.Hour)
-			if err := os.Chtimes(manifestPath, old, old); err != nil {
-				t.Fatalf("backdate manifest: %v", err)
-			}
-			beforeStat, err := os.Stat(manifestPath)
-			if err != nil {
-				t.Fatalf("stat before: %v", err)
-			}
+			before, beforeStat := snapshotBackdated(t, manifestPath)
 
 			opts := syncOptions(project, tc.layer, false, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 			if err := runSync(opts, testDeps()); err != nil {
 				t.Fatalf("runSync: %v", err)
 			}
 
-			after, err := os.ReadFile(manifestPath)
-			if err != nil {
-				t.Fatalf("read manifest after: %v", err)
-			}
-			if string(after) != string(before) {
-				t.Errorf("config sync rewrote the manifest\n--- before ---\n%s\n--- after ---\n%s", before, after)
-			}
-			afterStat, err := os.Stat(manifestPath)
-			if err != nil {
-				t.Fatalf("stat after: %v", err)
-			}
-			if !afterStat.ModTime().Equal(beforeStat.ModTime()) {
-				t.Errorf("config sync touched the manifest mtime: before %v, after %v",
-					beforeStat.ModTime(), afterStat.ModTime())
-			}
-
+			assertManifestUntouched(t, manifestPath, before, beforeStat)
 			// The lock IS sync's job and must still have been written.
 			if _, err := os.Stat(cfg.AgentsLockPath(project)); err != nil {
 				t.Errorf("config sync must still write the lock: %v", err)
 			}
 		})
+	}
+}
+
+// snapshotBackdated reads path and backdates its mtime by an hour so a later
+// mtime change is unambiguous. It returns the content plus the pre-run FileInfo.
+func snapshotBackdated(t *testing.T, path string) ([]byte, os.FileInfo) {
+	t.Helper()
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("backdate manifest: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat before: %v", err)
+	}
+	return before, info
+}
+
+// assertManifestUntouched fails unless the manifest is byte-identical AND its
+// mtime is unchanged — sync must not write the file at all, not merely write
+// back the same bytes.
+func assertManifestUntouched(t *testing.T, path string, before []byte, beforeStat os.FileInfo) {
+	t.Helper()
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read manifest after: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("config sync rewrote the manifest\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+	afterStat, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if !afterStat.ModTime().Equal(beforeStat.ModTime()) {
+		t.Errorf("config sync touched the manifest mtime: before %v, after %v",
+			beforeStat.ModTime(), afterStat.ModTime())
 	}
 }
 

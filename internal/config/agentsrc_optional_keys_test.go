@@ -87,45 +87,63 @@ func TestAgentsRC_AbsentOptionalKeysSurviveRoundTrip(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tmp := t.TempDir()
-			path := filepath.Join(tmp, AgentsRCFile)
-			if err := os.WriteFile(path, []byte(tc.manifest), 0644); err != nil {
-				t.Fatalf("seeding manifest: %v", err)
-			}
-
-			rc, err := LoadAgentsRC(tmp)
-			if err != nil {
-				t.Fatalf("LoadAgentsRC: %v", err)
-			}
-			if err := rc.Save(tmp); err != nil {
-				t.Fatalf("Save: %v", err)
-			}
-
-			saved, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("reading saved manifest: %v", err)
-			}
-			var raw map[string]any
-			if err := json.Unmarshal(saved, &raw); err != nil {
-				t.Fatalf("parsing saved manifest: %v\n%s", err, saved)
-			}
-
-			for _, key := range tc.wantAbsent {
-				if v, ok := raw[key]; ok {
-					t.Errorf("key %q must stay ABSENT after round-trip, got %v\nsaved:\n%s", key, v, saved)
-				}
-			}
-			for key, want := range tc.wantPresent {
-				got, ok := raw[key]
-				if !ok {
-					t.Errorf("key %q must be present after round-trip, but it was dropped\nsaved:\n%s", key, saved)
-					continue
-				}
-				if !jsonEqual(got, want) {
-					t.Errorf("key %q: got %v, want %v", key, got, want)
-				}
-			}
+			saved, raw := roundTripManifest(t, tc.manifest)
+			assertKeysAbsent(t, raw, saved, tc.wantAbsent)
+			assertKeysEqual(t, raw, saved, tc.wantPresent)
 		})
+	}
+}
+
+// roundTripManifest seeds a manifest, loads it through LoadAgentsRC, saves it
+// back with Save, and returns the re-saved bytes plus their decoded object.
+func roundTripManifest(t *testing.T, manifest string) ([]byte, map[string]any) {
+	t.Helper()
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, AgentsRCFile)
+	if err := os.WriteFile(path, []byte(manifest), 0644); err != nil {
+		t.Fatalf("seeding manifest: %v", err)
+	}
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+	if err := rc.Save(tmp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading saved manifest: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(saved, &raw); err != nil {
+		t.Fatalf("parsing saved manifest: %v\n%s", err, saved)
+	}
+	return saved, raw
+}
+
+// assertKeysAbsent fails for every key still present in the re-saved manifest.
+func assertKeysAbsent(t *testing.T, raw map[string]any, saved []byte, keys []string) {
+	t.Helper()
+	for _, key := range keys {
+		if v, ok := raw[key]; ok {
+			t.Errorf("key %q must stay ABSENT after round-trip, got %v\nsaved:\n%s", key, v, saved)
+		}
+	}
+}
+
+// assertKeysEqual fails for every key missing from, or mismatched in, the
+// re-saved manifest.
+func assertKeysEqual(t *testing.T, raw map[string]any, saved []byte, want map[string]any) {
+	t.Helper()
+	for key, wantVal := range want {
+		got, ok := raw[key]
+		if !ok {
+			t.Errorf("key %q must be present after round-trip, but it was dropped\nsaved:\n%s", key, saved)
+			continue
+		}
+		if !jsonEqual(got, wantVal) {
+			t.Errorf("key %q: got %v, want %v", key, got, wantVal)
+		}
 	}
 }
 

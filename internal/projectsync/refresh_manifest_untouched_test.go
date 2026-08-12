@@ -74,45 +74,64 @@ func TestWriteRefreshToLock_LeavesManifestByteIdentical(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			projectPath := t.TempDir()
 			manifestPath := filepath.Join(projectPath, config.AgentsRCFile)
-			if err := os.WriteFile(manifestPath, []byte(tc.manifest), 0644); err != nil {
-				t.Fatalf("seeding manifest: %v", err)
-			}
-			// Backdate so an mtime change is unambiguous rather than racing the
-			// filesystem's timestamp granularity.
-			old := time.Now().Add(-time.Hour)
-			if err := os.Chtimes(manifestPath, old, old); err != nil {
-				t.Fatalf("backdating manifest: %v", err)
-			}
-			beforeStat, err := os.Stat(manifestPath)
-			if err != nil {
-				t.Fatalf("stat before: %v", err)
-			}
+			beforeStat := seedBackdatedManifest(t, manifestPath, tc.manifest)
 
 			if err := projectsync.WriteRefreshToLock(projectPath, "1.2.3", "deadbeef", "v1.2.3"); err != nil {
 				t.Fatalf("WriteRefreshToLock: %v", err)
 			}
 
-			after, err := os.ReadFile(manifestPath)
-			if err != nil {
-				t.Fatalf("reading manifest after: %v", err)
-			}
-			if string(after) != tc.manifest {
-				t.Errorf("manifest was rewritten by refresh\n--- before ---\n%s\n--- after ---\n%s", tc.manifest, after)
-			}
-			afterStat, err := os.Stat(manifestPath)
-			if err != nil {
-				t.Fatalf("stat after: %v", err)
-			}
-			if !afterStat.ModTime().Equal(beforeStat.ModTime()) {
-				t.Errorf("manifest mtime changed: before %v, after %v — refresh must not write the manifest at all",
-					beforeStat.ModTime(), afterStat.ModTime())
-			}
-
-			// The lock IS the machine-written artifact and must still be produced.
-			if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); err != nil {
-				t.Errorf("refresh must still write the lock: %v", err)
-			}
+			assertFileUnchanged(t, manifestPath, tc.manifest, beforeStat)
+			assertLockWritten(t, projectPath)
 		})
+	}
+}
+
+// seedBackdatedManifest writes body to path and backdates its mtime by an hour
+// so a later mtime change is unambiguous rather than racing the filesystem's
+// timestamp granularity. It returns the pre-run FileInfo.
+func seedBackdatedManifest(t *testing.T, path, body string) os.FileInfo {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatalf("seeding manifest: %v", err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("backdating manifest: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat before: %v", err)
+	}
+	return info
+}
+
+// assertFileUnchanged fails unless path still holds exactly want AND its mtime
+// is untouched. Byte equality alone would let a same-content rewrite through;
+// even a cosmetic reflow of a user-authored file is a defect here.
+func assertFileUnchanged(t *testing.T, path, want string, before os.FileInfo) {
+	t.Helper()
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading manifest after: %v", err)
+	}
+	if string(after) != want {
+		t.Errorf("manifest was rewritten by refresh\n--- before ---\n%s\n--- after ---\n%s", want, after)
+	}
+	afterStat, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if !afterStat.ModTime().Equal(before.ModTime()) {
+		t.Errorf("manifest mtime changed: before %v, after %v — refresh must not write the manifest at all",
+			before.ModTime(), afterStat.ModTime())
+	}
+}
+
+// assertLockWritten checks the machine-written artifact was still produced.
+func assertLockWritten(t *testing.T, projectPath string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); err != nil {
+		t.Errorf("refresh must still write the lock: %v", err)
 	}
 }
 

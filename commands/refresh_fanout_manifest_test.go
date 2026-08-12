@@ -48,18 +48,8 @@ func TestRunRefresh_FanOutLeavesEveryLinkedManifestUntouched(t *testing.T) {
 
 	for _, name := range projects {
 		projectPath := filepath.Join(tmp, name)
-		if err := os.MkdirAll(projectPath, 0755); err != nil {
-			t.Fatal(err)
-		}
 		body := strings.Replace(manifest, "%s", name, 1)
-		manifestPath := filepath.Join(projectPath, config.AgentsRCFile)
-		if err := os.WriteFile(manifestPath, []byte(body), 0644); err != nil {
-			t.Fatal(err)
-		}
-		old := time.Now().Add(-time.Hour)
-		if err := os.Chtimes(manifestPath, old, old); err != nil {
-			t.Fatal(err)
-		}
+		seedLinkedProject(t, projectPath, body)
 		want[name] = body
 		cfg.AddProject(name, projectPath)
 	}
@@ -77,27 +67,49 @@ func TestRunRefresh_FanOutLeavesEveryLinkedManifestUntouched(t *testing.T) {
 	}
 
 	for _, name := range projects {
-		projectPath := filepath.Join(tmp, name)
-		manifestPath := filepath.Join(projectPath, config.AgentsRCFile)
+		assertLinkedManifestUntouched(t, name, filepath.Join(tmp, name), want[name])
+	}
+}
 
-		got, err := os.ReadFile(manifestPath)
-		if err != nil {
-			t.Errorf("%s: reading manifest: %v", name, err)
-			continue
+// seedLinkedProject creates a project dir holding body as its manifest, with a
+// backdated mtime so a later write is unambiguous.
+func seedLinkedProject(t *testing.T, projectPath, body string) {
+	t.Helper()
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(projectPath, config.AgentsRCFile)
+	if err := os.WriteFile(manifestPath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(manifestPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// assertLinkedManifestUntouched checks one project in the fan-out: its manifest
+// is byte-identical, carries none of the injected keys, and its lock was still
+// stamped.
+func assertLinkedManifestUntouched(t *testing.T, name, projectPath, want string) {
+	t.Helper()
+	got, err := os.ReadFile(filepath.Join(projectPath, config.AgentsRCFile))
+	if err != nil {
+		t.Errorf("%s: reading manifest: %v", name, err)
+		return
+	}
+	if string(got) != want {
+		t.Errorf("%s: refresh fan-out rewrote the manifest\n--- before ---\n%s\n--- after ---\n%s",
+			name, want, got)
+	}
+	for _, key := range []string{`"hooks"`, `"mcp"`, `"settings"`} {
+		if strings.Contains(string(got), key) {
+			t.Errorf("%s: refresh fan-out injected %s:\n%s", name, key, got)
 		}
-		if string(got) != want[name] {
-			t.Errorf("%s: refresh fan-out rewrote the manifest\n--- before ---\n%s\n--- after ---\n%s",
-				name, want[name], got)
-		}
-		for _, key := range []string{`"hooks"`, `"mcp"`, `"settings"`} {
-			if strings.Contains(string(got), key) {
-				t.Errorf("%s: refresh fan-out injected %s:\n%s", name, key, got)
-			}
-		}
-		// The lock is the machine-written artifact and must still be stamped
-		// for every project in the fan-out.
-		if _, err := os.Stat(config.AgentsLockPath(projectPath)); err != nil {
-			t.Errorf("%s: refresh must still write the lock: %v", name, err)
-		}
+	}
+	// The lock is the machine-written artifact and must still be stamped for
+	// every project in the fan-out.
+	if _, err := os.Stat(config.AgentsLockPath(projectPath)); err != nil {
+		t.Errorf("%s: refresh must still write the lock: %v", name, err)
 	}
 }
