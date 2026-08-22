@@ -108,6 +108,11 @@ worked walkthrough of `da config sync` / `explain` / `lint`.
 - `da refresh` and `da install` re-project the locked config locally and only
   re-resolve when the lock is stale, so routine relinking never reaches the
   network for an unchanged stack.
+- `da config cache prune` garbage-collects the shared config cache
+  (`~/.agents/cache/config`, which holds every fetched layer and
+  source-qualified prompt file). An entry is prunable when no registered
+  project's lockfile references its digest. It lists by default; `--apply`
+  deletes.
 
 ## Skills & Agents
 
