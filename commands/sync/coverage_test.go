@@ -117,7 +117,7 @@ func TestHasGitManifests_SkipsMissingPathsAndBadManifests(t *testing.T) {
 // the trailing hasManifests=true printGitSourcesHint call.
 func TestPostPullRefresh_AutoYesWithManifests(t *testing.T) {
 	called := 0
-	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefresh: func(string) error {
+	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefreshCurrentProject: func() error {
 		called++
 		return nil
 	}}
@@ -133,7 +133,7 @@ func TestPostPullRefresh_AutoYesWithManifests(t *testing.T) {
 // is returned.
 func TestPostPullRefresh_RefreshErrorBubblesUp(t *testing.T) {
 	want := errors.New("refresh boom")
-	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefresh: func(string) error {
+	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefreshCurrentProject: func() error {
 		return want
 	}}
 	err := postPullRefresh(deps, false)
@@ -162,7 +162,7 @@ func TestPostPullRefresh_DeclineSkipsRefresh(t *testing.T) {
 	})
 
 	called := 0
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error {
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error {
 		called++
 		return nil
 	}}
@@ -193,7 +193,7 @@ func TestPostPullRefresh_AcceptedPromptCallsRefresh(t *testing.T) {
 	})
 
 	called := 0
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error {
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error {
 		called++
 		return nil
 	}}
@@ -225,7 +225,7 @@ func TestRunSyncPush_DeclinedAtConfirm(t *testing.T) {
 		_ = r.Close()
 	})
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncPush(deps, "decline"); err != nil {
 		t.Fatalf("declined push: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestRunSyncPush_PushErrorPropagates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncPush(deps, "bad-remote"); err == nil {
 		t.Fatal("expected push error when remote is missing")
 	}
@@ -257,7 +257,7 @@ func TestRunSyncPush_PushErrorPropagates(t *testing.T) {
 // TestPull_DryRunRejectedViaRunE covers the early-return error branch when
 // --dry-run is passed to pull.
 func TestPull_DryRunRejectedViaRunE(t *testing.T) {
-	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newPullCmd(deps)
 	if err := cmd.RunE(cmd, nil); err == nil {
 		t.Fatal("expected dry-run error from pull")
