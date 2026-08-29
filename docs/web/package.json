@@ -19,15 +19,15 @@
     "test:e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
-    "@astrojs/markdown-satteri": "^0.3.5",
-    "@astrojs/starlight": "^0.41.7",
-    "@mermaid-js/layout-elk": "^0.2.2",
-    "astro": "^7.2.1",
+    "@astrojs/markdown-satteri": "^0.3.8",
+    "@astrojs/starlight": "^0.41.9",
+    "@mermaid-js/layout-elk": "^0.2.3",
+    "astro": "^7.2.8",
     "astro-mermaid": "^2.1.0",
-    "cytoscape": "^3.34.1",
-    "mermaid": "^11.16.1",
-    "satteri": "^0.9.5",
-    "sharp": "^0.35.3"
+    "cytoscape": "^3.34.2",
+    "mermaid": "^11.17.2",
+    "satteri": "^0.10.5",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
