@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -63,6 +64,39 @@ func TestNewRootCommand_RegistersAllSubcommands(t *testing.T) {
 
 	if len(root.Commands()) < len(expected) {
 		t.Errorf("root has %d subcommands; expected at least %d", len(root.Commands()), len(expected))
+	}
+}
+
+// TestNewRootCommand_CompletionScripts drives the production path Homebrew
+// invokes at cask install time: `da completion <shell>`. Cobra's built-in
+// command is otherwise hidden from the advertised subcommand list.
+func TestNewRootCommand_CompletionScripts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("AGENTS_HOME", "")
+
+	cases := []struct {
+		shell   string
+		wantSub string
+	}{
+		{"bash", "# bash completion V2 for da"},
+		{"zsh", "#compdef da"},
+		{"fish", "complete -c da"},
+		{"powershell", "Register-ArgumentCompleter"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.shell, func(t *testing.T) {
+			root := NewRootCommand()
+			var out bytes.Buffer
+			root.SetOut(&out)
+			root.SetErr(&out)
+			root.SetArgs([]string{"completion", tc.shell})
+			if err := root.Execute(); err != nil {
+				t.Fatalf("completion %s: %v\n%s", tc.shell, err, out.String())
+			}
+			if !strings.Contains(out.String(), tc.wantSub) {
+				t.Errorf("completion %s missing %q; got:\n%s", tc.shell, tc.wantSub, out.String())
+			}
+		})
 	}
 }
 

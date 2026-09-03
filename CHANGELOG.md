@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Homebrew cask shell completions.** Both tap casks (`da` and `da@<version>`)
+  now generate bash, zsh, fish, and PowerShell completions at install time via
+  GoReleaser's `generate_completions_from_executable` (Cobra format).
+- **Observability dashboard deployment + `da observability`.** Ships the workflow
+  observability dashboard as a single-tenant Cloudflare Worker (reference deployment
+  `obs.agorcha.dev`) — Durable Objects + D1 for durable iteration/score history,
+  fail-closed CF Access JWT auth, and the existing dashboard SPA served with a live
+  WebSocket transport. New `da observability login | sync | status` publishes local
+  workflow telemetry to the endpoint configured in the `.agentsrc.json`
+  `observability` block, resolving a `credential-ref` from the credential store over
+  HTTPS only. Events queue crash-safe in `.agents/active/obs-outbox/` and drain
+  idempotently (server dedupes; `sync --full` rebuilds the remote from local
+  `.agents/history/`); publishing is wired best-effort into `workflow checkpoint` /
+  `verify record` and never changes a local command's exit. See
+  `docs/cf-access-bootstrap.md` and `obs/`.
+- **`observability` block in `.agentsrc.json`.** Configures the endpoint and a
+  strict `credential-ref` auth reference (`{kind, id}`); an enabled non-loopback
+  endpoint requires auth and must be absolute `https:`.
 - **`da install` now maintains the managed `.gitignore` block.** Previously only `da refresh` wrote it, so a freshly-installed repo carried its projected outputs (`.codex/`, `.mcp.json`, `.vscode/mcp.json`, `AGENTS.md`, `.cursor/`, `.github/copilot-instructions.md`, `.github/hooks/`) as untracked noise until someone happened to run refresh. Install and refresh now share one step and converge on a byte-identical block, derived from the platforms' own declared outputs rather than a hardcoded list.
 - **`gitignore_projections` in `.agentsrc.json`.** Optional boolean opting a project out of the managed block; absent means enabled, and an explicit `false` also removes a block a previous run wrote.
 
@@ -79,6 +97,7 @@ A patch re-release fixing the macOS Developer ID signing chain (the v0.4.1 artif
 ### Fixed
 
 - **macOS signing chain.** Re-released with a corrected Developer ID signing + notarization flow; the fsguard `agentslock` allowlist line moved with the lock primitive (#213, #214, #215).
+
 
 ## [0.4.1] - 2026-06-24
 
