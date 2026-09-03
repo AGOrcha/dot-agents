@@ -1,16 +1,29 @@
 {
-  "inputs_digest": "sha256:08ce10d7e3d212c61c50fbc8ba567076fffffafacd5d0ae80429ade079f45fa2",
+  "artifact-content": {
+    "da-agc:agent/platform-dirs-change-analyst@main": "sha256:4d292e247f7be76dffd486e39c158a911f974e8d9a9d15f45bc7fb335cc60bc5",
+    "da-agc:agent/promise-gap-analyst@main": "sha256:b6bc3007f04f199fd3011c0e8936d4c36eedc2aa6cfeacd5bb56c988dabc72f3",
+    "da-agc:skill/release-docs-refresh@main": "sha256:a0a92f68253a5f88096ce5df7d8405cf3deda39334b818e799086d3c17e7ee66"
+  },
+  "inputs_digest": "sha256:15cf60373047aff2df07f60dd774c6350b2247d0e45631f0a07e042c89990b9d",
   "install": {
     "project": "dot-agents",
     "version": "dev",
-    "stamped_at": "2026-07-13T06:45:15Z"
+    "stamped_at": "2026-09-03T00:40:13Z"
   },
   "lock_version": 1,
   "refresh": {
     "version": "dev",
-    "refreshedAt": "2026-07-13T06:21:20Z"
+    "refreshedAt": "2026-09-03T00:27:01Z"
   },
   "units": {
+    "da-agc:agent/platform-dirs-change-analyst@main": {
+      "kind": "artifact",
+      "digest": "sha256:c9339530bcda34b45a9651f8b7eb72ca87d8663efa27136e3591318aaf93cd0c"
+    },
+    "da-agc:agent/promise-gap-analyst@main": {
+      "kind": "artifact",
+      "digest": "sha256:8bfa831efa0e693ffc670c6d332e5966de8b64a21a36dea4dcb2208b3fc1aa1b"
+    },
     "da-agc:dot-agents/base.json": {
       "kind": "layer",
       "digest": "692ab1c5c07aee961188db726fb7576bf9130a6b",
@@ -23,6 +36,10 @@
     "da-agc:dot-agents/base.json:execution-profile:web-spa": {
       "kind": "profile",
       "digest": "sha256:c07dd229cc0e42c6c1b6320ae26c12b5163c3bd933d5f4881f32fcc206b27e8e"
+    },
+    "da-agc:skill/release-docs-refresh@main": {
+      "kind": "artifact",
+      "digest": "sha256:ff198804ff7ae9cfa139ef9e3897c0dc624a0743f54a84a82f648435d4f41064"
     },
     "repo-local:execution-profile:daemon": {
       "kind": "profile",

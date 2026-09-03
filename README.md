@@ -85,6 +85,9 @@ fresh** — then the shared verify step.
 brew tap AGOrcha/tap && brew install da
 ```
 
+The cask generates bash, zsh, fish, and PowerShell completions from the
+installed `da` binary at install time (`da completion <shell>`).
+
 ### Install script
 
 Downloads the prebuilt `da` binary onto your `PATH` — no Go toolchain required:
