@@ -3,17 +3,28 @@
 #
 # Regenerates, purely from repo content, the list of things that still depend on
 # the CRG "bridge" and derives a READY / NOT-READY verdict for its deletion
-# (plan graph-backend-adapter-contract, task t6d). It is the deterministic,
-# re-runnable form of the §11.4-gate-condition-4 readiness check that
-# `workflow drift` is specified to consume.
+# (plan graph-backend-adapter-contract, task t6d).
 #
 #   bash scripts/crg-bridge-consumer-audit.sh            # print the audit report
 #   bash scripts/crg-bridge-consumer-audit.sh --check F  # verify F embeds this output
 #   make ... (not wired) — invoke directly or from CI
 #
 # DETERMINISTIC: two runs on an unchanged tree produce byte-identical stdout and
-# the script never mutates the working tree. The audited commit SHA + timestamp
-# go to STDERR only, so stdout stays stable for --check.
+# the script never mutates the working tree (`da workflow drift` still writes its
+# usual ~/.agents/context/drift-report.json side file — outside the repo tree,
+# unrelated to this script's stdout). The audited commit SHA + timestamp go to
+# STDERR only, so stdout stays stable for --check.
+#
+# SECTION [E] CALLS `workflow drift` RATHER THAN RE-DERIVING ITS ANSWER: the
+# §11.4-condition-4 check ("zero reads_from:[crg-bridge]") has exactly one
+# detector — internal/graphstore.BridgeConsumers, consumed by
+# `da workflow drift --path <dir> --json` (commands/workflow/drift.go). This
+# script shells out to that instead of re-implementing lockfile parsing in
+# bash, so the two can't silently diverge (see run_workflow_drift_json below).
+# --path bypasses the ~/.agents/config.json managed-project registry entirely,
+# so the result depends only on this repo's tracked .agentsrc.lock — same
+# determinism guarantee as every other section here. The cross-repo sweep
+# across the full managed set is `da workflow drift --json` (no --path).
 #
 # TWO DISTINCT SURFACES are audited, because t6d removes BOTH together (§11.4):
 #   [A] the legacy Python CRG subprocess bridge — internal/graphstore/crg.go
@@ -106,9 +117,45 @@ D_CI="$(present_if .github/workflows/test.yml 'code-review-graph')"
 D_HOOK="$(present_if commands/kg/sync_code_warm_link.go 'skipping code graph update')"
 D_MCP="$(present_if commands/kg/kg.go 'NewMCPServer')"
 
-# ── [E] does workflow drift actually run the reads_from:[crg-bridge] sweep? ──
-E_DRIFT_WIRED="$(if grep -rqF 'BridgeConsumers(' commands/workflow 2>/dev/null; \
-  then echo wired; else echo UNWIRED; fi)"
+# ── [E] the real reads_from:[crg-bridge] check — via `workflow drift`, not a
+# bash reimplementation. See the header comment for why this shells out
+# instead of re-deriving the answer.
+
+# da_bin: prefer a prebuilt binary (CI's own convention — see
+# .github/workflows/test.yml's DA_BIN — and any local `go build -o ./bin/da`),
+# fall back to whatever `da` is on PATH, else `go run` (slower, but requires
+# nothing but the Go toolchain this repo already needs to build).
+da_bin() {
+  if [[ -x ./bin/da ]]; then printf '%s\n' ./bin/da; return 0; fi
+  if command -v da >/dev/null 2>&1; then command -v da; return 0; fi
+  printf '%s\n' "__go_run__"
+  return 0
+}
+
+# run_workflow_drift_json: the §11.4-condition-4 finding for THIS repo,
+# straight from `da workflow drift --path . --json` (bridge_consumer_status /
+# bridge_consumers on reports[0]). Empty stdout on any failure (missing Go
+# toolchain, build error) — callers treat that as "unavailable", never a hard
+# script failure.
+run_workflow_drift_json() {
+  local bin
+  bin="$(da_bin)"
+  if [[ "$bin" == "__go_run__" ]]; then
+    go run ./cmd/da workflow drift --path "$REPO_ROOT" --json 2>/dev/null
+  else
+    "$bin" workflow drift --path "$REPO_ROOT" --json 2>/dev/null
+  fi
+  return 0
+}
+
+DRIFT_JSON="$(run_workflow_drift_json || true)"
+if [[ -n "$DRIFT_JSON" ]] && command -v jq >/dev/null 2>&1 \
+  && E_BRIDGE_STATUS="$(printf '%s' "$DRIFT_JSON" | jq -re '.reports[0].bridge_consumer_status // empty' 2>/dev/null)"; then
+  E_BRIDGE_CONSUMERS_N="$(printf '%s' "$DRIFT_JSON" | jq -r '(.reports[0].bridge_consumers // []) | length')"
+else
+  E_BRIDGE_STATUS="unavailable"
+  E_BRIDGE_CONSUMERS_N=0
+fi
 
 # ── [E3] is a kg-native replacement actually serving the `da kg` surface? ──
 # Condition 3 of §11.4 is met only when the built-in registries carry the CRG
@@ -123,9 +170,10 @@ else
 fi
 
 # ── Verdict (derivable half of §11.4): bridge is deletable only when the
-# Python machinery has zero live consumers AND no view reads the mirror. The
+# Python machinery has zero live consumers, no view reads the mirror (repo
+# grep signals), AND `workflow drift`'s own lockfile-based check agrees. The
 # CI-soak halves (§11.4 conditions 1-2) are external facts, reported not derived.
-if [[ "$A_PROD_N" -gt 0 ]] || [[ "$B_READS_N" -gt 0 ]]; then
+if [[ "$A_PROD_N" -gt 0 ]] || [[ "$B_READS_N" -gt 0 ]] || [[ "$E_BRIDGE_STATUS" == "consumers_found" ]]; then
   VERDICT="NOT-READY — KEEP THE BRIDGE"
 else
   VERDICT="IN-REPO-CLEAR (bridge deletable pending external §11.4 CI soak)"
@@ -170,9 +218,14 @@ $(printf '%s\n' "$A_PROD" | sed '/^$/d' | while read -r f; do printf '      %s  
     3. out-of-tree consumer migration     : ${E_NATIVE}
                                             (${E_NATIVE_NOTE};
                                              RegisterCRGFamily prod callers = ${B_REG_N})
-    4. zero reads_from:[crg-bridge]        : in-repo count ${B_READS_N}; cross-repo sweep
-                                            NOT automated — workflow drift is ${E_DRIFT_WIRED}
-                                            for graphstore.BridgeConsumers()
+    4. zero reads_from:[crg-bridge]        : in-repo grep count ${B_READS_N}; \`workflow drift\`
+                                            (da workflow drift --path . --json) reports
+                                            bridge_consumer_status=${E_BRIDGE_STATUS}
+                                            (${E_BRIDGE_CONSUMERS_N} live consumer(s) here).
+                                            Managed-repo sweep: \`da workflow drift --json\`
+                                            (no --path) walks every registered project and
+                                            summarizes bridge_sweep.{consumers_found,clean,
+                                            not_a_kg_repo}_repos.
 
 VERDICT: ${VERDICT}
 EOF

@@ -720,6 +720,7 @@ func TestRunKGCodeStatus_JSONOutput(t *testing.T) {
 	cmd.Flags().String("repo", repo, "")
 	cmd.Flags().Bool("json", true, "")
 
+	writeDiscoverableCRGStub(t, repo)
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {

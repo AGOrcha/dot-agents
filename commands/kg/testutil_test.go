@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,24 @@ func fakeCRGEmittingJSON(t *testing.T, repo, body string) {
 func useBridgeBackend(t *testing.T) {
 	t.Helper()
 	t.Setenv(graphBackendEnv, "crg-bridge")
+}
+
+// writeDiscoverableCRGStub creates the minimum on-disk entrypoint needed by
+// status-only bridge tests. Those tests never execute the binary; they only
+// require NewCRGBridge to discover the selected rollback backend.
+func writeDiscoverableCRGStub(t *testing.T, repo string) {
+	t.Helper()
+	binDir := "bin"
+	if runtime.GOOS == "windows" {
+		binDir = "Scripts"
+	}
+	path := filepath.Join(repo, ".venv", binDir, "code-review-graph")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("status-only test stub"), 0755); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // runGit is a tiny helper to invoke git in a workdir.

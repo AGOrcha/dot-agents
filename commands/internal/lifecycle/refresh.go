@@ -52,25 +52,40 @@ func DetectAndEnableNewPlatforms(cfg *config.Config) []string {
 func NewRefreshCmd(deps Deps) *cobra.Command {
 	var importAlso bool
 	var inexact bool
+	var allProjects bool
 	cmd := &cobra.Command{
 		Use:   "refresh [project]",
-		Short: "Refresh managed setup in projects from ~/.agents/",
-		Long: `Re-applies links and config from ~/.agents/ into project directories.
-Use after pulling changes to ~/.agents/ or when a project's agent config is out of sync.`,
+		Short: "Refresh the current project's managed setup from ~/.agents/",
+		Long: `Re-applies links and config from ~/.agents/ into a project directory.
+Use after pulling changes to ~/.agents/ or when a project's agent config is out of sync.
+
+Scope: refresh operates on the CURRENT project only — the managed project
+containing the working directory. Name a project to refresh that one instead,
+or pass --all to sweep every project registered on this machine. Cross-repo
+effects are never implicit: --all is the only way to reach more than one repo.
+
+Run outside any managed project without --all, refresh refuses rather than
+guessing.`,
 		Example: deps.ExampleBlock(
 			"  da refresh",
 			"  da refresh billing-api",
+			"  da refresh --all",
 			"  da refresh --import --dry-run",
 		),
-		Args: deps.MaximumNArgsWithHints(1, "Optionally pass one managed project name to limit the refresh."),
+		Args: deps.MaximumNArgsWithHints(1, "Optionally pass one managed project name to refresh a project other than the current one."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filter := ""
 			if len(args) > 0 {
 				filter = args[0]
 			}
-			return deps.RunRefresh(filter, importAlso, inexact)
+			if filter != "" && allProjects {
+				return ErrorWithHintsFn("cannot combine a project name with --all",
+					"Drop --all to refresh just "+filter+", or drop the project name to refresh every registered project.")
+			}
+			return deps.RunRefresh(filter, importAlso, inexact, allProjects)
 		},
 	}
+	cmd.Flags().BoolVar(&allProjects, "all", false, "Refresh EVERY project registered on this machine (default: the current project only)")
 	cmd.Flags().BoolVar(&importAlso, "import", false, "Also import global user configs into ~/.agents before relinking")
 	cmd.Flags().BoolVar(&inexact, "inexact", false, "Keep additive behavior: write the resolved set but do NOT prune managed outputs no longer in it (refresh otherwise converges the tree to exactly what the lock declares)")
 	return cmd

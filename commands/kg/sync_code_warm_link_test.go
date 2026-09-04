@@ -1558,6 +1558,7 @@ func TestRunKGBuild_BusyOutcome(t *testing.T) {
 func TestCheckCRGReadiness_ReadyNoWarn(t *testing.T) {
 	useBridgeBackend(t)
 	repo := t.TempDir()
+	writeDiscoverableCRGStub(t, repo)
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
 	})

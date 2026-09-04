@@ -39,9 +39,9 @@ func printGitSourcesHint() {
 }
 
 func postPullRefresh(deps Deps, hasManifests bool) error {
-	if deps.Flags.Yes || ui.Confirm("Refresh managed projects with pulled changes?", false) {
+	if deps.Flags.Yes || ui.Confirm("Refresh this project with pulled changes?", false) {
 		fmt.Fprintln(os.Stdout)
-		if err := deps.RunRefresh(""); err != nil {
+		if err := deps.RunRefreshCurrentProject(); err != nil {
 			return err
 		}
 		if hasManifests {
@@ -50,7 +50,7 @@ func postPullRefresh(deps Deps, hasManifests bool) error {
 		}
 		return nil
 	}
-	fmt.Fprintf(os.Stdout, "\n  %sRun 'da refresh' to apply changes to managed projects.%s\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "\n  %sRun 'da refresh' to apply changes to this project ('da refresh --all' for every registered project).%s\n", ui.Dim, ui.Reset)
 	if hasManifests {
 		printGitSourcesHint()
 	}

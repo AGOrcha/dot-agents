@@ -182,8 +182,7 @@ func (r *LayeredResolver) readOneLockedLayer(entry LayerRef, sources map[string]
 		return ResolvedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("no resolved SHA in %s for %q (run `da config sync`)", AgentsLockFile, entry.Ref)}
 	}
 
-	cacheDir := layerCacheDir(parts.SourceID, parts.LayerPath)
-	data, ok := readCachedLayer(cacheDir, lock.ResolvedSHA)
+	data, ok := readCachedUnit(layerTarget(parts.SourceID, parts.LayerPath), lock.ResolvedSHA)
 	if !ok {
 		return ResolvedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("locked SHA %s for %q not in cache (run `da config sync`)", lock.ResolvedSHA, entry.Ref)}
 	}

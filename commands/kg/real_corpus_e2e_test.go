@@ -348,6 +348,7 @@ func findQueryResult(resp GraphQueryResponse, id string) *GraphQueryResult {
 // under -race in CI. The subtree still contains dozens of real Go symbols, so
 // the node-count and impact assertions remain meaningful.
 func TestKGCodeLane_RealCorpus(t *testing.T) {
+	useBridgeBackend(t)
 	if testing.Short() {
 		t.Skip("skipping real-corpus code lane in -short mode (shells out to code-review-graph)")
 	}
