@@ -107,9 +107,9 @@ func verifyOneLayerLock(entry LayerRef, sources map[string]Source, locked map[st
 	// the same way (localFetcher hashes the bytes and writes the cache), and the
 	// offline resolver reads all of them from the cache at the locked SHA. So a
 	// locked layer of any source type must have its cached bytes present.
-	cacheDir := layerCacheDir(parts.SourceID, parts.LayerPath)
-	st.CachePath = cachedLayerPath(cacheDir, st.SHA)
-	if _, ok := readCachedLayer(cacheDir, st.SHA); ok {
+	target := layerTarget(parts.SourceID, parts.LayerPath)
+	st.CachePath = target.pathFor(st.SHA)
+	if _, ok := readCachedUnit(target, st.SHA); ok {
 		st.Cached = true
 		return st
 	}

@@ -1,6 +1,6 @@
 {
   "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
-  "version": 1,
+  "version": 2,
   "project": "dot-agents",
   "skills": [
     "research-intake",
@@ -21,18 +21,6 @@
     "promise-gap-analyst"
   ],
   "hooks": true,
-  "work_tracking": {
-    "backend": "git-ref"
-  },
-  "observability": {
-    "enabled": true,
-    "endpoint": "https://obs.agorcha.dev",
-    "push_throttle_seconds": 0,
-    "auth": {
-      "kind": "credential-ref",
-      "id": "agorcha-obs"
-    }
-  },
   "mcp": [
     "code-review-graph",
     "sonarqube"
@@ -44,11 +32,20 @@
     },
     {
       "type": "git",
-      "id": "da-agc",
       "url": "git@github.com:AGOrcha/da-agc.git",
-      "ref": "main"
+      "ref": "main",
+      "id": "da-agc"
     }
   ],
+  "observability": {
+    "enabled": true,
+    "endpoint": "https://obs.agorcha.dev",
+    "push_throttle_seconds": 0,
+    "auth": {
+      "kind": "credential-ref",
+      "id": "agorcha-obs"
+    }
+  },
   "extends": [
     "da-agc:dot-agents/base.json"
   ],
@@ -278,6 +275,9 @@
       }
     },
     "default_class": "situational"
+  },
+  "work_tracking": {
+    "backend": "git-ref"
   },
   "stage_profiles": {
     "executor": {

@@ -1342,7 +1342,7 @@ func TestLocalFetcher(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cacheDir := filepath.Join(t.TempDir(), "cache")
+	cacheDir := FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")}
 	f := &localFetcher{}
 	got, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: layerPath}, cacheDir)
 	if err != nil {
@@ -1355,14 +1355,14 @@ func TestLocalFetcher(t *testing.T) {
 		t.Fatalf("sha = %q, want content hash", got.ResolvedSHA)
 	}
 	// Cache file is written content-addressed by SHA.
-	if _, ok := readCachedLayer(cacheDir, got.ResolvedSHA); !ok {
+	if _, ok := readCachedUnit(cacheDir, got.ResolvedSHA); !ok {
 		t.Fatal("expected layer written to cache")
 	}
 }
 
 func TestLocalFetcherMissing(t *testing.T) {
 	f := &localFetcher{}
-	_, err := f.Fetch(Source{Type: "local", Path: t.TempDir()}, LayerRefParts{LayerPath: "nope.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "local", Path: t.TempDir()}, LayerRefParts{LayerPath: "nope.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for missing local layer")
 	}
@@ -1379,7 +1379,7 @@ func TestHTTPFetcher(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cacheDir := filepath.Join(t.TempDir(), "cache")
+	cacheDir := FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")}
 	f := &httpFetcher{client: srv.Client()}
 	got, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
 	if err != nil {
@@ -1404,7 +1404,7 @@ func TestHTTPFetcher(t *testing.T) {
 
 func TestHTTPFetcherRejectsNonHTTPS(t *testing.T) {
 	f := &httpFetcher{}
-	_, err := f.Fetch(Source{Type: "http", URL: "http://insecure.example/"}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "http", URL: "http://insecure.example/"}, LayerRefParts{LayerPath: "x.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "https") {
 		t.Fatalf("expected https-enforcement error, got %v", err)
 	}
@@ -1416,7 +1416,7 @@ func TestHTTPFetcherNon200(t *testing.T) {
 	}))
 	defer srv.Close()
 	f := &httpFetcher{client: srv.Client()}
-	_, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "x.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for non-200 status")
 	}
@@ -1472,7 +1472,7 @@ func TestGitFetcherClonesAndCaches(t *testing.T) {
 	body := []byte(`{"agents":["claude"]}`)
 	url, branch, wantSHA := makeGitFixture(t, "org/base.json", body)
 
-	cacheDir := filepath.Join(t.TempDir(), "cache")
+	cacheDir := FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")}
 	f := &gitFetcher{}
 	got, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
 	if err != nil {
@@ -1510,7 +1510,7 @@ func TestGitFetcherDefaultsRefToSourceRefThenMain(t *testing.T) {
 	// both are empty only if the fixture branch matches; assert the source-ref
 	// branch resolves regardless.
 	f := &gitFetcher{}
-	got, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	got, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "base.json"}, FetchTarget{Dir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -1523,7 +1523,7 @@ func TestGitFetcherBadURL(t *testing.T) {
 	f := &gitFetcher{}
 	// A URL that transport.ParseURL rejects outright (control char) hits the
 	// gitremote.ParseRemoteURL hard-error branch before any clone.
-	_, err := f.Fetch(Source{Type: "git", URL: "ht!tp://%zz"}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "git", URL: "ht!tp://%zz"}, LayerRefParts{LayerPath: "x.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for malformed git url")
 	}
@@ -1532,7 +1532,7 @@ func TestGitFetcherBadURL(t *testing.T) {
 func TestGitFetcherMissingRef(t *testing.T) {
 	url, _, _ := makeGitFixture(t, "base.json", []byte("{}"))
 	f := &gitFetcher{}
-	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: "no-such-branch"}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: "no-such-branch"}, LayerRefParts{LayerPath: "base.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error cloning a non-existent ref")
 	}
@@ -1541,7 +1541,7 @@ func TestGitFetcherMissingRef(t *testing.T) {
 func TestGitFetcherMissingLayerPath(t *testing.T) {
 	url, branch, _ := makeGitFixture(t, "base.json", []byte("{}"))
 	f := &gitFetcher{}
-	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "nope.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "nope.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error reading a missing layer path from the clone")
 	}
@@ -1555,7 +1555,7 @@ func TestGitFetcherOversizedLayer(t *testing.T) {
 	}
 	url, branch, _ := makeGitFixture(t, "big.json", big)
 	f := &gitFetcher{}
-	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "big.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "big.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for oversized layer")
 	}
@@ -1604,7 +1604,7 @@ func emptyRepoCloner() func(context.Context, string, string) (*gogit.Repository,
 func TestGitFetcherHeadError(t *testing.T) {
 	// Cloner returns a repo with no commits -> repo.Head() errors.
 	f := &gitFetcher{cloner: emptyRepoCloner()}
-	_, err := f.Fetch(Source{Type: "git", URL: "file:///x", Ref: "main"}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///x", Ref: "main"}, LayerRefParts{LayerPath: "base.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error when HEAD cannot be resolved")
 	}
@@ -1614,7 +1614,7 @@ func TestGitFetcherCloneError(t *testing.T) {
 	f := &gitFetcher{cloner: func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
 		return nil, nil, errors.New("clone boom")
 	}}
-	_, err := f.Fetch(Source{Type: "git", URL: "file:///x", Ref: "main"}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///x", Ref: "main"}, LayerRefParts{LayerPath: "base.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "git clone") {
 		t.Fatalf("expected wrapped clone error, got %v", err)
 	}
@@ -1636,7 +1636,7 @@ func TestWriteCachedLayerMkdirError(t *testing.T) {
 	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCachedLayer(filepath.Join(f, "sub"), "sha", []byte("{}")); err == nil {
+	if err := writeCachedUnit(FetchTarget{Dir: filepath.Join(f, "sub")}, "sha", []byte("{}")); err == nil {
 		t.Fatal("expected mkdir error when parent is a file")
 	}
 }
@@ -1652,7 +1652,7 @@ func TestLocalFetcherCacheWriteError(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &localFetcher{}
-	_, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "x.json"}, filepath.Join(blocker, "cache"))
+	_, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "x.json"}, FetchTarget{Dir: filepath.Join(blocker, "cache")})
 	if err == nil {
 		t.Fatal("expected cache-write error")
 	}
@@ -1668,7 +1668,7 @@ func TestHTTPFetcherCacheWriteError(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &httpFetcher{client: srv.Client()}
-	_, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "x.json"}, filepath.Join(blocker, "cache"))
+	_, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "x.json"}, FetchTarget{Dir: filepath.Join(blocker, "cache")})
 	if err == nil {
 		t.Fatal("expected cache-write error")
 	}
@@ -1685,7 +1685,7 @@ func TestGitFetcherCacheWriteError(t *testing.T) {
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.Fetch(Source{Type: "git", URL: "file:///r", Ref: "main"}, LayerRefParts{LayerPath: "x.json"}, filepath.Join(blocker, "cache"))
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///r", Ref: "main"}, LayerRefParts{LayerPath: "x.json"}, FetchTarget{Dir: filepath.Join(blocker, "cache")})
 	if err == nil {
 		t.Fatal("expected cache-write error")
 	}
@@ -1697,7 +1697,7 @@ func TestGitFetcherReadError(t *testing.T) {
 	dir := t.TempDir()
 	makeGitFixtureAt(t, dir, "x.json", []byte("{}"))
 	f := &gitFetcher{cloner: committedRepoFS(t, dir, nil)}
-	_, err := f.Fetch(Source{Type: "git", URL: "file:///r", Ref: "main"}, LayerRefParts{LayerPath: "missing.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///r", Ref: "main"}, LayerRefParts{LayerPath: "missing.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "git read") {
 		t.Fatalf("expected git read error, got %v", err)
 	}
@@ -1725,7 +1725,7 @@ func TestHTTPFetcherCapturesCacheKeyValidators(t *testing.T) {
 	defer srv.Close()
 
 	f := &httpFetcher{client: srv.Client()}
-	got, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, filepath.Join(t.TempDir(), "cache"))
+	got, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -1756,7 +1756,7 @@ func TestLocalFetcherCapturesWorktreeCacheKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &localFetcher{}
-	got, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "base.json"}, filepath.Join(t.TempDir(), "cache"))
+	got, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "base.json"}, FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -1771,7 +1771,7 @@ func TestLocalFetcherCapturesWorktreeCacheKey(t *testing.T) {
 	if err := os.WriteFile(full, []byte(`{"skills":["x","y"]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got2, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "base.json"}, filepath.Join(t.TempDir(), "cache2"))
+	got2, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "base.json"}, FetchTarget{Dir: filepath.Join(t.TempDir(), "cache2")})
 	if err != nil {
 		t.Fatalf("Fetch (2nd): %v", err)
 	}
@@ -1938,11 +1938,11 @@ type refreshFakeFetcher struct {
 	refreshSeen []bool // forceRefresh value per call
 }
 
-func (f *refreshFakeFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
-	return f.FetchRefresh(src, parts, cacheDir, false)
+func (f *refreshFakeFetcher) Fetch(src Source, parts LayerRefParts, target FetchTarget) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, target, false)
 }
 
-func (f *refreshFakeFetcher) FetchRefresh(_ Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
+func (f *refreshFakeFetcher) FetchRefresh(_ Source, parts LayerRefParts, target FetchTarget, forceRefresh bool) (FetchedLayer, error) {
 	f.calls++
 	f.refreshSeen = append(f.refreshSeen, forceRefresh)
 	body, ok := f.files[parts.LayerPath]
@@ -1954,11 +1954,11 @@ func (f *refreshFakeFetcher) FetchRefresh(_ Source, parts LayerRefParts, cacheDi
 		sha = contentHash([]byte(body))
 	}
 	if !forceRefresh {
-		if cached, ok := readCachedLayer(cacheDir, sha); ok {
+		if cached, ok := readCachedUnit(target, sha); ok {
 			return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
 		}
 	}
-	if err := writeCachedLayer(cacheDir, sha, []byte(body)); err != nil {
+	if err := writeCachedUnit(target, sha, []byte(body)); err != nil {
 		return FetchedLayer{}, err
 	}
 	return FetchedLayer{Data: []byte(body), ResolvedSHA: sha, CacheHit: false, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
@@ -2066,13 +2066,13 @@ func TestGitFetcherRefreshBypassesCache(t *testing.T) {
 	fresh := []byte(`{"skills":["fresh"]}`)
 	url, branch, sha := makeGitFixture(t, "org/base.json", fresh)
 	f := &gitFetcher{}
-	cacheDir := filepath.Join(t.TempDir(), "cache")
+	cacheDir := FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")}
 	src := Source{Type: "git", URL: url, Ref: branch}
 	parts := LayerRefParts{LayerPath: "org/base.json"}
 	// Pre-seed the cache at the resolved SHA with STALE bytes the fetcher would
 	// serve on a normal fetch.
 	stale := []byte(`{"skills":["stale"]}`)
-	if err := writeCachedLayer(cacheDir, sha, stale); err != nil {
+	if err := writeCachedUnit(cacheDir, sha, stale); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2105,9 +2105,9 @@ func TestHTTPFetcherRefreshBypassesCache(t *testing.T) {
 	}))
 	defer srv.Close()
 	f := &httpFetcher{client: srv.Client()}
-	cacheDir := filepath.Join(t.TempDir(), "cache")
+	cacheDir := FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")}
 	sha := contentHash([]byte(body))
-	if err := writeCachedLayer(cacheDir, sha, []byte(body)); err != nil {
+	if err := writeCachedUnit(cacheDir, sha, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2136,7 +2136,7 @@ func TestHTTPFetcherRefreshBypassesCache(t *testing.T) {
 func TestFetchWithRefreshFallsBackToFetch(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	plain := &fakeFetcher{files: map[string]string{"org/base.json": `{"skills":["x"]}`}, sha: "abc0000000000000000000000000000000000000"}
-	cacheDir := filepath.Join(t.TempDir(), "cache")
+	cacheDir := FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")}
 	got, err := fetchWithRefresh(plain, Source{Type: "git"}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir, true)
 	if err != nil {
 		t.Fatalf("fetchWithRefresh: %v", err)
@@ -3490,7 +3490,7 @@ func TestValidateGitSourceURL(t *testing.T) {
 func TestReadCachedLayerBytes(t *testing.T) {
 	withPackagesCache(t)
 	body := []byte(`{"version":2,"skills":["s"]}`)
-	if err := writeCachedLayer(layerCacheDir("acme", "org/base.json"), "deadbeef", body); err != nil {
+	if err := writeCachedUnit(layerTarget("acme", "org/base.json"), "deadbeef", body); err != nil {
 		t.Fatalf("seed cache: %v", err)
 	}
 	got, ok := ReadCachedLayerBytes("acme", "org/base.json", "deadbeef")
@@ -3512,7 +3512,7 @@ func TestLockedRemoteLayerBytes(t *testing.T) {
 		t.Fatalf("parse ref: %v", err)
 	}
 	body := []byte(`{"version":2}`)
-	if err := writeCachedLayer(layerCacheDir("acme", "org/base.json"), "sha1", body); err != nil {
+	if err := writeCachedUnit(layerTarget("acme", "org/base.json"), "sha1", body); err != nil {
 		t.Fatalf("seed cache: %v", err)
 	}
 
@@ -4013,7 +4013,7 @@ func TestGitFetcherSSHNoAgentNoKeyErrorsClearly(t *testing.T) {
 	_, err := f.Fetch(
 		Source{Type: "git", URL: "git@github.com:acme/does-not-matter.git", Ref: "main"},
 		LayerRefParts{LayerPath: "layer.json"},
-		filepath.Join(t.TempDir(), "cache"),
+		FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")},
 	)
 	if err == nil {
 		t.Fatal("expected an ssh auth error")

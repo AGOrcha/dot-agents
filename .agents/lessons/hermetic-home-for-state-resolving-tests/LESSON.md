@@ -57,6 +57,56 @@ buries the bug AND defeats the gate. Make the test hermetic instead.
 - Treat "this test only fails on one machine / one shard" as a hermeticity smell
   first, not an infra flake.
 
+## Guard (regression-proofing)
+
+Remembering `t.Setenv("HOME", ...)` in every new test is a discipline that
+erodes over time — it did: `commands/skills/promote_test.go`'s pre-fix
+`NewTempProject`/`WritePreservationManifest` sandboxed `AGENTS_HOME` but not
+`HOME`, and the skill-promote mirror step (`config.UserHomeDir()` in
+`commands/skills/promote.go`) leaked real symlinks (`my-skill`, `idem-skill`,
+`extra-skill`) into the developer's actual `~/.agents/skills` and
+`~/.claude/skills`.
+
+Don't rely on discipline alone. `internal/testutil/homeguard.go` provides a
+package-wide hermeticity guard: `HomeGuardBefore()` snapshots the developer's
+real `~/.agents/{skills,agents,hooks,plugins}` and
+`~/.claude/{skills,agents,hooks,plugins}` trees before any test runs;
+`CheckAndReport()` re-snapshots after and fails the run if anything new
+appeared — independent of which individual test forgot to sandbox HOME. Wire
+it into every package's `TestMain` that resolves `AGENTS_HOME`/`HOME` in
+tests:
+
+```go
+func TestMain(m *testing.M) {
+    homeGuard := testutil.HomeGuardBefore()
+    code := m.Run()
+    if n := homeGuard.CheckAndReport(); n > 0 && code == 0 {
+        code = 1
+    }
+    os.Exit(code)
+}
+```
+
+As of the fix/test-isolation-real-home cleanup this is wired into every
+package with `t.Setenv("AGENTS_HOME", ...)` in its tests (commands,
+commands/agents, commands/config, commands/hooks, commands/internal/lifecycle,
+commands/internal/mcp, commands/internal/rules, commands/internal/settings,
+commands/skills, commands/sync, commands/workflow, internal/config [via the
+external `config_test` package — importing `testutil` from an internal test
+file would create an import cycle since `testutil` imports `config`],
+internal/links, internal/platform, internal/projectsync,
+internal/review/auth). Add it to any new package that gains AGENTS_HOME-
+sandboxing tests.
+
+A subprocess test helper that shells the real `da` binary (e.g.
+`commands/workflow/testutil_test.go::runKGSetupViaCLI`) is a second escape
+class the guard does not directly instrument (the write happens in a child
+process, but still lands under the same real-home directories the guard
+watches — so the package-level `TestMain` guard still catches it). Explicitly
+override `HOME`/`AGENTS_HOME`/`USERPROFILE` in the subprocess's `cmd.Env`
+too, rather than inheriting `os.Environ()` verbatim, so the helper is safe
+even before the parent test remembers to sandbox anything.
+
 ## Related
 
 - [[credstore-loader-test-hangs-on-macos-keychain]] — the keychain-specific

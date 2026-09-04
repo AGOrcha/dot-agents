@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/journal"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestMain installs a hermetic base PATH for the whole package test binary.
@@ -38,6 +39,16 @@ import (
 // journal events (p3b), and every existing review test that drives those runners
 // would otherwise write events.log into the developer's real ~/.local/state.
 func TestMain(m *testing.M) {
+	// Hermeticity guard: snapshot the developer's real ~/.agents and
+	// ~/.claude managed-bucket trees before any test runs. This package
+	// drives `da skills`/`da agents` create+promote flows end-to-end
+	// (skills_test.go, agentsrc_mutations_test.go, run_test.go), which reach
+	// os.UserHomeDir() for the global-scope mirror step — a test that forgets
+	// to t.Setenv("HOME", ...) leaks real symlinks into the developer's
+	// machine. See internal/testutil/homeguard.go and
+	// .agents/lessons/hermetic-home-for-state-resolving-tests/LESSON.md.
+	homeGuard := testutil.HomeGuardBefore()
+
 	if runtime.GOOS != "windows" {
 		sep := string(os.PathListSeparator)
 		os.Setenv("PATH", filepath.Join(runtime.GOROOT(), "bin")+sep+"/usr/bin"+sep+"/bin"+sep+"/usr/sbin"+sep+"/sbin")
@@ -55,5 +66,8 @@ func TestMain(m *testing.M) {
 	reviewJournalEmit = func(string, journal.Envelope) error { return nil }
 	code := m.Run()
 	os.RemoveAll(dir)
+	if n := homeGuard.CheckAndReport(); n > 0 && code == 0 {
+		code = 1
+	}
 	os.Exit(code)
 }

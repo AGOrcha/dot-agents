@@ -16,11 +16,16 @@ import (
 // "settings": false` into each sub-repo's local .agentsrc.json.
 //
 // The fan-out is what made the blast radius workspace-wide, and it is also what
-// produced the observed asymmetry: runRefresh iterates cfg.ListProjects() — the
+// produced the observed asymmetry: the sweep iterates cfg.ListProjects() — the
 // managed-project registry — so registered MAIN checkouts were rewritten while
 // unregistered scratch git worktrees never were. A single-project test cannot
 // catch a regression in the loop, so this asserts the property across THREE
 // registered projects at once, on raw bytes.
+//
+// The sweep now requires an explicit `da refresh --all` (the default scope is
+// the current project — see refresh_scope_test.go), which shrinks the blast
+// radius of a future injection bug but does not remove it: --all still visits
+// every project, so this guard stays.
 func TestRunRefresh_FanOutLeavesEveryLinkedManifestUntouched(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -61,8 +66,10 @@ func TestRunRefresh_FanOutLeavesEveryLinkedManifestUntouched(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	// No project filter: this is the workspace-root fan-out over ALL projects.
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	// The machine-wide fan-out. It is now opt-in (`da refresh --all`) rather
+	// than the default, but it still exists, so the manifest-untouched property
+	// still has to hold across every project it visits.
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh: %v", err)
 	}
 

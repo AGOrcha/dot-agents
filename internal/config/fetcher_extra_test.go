@@ -28,7 +28,7 @@ func (errRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 
 func TestHTTPFetcherTransportError(t *testing.T) {
 	f := &httpFetcher{client: &http.Client{Transport: errRoundTripper{}}}
-	_, err := f.Fetch(Source{Type: "http", URL: "https://example.test"}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "http", URL: "https://example.test"}, LayerRefParts{LayerPath: "x.json"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected transport error")
 	}
@@ -42,7 +42,7 @@ func TestLocalFetcherURLFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &localFetcher{}
-	got, err := f.Fetch(Source{Type: "local", URL: srcDir}, LayerRefParts{LayerPath: "base.json"}, filepath.Join(t.TempDir(), "cache"))
+	got, err := f.Fetch(Source{Type: "local", URL: srcDir}, LayerRefParts{LayerPath: "base.json"}, FetchTarget{Dir: filepath.Join(t.TempDir(), "cache")})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestLocalFetcherReadDirError(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &localFetcher{}
-	_, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "adir"}, t.TempDir())
+	_, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "adir"}, FetchTarget{Dir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected read error for directory layer path")
 	}

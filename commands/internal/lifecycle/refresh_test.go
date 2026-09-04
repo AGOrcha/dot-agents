@@ -165,7 +165,7 @@ func stubMaximumNArgsWithHints(n int, _ ...string) cobra.PositionalArgs {
 	return cobra.MaximumNArgs(n)
 }
 
-func depsWithRunRefresh(run func(string, bool, bool) error) Deps {
+func depsWithRunRefresh(run func(string, bool, bool, bool) error) Deps {
 	return Deps{
 		ExampleBlock:          stubExampleBlock,
 		MaximumNArgsWithHints: stubMaximumNArgsWithHints,
@@ -177,7 +177,7 @@ func depsWithRunRefresh(run func(string, bool, bool) error) Deps {
 // presence of the --import flag. Positive: a known-good Deps wires
 // everything cleanly.
 func TestNewRefreshCmd_MetadataAndFlag(t *testing.T) {
-	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool, bool) error { return nil }))
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool, bool, bool) error { return nil }))
 
 	if cmd.Use != "refresh [project]" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "refresh [project]")
@@ -210,7 +210,7 @@ func TestNewRefreshCmd_RunEPassesFilterAndImportFlag(t *testing.T) {
 	var gotImport bool
 	called := false
 
-	cmd := NewRefreshCmd(depsWithRunRefresh(func(filter string, importAlso, _ bool) error {
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(filter string, importAlso, _, _ bool) error {
 		called = true
 		gotFilter = filter
 		gotImport = importAlso
@@ -240,7 +240,7 @@ func TestNewRefreshCmd_RunEPassesFilterAndImportFlag(t *testing.T) {
 func TestNewRefreshCmd_RunEPassesInexactFlag(t *testing.T) {
 	t.Run("flag set", func(t *testing.T) {
 		var gotInexact bool
-		cmd := NewRefreshCmd(depsWithRunRefresh(func(_ string, _, inexact bool) error {
+		cmd := NewRefreshCmd(depsWithRunRefresh(func(_ string, _, inexact, _ bool) error {
 			gotInexact = inexact
 			return nil
 		}))
@@ -254,7 +254,7 @@ func TestNewRefreshCmd_RunEPassesInexactFlag(t *testing.T) {
 	})
 	t.Run("flag absent defaults false", func(t *testing.T) {
 		gotInexact := true
-		cmd := NewRefreshCmd(depsWithRunRefresh(func(_ string, _, inexact bool) error {
+		cmd := NewRefreshCmd(depsWithRunRefresh(func(_ string, _, inexact, _ bool) error {
 			gotInexact = inexact
 			return nil
 		}))
@@ -273,7 +273,7 @@ func TestNewRefreshCmd_RunEPassesInexactFlag(t *testing.T) {
 // the no-swallowed-error contract for the lifecycle dispatch boundary.
 func TestNewRefreshCmd_RunEPropagatesError(t *testing.T) {
 	sentinel := errors.New("refresh deliberately failed")
-	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool, bool) error {
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool, bool, bool) error {
 		return sentinel
 	}))
 	cmd.SetArgs(nil)
@@ -286,7 +286,7 @@ func TestNewRefreshCmd_RunEPropagatesError(t *testing.T) {
 // "no positional arg → empty filter string" contract.
 func TestNewRefreshCmd_RunEEmptyArgsPassesEmptyFilter(t *testing.T) {
 	var seenFilter = "sentinel-not-overwritten"
-	cmd := NewRefreshCmd(depsWithRunRefresh(func(filter string, _, _ bool) error {
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(filter string, _, _ bool, _ bool) error {
 		seenFilter = filter
 		return nil
 	}))
@@ -296,5 +296,77 @@ func TestNewRefreshCmd_RunEEmptyArgsPassesEmptyFilter(t *testing.T) {
 	}
 	if seenFilter != "" {
 		t.Errorf("expected empty filter, got %q", seenFilter)
+	}
+}
+
+// TestNewRefreshCmd_AllFlagWiredAndDefaultsFalse pins the reversed polarity at
+// the flag surface: --all exists, and its ABSENCE is what scopes a refresh to
+// the current project. A default of true would silently restore the
+// machine-wide fan-out.
+func TestNewRefreshCmd_AllFlagWiredAndDefaultsFalse(t *testing.T) {
+	seen := true
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(_ string, _, _, allProjects bool) error {
+		seen = allProjects
+		return nil
+	}))
+	if cmd.Flags().Lookup("all") == nil {
+		t.Fatal("expected --all flag wired on lifecycle refresh cmd")
+	}
+	cmd.SetArgs(nil)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if seen {
+		t.Error("allProjects = true with --all absent, want false (current project only)")
+	}
+}
+
+// TestNewRefreshCmd_RunEPassesAllFlag pins that the parsed --all boolean
+// actually reaches the run body.
+func TestNewRefreshCmd_RunEPassesAllFlag(t *testing.T) {
+	seen := false
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(_ string, _, _, allProjects bool) error {
+		seen = allProjects
+		return nil
+	}))
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !seen {
+		t.Error("allProjects = false, want true (set via --all)")
+	}
+}
+
+// TestNewRefreshCmd_ProjectNameWithAllIsRejected: the two scopes contradict
+// each other, so refresh refuses rather than silently picking one.
+func TestNewRefreshCmd_ProjectNameWithAllIsRejected(t *testing.T) {
+	called := false
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool, bool, bool) error {
+		called = true
+		return nil
+	}))
+	cmd.SetArgs([]string{"--all", "billing"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an error combining a project name with --all")
+	}
+	if !strings.Contains(err.Error(), "--all") {
+		t.Errorf("error = %v, want it to mention --all", err)
+	}
+	if called {
+		t.Error("run body must not be invoked for a contradictory scope")
+	}
+}
+
+// TestNewRefreshCmd_LongDocumentsCurrentProjectDefault keeps the help text
+// honest about the behavior change — the default scope and the --all escape
+// hatch both have to be discoverable from `da refresh --help`.
+func TestNewRefreshCmd_LongDocumentsCurrentProjectDefault(t *testing.T) {
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool, bool, bool) error { return nil }))
+	for _, want := range []string{"CURRENT project", "--all"} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("Long missing %q:\n%s", want, cmd.Long)
+		}
 	}
 }
