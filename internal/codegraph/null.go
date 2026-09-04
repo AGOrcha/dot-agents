@@ -14,6 +14,8 @@ type NullProvider struct{}
 // Compile-time proof the null backend satisfies the same contract.
 var _ graphstore.CodeGraphProvider = NullProvider{}
 
+const disabledSummary = "Graph backend is disabled (none)."
+
 // nullStatus is the status a disabled backend reports.
 func nullStatus() *graphstore.CRGStatus {
 	return &graphstore.CRGStatus{
@@ -56,19 +58,19 @@ func (NullProvider) Status() (*graphstore.CRGStatus, error) { return nullStatus(
 func (NullProvider) GetImpactRadius(opts graphstore.ImpactOptions) (*graphstore.CRGImpactResult, error) {
 	return &graphstore.CRGImpactResult{
 		Status:       statusOK,
-		Summary:      "Graph backend is disabled (none).",
+		Summary:      disabledSummary,
 		ChangedFiles: opts.ChangedFiles,
 	}, nil
 }
 
 // ListFlows returns no flows.
 func (NullProvider) ListFlows(int, string) (*graphstore.FlowsResult, error) {
-	return &graphstore.FlowsResult{Status: statusOK, Summary: "Graph backend is disabled (none)."}, nil
+	return &graphstore.FlowsResult{Status: statusOK, Summary: disabledSummary}, nil
 }
 
 // ListCommunities returns no communities.
 func (NullProvider) ListCommunities(int, string) (*graphstore.CommunitiesResult, error) {
-	return &graphstore.CommunitiesResult{Status: statusOK, Summary: "Graph backend is disabled (none)."}, nil
+	return &graphstore.CommunitiesResult{Status: statusOK, Summary: disabledSummary}, nil
 }
 
 // Postprocess is a no-op.
@@ -76,7 +78,7 @@ func (NullProvider) Postprocess(graphstore.PostprocessOptions) error { return ni
 
 // DetectChanges returns an empty change report.
 func (NullProvider) DetectChanges(graphstore.DetectChangesOptions) (*graphstore.CRGChangeReport, error) {
-	return &graphstore.CRGChangeReport{Summary: "Graph backend is disabled (none)."}, nil
+	return &graphstore.CRGChangeReport{Summary: disabledSummary}, nil
 }
 
 // ReadNodes returns no nodes.

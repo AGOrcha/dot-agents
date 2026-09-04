@@ -82,6 +82,10 @@ func resolvedBackendName(ref string) (string, error) {
 	return adapter.Name(), nil
 }
 
+func noCodeGraphRelease() {
+	// Bridge and null providers do not own closeable resources.
+}
+
 // codeGraphProvider opens the code-graph backend selected for repoRoot and
 // returns it with a release function. The returned provider is the ONLY way the
 // `da kg` code commands and `da kg serve` reach a code graph, so the backend
@@ -91,20 +95,21 @@ func resolvedBackendName(ref string) (string, error) {
 // crg-bridge family routes to the legacy `code-review-graph` CLI, and a missing
 // CLI is reported as errBackendUnavailable so graceful-degradation callers can
 // no-op exactly as they did before the cutover.
+
 func codeGraphProvider(repoRoot string) (graphstore.CodeGraphProvider, func(), error) {
 	name, err := resolvedBackendName(graphBackendRef(repoRoot))
 	if err != nil {
-		return nil, func() {}, err
+		return nil, noCodeGraphRelease, err
 	}
 	switch name {
 	case crgbridge.Name:
 		bridge, berr := graphstore.NewCRGBridge(repoRoot)
 		if berr != nil {
-			return nil, func() {}, fmt.Errorf("%w: %s", errBackendUnavailable, berr)
+			return nil, noCodeGraphRelease, fmt.Errorf("%w: %s", errBackendUnavailable, berr)
 		}
-		return bridge, func() {}, nil
+		return bridge, noCodeGraphRelease, nil
 	case none.Name:
-		return codegraph.NullProvider{}, func() {}, nil
+		return codegraph.NullProvider{}, noCodeGraphRelease, nil
 	default:
 		engine := codegraph.Open(repoRoot)
 		return engine, func() { _ = engine.Close() }, nil
