@@ -12,9 +12,9 @@ brew install agorcha/tap/da
 ```
 
 The tap **cask** downloads the prebuilt binary from GitHub releases — no Go on the
-consumer's machine. An interim `postflight` hook strips the macOS
-`com.apple.quarantine` attribute so Gatekeeper doesn't block the unsigned binary,
-until Apple Developer ID signing/notarization is wired.
+consumer's machine. At install time Homebrew runs `da completion <shell>` (Cobra)
+to generate bash, zsh, fish, and PowerShell completions for the installed
+binary. The darwin binaries are Developer ID-signed and notarized as of v0.4.0.
 
 ## Core formula (`da.rb`, draft — future)
 

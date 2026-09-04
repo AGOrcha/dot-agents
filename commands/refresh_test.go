@@ -57,7 +57,7 @@ func TestRefresh_KnownButUnboundReported(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	out := captureRefreshStdout(t, func() {
-		if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 			t.Errorf("runRefresh: %v", err)
 		}
 	})
@@ -337,7 +337,7 @@ func TestRunRefresh_NoManagedProjectsReturnsOk(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh with no projects: %v", err)
 	}
 }
@@ -360,7 +360,7 @@ func TestRunRefresh_UnknownProjectFilterErrors(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runRefresh("ghost", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
+	err := runRefresh(refreshScope{Project: "ghost"}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 	if err == nil {
 		t.Fatal("expected error when filter targets unknown project")
 	}
@@ -394,7 +394,7 @@ func TestRunRefresh_RegisteredProjectDryRun(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh dry-run: %v", err)
 	}
 }
@@ -417,7 +417,7 @@ func TestRunRefresh_SkipsMissingProjectDirectory(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh with missing dir: %v", err)
 	}
 }
@@ -511,7 +511,7 @@ func TestRunRefresh_InstalledPlatformDoesCreateLinks(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh installed: %v", err)
 	}
 
@@ -548,7 +548,7 @@ func TestRunRefresh_SkipsProjectWithoutPath(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh with dot path: %v", err)
 	}
 }
@@ -578,7 +578,7 @@ func TestRunRefresh_DryRunWithCommit(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh dry-run with commit: %v", err)
 	}
 }
@@ -617,7 +617,7 @@ func TestRunRefresh_MultiProjectStepNRender(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh multi-project: %v", err)
 	}
 }
@@ -649,7 +649,7 @@ func TestRunRefresh_NoEnabledPlatforms(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh no-enabled-platforms: %v", err)
 	}
 }
@@ -677,7 +677,7 @@ func TestRunRefresh_SkipsProjectWithEmptyPath(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh skip-dot-path: %v", err)
 	}
 }
@@ -754,7 +754,7 @@ func TestRunRefresh_RestoreFailureDoesNotStampMetadata(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, addD)
+	err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, addD)
 	if err == nil {
 		t.Fatal("expected runRefresh to return non-zero error after swallowed restore failure")
 	}
@@ -868,7 +868,7 @@ func TestRunRefresh_AllPlatformsInstalled(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh (all platforms seeded): %v", err)
 	}
 }
@@ -901,7 +901,7 @@ func TestRunRefresh_AllPlatformsDryRun(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh dry-run (all platforms seeded): %v", err)
 	}
 }
@@ -934,7 +934,7 @@ func TestRunRefresh_SeededClaudeDryRunExercisesDryRunBranches(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh dry-run with installed claude: %v", err)
 	}
 }
@@ -1001,7 +1001,7 @@ func TestRunRefresh_SharedTargetProjectionMaterializesCodexToml(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("runRefresh: %v", err)
 	}
 
@@ -1027,7 +1027,7 @@ func TestRunRefresh_SharedTargetProjectionDryRunNoMutation(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("runRefresh dry-run: %v", err)
 	}
 
@@ -1050,7 +1050,7 @@ func TestRunRefresh_SharedTargetProjectionIdempotent(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("first runRefresh: %v", err)
 	}
 	codexDir := filepath.Join(projectPath, ".codex")
@@ -1059,7 +1059,7 @@ func TestRunRefresh_SharedTargetProjectionIdempotent(t *testing.T) {
 		t.Fatalf("first refresh produced no .codex/ artifacts; projection did not run")
 	}
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("second runRefresh: %v", err)
 	}
 	second := snapshotTree(t, codexDir)
@@ -1210,7 +1210,7 @@ func TestRunRefresh_ExactProjectionPrunesStaleManagedOutput(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("p", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{Project: "p"}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("runRefresh: %v", err)
 	}
 
@@ -1335,7 +1335,7 @@ func TestRunRefresh_MaterializesCopilotUserHomeHooks(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("runRefresh: %v", err)
 	}
 
@@ -1426,7 +1426,7 @@ func TestRunRefresh_WritesManagedGitignoreBlock(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("runRefresh: %v", err)
 	}
 
@@ -1457,7 +1457,7 @@ func TestRunRefresh_WritesManagedGitignoreBlock(t *testing.T) {
 		[]string{".agentsrc.lock", ".agentsrc.json"})
 
 	// Byte-stable: a second refresh regenerates the identical file.
-	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("second runRefresh: %v", err)
 	}
 	second, err := os.ReadFile(gitignorePath)
@@ -1615,7 +1615,7 @@ func TestRunRefresh_PackageFetchFailureLeavesExistingLinksIntact(t *testing.T) {
 
 	// Refresh: hydration fails. The prior package link MUST survive (no
 	// destructive empty-set prune).
-	_ = runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
+	_ = runRefresh(refreshScope{AllProjects: true}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 
 	if _, err := os.Lstat(projected); err != nil {
 		t.Fatalf("a transient package fetch failure on refresh destroyed the installed link at %s: %v", projected, err)

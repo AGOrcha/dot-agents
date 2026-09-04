@@ -33,7 +33,7 @@ func TestRunSyncPush_DryRun(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
 	initEmptyRepo(t, agentsHome)
 
-	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncPush(deps, "test-msg"); err != nil {
 		t.Errorf("dry-run push: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestRunSyncPush_NewFileRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncPush(deps, "round-trip"); err != nil {
 		t.Fatalf("push: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestRunSyncPush_DefaultMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncPush(deps, ""); err != nil {
 		t.Fatalf("push: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestRunSyncPush_CommitFailureAbortsBeforePush(t *testing.T) {
 
 	stripGitIdentity(t)
 
-	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefreshCurrentProject: func() error { return nil }}
 	pushErr := runSyncPush(deps, "should-not-push")
 	if pushErr == nil {
 		t.Skip("git accepted the commit even with no identity (likely a CI git build with implicit defaults); cannot exercise the error path here")
@@ -118,7 +118,7 @@ func TestRunSyncPush_CommitFailureAbortsBeforePush(t *testing.T) {
 }
 
 func TestRunSyncPush_NewPushCmdMetadata(t *testing.T) {
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newPushCmd(deps)
 	if cmd.Use != "push" {
 		t.Errorf("Use = %q", cmd.Use)
@@ -212,8 +212,8 @@ func TestPull_RoundTrip(t *testing.T) {
 	runGit(t, other, "push")
 
 	deps := Deps{
-		Flags:      GlobalFlags{Yes: true},
-		RunRefresh: func(string) error { return nil },
+		Flags:                    GlobalFlags{Yes: true},
+		RunRefreshCurrentProject: func() error { return nil },
 	}
 	cmd := newPullCmd(deps)
 	if err := cmd.RunE(cmd, nil); err != nil {

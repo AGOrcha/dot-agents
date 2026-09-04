@@ -8,13 +8,24 @@ import (
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/journal"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestMain isolates the per-repo journal under a throwaway XDG_STATE_HOME for the
 // whole package run, so the real wiring (runner → emitWorkflow* → journal.Emit)
 // exercised by every existing workflow test writes events.log into a temp dir
 // instead of the developer's real ~/.local/state.
+//
+// It also installs the hermeticity home guard: this package builds and shells
+// the real `da` binary as a subprocess in a couple of tests (graph_test.go,
+// testutil_test.go::runKGSetupViaCLI) with an inherited/mostly-real
+// environment, so a subprocess command that ever touches an AGENTS_HOME-
+// derived path without every caller sandboxing HOME is caught here rather
+// than silently leaking. See internal/testutil/homeguard.go and
+// .agents/lessons/hermetic-home-for-state-resolving-tests/LESSON.md.
 func TestMain(m *testing.M) {
+	homeGuard := testutil.HomeGuardBefore()
+
 	dir, err := os.MkdirTemp("", "wf-journal-state-")
 	if err != nil {
 		panic(err)
@@ -22,6 +33,9 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv("XDG_STATE_HOME", dir)
 	code := m.Run()
 	_ = os.RemoveAll(dir)
+	if n := homeGuard.CheckAndReport(); n > 0 && code == 0 {
+		code = 1
+	}
 	os.Exit(code)
 }
 

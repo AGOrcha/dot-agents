@@ -28,7 +28,7 @@ func TestCommit_NewFileCreatesCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newCommitCmd(deps)
 	if err := cmd.RunE(cmd, []string{"add", "hello"}); err != nil {
 		t.Fatalf("commit RunE: %v", err)
@@ -50,7 +50,7 @@ func TestCommit_MessageFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	root := NewSyncCmd(deps)
 	commitCmd := findSubcmd(t, root, "commit")
 	if err := commitCmd.Flags().Set("message", "via-flag"); err != nil {
@@ -69,7 +69,7 @@ func TestCommit_NothingToCommit(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
 	initEmptyRepo(t, agentsHome)
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newCommitCmd(deps)
 	// Clean tree → should not error.
 	if err := cmd.RunE(cmd, []string{"nothing"}); err != nil {
@@ -88,7 +88,7 @@ func TestCommit_GitCommitFailureSurfacesError(t *testing.T) {
 	}
 	stripGitIdentity(t)
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newCommitCmd(deps)
 	err := cmd.RunE(cmd, []string{"should-fail"})
 	if err == nil {
@@ -113,7 +113,7 @@ func TestCommit_GitAddFailureSurfacesError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newCommitCmd(deps)
 	err := cmd.RunE(cmd, []string{"should-fail"})
 	if err == nil {
@@ -131,7 +131,7 @@ func TestCommit_DryRunSkipsCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newCommitCmd(deps)
 	if err := cmd.RunE(cmd, []string{"dry"}); err != nil {
 		t.Fatalf("dry-run commit: %v", err)
@@ -150,7 +150,7 @@ func TestCommit_DefaultMessageWhenEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newCommitCmd(deps)
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("commit: %v", err)
@@ -172,7 +172,7 @@ func TestCommit_DryRunDoesNotStage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newCommitCmd(deps)
 	// No -m and no positional args -> exercises resolveCommitMessage's default path.
 	if err := cmd.RunE(cmd, nil); err != nil {

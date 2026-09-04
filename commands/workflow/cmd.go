@@ -1128,6 +1128,7 @@ func newWorkflowDriftCmd() *cobra.Command {
 		Example: deps.ExampleBlock(
 			"  da workflow drift",
 			"  da workflow drift --project billing-api",
+			"  da workflow drift --path . --json",
 		),
 		Args: deps.NoArgsWithHints("Use flags such as `--project` instead of positional arguments."),
 		RunE: runWorkflowDrift,
@@ -1135,6 +1136,7 @@ func newWorkflowDriftCmd() *cobra.Command {
 	driftCmd.Flags().Int("stale-days", defaultCheckpointStaleDays, "Checkpoint staleness threshold in days")
 	driftCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
 	driftCmd.Flags().String("project", "", "Check only this project (by name)")
+	driftCmd.Flags().String("path", "", "Check only this local directory, independent of the managed project registry (e.g. CI / the crg-bridge-consumer-audit sweep)")
 	return driftCmd
 }
 

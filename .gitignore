@@ -45,7 +45,8 @@ Desktop.ini
 *.log
 logs/
 *.log.*
-
+.agents/active/scratch
+.agents/active/review/scratch
 # Environment
 .env
 .env.local
@@ -135,6 +136,7 @@ pip-delete-this-directory.txt
 # terraform plan outputs
 *.tfplan
 # >>> dot-agents managed (project outputs) >>>
+*.dot-agents-backup
 .agents/agents/
 .agents/skills/
 .agentsrc.local.json
