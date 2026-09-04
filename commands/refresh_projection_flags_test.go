@@ -129,7 +129,7 @@ func refreshProjectionFlagsRepo(t *testing.T, home, manifest string) string {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRefresh("p", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+	if err := runRefresh(refreshScope{Project: "p"}, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Fatalf("runRefresh: %v", err)
 	}
 	return repo
