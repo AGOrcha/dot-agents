@@ -202,17 +202,19 @@ func TestRunHooksPruneImportArtifacts_NoCandidatesIsNoop(t *testing.T) {
 }
 
 // TestRunHooksPruneImportArtifacts_ScanErrorPropagates covers the scan leg's
-// failure path: when ~/.agents/hooks cannot be enumerated at all (here it is
-// a regular file, not a directory), the command must surface the error
-// rather than report "no candidates found" and exit clean.
+// failure path: a corrupt bundle manifest under ~/.agents/hooks must surface
+// as an error from the command rather than be swallowed into a clean "no
+// candidates found" exit. An unparseable HOOK.yaml is the portable trigger —
+// unlike a non-directory hooks root, whose ReadDir error class differs
+// between Unix and Windows.
 func TestRunHooksPruneImportArtifacts_ScanErrorPropagates(t *testing.T) {
 	agentsHome := filepath.Join(t.TempDir(), ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
-	mustMkdirAll(t, agentsHome)
-	mustWriteFile(t, filepath.Join(agentsHome, "hooks"), "not a directory")
+	mustMkdirAll(t, filepath.Join(agentsHome, "hooks", "global", "broken"))
+	mustWriteFile(t, filepath.Join(agentsHome, "hooks", "global", "broken", "HOOK.yaml"), "name: [unterminated\n")
 
 	if err := runHooksPruneImportArtifacts(testDeps(), false); err == nil {
-		t.Fatal("expected an error when the hooks root cannot be scanned")
+		t.Fatal("expected an error when a hook bundle manifest cannot be parsed")
 	}
 }
 
