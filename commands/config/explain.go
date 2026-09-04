@@ -408,14 +408,78 @@ func emitField(opts *runExplainOptions, snap *cfg.Snapshot, path string, deps De
 	}
 }
 
+// PromptUnitView is one source-qualified prompt file in the `da config explain
+// --all` view: where it comes from, the digest the lock pins, and whether its
+// bytes are actually in the local cache. It is the prompt-tier companion to the
+// layer/profile provenance explain already renders — a prompt file is resolved
+// content that participates in a dispatch exactly like a layer participates in
+// the effective config, so "what is pinned and is it here?" belongs on the same
+// truth surface.
+//
+// The section is purely ADDITIVE: a project that pins no prompt units renders
+// and serializes exactly as before.
+type PromptUnitView struct {
+	// Ref is the canonical "<source>:<path>[@version]" unit key.
+	Ref string `json:"ref"`
+	// Source is the config source the prompt is fetched from.
+	Source string `json:"source,omitempty"`
+	// Path is the prompt path relative to the source root.
+	Path string `json:"path,omitempty"`
+	// Digest is the resolved SHA/content hash the lock pins.
+	Digest string `json:"digest,omitempty"`
+	// Status is "cached" when the pinned bytes are on disk, else "missing".
+	Status string `json:"status"`
+	// CachePath is where those bytes belong (present or not).
+	CachePath string `json:"cache_path,omitempty"`
+	// Detail carries the reason when Status is not "cached".
+	Detail string `json:"detail,omitempty"`
+}
+
+// Prompt-unit status values rendered by the explain surface.
+const (
+	promptStatusCached  = "cached"
+	promptStatusMissing = "missing"
+)
+
+// promptUnitViews reads the project's lock-pinned prompt units and their cache
+// state through the same offline surface `da config verify` uses, so the two
+// commands can never disagree about whether a prompt is resolvable. A lock that
+// cannot be read yields no rows: the resolve that produced this snapshot already
+// owns that failure, and explain must not turn it into a second error.
+func promptUnitViews(cwd string) []PromptUnitView {
+	statuses, err := cfg.VerifyPromptUnits(cwd)
+	if err != nil {
+		return nil
+	}
+	out := make([]PromptUnitView, 0, len(statuses))
+	for _, s := range statuses {
+		view := PromptUnitView{
+			Ref:       s.Key,
+			Source:    s.SourceID,
+			Path:      s.Path,
+			Digest:    s.Digest,
+			Status:    promptStatusCached,
+			CachePath: s.CachePath,
+			Detail:    s.Problem,
+		}
+		if !s.OK() {
+			view.Status = promptStatusMissing
+		}
+		out = append(out, view)
+	}
+	return out
+}
+
 // emitAll prints the full effective configuration. In JSON mode the shape is
-// {"effective": <merged map>, "provenance": {field-path: FieldExplanation, …}}
-// so consumers can decide whether to display provenance or just the values.
+// {"effective": <merged map>, "provenance": {field-path: FieldExplanation, …},
+// "prompt_units": [PromptUnitView, …]} so consumers can decide whether to
+// display provenance or just the values.
 func emitAll(opts *runExplainOptions, snap *cfg.Snapshot) error {
 	effective, err := snap.EffectiveRaw()
 	if err != nil {
 		return fmt.Errorf("decoding effective config: %w", err)
 	}
+	prompts := promptUnitViews(opts.cwd)
 	if opts.jsonOut {
 		prov := map[string]FieldExplanation{}
 		for _, key := range snap.FieldNames() {
@@ -425,6 +489,7 @@ func emitAll(opts *runExplainOptions, snap *cfg.Snapshot) error {
 			"effective":       effective,
 			"provenance":      prov,
 			"lock_collisions": snap.LockCollisions,
+			"prompt_units":    prompts,
 		})
 	}
 	fmt.Fprintln(opts.stdout, "Effective configuration (with active layer per field):")
@@ -436,8 +501,37 @@ func emitAll(opts *runExplainOptions, snap *cfg.Snapshot) error {
 		fmt.Fprintf(opts.stdout, "    origin : %s\n", emptyAsDash(exp.ActiveLayer))
 		fmt.Fprintln(opts.stdout)
 	}
+	printPromptUnits(opts.stdout, prompts)
 	printLockCollisions(opts.stdout, snap.LockCollisions)
 	return nil
+}
+
+// printPromptUnits renders the source-qualified prompt files pinned in the lock,
+// with their cache state. Nothing is printed when none are pinned, so the output
+// of a project that uses no source-qualified prompts is byte-identical to before.
+func printPromptUnits(w io.Writer, prompts []PromptUnitView) {
+	if len(prompts) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Source-qualified prompt units (pinned in "+cfg.AgentsLockFile+"):")
+	fmt.Fprintln(w)
+	for _, p := range prompts {
+		fmt.Fprintf(w, "  %s\n", p.Ref)
+		fmt.Fprintf(w, "    source : %s\n", emptyAsDash(p.Source))
+		fmt.Fprintf(w, "    path   : %s\n", emptyAsDash(p.Path))
+		fmt.Fprintf(w, "    digest : %s\n", emptyAsDash(abbrevSHA(p.Digest)))
+		fmt.Fprintf(w, "    status : %s\n", promptStatusLine(p))
+		fmt.Fprintln(w)
+	}
+}
+
+// promptStatusLine renders a prompt unit's status with its cache path (cached)
+// or the actionable reason (missing).
+func promptStatusLine(p PromptUnitView) string {
+	if p.Status == promptStatusCached {
+		return promptStatusCached + " at " + p.CachePath
+	}
+	return promptStatusMissing + " — " + p.Detail
 }
 
 // printLockCollisions surfaces the §15 D1a authority-pass rejections: each

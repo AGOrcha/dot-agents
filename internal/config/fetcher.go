@@ -11,9 +11,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-git/go-billy/v6"
@@ -175,16 +177,86 @@ type FetchedLayer struct {
 	KeyInputs CacheKeyInputs
 }
 
+// FetchTarget locates where a fetched unit's bytes are cached: the
+// content-addressed directory for this source+path, plus the file name the bytes
+// are written under inside the resolved <sha>/ entry.
+//
+// The file name is part of the target (rather than hard-coded to "layer.json")
+// because the SAME per-source-type Fetcher serves both tiers that ride this
+// plumbing: a config layer, whose bytes ARE a layer.json manifest fragment, and a
+// source-qualified PROMPT FILE (prompt_units.go), whose bytes are the prompt's
+// own document. Threading the name through keeps one content-addressed
+// writer/reader pair while letting a prompt cache under its real basename
+// (…/<sha>/ts-lint.md) instead of a misleading layer.json.
+type FetchTarget struct {
+	// Dir is the content-addressed cache root for this source+path
+	// (~/.agents/cache/config/<source-id>/<path>).
+	Dir string
+	// FileName is the basename written inside <Dir>/<sha>/. Empty means the
+	// layer default, so a zero-value target behaves exactly as the pre-existing
+	// layer cache did.
+	FileName string
+}
+
+// layerCacheFileName is the cached-bytes file name for a config layer, and the
+// default for a FetchTarget that names none.
+const layerCacheFileName = "layer.json"
+
+// fileName resolves the target's basename, defaulting to the layer file name.
+func (t FetchTarget) fileName() string {
+	if t.FileName == "" {
+		return layerCacheFileName
+	}
+	return t.FileName
+}
+
+// pathFor is the absolute path of this target's cached bytes at a given SHA.
+// The SHA is mapped through digestDir so an OCI source's "sha256:<hex>" digest
+// (D13) becomes a colon-free directory segment — a colon is an illegal path
+// char on Windows. git/http/local SHAs are already bare hex, so this is a no-op
+// for them; the on-disk layout matches the packages/artifact cache.
+func (t FetchTarget) pathFor(sha string) string {
+	return filepath.Join(t.Dir, digestDir(sha), t.fileName())
+}
+
+// layerTarget is the FetchTarget for a config layer: the source+layer cache dir
+// with the layer.json file name, i.e. the exact layout the layer cache has
+// always used.
+func layerTarget(sourceID, layerPath string) FetchTarget {
+	return FetchTarget{Dir: layerCacheDir(sourceID, layerPath), FileName: layerCacheFileName}
+}
+
+// cacheFileName derives the cached-bytes basename for a source-relative unit
+// path ("verifiers/ts-lint.md" -> "ts-lint.md"). A path whose basename is not a
+// usable file name (empty, dot segments, or one carrying a separator/colon a
+// Windows path cannot hold) falls back to the layer default, so a hostile or
+// degenerate ref can never escape its <sha>/ entry directory.
+func cacheFileName(unitPath string) string {
+	// A backslash is normalized to a separator on EVERY host, not just Windows:
+	// a source ref is a slash-path by contract, and a backslash is an illegal
+	// file-name character on Windows — so it can only be a separator. Normalizing
+	// unconditionally keeps the derived name identical across platforms.
+	base := path.Base(strings.ReplaceAll(strings.TrimSpace(unitPath), `\`, "/"))
+	switch base {
+	case "", ".", "..", "/":
+		return layerCacheFileName
+	}
+	if strings.ContainsAny(base, `\/:`) {
+		return layerCacheFileName
+	}
+	return base
+}
+
 // Fetcher fetches a config layer's bytes from a resolved source. One impl per
 // source type (git, http, local); the resolver selects by Source.Type. The
 // interface is the test seam: a fakeFetcher stands in so no test touches the
 // network or a git binary.
 type Fetcher interface {
-	// Fetch returns the layer bytes for parts.LayerPath from src. cacheDir is
-	// the content-addressed cache root for this source+layer
-	// (~/.agents/cache/config/<source-id>/<layer-path>); the fetcher writes its
-	// resolved <sha>/layer.json beneath it and returns the resolved SHA.
-	Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error)
+	// Fetch returns the layer bytes for parts.LayerPath from src. target names
+	// the content-addressed cache dir for this source+path and the file name to
+	// write the bytes under; the fetcher writes its resolved <sha>/<file-name>
+	// beneath it and returns the resolved SHA.
+	Fetch(src Source, parts LayerRefParts, target FetchTarget) (FetchedLayer, error)
 }
 
 // refreshingFetcher is the optional cache-key-aware extension of Fetcher
@@ -200,18 +272,18 @@ type refreshingFetcher interface {
 	// FetchRefresh behaves like Fetch but, when forceRefresh is true, skips the
 	// cached-SHA fast path and re-reads from the upstream so a stale cache key
 	// re-validates. forceRefresh=false is identical to Fetch.
-	FetchRefresh(src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error)
+	FetchRefresh(src Source, parts LayerRefParts, target FetchTarget, forceRefresh bool) (FetchedLayer, error)
 }
 
 // fetchWithRefresh dispatches to a fetcher's refresh-aware path when it supports
 // one, falling back to the plain Fetch otherwise. It is the single point the
 // resolver routes a layer fetch through, so the force-refresh signal threads to
 // every refresh-aware fetcher uniformly while plain Fetchers stay unaffected.
-func fetchWithRefresh(f Fetcher, src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
+func fetchWithRefresh(f Fetcher, src Source, parts LayerRefParts, target FetchTarget, forceRefresh bool) (FetchedLayer, error) {
 	if rf, ok := f.(refreshingFetcher); ok {
-		return rf.FetchRefresh(src, parts, cacheDir, forceRefresh)
+		return rf.FetchRefresh(src, parts, target, forceRefresh)
 	}
-	return f.Fetch(src, parts, cacheDir)
+	return f.Fetch(src, parts, target)
 }
 
 // SelectFetcher returns the Fetcher for a source type, or an error for an
@@ -248,15 +320,6 @@ func layerCacheDir(sourceID, layerPath string) string {
 	return filepath.Join(configCacheRoot(), sourceID, filepath.FromSlash(layerPath))
 }
 
-// cachedLayerPath is the absolute path of a cached layer.json for a given SHA.
-// The SHA is mapped through digestDir so an OCI source's "sha256:<hex>" digest
-// (D13) becomes a colon-free directory segment — a colon is an illegal path
-// char on Windows. git/http/local SHAs are already bare hex, so this is a no-op
-// for them; the on-disk layout matches the packages/artifact cache.
-func cachedLayerPath(cacheDir, sha string) string {
-	return filepath.Join(cacheDir, digestDir(sha), "layer.json")
-}
-
 // ReadCachedLayerBytes returns the cached layer.json bytes for a source+layer at
 // the given resolved SHA/digest, read from the content-addressed layer cache with
 // NO fetch. ok is false when nothing is cached at that SHA. It is the exported,
@@ -264,22 +327,22 @@ func cachedLayerPath(cacheDir, sha string) string {
 // already on disk (e.g. `da config lint`), mirroring the resolver's offline
 // cache-hit path (readOneLockedLayer) without re-exposing the internal layout.
 func ReadCachedLayerBytes(sourceID, layerPath, sha string) ([]byte, bool) {
-	return readCachedLayer(layerCacheDir(sourceID, layerPath), sha)
+	return readCachedUnit(layerTarget(sourceID, layerPath), sha)
 }
 
-// readCachedLayer returns the cached layer bytes for sha, or (nil,false) if not
-// present. It is the offline / cache-hit fast path.
-func readCachedLayer(cacheDir, sha string) ([]byte, bool) {
-	data, err := os.ReadFile(cachedLayerPath(cacheDir, sha))
+// readCachedUnit returns the cached bytes for sha under target, or (nil,false)
+// if not present. It is the offline / cache-hit fast path.
+func readCachedUnit(target FetchTarget, sha string) ([]byte, bool) {
+	data, err := os.ReadFile(target.pathFor(sha))
 	if err != nil {
 		return nil, false
 	}
 	return data, true
 }
 
-// writeCachedLayer persists layer bytes under <cacheDir>/<sha>/layer.json. The
-// SHA segment is mapped through digestDir (see cachedLayerPath) so an OCI
-// "sha256:<hex>" digest never embeds a colon in a path segment (illegal on
+// writeCachedUnit persists fetched bytes under <target.Dir>/<sha>/<file-name>.
+// The SHA segment is mapped through digestDir (see FetchTarget.pathFor) so an
+// OCI "sha256:<hex>" digest never embeds a colon in a path segment (illegal on
 // Windows); the read path uses the same mapping.
 //
 // Perf (package-artifact-install t9): the target path is content-addressed by
@@ -287,7 +350,7 @@ func readCachedLayer(cacheDir, sha string) ([]byte, bool) {
 // an UNCHANGED layer (the common steady-state case: every `da config sync` /
 // `da status` / `da install` on an unmodified manifest, across every extends
 // layer) writes byte-identical content to the same path every single time.
-// Profiling a 100-layer local-extends chain showed writeCachedLayer's
+// Profiling a 100-layer local-extends chain showed writeCachedUnit's
 // unconditional MkdirAll+WriteFile pair as ~79% of total resolve CPU time
 // (README: docs/PERF_BUDGET.md), almost entirely redundant I/O. A full
 // read-back + byte-compare fast path — NOT a bare existence/size check —
@@ -295,16 +358,16 @@ func readCachedLayer(cacheDir, sha string) ([]byte, bool) {
 // prior interrupted process): only a verified byte-identical match skips the
 // write, so a stale/corrupt entry at the right path is still self-healed by
 // falling through to a real (now atomic, temp+rename) write.
-func writeCachedLayer(cacheDir, sha string, data []byte) error {
-	target := cachedLayerPath(cacheDir, sha)
-	if existing, err := os.ReadFile(target); err == nil && bytes.Equal(existing, data) {
+func writeCachedUnit(target FetchTarget, sha string, data []byte) error {
+	path := target.pathFor(sha)
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, data) {
 		return nil
 	}
-	dir := filepath.Join(cacheDir, digestDir(sha))
+	dir := filepath.Join(target.Dir, digestDir(sha))
 	if err := fsops.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating layer cache dir: %w", err)
 	}
-	if err := fsops.WriteFileAtomic(target, data); err != nil {
+	if err := fsops.WriteFileAtomic(path, data); err != nil {
 		return fmt.Errorf("writing cached layer: %w", err)
 	}
 	return nil
@@ -322,13 +385,65 @@ type gitFetcher struct {
 	// It returns the cloned repository (for HEAD resolution) and the worktree
 	// filesystem (for reading the layer file).
 	cloner func(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error)
+
+	// mu guards memo. Holding it across the clone itself is deliberate: it makes
+	// a (url, ref) clone happen exactly once even if two units for the same
+	// source were ever fetched concurrently, which is the whole point of the memo.
+	mu sync.Mutex
+	// memo is the PER-RESOLVE (url, ref) -> cloned tree cache. A shallow clone
+	// resolves both the ref->SHA and every file at that SHA, so N units from one
+	// source (the common case for prompt units: a stage profile pinning a base
+	// prompt plus per-slug overlays from the same team source) need ONE clone, not
+	// N. The resolver clears it at the start of each resolve (resetFetchMemo) so a
+	// long-lived resolver never serves a stale tree across syncs.
+	memo map[string]clonedTree
 }
 
+// clonedTree is one memoized clone outcome. The error is memoized alongside the
+// tree so a source that is down costs one failed clone per resolve instead of one
+// per unit (each carrying its own 60s timeout).
+type clonedTree struct {
+	repo *gogit.Repository
+	fs   billy.Filesystem
+	err  error
+}
+
+// gitCloneMemoKey namespaces a memo entry by the exact clone inputs. url and ref
+// fully determine the tree a shallow single-branch clone produces.
+func gitCloneMemoKey(url, ref string) string { return url + "\x00" + ref }
+
 func (f *gitFetcher) clone(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error) {
+	key := gitCloneMemoKey(url, ref)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if hit, ok := f.memo[key]; ok {
+		return hit.repo, hit.fs, hit.err
+	}
+	repo, wfs, err := f.cloneUncached(ctx, url, ref)
+	if f.memo == nil {
+		f.memo = map[string]clonedTree{}
+	}
+	f.memo[key] = clonedTree{repo: repo, fs: wfs, err: err}
+	return repo, wfs, err
+}
+
+// cloneUncached performs the actual clone through the test seam (or the real
+// shallow clone), bypassing the memo.
+func (f *gitFetcher) cloneUncached(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error) {
 	if f.cloner != nil {
 		return f.cloner(ctx, url, ref)
 	}
 	return gitCloneShallow(ctx, url, ref)
+}
+
+// resetFetchMemo drops the per-resolve clone memo (fetchMemoResetter). The
+// resolver calls it at the start of every resolve so the memo can never outlive
+// the resolve that filled it — an upstream that moved between two syncs in the
+// same process must be re-cloned.
+func (f *gitFetcher) resetFetchMemo() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.memo = nil
 }
 
 // gitCloneShallow performs a Depth:1, single-branch in-memory clone of url at
@@ -569,14 +684,14 @@ func expandTildePath(path, home string) string {
 	return filepath.Join(home, path[2:])
 }
 
-func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
-	return f.FetchRefresh(src, parts, cacheDir, false)
+func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, target FetchTarget) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, target, false)
 }
 
 // FetchRefresh resolves the ref→SHA, then serves the SHA-addressed cache unless
 // forceRefresh is set (a stale cache key), in which case it re-reads the layer
 // from the freshly cloned worktree and rewrites the cache.
-func (f *gitFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
+func (f *gitFetcher) FetchRefresh(src Source, parts LayerRefParts, target FetchTarget, forceRefresh bool) (FetchedLayer, error) {
 	ref := parts.Version
 	if ref == "" {
 		ref = src.Ref
@@ -613,7 +728,7 @@ func (f *gitFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir stri
 		return FetchedLayer{}, fmt.Errorf("git ref %q not found at %s", ref, src.URL)
 	}
 	if !forceRefresh {
-		if cached, ok := readCachedLayer(cacheDir, sha); ok {
+		if cached, ok := readCachedUnit(target, sha); ok {
 			return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
 		}
 	}
@@ -628,7 +743,7 @@ func (f *gitFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir stri
 		return FetchedLayer{}, fmt.Errorf("git read %s@%s: %w", parts.LayerPath, sha, err)
 	}
 
-	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
+	if err := writeCachedUnit(target, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
 	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
@@ -655,14 +770,14 @@ type httpFetcher struct {
 	client *http.Client
 }
 
-func (f *httpFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
-	return f.FetchRefresh(src, parts, cacheDir, false)
+func (f *httpFetcher) Fetch(src Source, parts LayerRefParts, target FetchTarget) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, target, false)
 }
 
 // FetchRefresh GETs the layer, then serves the SHA-addressed cache unless
 // forceRefresh is set (a stale cache key), in which case it rewrites the cache
 // with the freshly fetched bytes so the upstream is re-validated.
-func (f *httpFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
+func (f *httpFetcher) FetchRefresh(src Source, parts LayerRefParts, target FetchTarget, forceRefresh bool) (FetchedLayer, error) {
 	url := strings.TrimRight(src.URL, "/") + "/" + strings.TrimLeft(parts.LayerPath, "/")
 	if !strings.HasPrefix(strings.ToLower(url), "https://") {
 		return FetchedLayer{}, fmt.Errorf("http source url must be https: %q", url)
@@ -700,11 +815,11 @@ func (f *httpFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir str
 		ContentDigest: sha,
 	}
 	if !forceRefresh {
-		if cached, ok := readCachedLayer(cacheDir, sha); ok {
+		if cached, ok := readCachedUnit(target, sha); ok {
 			return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: keyInputs}, nil
 		}
 	}
-	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
+	if err := writeCachedUnit(target, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
 	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false, KeyInputs: keyInputs}, nil
@@ -717,7 +832,7 @@ func (f *httpFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir str
 // well-formed and the cache is still content-addressed.
 type localFetcher struct{}
 
-func (f *localFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
+func (f *localFetcher) Fetch(src Source, parts LayerRefParts, target FetchTarget) (FetchedLayer, error) {
 	base := src.Path
 	if base == "" {
 		base = src.URL
@@ -736,7 +851,7 @@ func (f *localFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (
 	// dirty and supply the content hash as the precise worktree key, so authoring
 	// before a commit still derives a distinct effective cache key.
 	keyInputs := CacheKeyInputs{WorktreeDirty: true, WorktreeContentHash: sha}
-	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
+	if err := writeCachedUnit(target, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
 	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false, KeyInputs: keyInputs}, nil

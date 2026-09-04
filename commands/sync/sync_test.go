@@ -6,8 +6,8 @@ import (
 
 func TestNewSyncCmd_ConstructsWithoutPanic(t *testing.T) {
 	deps := Deps{
-		Flags:      GlobalFlags{},
-		RunRefresh: func(projectFilter string) error { return nil },
+		Flags:                    GlobalFlags{},
+		RunRefreshCurrentProject: func() error { return nil },
 	}
 	cmd := NewSyncCmd(deps)
 	if cmd == nil {
@@ -20,8 +20,8 @@ func TestNewSyncCmd_ConstructsWithoutPanic(t *testing.T) {
 
 func TestNewSyncCmd_HasExpectedSubcommands(t *testing.T) {
 	deps := Deps{
-		Flags:      GlobalFlags{},
-		RunRefresh: func(projectFilter string) error { return nil },
+		Flags:                    GlobalFlags{},
+		RunRefreshCurrentProject: func() error { return nil },
 	}
 	cmd := NewSyncCmd(deps)
 

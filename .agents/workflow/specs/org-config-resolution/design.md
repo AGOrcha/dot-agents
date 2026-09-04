@@ -422,6 +422,10 @@ Without explicit merge rules, layered config becomes guesswork and teams cannot 
 - `repo_id`: scalar, must not be overridden by imported layers
 - `skills`: set-union
 - `agents`: set-union
+- `rules`: set-union (name-selection; see [workspace-member-aggregation](../workspace-member-aggregation/design.md#d12--hooks-mcp-and-rules-become-a-uniform-name-selection-model) for exclusion-token semantics)
+- `hooks`: set-union (name-selection; see [workspace-member-aggregation](../workspace-member-aggregation/design.md#d12--hooks-mcp-and-rules-become-a-uniform-name-selection-model) for exclusion-token semantics)
+- `mcp`: set-union (name-selection; see [workspace-member-aggregation](../workspace-member-aggregation/design.md#d15--mcp-server-definitions-are-resolvable-config-content) for full-resolution merge semantics)
+- `settings`: scalar (see [workspace-member-aggregation](../workspace-member-aggregation/design.md#rd13--settings-stays-scalar-in-v1) for the no-name-space rationale)
 - `verifier_profiles`: map merge by profile id
 - `app_type_verifier_map`: ordered execution mapping, last writer wins per app type
 - `feature_flags`: map merge

@@ -400,12 +400,21 @@ func currentWorkflowProject() (workflowProjectRef, error) {
 	if err != nil {
 		return workflowProjectRef{}, err
 	}
+	return workflowProjectRef{Name: resolveProjectNameForPath(cwd), Path: cwd}, nil
+}
 
-	project := filepath.Base(cwd)
-	if rc, err := config.LoadAgentsRC(cwd); err == nil && strings.TrimSpace(rc.Project) != "" {
-		project = strings.TrimSpace(rc.Project)
+// resolveProjectNameForPath returns the project name for an arbitrary
+// directory: the .agentsrc.json "project" field when present and non-empty,
+// otherwise the directory's base name. Factored out of currentWorkflowProject
+// so `workflow drift --path` can resolve a display name for a directory that
+// is not necessarily the process cwd and is not registered in the managed
+// project registry.
+func resolveProjectNameForPath(path string) string {
+	name := filepath.Base(path)
+	if rc, err := config.LoadAgentsRC(path); err == nil && strings.TrimSpace(rc.Project) != "" {
+		name = strings.TrimSpace(rc.Project)
 	}
-	return workflowProjectRef{Name: project, Path: cwd}, nil
+	return name
 }
 
 // collectWorkTrackingSummary resolves the ACTIVE coordination-state backend for

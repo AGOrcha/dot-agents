@@ -804,6 +804,11 @@ so tooling can depend on it.
 
 ### Q5: Lockfile for workspace-level installs
 
+> **Superseded in part by [workspace-member-aggregation](../workspace-member-aggregation/design.md)
+> — see that spec.** It resolves this question directly (member locks stay authoritative; the
+> root references them via per-member units + a member-drift staleness reason) rather than the
+> either-or gitdir-pointer framing below.
+
 For a developer running one `dot-agents` binary across multiple repos (the `payout`-
 style workspace), should there be a workspace-level lockfile that aggregates resolved
 SHAs across repos, or does each repo own its own lockfile exclusively? | Human Addendum 2026-05-10T12:56 (EST) So like git where the gitdir is just a pointer to the parent's .git/.. we should have it be either-or so that if by it's self then it has it, if in a workspace like payout then workspace manages the aggregate. |

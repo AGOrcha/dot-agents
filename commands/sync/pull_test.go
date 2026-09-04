@@ -11,7 +11,7 @@ func TestPullRejectsDryRun(t *testing.T) {
 	t.Parallel()
 	deps := Deps{
 		Flags: GlobalFlags{DryRun: true},
-		RunRefresh: func(string) error {
+		RunRefreshCurrentProject: func() error {
 			return nil
 		},
 	}

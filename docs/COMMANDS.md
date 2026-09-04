@@ -28,13 +28,30 @@ and each section below links to the guide that explains the area in depth. Run
 | `init` | Initialize `~/.agents/` directory structure (`--from <git-url>` adopts a shared home) |
 | `add <path>` | Add a project to da management |
 | `remove <project>` | Remove a project from da management |
-| `refresh [project]` | Refresh managed setup from `~/.agents/`; auto-enables newly-installed editors and updates their versions. EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep the additive behavior |
+| `refresh [project]` | Refresh managed setup from `~/.agents/` for the **current project** (the one containing the working directory); name a project to refresh that one, or pass `--all` for every project registered on this machine. Auto-enables newly-installed editors and updates their versions. EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep the additive behavior |
 | `import [project]` | Import configs from project/global scope into `~/.agents/` |
 | `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create one). EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep additive behavior, `--strict` to fail on a missing declared resource |
 | `status` | Show managed projects and link health; for effective-config detail run `da config explain` (use `--audit` for details) |
 | `doctor` | Check installations, validate links, detect issues (read-only — reports problems and the command to fix them; never repairs) |
 
 See [Getting Started](GETTING_STARTED.md) for the three setup paths (adopt / install / fresh).
+
+### Refresh scope
+
+`da refresh` mutates every managed project it visits, so its reach is explicit in
+the invocation:
+
+| Invocation | Projects refreshed |
+|---|---|
+| `da refresh` | The current project — the managed project containing the working directory (a subdirectory or worktree beneath it counts) |
+| `da refresh <project>` | That one registered project, from anywhere |
+| `da refresh --all` | Every project registered on this machine, in deterministic (name) order |
+
+Run outside any managed project without `--all`, refresh refuses and tells you
+how to proceed rather than guessing. `--all` cannot be combined with a project
+name. The internal refreshes triggered by `da sync pull` and `da review approve`
+are current-project-scoped for the same reason; run `da refresh --all` yourself
+when you want the pulled or approved change projected everywhere.
 
 ### Managed `.gitignore` block
 
@@ -113,6 +130,11 @@ worked walkthrough of `da config sync` / `explain` / `lint`.
 - `da refresh` and `da install` re-project the locked config locally and only
   re-resolve when the lock is stale, so routine relinking never reaches the
   network for an unchanged stack.
+- `da config cache prune` garbage-collects the shared config cache
+  (`~/.agents/cache/config`, which holds every fetched layer and
+  source-qualified prompt file). An entry is prunable when no registered
+  project's lockfile references its digest. It lists by default; `--apply`
+  deletes.
 
 ## Skills & Agents
 
