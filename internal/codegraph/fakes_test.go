@@ -21,19 +21,22 @@ var errFake = errors.New("codegraph test: injected failure")
 type fakeStore struct {
 	graphstore.Store
 
-	files     []string
-	filesErr  error
-	nodes     map[string][]graphstore.GraphNode
-	nodesErr  error
-	edges     map[string][]graphstore.GraphEdge
-	edgesErr  error
-	stats     graphstore.GraphStats
-	statsErr  error
-	impact    graphstore.ImpactResult
-	impactErr error
-	removeErr error
-	writeErr  error
-	metaErr   error
+	files    []string
+	filesErr error
+	nodes    map[string][]graphstore.GraphNode
+	nodesErr error
+	edges    map[string][]graphstore.GraphEdge
+	edgesErr error
+	// edgeSources records each GetEdgesBySource query, so a test can assert
+	// the read layer collapses duplicate sources instead of re-querying.
+	edgeSources []string
+	stats       graphstore.GraphStats
+	statsErr    error
+	impact      graphstore.ImpactResult
+	impactErr   error
+	removeErr   error
+	writeErr    error
+	metaErr     error
 }
 
 func (f *fakeStore) GetAllFiles() ([]string, error) { return f.files, f.filesErr }
@@ -43,6 +46,7 @@ func (f *fakeStore) GetNodesByFile(path string) ([]graphstore.GraphNode, error) 
 }
 
 func (f *fakeStore) GetEdgesBySource(qualified string) ([]graphstore.GraphEdge, error) {
+	f.edgeSources = append(f.edgeSources, qualified)
 	return f.edges[qualified], f.edgesErr
 }
 

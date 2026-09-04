@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/none"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/kg/lockfile"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
@@ -61,6 +62,18 @@ func TestBuiltinRegistryHasNoneAndCRGFamily(t *testing.T) {
 	}
 	if len(got) != len(want) {
 		t.Fatalf("builtinRegistry names = %v, want exactly %v", reg.Names(), want)
+	}
+}
+
+// TestRegisterBuiltinsRejectsDuplicateNone covers the first registration arm:
+// `none` failing before the CRG family is ever reached.
+func TestRegisterBuiltinsRejectsDuplicateNone(t *testing.T) {
+	reg := registry.New()
+	if err := none.Register(reg); err != nil {
+		t.Fatalf("register fixture: %v", err)
+	}
+	if err := registerBuiltins(reg); err == nil {
+		t.Fatal("expected duplicate none registration to fail")
 	}
 }
 

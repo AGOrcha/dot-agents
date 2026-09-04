@@ -35,6 +35,11 @@ import (
 // delta is documented in docs/crg-bridge-consumer-audit.md rather than hidden.
 const languageGo = "go"
 
+// walkDir is a seam for the directory walk. Production binds
+// filepath.WalkDir; the walk callback swallows every per-entry error, so
+// overriding this is the only way to reach goFiles' walk-failure arm.
+var walkDir = filepath.WalkDir
+
 // kindFunction / kindType are the two `symbol` note kinds the crg adapter
 // schema declares (schema.yaml enum: Function | Type).
 const (
@@ -133,7 +138,7 @@ func goFiles(root string) ([]string, error) {
 		return nil, fmt.Errorf("codegraph: walk %s: %w", root, err)
 	}
 	var out []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := walkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // unreadable subtree — skip, do not fail the whole scan
 		}
