@@ -338,14 +338,32 @@ structured project memory, bridge queries, and code-to-note context.
 | Command | Description |
 |---------|-------------|
 | `kg build` | Full code graph build (re-parse all files via code-review-graph) |
+| `kg build --no-recurse-submodules` | Index the superproject only; skipped submodules are still reported |
 | `kg update` | Incremental code graph update (changed files only) |
-| `kg code-status` | Show code graph stats (nodes, edges, languages) |
+| `kg code-status` | Show code graph stats (nodes, edges, languages, per-root breakdown) |
 | `kg changes` | Detect change impact in the current diff |
 | `kg impact [file...]` | Show blast radius for given files (or current diff) |
 | `kg flows` | List detected execution flows |
 | `kg communities` | List detected code communities |
 | `kg postprocess` | Rebuild flows, communities, and FTS index |
 | `kg link add\|list\|remove` | Manage note→code symbol cross-references |
+
+In a superproject, `kg build` indexes every initialized submodule as well as the
+root and merges their graphs under a per-repository namespace
+(`<submodule-path>::<qualified-name>`), then runs one postprocess pass over the
+merged result. `kg code-status` reports the counts per root.
+
+A submodule that is present in the checkout but absent from the graph — an
+uninitialized one, or one a build never reached — puts the graph in the
+`incomplete` state rather than `ready`, and `--require-graph` consumers refuse
+it. Two things are *not* incomplete: a submodule the build indexed and found no
+symbols in, and one excluded with `--no-recurse-submodules`. Each build records
+which roots it covered (`.code-review-graph/da-workspace.json`) so later status
+reads can tell those apart from a root that was never looked at; both are still
+named in the per-root breakdown.
+
+An incremental `kg update` covers the superproject only — run `kg build` to
+refresh submodules.
 
 ## Sync
 

@@ -229,6 +229,8 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgBuildCmd.Flags().String("repo", "", repoRootHelpText)
 	kgBuildCmd.Flags().Bool("skip-flows", false, "Skip flow/community detection (faster)")
 	kgBuildCmd.Flags().Bool("skip-postprocess", false, "Skip all post-processing (raw parse only)")
+	kgBuildCmd.Flags().Bool(noRecurseSubmodulesFlag, false,
+		"Index the superproject only, excluding its submodules (they are still reported as skipped)")
 
 	kgUpdateCmd := &cobra.Command{
 		Use:   "update",
