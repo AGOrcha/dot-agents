@@ -251,6 +251,42 @@ func TestEnumValuesReturnsNilForNonEnumFlag(t *testing.T) {
 	}
 }
 
+func TestEnumDynamicSource(t *testing.T) {
+	cmd := &cobra.Command{Use: "x"}
+	var staticValue, dynamicValue string
+	RegisterEnum(cmd, &staticValue, EnumSpec{
+		Name:   "status",
+		Values: []string{"pending", "completed"},
+	})
+	RegisterEnum(cmd, &dynamicValue, EnumSpec{
+		Name:        "app-type",
+		DynamicFrom: "da workflow app-types",
+	})
+
+	assertEqual(t, "missing flag source", EnumDynamicSource(cmd, "missing"), "")
+	assertEqual(t, "static enum source", EnumDynamicSource(cmd, "status"), "")
+	assertEqual(t, "dynamic enum source", EnumDynamicSource(cmd, "app-type"), "da workflow app-types")
+}
+
+func TestAnnotateEnumIgnoresMissingFlag(t *testing.T) {
+	cmd := &cobra.Command{Use: "x"}
+	annotateEnum(cmd, EnumSpec{Name: "missing", Values: []string{"one", "two"}})
+	if got := EnumValues(cmd, "missing"); got != nil {
+		t.Fatalf("missing flag unexpectedly has enum values %v", got)
+	}
+}
+
+func TestChainEnumValidationReturnsMissingFlagError(t *testing.T) {
+	cmd := &cobra.Command{Use: "x", RunE: func(*cobra.Command, []string) error { return nil }}
+	chainEnumValidation(cmd, EnumSpec{Name: "missing", Values: []string{"one", "two"}})
+
+	err := runCommand(cmd)
+	if err == nil {
+		t.Fatal("want missing flag error, got nil")
+	}
+	assertContains(t, err.Error(), "flag accessed but not defined: missing")
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func runCommand(cmd *cobra.Command, args ...string) error {

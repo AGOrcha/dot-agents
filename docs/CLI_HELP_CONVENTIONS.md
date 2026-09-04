@@ -36,8 +36,8 @@ Two mechanisms carry most of the load, in this order:
 ## Rule 1 — a closed-set flag declares its values once, via the helper
 
 Any flag with a finite vocabulary must be registered through
-[`cmdutil.RegisterEnum`](../commands/internal/cmdutil/enumflag.go) (or
-`RegisterEnumFlag` for commands that read flags back off the command rather than
+`cmdutil.RegisterEnum` (or `RegisterEnumFlag` for commands that read flags back
+off the command rather than
 binding them to a variable):
 
 ```go
