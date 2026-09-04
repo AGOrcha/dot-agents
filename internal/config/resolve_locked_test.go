@@ -290,8 +290,8 @@ func TestResolveLockedLayerProtectedFieldDropped(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := locked["acme:org/base.json"].ResolvedSHA
-	cacheDir := layerCacheDir("acme", "org/base.json")
-	if err := os.WriteFile(filepath.Join(cacheDir, sha, "layer.json"), []byte(`{"repo_id":"evil","skills":["base"]}`), 0o644); err != nil {
+	cacheDir := layerTarget("acme", "org/base.json")
+	if err := os.WriteFile(cacheDir.pathFor(sha), []byte(`{"repo_id":"evil","skills":["base"]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -380,8 +380,8 @@ func TestResolveLockedInvalidLayerCacheIsSchemaError(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := locked["acme:org/base.json"].ResolvedSHA
-	cacheDir := layerCacheDir("acme", "org/base.json")
-	if err := os.WriteFile(filepath.Join(cacheDir, sha, "layer.json"), []byte("{not json"), 0o644); err != nil {
+	cacheDir := layerTarget("acme", "org/base.json")
+	if err := os.WriteFile(cacheDir.pathFor(sha), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -408,7 +408,7 @@ func TestResolveLockedVersionPinnedRef(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`{"version":2,"skills":["org"]}`)); err != nil {
+	if err := writeCachedUnit(layerTarget("s", "org.json"), "shaorg", []byte(`{"version":2,"skills":["org"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	snap, err := NewLayeredResolver().ResolveLocked(repo)
@@ -439,10 +439,10 @@ func TestResolveLockedCycleDetected(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`{"version":2,"extends":["s:team.json"],"skills":["org"]}`)); err != nil {
+	if err := writeCachedUnit(layerTarget("s", "org.json"), "shaorg", []byte(`{"version":2,"extends":["s:team.json"],"skills":["org"]}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCachedLayer(layerCacheDir("s", "team.json"), "shateam", []byte(`{"version":2,"extends":["s:org.json"],"skills":["team"]}`)); err != nil {
+	if err := writeCachedUnit(layerTarget("s", "team.json"), "shateam", []byte(`{"version":2,"extends":["s:org.json"],"skills":["team"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	_, err := NewLayeredResolver().ResolveLocked(repo)
@@ -470,7 +470,7 @@ func TestResolveLockedOptionalChildSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	// org.json transitively extends an OPTIONAL team layer that was never locked.
-	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`{"version":2,"extends":[{"ref":"s:team.json","optional":true}],"skills":["org"]}`)); err != nil {
+	if err := writeCachedUnit(layerTarget("s", "org.json"), "shaorg", []byte(`{"version":2,"extends":[{"ref":"s:team.json","optional":true}],"skills":["org"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	snap, err := NewLayeredResolver().ResolveLocked(repo)
@@ -502,7 +502,7 @@ func TestResolveLockedNullLayerCacheIsSchemaError(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`null`)); err != nil {
+	if err := writeCachedUnit(layerTarget("s", "org.json"), "shaorg", []byte(`null`)); err != nil {
 		t.Fatal(err)
 	}
 	_, err := NewLayeredResolver().ResolveLocked(repo)
@@ -529,7 +529,7 @@ func TestResolveLockedChildExtendsWrongTypeErrors(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCachedLayer(layerCacheDir("s", "org.json"), "shaorg", []byte(`{"version":2,"extends":{"bad":"object"}}`)); err != nil {
+	if err := writeCachedUnit(layerTarget("s", "org.json"), "shaorg", []byte(`{"version":2,"extends":{"bad":"object"}}`)); err != nil {
 		t.Fatal(err)
 	}
 	_, err := NewLayeredResolver().ResolveLocked(repo)

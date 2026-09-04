@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/kg/lockfile"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -58,8 +60,60 @@ type RepoDriftReport struct {
 	MissingPlanStructure        bool           `json:"missing_plan_structure"`         // no .agents/workflow/plans/
 	CompletedPlanIDs            []string       `json:"completed_plan_ids"`             // plans with status==completed (hygiene signal)
 	InconsistentArchivedPlanIDs []string       `json:"inconsistent_archived_plan_ids"` // plans with status==archived still in workflow/plans/ (error-level)
-	Warnings                    []string       `json:"warnings"`
-	Status                      string         `json:"status"` // healthy|warn|unreachable
+	// BridgeConsumerStatus is the §11.4-criterion-4 finding (spec
+	// graph-backend-adapter-contract): one of consumers_found|clean|
+	// not_a_kg_repo|error. See driftBridgeConsumerPhase.
+	BridgeConsumerStatus string                      `json:"bridge_consumer_status,omitempty"`
+	BridgeConsumers      []graphstore.BridgeConsumer `json:"bridge_consumers,omitempty"`
+	Warnings             []string                    `json:"warnings"`
+	Status               string                      `json:"status"` // healthy|warn|unreachable
+}
+
+// Bridge-consumer status values for RepoDriftReport.BridgeConsumerStatus —
+// the §11.4-criterion-4 sweep (spec graph-backend-adapter-contract §11.4):
+// "zero reads_from:[crg-bridge] across the managed repo set" before the CRG
+// bridge (t6d) can be deleted.
+const (
+	bridgeConsumerStatusConsumersFound = "consumers_found"
+	bridgeConsumerStatusClean          = "clean"
+	bridgeConsumerStatusNotAKGRepo     = "not_a_kg_repo"
+	bridgeConsumerStatusError          = "error"
+)
+
+// driftBridgeConsumerPhase wires graphstore.BridgeConsumers into workflow
+// drift (§11.4 criterion 4, docs/crg-bridge-consumer-audit.md §[E]): a
+// repo's .agentsrc.lock "adapters" section is scanned for materialized views
+// that still declare a dependency on the crg-bridge mirror. Any live
+// consumer is a drift finding — the CRG bridge cannot be decommissioned
+// (t6d) while readers remain. A repo whose lockfile has no "adapters"
+// section at all has never activated a graph-backend adapter; that is
+// reported not_a_kg_repo rather than clean, so the sweep summary
+// distinguishes "verified clean" from "nothing to verify".
+func driftBridgeConsumerPhase(report *RepoDriftReport, project ManagedProject) {
+	lf, err := lockfile.Load(config.AgentsLockPath(project.Path))
+	if err != nil {
+		report.BridgeConsumerStatus = bridgeConsumerStatusError
+		report.Warnings = append(report.Warnings, fmt.Sprintf("could not read adapter lockfile: %v", err))
+		return
+	}
+	if len(lf.Adapters) == 0 {
+		report.BridgeConsumerStatus = bridgeConsumerStatusNotAKGRepo
+		return
+	}
+	consumers := graphstore.BridgeConsumers(lf)
+	if len(consumers) == 0 {
+		report.BridgeConsumerStatus = bridgeConsumerStatusClean
+		return
+	}
+	report.BridgeConsumerStatus = bridgeConsumerStatusConsumersFound
+	report.BridgeConsumers = consumers
+	names := make([]string, 0, len(consumers))
+	for _, c := range consumers {
+		names = append(names, fmt.Sprintf("%s/%s", c.Adapter, c.View))
+	}
+	report.Warnings = append(report.Warnings, fmt.Sprintf(
+		"%d live crg-bridge consumer(s) — §11.4 criterion 4 not met: %s",
+		len(consumers), strings.Join(names, ", ")))
 }
 
 // extractPlanStatus reads the status field from a PLAN.yaml byte slice.
@@ -216,6 +270,7 @@ func detectRepoDrift(project ManagedProject, checkpointStaleDays, proposalStaleD
 	driftStaleProposalPhase(&report, proposalStaleDays)
 	driftWorkflowDirPhase(&report, project)
 	driftPlanScanPhase(&report, project)
+	driftBridgeConsumerPhase(&report, project)
 
 	if len(report.Warnings) == 0 {
 		report.Status = "healthy"
@@ -227,14 +282,27 @@ func detectRepoDrift(project ManagedProject, checkpointStaleDays, proposalStaleD
 
 // AggregateDriftReport summarizes drift across all managed projects.
 type AggregateDriftReport struct {
-	Timestamp        string            `json:"timestamp"`
-	TotalProjects    int               `json:"total_projects"`
-	ProjectsChecked  int               `json:"projects_checked"`
-	Reports          []RepoDriftReport `json:"reports"`
-	HealthyCount     int               `json:"healthy_count"`
-	WarnCount        int               `json:"warn_count"`
-	UnreachableCount int               `json:"unreachable_count"`
-	TopWarnings      []string          `json:"top_warnings"`
+	Timestamp        string             `json:"timestamp"`
+	TotalProjects    int                `json:"total_projects"`
+	ProjectsChecked  int                `json:"projects_checked"`
+	Reports          []RepoDriftReport  `json:"reports"`
+	HealthyCount     int                `json:"healthy_count"`
+	WarnCount        int                `json:"warn_count"`
+	UnreachableCount int                `json:"unreachable_count"`
+	TopWarnings      []string           `json:"top_warnings"`
+	BridgeSweep      BridgeSweepSummary `json:"bridge_sweep"`
+}
+
+// BridgeSweepSummary buckets each checked repo's §11.4-criterion-4
+// bridge-consumer status (docs/crg-bridge-consumer-audit.md): the
+// managed-repo-set companion to the per-repo finding on RepoDriftReport.
+// Criterion 4 ("zero reads_from:[crg-bridge] across the managed repo set")
+// is satisfied exactly when ConsumersFoundRepos is empty.
+type BridgeSweepSummary struct {
+	ConsumersFoundRepos []string `json:"consumers_found_repos"`
+	CleanRepos          []string `json:"clean_repos"`
+	NotAKGRepoRepos     []string `json:"not_a_kg_repo_repos"`
+	ErrorRepos          []string `json:"error_repos,omitempty"`
 }
 
 // aggregateDrift combines per-repo reports into a summary.
@@ -243,6 +311,11 @@ func aggregateDrift(reports []RepoDriftReport) AggregateDriftReport {
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 		TotalProjects: len(reports),
 		Reports:       reports,
+		BridgeSweep: BridgeSweepSummary{
+			ConsumersFoundRepos: []string{},
+			CleanRepos:          []string{},
+			NotAKGRepoRepos:     []string{},
+		},
 	}
 	seen := make(map[string]bool)
 	for _, r := range reports {
@@ -254,6 +327,16 @@ func aggregateDrift(reports []RepoDriftReport) AggregateDriftReport {
 			agg.UnreachableCount++
 		default:
 			agg.WarnCount++
+		}
+		switch r.BridgeConsumerStatus {
+		case bridgeConsumerStatusConsumersFound:
+			agg.BridgeSweep.ConsumersFoundRepos = append(agg.BridgeSweep.ConsumersFoundRepos, r.Project.Name)
+		case bridgeConsumerStatusClean:
+			agg.BridgeSweep.CleanRepos = append(agg.BridgeSweep.CleanRepos, r.Project.Name)
+		case bridgeConsumerStatusNotAKGRepo:
+			agg.BridgeSweep.NotAKGRepoRepos = append(agg.BridgeSweep.NotAKGRepoRepos, r.Project.Name)
+		case bridgeConsumerStatusError:
+			agg.BridgeSweep.ErrorRepos = append(agg.BridgeSweep.ErrorRepos, r.Project.Name)
 		}
 		for _, w := range r.Warnings {
 			if !seen[w] {
@@ -331,6 +414,31 @@ func renderDriftReport(reports []RepoDriftReport, agg AggregateDriftReport) {
 	fmt.Fprintf(os.Stdout, "  healthy: %d  warnings: %d  unreachable: %d\n",
 		agg.HealthyCount, agg.WarnCount, agg.UnreachableCount)
 	fmt.Fprintf(os.Stdout, "  report saved: %s\n", config.DisplayPath(driftReportPath()))
+
+	renderBridgeSweepSummary(agg.BridgeSweep)
+}
+
+// renderBridgeSweepSummary prints the §11.4-criterion-4 bridge-consumer
+// sweep: which repos in the checked set still read the crg-bridge mirror,
+// which are verified clean, and which have never activated a graph-backend
+// adapter (not_a_kg_repo). Silent when nothing was evaluated (e.g. every
+// project was unreachable).
+func renderBridgeSweepSummary(sweep BridgeSweepSummary) {
+	total := len(sweep.ConsumersFoundRepos) + len(sweep.CleanRepos) + len(sweep.NotAKGRepoRepos) + len(sweep.ErrorRepos)
+	if total == 0 {
+		return
+	}
+	ui.Section("crg-bridge Consumer Sweep (§11.4 criterion 4)")
+	if len(sweep.ConsumersFoundRepos) > 0 {
+		fmt.Fprintf(os.Stdout, "  %sconsumers found%s: %s\n", ui.Red, ui.Reset, joinIDs(sweep.ConsumersFoundRepos))
+	} else {
+		fmt.Fprintf(os.Stdout, "  %szero live crg-bridge consumers%s across the checked repo set — criterion 4 satisfied.\n", ui.Green, ui.Reset)
+	}
+	fmt.Fprintf(os.Stdout, "  clean: %d   not-a-kg-repo: %d", len(sweep.CleanRepos), len(sweep.NotAKGRepoRepos))
+	if len(sweep.ErrorRepos) > 0 {
+		fmt.Fprintf(os.Stdout, "   errors: %d (%s)", len(sweep.ErrorRepos), joinIDs(sweep.ErrorRepos))
+	}
+	fmt.Fprintln(os.Stdout)
 }
 
 // runWorkflowDrift is the read-only cross-repo drift detection command.
@@ -347,19 +455,35 @@ func runWorkflowDriftWithLister(cmd *cobra.Command, lister func() ([]ManagedProj
 	checkpointDays, _ := cmd.Flags().GetInt("stale-days")
 	proposalDays, _ := cmd.Flags().GetInt("proposal-days")
 	projectFilter, _ := cmd.Flags().GetString("project")
+	pathFlag, _ := cmd.Flags().GetString("path")
 
-	projects, err := lister()
-	if err != nil {
-		return fmt.Errorf("load managed projects: %w", err)
-	}
-	if len(projects) == 0 {
-		ui.Info("No managed projects registered. Add one with: da add <path>")
-		return nil
-	}
+	var projects []ManagedProject
+	if strings.TrimSpace(pathFlag) != "" {
+		// --path checks exactly one local directory, independent of the
+		// ~/.agents/config.json managed-project registry. This is what
+		// scripts/crg-bridge-consumer-audit.sh drives: the §11.4-criterion-4
+		// check must be reproducible from repo content alone, not gated on
+		// this repo happening to be `da add`-registered under some name.
+		// filepath.Abs only errors when os.Getwd fails, which is not
+		// reachable on a live process (see lockfilePath's identical
+		// rationale in commands/kg/lockfile.go) — no error branch to guard.
+		abs, _ := filepath.Abs(pathFlag)
+		projects = []ManagedProject{{Name: resolveProjectNameForPath(abs), Path: abs}}
+	} else {
+		var err error
+		projects, err = lister()
+		if err != nil {
+			return fmt.Errorf("load managed projects: %w", err)
+		}
+		if len(projects) == 0 {
+			ui.Info("No managed projects registered. Add one with: da add <path>")
+			return nil
+		}
 
-	projects, err = filterDriftProjects(projects, projectFilter)
-	if err != nil {
-		return err
+		projects, err = filterDriftProjects(projects, projectFilter)
+		if err != nil {
+			return err
+		}
 	}
 
 	reports := make([]RepoDriftReport, 0, len(projects))

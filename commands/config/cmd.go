@@ -113,6 +113,8 @@ which prints human concept documentation rather than live repo state.`,
 			"  da config migrate",
 			"  da config migrate --dry-run",
 			"  da config publish ./skills/review-pr acme-oci:skill/review-pr@v1.0.0",
+			"  da config cache prune",
+			"  da config cache prune --apply",
 		),
 	}
 	cmd.AddCommand(newExplainCmd(deps))
@@ -122,6 +124,7 @@ which prints human concept documentation rather than live repo state.`,
 	cmd.AddCommand(newRelevanceCmd(deps))
 	cmd.AddCommand(newMigrateCmd(deps))
 	cmd.AddCommand(newPublishCmd(deps))
+	cmd.AddCommand(newCacheCmd(deps))
 	return cmd
 }
 
