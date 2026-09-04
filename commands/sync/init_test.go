@@ -12,7 +12,7 @@ import (
 func TestRunSyncInit_FreshRepo(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncInit(deps); err != nil {
 		t.Fatalf("runSyncInit: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestRunSyncInit_FreshRepo(t *testing.T) {
 
 func TestRunSyncInit_DryRunSkipsInit(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
-	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncInit(deps); err != nil {
 		t.Fatalf("dry run init: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestRunSyncInit_DryRunSkipsInit(t *testing.T) {
 func TestRunSyncInit_ExistingRepoNoRemote(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
 	initEmptyRepo(t, agentsHome)
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncInit(deps); err != nil {
 		t.Fatalf("runSyncInit on existing repo: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestRunSyncInit_ExistingRepoGitignoreError(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(agentsHome, ".gitignore"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncInit(deps); err == nil {
 		t.Error("expected error when .gitignore cannot be written")
 	}
@@ -84,7 +84,7 @@ func TestRunSyncInit_ExistingRepoDryRunSkipsRepair(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
 	initEmptyRepo(t, agentsHome)
 
-	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncInit(deps); err != nil {
 		t.Fatalf("runSyncInit dry-run on existing repo: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestRunSyncInit_UntracksAlreadyTrackedMachineLocal(t *testing.T) {
 	runGit(t, agentsHome, "add", "-A")
 	runGit(t, agentsHome, "commit", "-m", "pre-fix: tracked machine-local state")
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncInit(deps); err != nil {
 		t.Fatalf("runSyncInit: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestRunSyncInit_UntrackFailureSurfacesError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	err := runSyncInit(deps)
 	if err == nil {
 		t.Fatal("expected runSyncInit to surface the git rm --cached failure, got nil")
@@ -173,7 +173,7 @@ func TestRunSyncInit_ExistingRepoWithRemote(t *testing.T) {
 	runGit(t, bare, "init", "--bare")
 	runGit(t, agentsHome, "remote", "add", "origin", bare)
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	if err := runSyncInit(deps); err != nil {
 		t.Fatalf("runSyncInit on existing+remote repo: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestRunSyncInit_GitCommitFailureSurfacesError(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 	stripGitIdentity(t)
 
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	err := runSyncInit(deps)
 	if err == nil {
 		t.Skip("git accepted the commit even with no identity (likely a CI git build with implicit defaults); cannot exercise the error path here")
@@ -232,7 +232,7 @@ func TestRunSyncInit_GitCommitFailureSurfacesError(t *testing.T) {
 
 func TestNewInitCmd_RunE(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
-	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	deps := Deps{Flags: GlobalFlags{}, RunRefreshCurrentProject: func() error { return nil }}
 	cmd := newInitCmd(deps)
 	if cmd.Use != "init" {
 		t.Errorf("Use = %q, want init", cmd.Use)

@@ -34,9 +34,15 @@
 # proof-backed blocking from advisory-only missing-trace coverage.
 #
 # Harness: every filesystem effect is rooted under a single mktemp dir that is
-# removed on exit; the real $HOME / ~/.agents is never touched (AGENTS_HOME is
-# redirected into the sandbox). No jq/python3 dependency — the gates and this
-# test use portable shell + git only.
+# removed on exit; the real $HOME / ~/.agents is never touched (both AGENTS_HOME
+# and HOME are redirected into the sandbox — HOME matters because case 6's
+# `da init` calls linkClaudeGlobalSettings/linkCursorGlobalHooks, which resolve
+# config.UserHome() independently of AGENTS_HOME to symlink ~/.claude/settings.json
+# / ~/.cursor/hooks.json when that platform is installed; sandboxing AGENTS_HOME
+# alone leaves those two real-home targets exposed on any machine with Claude
+# Code or Cursor on PATH and no pre-existing settings file there — see
+# .agents/lessons/hermetic-home-for-state-resolving-tests/LESSON.md). No
+# jq/python3 dependency — the gates and this test use portable shell + git only.
 
 set -euo pipefail
 
@@ -68,6 +74,9 @@ trap 'rm -rf "$WORK"' EXIT
 # Isolate config/prefs and the materialized home from the real $HOME and
 # ~/.agents. The gates resolve `da` from PATH; expose the built binary's dir.
 export AGENTS_HOME="$WORK/agents-home"
+export HOME="$WORK/home"
+export USERPROFILE="$WORK/home"
+mkdir -p "$HOME"
 DA_DIR="$(dirname "$DA")"
 export PATH="$DA_DIR:$PATH"
 

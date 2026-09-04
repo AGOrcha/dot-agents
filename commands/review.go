@@ -21,7 +21,7 @@ const reviewProposalIDHint = "Pass the proposal ID from `da review`."
 // captureProposalRollback need (interface-DI per docs/TEST_SEAMS.md). One
 // interface covers both the os-level rollback touch points (MkdirAll,
 // WriteFile, Remove) and the higher-order workflow operations
-// (ApplyProposal, ArchiveProposal, RunRefresh) so review's approve pipeline
+// (ApplyProposal, ArchiveProposal, RunRefreshCurrentProject) so review's approve pipeline
 // has a single fault-injection surface. File-scoped — do not share with
 // other commands files.
 type reviewDeps interface {
@@ -30,13 +30,18 @@ type reviewDeps interface {
 	Remove(name string) error
 	ApplyProposal(proposal *config.Proposal) error
 	ArchiveProposal(proposal *config.Proposal) error
-	RunRefresh(projectFilter string) error
+	// RunRefreshCurrentProject re-projects the just-applied proposal into the
+	// CURRENT project only. Approving a proposal edits ~/.agents; the projection
+	// that follows belongs to the repo the operator is standing in, not to every
+	// repo on the machine — a machine-wide sweep is `da refresh --all`, which
+	// they run deliberately.
+	RunRefreshCurrentProject() error
 }
 
 // stdReviewDeps is the production reviewDeps backed by the os package and the
-// real config / runRefresh entry points. RunRefresh mirrors the legacy
-// runRefreshFn wrap so the default refresh path still threads
-// stdRefreshConfigLoader{} into runRefresh.
+// real config / runRefresh entry points. RunRefreshCurrentProject routes through
+// refreshCurrentProjectOrSkip so an approval made outside any managed project
+// skips the projection instead of failing (and rolling back) the approval.
 type stdReviewDeps struct{}
 
 func (stdReviewDeps) MkdirAll(path string, perm os.FileMode) error {
@@ -48,9 +53,7 @@ func (stdReviewDeps) WriteFile(name string, data []byte, perm os.FileMode) error
 func (stdReviewDeps) Remove(name string) error                 { return os.Remove(name) }
 func (stdReviewDeps) ApplyProposal(p *config.Proposal) error   { return config.ApplyProposal(p) }
 func (stdReviewDeps) ArchiveProposal(p *config.Proposal) error { return config.ArchiveProposal(p) }
-func (stdReviewDeps) RunRefresh(projectFilter string) error {
-	return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
-}
+func (stdReviewDeps) RunRefreshCurrentProject() error          { return refreshCurrentProjectOrSkip() }
 
 func NewReviewCmd() *cobra.Command {
 	var rejectReason string
@@ -184,7 +187,7 @@ func runReviewApprove(id string, deps reviewDeps) error {
 	if err := deps.ApplyProposal(proposal); err != nil {
 		return err
 	}
-	if err := deps.RunRefresh(""); err != nil {
+	if err := deps.RunRefreshCurrentProject(); err != nil {
 		_ = restore()
 		return fmt.Errorf("refresh after apply: %w", err)
 	}

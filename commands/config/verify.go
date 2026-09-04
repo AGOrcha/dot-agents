@@ -66,6 +66,9 @@ Checks performed:
                   and for remote (git/http/oci) sources its downloaded assets
                   are present in the local cache at the locked SHA — so remote
                   layers are confirmed offline without re-fetching
+  - prompt-units  each lock-pinned source-qualified prompt file still has its
+                  cached bytes on disk at the locked digest, so a pruned cache
+                  is caught here instead of at ` + "`da workflow resolve-prompt`" + ` time
   - shadow        repo-local keys that the layer stack underneath also supplies:
                   REDUNDANT (the repo restates a layer's value — remove the key
                   and defer to the layers) or OVERRIDE (the repo replaces it,
@@ -131,6 +134,7 @@ func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 
 	checks = append(checks, verifySources(opts.cwd, snap)...)
 	checks = append(checks, verifyLayerLocks(opts.cwd)...)
+	checks = append(checks, verifyPromptUnits(opts.cwd)...)
 	checks = append(checks, verifyStaleness(opts.cwd)...)
 	checks = append(checks, verifyPreconditionPolicies(snap)...)
 	checks = append(checks, verifyLayerShadows(snap)...)
@@ -264,6 +268,41 @@ func verifyLayerLocks(cwd string) []VerifyCheck {
 	return checks
 }
 
+// verifyPromptUnits cross-checks each lock-pinned source-qualified prompt unit
+// against the on-disk prompt cache (no fetch). A prompt's bytes live in the
+// shared, machine-local ~/.agents cache, so a pruned or never-synced cache leaves
+// a valid lock pointing at nothing — a gap that previously surfaced only when
+// `da workflow resolve-prompt` reported the prompt unresolved mid-dispatch.
+//
+// Status policy mirrors the locked-layers check's advisory side: a missing or
+// mismatched cache entry is a WARN carrying the same "run `da config sync`" hint
+// the offline resolve emits, not a hard failure — the condition is recoverable by
+// re-syncing and must not block CI on a machine that simply has a cold cache.
+// Returns nil when the lock pins no prompt units (nothing to add to the report).
+func verifyPromptUnits(cwd string) []VerifyCheck {
+	statuses, err := cfg.VerifyPromptUnits(cwd)
+	if err != nil {
+		return []VerifyCheck{{"prompt-units", verifyWarn, "could not read lockfile/cache: " + err.Error()}}
+	}
+	if len(statuses) == 0 {
+		return nil
+	}
+	checks := make([]VerifyCheck, 0, len(statuses))
+	for _, s := range statuses {
+		checks = append(checks, promptUnitCheck(s))
+	}
+	return checks
+}
+
+// promptUnitCheck maps one prompt-unit status to its report line.
+func promptUnitCheck(s cfg.PromptUnitStatus) VerifyCheck {
+	name := "prompt:" + s.Key
+	if s.OK() {
+		return VerifyCheck{name, verifyPass, "cached at " + abbrevSHA(s.Digest)}
+	}
+	return VerifyCheck{name, verifyWarn, s.Problem}
+}
+
 // verifyStaleness is the §7A local-scope drift check — the first-class
 // inputs_digest contract verify gained when the units-lock model was wired
 // (section-7a-units-lock-wiring). It is the whole point of §7A on the primary
@@ -304,7 +343,7 @@ func verifyStaleness(cwd string) []VerifyCheck {
 		return []VerifyCheck{{name, verifyWarn, "could not compute staleness: " + err.Error()}}
 	}
 	if res.Fresh {
-		return []VerifyCheck{{name, verifyPass, "local config in sync (inputs_digest " + abbrevSHA(res.ExpectedInputsDigest) + ")"}}
+		return []VerifyCheck{{name, verifyPass, "local config in sync (inputs_digest " + abbrevDigest(res.ExpectedInputsDigest) + ")"}}
 	}
 	// A unit-digest mismatch is ALWAYS a hard failure (review #1): a tampered
 	// store must FAIL verify regardless of whether ordinary local-scope drift
@@ -324,9 +363,7 @@ func verifyStaleness(cwd string) []VerifyCheck {
 	if recorded == "" {
 		return []VerifyCheck{{name, verifyWarn, "no inputs_digest recorded in " + cfg.AgentsLockFile + " — run `da config sync` to create the lock"}}
 	}
-	return []VerifyCheck{{name, verifyWarn, fmt.Sprintf(
-		"local config changed since last resolve (lock %s, now %s) — run `da config sync`",
-		abbrevSHA(recorded), abbrevSHA(res.ExpectedInputsDigest))}}
+	return []VerifyCheck{{name, verifyWarn, staleWarnDetail(res.Reasons, recorded, res.ExpectedInputsDigest)}}
 }
 
 // reasonsContainUnitDigest reports whether a unit-digest mismatch is among the
@@ -342,6 +379,50 @@ func reasonsContainUnitDigest(reasons []cfg.StalenessReason) bool {
 		}
 	}
 	return false
+}
+
+// staleWarnDetail renders the config-staleness warn detail for the non-fresh,
+// non-unit-digest case, naming the SPECIFIC reason(s) that fired instead of
+// always implying an inputs_digest mismatch. res.Reasons can carry
+// ReasonDeclaredSet alone (e.g. a manually edited/incomplete lock) with the
+// recorded and expected inputs_digest IDENTICAL — the prior message printed
+// "(lock X, now X)" verbatim in that case, which read as a truncated-display
+// collision but was really just the wrong sentence for the reason that fired
+// (config-verify-staleness-digest).
+func staleWarnDetail(reasons []cfg.StalenessReason, recorded, expected string) string {
+	var parts []string
+	for _, r := range reasons {
+		switch r {
+		case cfg.ReasonInputsDigest:
+			parts = append(parts, fmt.Sprintf("local config scopes changed since last resolve (lock %s, now %s)", abbrevDigest(recorded), abbrevDigest(expected)))
+		case cfg.ReasonDeclaredSet:
+			parts = append(parts, "the declared `extends`/`packages` set no longer matches the lock")
+		}
+	}
+	if len(parts) == 0 {
+		// Defensive only: Fresh is false and unit-digest was already handled by the
+		// caller, so Reasons is never empty here — but degrade to a generic message
+		// rather than emit "" if a future StalenessReason is added and left
+		// unhandled above.
+		parts = append(parts, "local config changed since last resolve")
+	}
+	return strings.Join(parts, "; ") + " — run `da config sync`"
+}
+
+// abbrevDigest shortens a "sha256:…" content digest for the human render,
+// preserving enough hex past the algorithm prefix that two different digests
+// stay visually distinguishable. abbrevSHA's flat 12-character cut leaves only
+// 5 hex characters once the "sha256:" prefix eats into the budget — a genuine
+// mismatch could easily still look identical at a glance. Falls back to
+// abbrevSHA for a value that does not carry the prefix (e.g. a bare git SHA).
+func abbrevDigest(digest string) string {
+	if rest, ok := strings.CutPrefix(digest, "sha256:"); ok {
+		if len(rest) > 16 {
+			rest = rest[:16]
+		}
+		return "sha256:" + rest
+	}
+	return abbrevSHA(digest)
 }
 
 // recordedInputsDigest reads the inputs_digest the lockfile currently pins, or

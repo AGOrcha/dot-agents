@@ -35,7 +35,7 @@ func layerProject(t *testing.T, manifest string, locks map[string]LockedLayer) s
 
 func seedCachedLayer(t *testing.T, sourceID, layerPath, sha string) {
 	t.Helper()
-	if err := writeCachedLayer(layerCacheDir(sourceID, layerPath), sha, []byte(`{"skills":[]}`)); err != nil {
+	if err := writeCachedUnit(layerTarget(sourceID, layerPath), sha, []byte(`{"skills":[]}`)); err != nil {
 		t.Fatalf("seed cache: %v", err)
 	}
 }

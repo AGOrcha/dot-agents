@@ -430,6 +430,15 @@ type LockedLayer struct {
 	// — means the SHA-addressed cache may no longer be served and the upstream must
 	// be re-checked. Omitted for a pre-cache-key lock (treated as stale on read).
 	CacheKey string `json:"cache_key,omitempty"`
+	// Transitive marks a layer resolved because another layer's OWN `extends`
+	// named it (config-transitive-layering), not because this project's own
+	// manifest declared it directly. Set by extendsGraphState.walk based on
+	// which loop admitted the entry (root rc.Extends vs a recursed childRC.Extends)
+	// and carried into LockedUnit.Transitive by writeUnitsLock, so staleness's
+	// declared-set comparison (§7A.3) — which only knows the manifest's own
+	// top-level extends/packages — does not require a transitively-pulled layer
+	// to also appear there.
+	Transitive bool
 }
 
 // cacheKeyInputs reconstructs the minimal CacheKeyInputs an offline re-derive
@@ -527,6 +536,12 @@ type LayeredResolver struct {
 	// fetchers overrides the per-source-type Fetcher (test seam). When a type
 	// is absent, the default SelectFetcher impl is used.
 	fetchers map[string]Fetcher
+	// defaultFetchers memoizes the SelectFetcher impl per source type FOR THE
+	// CURRENT RESOLVE, so every unit of a given type shares one fetcher instance
+	// and therefore one per-resolve fetch memo (the git fetcher's clone memo).
+	// Without it each unit built its own fetcher and a source was re-cloned once
+	// per unit. beginResolve resets it, so the sharing never spans two resolves.
+	defaultFetchers map[string]Fetcher
 	// offline forces use of the last resolved SHA from the lockfile instead of
 	// contacting any source; a cache_hit_offline warning is emitted per layer.
 	offline bool
@@ -603,11 +618,48 @@ func (r *LayeredResolver) clock() time.Time {
 	return time.Now().UTC()
 }
 
+// fetchMemoResetter is the optional per-resolve-state extension of Fetcher: a
+// fetcher that caches work across the units of ONE resolve (today the git
+// fetcher's (url, ref) clone memo) implements it so the resolver can clear that
+// cache at the start of every resolve. A Fetcher that does not implement it is
+// stateless across units and needs no reset.
+type fetchMemoResetter interface {
+	resetFetchMemo()
+}
+
+// fetcherFor returns the Fetcher for a source type, preferring the injected test
+// seam and otherwise reusing ONE default instance per type for the duration of
+// this resolve. The reuse is what lets a fetcher memoize per-resolve work across
+// units — N prompt files from one git source share the fetcher, hence the clone.
 func (r *LayeredResolver) fetcherFor(sourceType string) (Fetcher, error) {
 	if f, ok := r.fetchers[sourceType]; ok {
 		return f, nil
 	}
-	return SelectFetcher(sourceType)
+	if f, ok := r.defaultFetchers[sourceType]; ok {
+		return f, nil
+	}
+	f, err := SelectFetcher(sourceType)
+	if err != nil {
+		return nil, err
+	}
+	if r.defaultFetchers == nil {
+		r.defaultFetchers = map[string]Fetcher{}
+	}
+	r.defaultFetchers[sourceType] = f
+	return f, nil
+}
+
+// beginResolve resets the per-resolve fetcher state: the default-fetcher
+// instances are dropped and every injected fetcher that memoizes per-resolve work
+// is asked to clear it. A resolver reused for two syncs in the same process must
+// re-clone, so no memo may outlive the resolve that filled it.
+func (r *LayeredResolver) beginResolve() {
+	r.defaultFetchers = map[string]Fetcher{}
+	for _, f := range r.fetchers {
+		if m, ok := f.(fetchMemoResetter); ok {
+			m.resetFetchMemo()
+		}
+	}
 }
 
 // Resolve implements Resolver. It builds the full layer stack (FLAT + imported
@@ -615,6 +667,7 @@ func (r *LayeredResolver) fetcherFor(sourceType string) (Fetcher, error) {
 // .agentsrc.lock. Layer fetch/validation errors surface as *ImportError for
 // non-optional entries; optional entries that fail are skipped with a warning.
 func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
+	r.beginResolve()
 	trace := newAuditTrace(r.emitter)
 
 	repoLayer, repoRaw, err := r.loadRepoLayer(projectPath)
@@ -705,9 +758,10 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, loc
 	layerUnits := make(map[string]LockedUnit, len(locked))
 	for ref, l := range locked {
 		layerUnits[ref] = LockedUnit{
-			Kind:     UnitKindLayer,
-			Digest:   l.ResolvedSHA,
-			CacheKey: l.CacheKey,
+			Kind:       UnitKindLayer,
+			Digest:     l.ResolvedSHA,
+			CacheKey:   l.CacheKey,
+			Transitive: l.Transitive,
 		}
 	}
 	// kind:profile units (R2): the resolved profile fragments are recorded as
@@ -934,7 +988,7 @@ func (r *LayeredResolver) resolveExtendsGraph(trace auditTrace, projectPath stri
 	st.prevLocked = prevLocked
 	rootEnv := sourceEnv(indexSources(rc.Sources))
 	for _, entry := range rc.Extends {
-		if err := st.walk(r, entry, rootEnv); err != nil {
+		if err := st.walk(r, entry, rootEnv, true); err != nil {
 			trace.emit(importFailedEvent(asImportError(entry.Ref, err), entry.Optional))
 			if entry.Optional {
 				st.warnings = append(st.warnings, optionalSkipWarning(entry.Ref, err))
@@ -951,7 +1005,16 @@ func (r *LayeredResolver) resolveExtendsGraph(trace auditTrace, projectPath stri
 // post-order precedence (a declared org layer lands before the team layer that
 // extends it). Dedupe and cycle detection guard against divergent-digest
 // re-resolution and extends loops.
-func (st *extendsGraphState) walk(r *LayeredResolver, entry LayerRef, env sourceEnv) error {
+//
+// isRoot is true only for entries admitted from the outer loop in
+// resolveExtendsGraph — i.e. named directly in THIS project's manifest — and
+// false for every entry reached by recursing into a childRC.Extends (a layer
+// pulled in transitively because another layer's own extends named it). It is
+// stamped onto the LockedLayer as Transitive (=!isRoot) so the lock records
+// which units the manifest actually declares (config-transitive-layering);
+// staleness's declared-set comparison reads that back to avoid requiring a
+// transitively-pulled layer to also appear in the manifest's own extends list.
+func (st *extendsGraphState) walk(r *LayeredResolver, entry LayerRef, env sourceEnv, isRoot bool) error {
 	parts, err := ParseLayerRef(entry.Ref)
 	if err != nil {
 		return &ImportError{Ref: entry.Ref, Reason: ReasonSchema, Err: err}
@@ -968,6 +1031,7 @@ func (st *extendsGraphState) walk(r *LayeredResolver, entry LayerRef, env source
 	if err != nil {
 		return err
 	}
+	lock.Transitive = !isRoot
 	if prev, seen := st.digestByRef[key]; seen {
 		if prev != lock.ResolvedSHA {
 			return &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonContent, Err: fmt.Errorf("ref %q resolves to conflicting digests (%s vs %s); refusing to merge ambiguous policy", entry.Ref, prev, lock.ResolvedSHA)}
@@ -984,7 +1048,7 @@ func (st *extendsGraphState) walk(r *LayeredResolver, entry LayerRef, env source
 	childEnv := env.child(childRC.Sources)
 	st.onStack[key] = true
 	for _, child := range childRC.Extends {
-		if err := st.walk(r, child, childEnv); err != nil {
+		if err := st.walk(r, child, childEnv, false); err != nil {
 			st.trace.emit(importFailedEvent(asImportError(child.Ref, err), child.Optional))
 			if child.Optional {
 				st.warnings = append(st.warnings, optionalSkipWarning(child.Ref, err))
@@ -1022,8 +1086,8 @@ func (r *LayeredResolver) resolveOneLayer(trace auditTrace, entry LayerRef, sour
 		return ResolvedLayer{}, LockedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonSchema, Err: err}
 	}
 
-	cacheDir := layerCacheDir(parts.SourceID, parts.LayerPath)
-	fetched, warns, err := r.fetchLayer(trace, parts, entry, src, fetcher, cacheDir, prevLocked)
+	target := layerTarget(parts.SourceID, parts.LayerPath)
+	fetched, warns, err := r.fetchLayer(trace, parts, entry, src, fetcher, target, prevLocked)
 	if err != nil {
 		return ResolvedLayer{}, LockedLayer{}, warns, err
 	}
@@ -1049,7 +1113,7 @@ func (r *LayeredResolver) resolveOneLayer(trace auditTrace, entry LayerRef, sour
 // fetchLayer performs the cache/TTL/offline-aware fetch for one layer. In
 // offline mode it serves the last resolved SHA from the lockfile cache (with a
 // cache_hit_offline warning) and never contacts the source.
-func (r *LayeredResolver) fetchLayer(trace auditTrace, parts LayerRefParts, entry LayerRef, src Source, fetcher Fetcher, cacheDir string, prevLocked map[string]LockedLayer) (FetchedLayer, []ProvenanceWarning, error) {
+func (r *LayeredResolver) fetchLayer(trace auditTrace, parts LayerRefParts, entry LayerRef, src Source, fetcher Fetcher, target FetchTarget, prevLocked map[string]LockedLayer) (FetchedLayer, []ProvenanceWarning, error) {
 	if r.offline {
 		prev, ok := prevLocked[entry.Ref]
 		if !ok || prev.ResolvedSHA == "" {
@@ -1065,7 +1129,7 @@ func (r *LayeredResolver) fetchLayer(trace auditTrace, parts LayerRefParts, entr
 		if r.effectiveCacheKey(src, prev.cacheKeyInputs()) == AlwaysRevalidate {
 			return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("offline and cache key revalidation required for %s", entry.Ref)}
 		}
-		data, ok := readCachedLayer(cacheDir, prev.ResolvedSHA)
+		data, ok := readCachedUnit(target, prev.ResolvedSHA)
 		if !ok {
 			return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("offline and SHA %s not in cache", prev.ResolvedSHA)}
 		}
@@ -1085,7 +1149,7 @@ func (r *LayeredResolver) fetchLayer(trace auditTrace, parts LayerRefParts, entr
 	if prev, ok := prevLocked[entry.Ref]; ok && prev.ResolvedSHA != "" {
 		forceRefresh = r.CacheKeyStaleForLayer(src, prev)
 	}
-	fetched, err := fetchWithRefresh(fetcher, src, parts, cacheDir, forceRefresh)
+	fetched, err := fetchWithRefresh(fetcher, src, parts, target, forceRefresh)
 	if err != nil {
 		// A fetcher that already classified the failure (e.g. the oci media-type
 		// guard's schema error) keeps its reason; otherwise the cause is treated
@@ -1136,6 +1200,25 @@ func (r *LayeredResolver) lockEntry(src Source, fetched FetchedLayer) LockedLaye
 func (r *LayeredResolver) effectiveCacheKey(src Source, in CacheKeyInputs) string {
 	in = gatherOverrideFacts(src.CacheKeys, in)
 	return EffectiveCacheKey(SourceKindOf(src.Type), src.CacheKeys, in, CacheKeyOptions{Refresh: r.refresh})
+}
+
+// contentCacheKey derives a unit's effective cache key from CONTENT facts only —
+// the kind default (a git commit, an http validator, a local worktree hash) or
+// the source's declared cache_keys override — WITHOUT the per-resolve `--refresh`
+// runtime force escape.
+//
+// The distinction matters for what gets PERSISTED. `--refresh` (and `da config
+// sync`, which always sets it) is a property of one run: "re-check upstream now".
+// The source's own always_revalidate marker is a property of the source: "always
+// re-check". Recording the AlwaysRevalidate sentinel for the former bakes a
+// transient flag into the lock, so every later resolve reads back "this unit must
+// always revalidate" purely because it was once synced. Units recorded through
+// this helper therefore carry the commit-pinned key an ordinary resolve records,
+// while a config-declared always_revalidate still records the sentinel (it is
+// derived from CacheKeys, not from opts).
+func (r *LayeredResolver) contentCacheKey(src Source, in CacheKeyInputs) string {
+	in = gatherOverrideFacts(src.CacheKeys, in)
+	return EffectiveCacheKey(SourceKindOf(src.Type), src.CacheKeys, in, CacheKeyOptions{})
 }
 
 // withResolvedSHA backfills the kind-primary cache-key facts from the resolved
