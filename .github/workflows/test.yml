@@ -171,7 +171,7 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install --quiet --upgrade pip
-          .venv/bin/python -m pip install --quiet code-review-graph
+          .venv/bin/python -m pip install --quiet 'code-review-graph==2.2.0'
           .venv/bin/code-review-graph --help >/dev/null
 
       # The dual-read comparison reads the legacy bridge's OWN persisted
