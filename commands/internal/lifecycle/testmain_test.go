@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestMain installs a hermetic base PATH for the whole package test binary.
@@ -34,9 +36,19 @@ import (
 // Windows is left untouched: the PATH/shim seeding helpers already t.Skip
 // there, and this POSIX base PATH is not meaningful on Windows.
 func TestMain(m *testing.M) {
+	// Hermeticity guard: this package drives install/refresh flows that
+	// resolve os.UserHomeDir() for platform mirror targets — see
+	// internal/testutil/homeguard.go and
+	// .agents/lessons/hermetic-home-for-state-resolving-tests/LESSON.md.
+	homeGuard := testutil.HomeGuardBefore()
+
 	if runtime.GOOS != "windows" {
 		sep := string(os.PathListSeparator)
 		os.Setenv("PATH", filepath.Join(runtime.GOROOT(), "bin")+sep+"/usr/bin"+sep+"/bin"+sep+"/usr/sbin"+sep+"/sbin")
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	if n := homeGuard.CheckAndReport(); n > 0 && code == 0 {
+		code = 1
+	}
+	os.Exit(code)
 }
