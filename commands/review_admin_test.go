@@ -421,6 +421,17 @@ func TestReviewUsersAddRejectsInvalidRoleAndDuplicates(t *testing.T) {
 	mustErrContain(t, err, "empty email")
 }
 
+func TestReviewUserRunnersRejectInvalidRoles(t *testing.T) {
+	// The runner keeps its own validation as defense in depth for callers that
+	// bypass Cobra's enum PreRunE.
+	var out bytes.Buffer
+	err := runReviewUsersAdd(&out, fakeReviewAdminDeps{}, nil, "x@example.com", "owner")
+	mustErrContain(t, err, "unknown role")
+
+	err = runReviewUsersSetRole(&out, fakeReviewAdminDeps{}, nil, "x@example.com", "supreme")
+	mustErrContain(t, err, "unknown role")
+}
+
 // ── users list ──────────────────────────────────────────────────────────────
 
 func TestReviewUsersListEmpty(t *testing.T) {
