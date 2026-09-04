@@ -94,13 +94,52 @@ func dotAgentsRepoRoot(t *testing.T) string {
 	}
 }
 
+// envWithOverrides returns os.Environ() with each key in overrides replaced
+// (not merely appended): a subprocess env slice with a duplicate key has
+// implementation-defined resolution across OSes, so any existing entry for a
+// key being overridden is dropped before the replacement is appended.
+func envWithOverrides(overrides map[string]string) []string {
+	base := os.Environ()
+	out := make([]string, 0, len(base)+len(overrides))
+	for _, kv := range base {
+		key := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			key = kv[:i]
+		}
+		if _, skip := overrides[key]; skip {
+			continue
+		}
+		out = append(out, kv)
+	}
+	for k, v := range overrides {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
 // runKGSetupViaCLI initializes KG_HOME using the real CLI (avoids importing package commands from workflow tests).
+//
+// Shells the actual `da` binary via `go run`, so it inherits the calling
+// test's env (including its sandboxed KG_HOME). AGENTS_HOME is explicitly
+// re-pointed at a throwaway dir here — independent of whatever the caller did
+// or forgot to t.Setenv — so `kg setup` can never resolve any AGENTS_HOME-
+// derived path onto the developer's real home even if the command surface
+// grows a home-touching side effect later (`kg setup` itself only touches
+// KG_HOME today). HOME is deliberately left untouched: `go run` resolves
+// GOPATH/the module cache (and the build cache) from $HOME/go when unset, so
+// redirecting HOME at a fresh t.TempDir() makes every call population a full
+// module-cache copy under that temp dir — files Go's module cache marks
+// read-only, which then makes t.TempDir()'s cleanup RemoveAll fail with
+// "permission denied" and fails the calling test. See
+// .agents/lessons/hermetic-home-for-state-resolving-tests/LESSON.md.
 func runKGSetupViaCLI(t *testing.T) {
 	t.Helper()
 	repoRoot := dotAgentsRepoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/da", "kg", "setup")
 	cmd.Dir = repoRoot
-	cmd.Env = os.Environ()
+	cmd.Env = envWithOverrides(map[string]string{
+		"AGENTS_HOME": filepath.Join(t.TempDir(), ".agents"),
+	})
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "unknown command") {

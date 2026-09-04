@@ -458,7 +458,7 @@ type fakeFetcher struct {
 	calls    int
 }
 
-func (f *fakeFetcher) Fetch(_ Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
+func (f *fakeFetcher) Fetch(_ Source, parts LayerRefParts, target FetchTarget) (FetchedLayer, error) {
 	f.calls++
 	if f.fetchErr != nil {
 		return FetchedLayer{}, f.fetchErr
@@ -471,7 +471,7 @@ func (f *fakeFetcher) Fetch(_ Source, parts LayerRefParts, cacheDir string) (Fet
 	if sha == "" {
 		sha = contentHash([]byte(body))
 	}
-	if err := writeCachedLayer(cacheDir, sha, []byte(body)); err != nil {
+	if err := writeCachedUnit(target, sha, []byte(body)); err != nil {
 		return FetchedLayer{}, err
 	}
 	return FetchedLayer{Data: []byte(body), ResolvedSHA: sha}, nil
@@ -1204,8 +1204,8 @@ func TestLayeredResolverOfflineCacheMissFails(t *testing.T) {
 
 	// Evict the cached bytes while keeping the lock entry, so offline finds a
 	// recorded SHA but no cache file.
-	cacheDir := layerCacheDir("acme", "org/base.json")
-	if err := os.RemoveAll(filepath.Join(cacheDir, fake.sha)); err != nil {
+	cacheDir := layerTarget("acme", "org/base.json")
+	if err := os.RemoveAll(filepath.Join(cacheDir.Dir, fake.sha)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1665,10 +1665,10 @@ type shiftingShaFetcher struct {
 	n    int
 }
 
-func (f *shiftingShaFetcher) Fetch(_ Source, _ LayerRefParts, cacheDir string) (FetchedLayer, error) {
+func (f *shiftingShaFetcher) Fetch(_ Source, _ LayerRefParts, target FetchTarget) (FetchedLayer, error) {
 	sha := f.shas[f.n%len(f.shas)]
 	f.n++
-	if err := writeCachedLayer(cacheDir, sha, []byte(f.body)); err != nil {
+	if err := writeCachedUnit(target, sha, []byte(f.body)); err != nil {
 		return FetchedLayer{}, err
 	}
 	return FetchedLayer{Data: []byte(f.body), ResolvedSHA: sha}, nil

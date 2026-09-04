@@ -22,7 +22,7 @@ type fakeReviewDeps struct {
 	remove          func(string) error
 	applyProposal   func(*config.Proposal) error
 	archiveProposal func(*config.Proposal) error
-	runRefresh      func(string) error
+	runRefresh      func() error
 }
 
 func (f fakeReviewDeps) MkdirAll(path string, perm os.FileMode) error {
@@ -60,11 +60,11 @@ func (f fakeReviewDeps) ArchiveProposal(p *config.Proposal) error {
 	return config.ArchiveProposal(p)
 }
 
-func (f fakeReviewDeps) RunRefresh(projectFilter string) error {
+func (f fakeReviewDeps) RunRefreshCurrentProject() error {
 	if f.runRefresh != nil {
-		return f.runRefresh(projectFilter)
+		return f.runRefresh()
 	}
-	return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
+	return refreshCurrentProjectOrSkip()
 }
 
 // TestFakeReviewDeps_NilDelegatesToReal pins the nil-delegates-to-real
@@ -91,13 +91,13 @@ func TestFakeReviewDeps_NilDelegatesToReal(t *testing.T) {
 	if err := f.Remove(file); err != nil {
 		t.Fatalf("nil-remove delegate: %v", err)
 	}
-	// ApplyProposal / ArchiveProposal / RunRefresh defaults call into the
+	// ApplyProposal / ArchiveProposal / RunRefreshCurrentProject defaults call into the
 	// real implementations — exercising them end-to-end requires a valid
 	// proposal/config fixture, which other tests already provide. Here we
 	// just assert the methods are addressable (no nil-panic on dispatch).
 	_ = f.ApplyProposal
 	_ = f.ArchiveProposal
-	_ = f.RunRefresh
+	_ = f.RunRefreshCurrentProject
 }
 
 func TestRunReviewList_EmptyDir(t *testing.T) {
@@ -716,7 +716,7 @@ func TestRunReviewApprove_ArchiveProposalErrorDIRollsBack(t *testing.T) {
 	sentinel := errors.New("archive boom")
 	deps := fakeReviewDeps{
 		applyProposal:   func(*config.Proposal) error { return nil },
-		runRefresh:      func(string) error { return nil },
+		runRefresh:      func() error { return nil },
 		archiveProposal: func(*config.Proposal) error { return sentinel },
 	}
 
@@ -739,7 +739,7 @@ func TestRunReviewApprove_RunRefreshErrorDIRollsBack(t *testing.T) {
 	sentinel := errors.New("refresh boom")
 	deps := fakeReviewDeps{
 		applyProposal: func(*config.Proposal) error { return nil },
-		runRefresh:    func(string) error { return sentinel },
+		runRefresh:    func() error { return sentinel },
 	}
 
 	err := runReviewApprove("refresh-fail-di", deps)

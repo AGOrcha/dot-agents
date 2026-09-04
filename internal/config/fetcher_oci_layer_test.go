@@ -26,7 +26,7 @@ func TestOCILayerFetcherPullsLayer(t *testing.T) {
 		return ociBlob{Data: body, Digest: digest, MediaType: ociLayerMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example/base"}
-	cacheDir := layerCacheDir("acme", "org/base.json")
+	cacheDir := layerTarget("acme", "org/base.json")
 	got, err := f.Fetch(src, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, cacheDir)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -38,7 +38,7 @@ func TestOCILayerFetcherPullsLayer(t *testing.T) {
 		t.Fatalf("key inputs = %+v, want oci digest %s", got.KeyInputs, digest)
 	}
 	// Persisted under the SHA-addressed config cache for offline serve.
-	if _, ok := readCachedLayer(cacheDir, digest); !ok {
+	if _, ok := readCachedUnit(cacheDir, digest); !ok {
 		t.Fatal("expected layer cached")
 	}
 	if pulls != 1 {
@@ -60,7 +60,7 @@ func TestOCILayerFetcherVersionPin(t *testing.T) {
 		return ociBlob{Data: body, Digest: digest, MediaType: ociLayerMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
-	cacheDir := layerCacheDir("acme", "org/base.json")
+	cacheDir := layerTarget("acme", "org/base.json")
 	got, err := f.Fetch(src, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json", Version: "pinned:" + digest}, cacheDir)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -80,7 +80,7 @@ func TestOCILayerFetcherRejectsArtifactMediaType(t *testing.T) {
 		return ociBlob{Data: body, Digest: "sha256:" + sha256Hex(body), MediaType: ociArtifactMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
-	cacheDir := layerCacheDir("acme", "org/base.json")
+	cacheDir := layerTarget("acme", "org/base.json")
 	_, err := f.Fetch(src, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, cacheDir)
 	var ie *ImportError
 	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
@@ -96,7 +96,7 @@ func TestOCILayerFetcherPullError(t *testing.T) {
 		return ociBlob{}, errors.New("registry down")
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
-	_, err := f.Fetch(src, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, layerCacheDir("acme", "org/base.json"))
+	_, err := f.Fetch(src, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, layerTarget("acme", "org/base.json"))
 	var ie *ImportError
 	if !errors.As(err, &ie) || ie.Reason != ReasonTransport {
 		t.Fatalf("want transport error, got %v", err)
@@ -108,7 +108,7 @@ func TestOCILayerFetcherPullError(t *testing.T) {
 func TestOCILayerFetcherParseError(t *testing.T) {
 	withPackagesCache(t)
 	f := &ociLayerFetcher{}
-	_, err := f.Fetch(Source{Type: "oci", URL: "https://reg.example/x"}, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, layerCacheDir("acme", "org/base.json"))
+	_, err := f.Fetch(Source{Type: "oci", URL: "https://reg.example/x"}, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, layerTarget("acme", "org/base.json"))
 	var ie *ImportError
 	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
 		t.Fatalf("want schema parse error, got %v", err)
@@ -125,7 +125,7 @@ func TestOCILayerFetcherEmptyMediaTypeTolerated(t *testing.T) {
 		return ociBlob{Data: body}, nil // registry omits digest and media type
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
-	got, err := f.Fetch(src, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, layerCacheDir("acme", "org/base.json"))
+	got, err := f.Fetch(src, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, layerTarget("acme", "org/base.json"))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestOCILayerFetcherCacheWriteError(t *testing.T) {
 	f := &ociLayerFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
 		return ociBlob{Data: body, Digest: "sha256:" + sha256Hex(body), MediaType: ociLayerMediaType}, nil
 	}}
-	_, err := f.Fetch(Source{Type: "oci", URL: "oci://reg.example"}, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, layerCacheDir("acme", "org/base.json"))
+	_, err := f.Fetch(Source{Type: "oci", URL: "oci://reg.example"}, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, layerTarget("acme", "org/base.json"))
 	if err == nil {
 		t.Fatal("expected cache-write error")
 	}
@@ -172,7 +172,7 @@ func TestOCILayerFetcherCacheHitWithoutSidecarIsNotTrusted(t *testing.T) {
 	if err := writeCachedArtifact(digest, body); err != nil {
 		t.Fatal(err)
 	}
-	cacheDir := layerCacheDir("acme", "org/base.json")
+	cacheDir := layerTarget("acme", "org/base.json")
 	parts := LayerRefParts{SourceID: "acme", LayerPath: "org/base.json", Version: "pinned:" + digest}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
 
@@ -225,7 +225,7 @@ func TestOCILayerFetcherFreshPullSeedsOCISidecar(t *testing.T) {
 		return ociBlob{Data: body, Digest: digest, MediaType: ociLayerMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
-	cacheDir := layerCacheDir("acme", "org/base.json")
+	cacheDir := layerTarget("acme", "org/base.json")
 	// Fresh pull at a tag: seeds the packages cache + OCI-layer sidecar.
 	if _, err := f.Fetch(src, LayerRefParts{SourceID: "acme", LayerPath: "org/base.json"}, cacheDir); err != nil {
 		t.Fatalf("fresh Fetch: %v", err)

@@ -2105,6 +2105,14 @@ func TestAcquireReleaseConcurrentChurn(t *testing.T) {
 // the test proves — every writer must still succeed and no key may be lost;
 // only the wall-clock ceiling for the whole contended batch is what scales.
 func TestUpdate_SerializesConcurrentReadModifyWrite(t *testing.T) {
+	// 16 goroutines contend on the same lock via real Update() read-modify-write
+	// round trips. Under -race on a loaded CI runner (windows-latest especially,
+	// -race AND coverage together) a single legitimate hold can outlast the 5s
+	// production acquire budget — the polling primitive is correct (no wakeup
+	// lost, only latency) — observed as a flaky "acquire ... timed out" here.
+	// Same fix as a84f6975's two sibling contention tests: widen the budget for
+	// this test only; production and every timeout-BEHAVIOR test keep 5s.
+	defer SetAcquireTimeout(60 * time.Second)()
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".agentsrc.lock")
 

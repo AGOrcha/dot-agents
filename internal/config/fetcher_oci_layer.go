@@ -40,8 +40,8 @@ func ociLayerRefToOCIRef(src Source, parts LayerRefParts) (ociRef, error) {
 }
 
 // Fetch pulls the layer blob and returns it as a FetchedLayer (no force-refresh).
-func (f *ociLayerFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
-	return f.FetchRefresh(src, parts, cacheDir, false)
+func (f *ociLayerFetcher) Fetch(src Source, parts LayerRefParts, target FetchTarget) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, target, false)
 }
 
 // FetchRefresh pulls the config-layer blob over the shared OCI plumbing and
@@ -51,7 +51,7 @@ func (f *ociLayerFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string
 // accepted to satisfy the refreshingFetcher contract; the OCI pull is already
 // content-addressed (a changed upstream yields a new digest), so it has no
 // separate SHA-fast-path to bypass.
-func (f *ociLayerFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir string, _ bool) (FetchedLayer, error) {
+func (f *ociLayerFetcher) FetchRefresh(src Source, parts LayerRefParts, target FetchTarget, _ bool) (FetchedLayer, error) {
 	importRef := parts.SourceID + ":" + parts.LayerPath
 	ref, err := ociLayerRefToOCIRef(src, parts)
 	if err != nil {
@@ -75,7 +75,7 @@ func (f *ociLayerFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir
 	}
 	// Persist under the SHA-addressed config layer cache so the resolver's offline
 	// serve and lockfile round-trip work like any other layer source.
-	if err := writeCachedLayer(cacheDir, pulled.Digest, pulled.Data); err != nil {
+	if err := writeCachedUnit(target, pulled.Digest, pulled.Data); err != nil {
 		return FetchedLayer{}, fmt.Errorf("caching oci layer %s: %w", importRef, err)
 	}
 	return FetchedLayer{

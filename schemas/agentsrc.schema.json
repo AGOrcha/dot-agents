@@ -39,13 +39,16 @@
       "$ref": "#/$defs/stringList"
     },
     "hooks": {
-      "$ref": "#/$defs/stringsOrBool"
+      "$ref": "#/$defs/stringsOrBool",
+      "description": "Hook projection for this repo. OPTIONAL: omitting the key defers to the config layer stack (an org/team layer pulled in via extends, then product defaults). Present-and-false is NOT the same as absent — it is an explicit repo-local override that wins the layer merge and disables hooks even when an org layer enables them."
     },
     "mcp": {
-      "$ref": "#/$defs/stringsOrBool"
+      "$ref": "#/$defs/stringsOrBool",
+      "description": "MCP server projection for this repo. OPTIONAL: omitting the key defers to the config layer stack. Present-and-false is an explicit repo-local override that wins the layer merge."
     },
     "settings": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Platform settings projection for this repo. OPTIONAL: omitting the key defers to the config layer stack. Present-and-false is an explicit repo-local override that wins the layer merge."
     },
     "gitignore_projections": {
       "type": "boolean",
