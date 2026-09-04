@@ -531,6 +531,35 @@ func (a *AgentsRC) UseGitRefBackend() bool {
 //     byte-for-byte when these fields are absent.
 //
 // See specs config-distribution-model §3-§5 + org-config-resolution §15.2.
+//
+// Projection flags (hooks / mcp / settings) are tri-state POINTERS so "absent"
+// stays distinguishable from "explicitly false" across a load→save round trip
+// (see [[schema-usage]]: pointer types where the zero value must differ from
+// absent).
+//
+// nil  => key omitted => defer to the layer stack / product defaults.
+// set  => key emitted => repo-local declaration that overrides lower layers.
+//
+// This is load-bearing, not cosmetic. The layer merge in
+// resolver.go/resolveSnapshot is key-presence driven: a layer only competes for
+// a key that is physically present in its raw JSON. As non-pointer fields these
+// three had no usable `omitempty` (encoding/json does not look inside a struct,
+// and a bare bool's zero value IS false), so every manifest da wrote re-emitted
+// `"hooks": false, "mcp": false, "settings": false` — silently converting "I
+// never declared this, defer to my org layer" into an explicit repo-local false
+// that WINS the merge, so `da config explain hooks` reported the repo's
+// fabricated false instead of the org layer's true.
+//
+// SCOPE OF THE EFFECT, as audited: these three keys participate in the layer
+// merge and surface through `da config explain`, but NO projection path consumes
+// them. `da refresh` / `da install` project hooks, MCP configs, and settings
+// purely from what exists under ~/.agents/{hooks,mcp,settings}/<scope>/
+// (internal/platform resolveHookSpec / resolveScopedFile), so the effective
+// value gates nothing today. Wiring it in is a deliberate behavior change, not a
+// bug fix: manifests written before the pointer migration carry an injected
+// `"hooks": false` their authors never wrote, and honoring it would disable hook
+// projection for every such repo at once. The invariant is pinned by
+// TestRunRefresh_ProjectionIgnoresHooksMCPSettingsFlags.
 type AgentsRC struct {
 	Schema  string   `json:"$schema,omitempty"`
 	Version int      `json:"version"`
@@ -538,33 +567,7 @@ type AgentsRC struct {
 	Skills  []string `json:"skills,omitempty"`
 	Rules   []string `json:"rules,omitempty"`
 	Agents  []string `json:"agents,omitempty"`
-	// Hooks/MCP/Settings are POINTERS so "absent" stays distinguishable from
-	// "explicitly false" across a load→save round trip (see [[schema-usage]]:
-	// pointer types where the zero value must differ from absent).
-	//
-	// This is load-bearing, not cosmetic. The layer merge in
-	// resolver.go/resolveSnapshot is key-presence driven: a layer only competes
-	// for a key that is physically present in its raw JSON. As non-pointer
-	// fields these three had no usable `omitempty` (encoding/json does not look
-	// inside a struct, and a bare bool's zero value IS false), so every manifest
-	// da wrote re-emitted `"hooks": false, "mcp": false, "settings": false` —
-	// silently converting "I never declared this, defer to my org layer" into an
-	// explicit repo-local false that WINS the merge, so `da config explain hooks`
-	// reported the repo's fabricated false instead of the org layer's true.
-	//
-	// nil  => key omitted => defer to the layer stack / product defaults.
-	// set  => key emitted => repo-local declaration that overrides lower layers.
-	//
-	// SCOPE OF THE EFFECT, as audited: these three keys participate in the layer
-	// merge and surface through `da config explain`, but NO projection path
-	// consumes them. `da refresh` / `da install` project hooks, MCP configs, and
-	// settings purely from what exists under ~/.agents/{hooks,mcp,settings}/
-	// <scope>/ (internal/platform resolveHookSpec / resolveScopedFile), so the
-	// effective value gates nothing today. Wiring it in is a deliberate behavior
-	// change, not a bug fix: manifests written before the pointer migration carry
-	// an injected `"hooks": false` their authors never wrote, and honoring it
-	// would disable hook projection for every such repo at once. The invariant is
-	// pinned by TestRunRefresh_ProjectionIgnoresHooksMCPSettingsFlags.
+	// Tri-state projection flags — semantics in the type doc comment above.
 	Hooks         *StringsOrBool         `json:"hooks,omitempty"`
 	MCP           *StringsOrBool         `json:"mcp,omitempty"`
 	Settings      *bool                  `json:"settings,omitempty"`
