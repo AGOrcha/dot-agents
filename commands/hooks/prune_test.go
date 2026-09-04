@@ -201,6 +201,21 @@ func TestRunHooksPruneImportArtifacts_NoCandidatesIsNoop(t *testing.T) {
 	}
 }
 
+// TestRunHooksPruneImportArtifacts_ScanErrorPropagates covers the scan leg's
+// failure path: when ~/.agents/hooks cannot be enumerated at all (here it is
+// a regular file, not a directory), the command must surface the error
+// rather than report "no candidates found" and exit clean.
+func TestRunHooksPruneImportArtifacts_ScanErrorPropagates(t *testing.T) {
+	agentsHome := filepath.Join(t.TempDir(), ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	mustMkdirAll(t, agentsHome)
+	mustWriteFile(t, filepath.Join(agentsHome, "hooks"), "not a directory")
+
+	if err := runHooksPruneImportArtifacts(testDeps(), false); err == nil {
+		t.Fatal("expected an error when the hooks root cannot be scanned")
+	}
+}
+
 // TestRunHooksPrune_RunEDeletesViaWiredCommand exercises the cobra RunE
 // success path end to end (--import-artifacts --apply through the real
 // wired command, not the unexported function directly) — the counterpart to
