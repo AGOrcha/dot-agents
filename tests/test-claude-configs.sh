@@ -7,6 +7,28 @@
 
 set -e
 
+# Hermeticity guard: this script writes UNCONDITIONALLY into ~/.agents and
+# ~/.claude (mkdir -p ~/.agents/skills/global/docker-verify, overwrites
+# ~/.agents/settings/global/claude-code.json) — by design, since it proves
+# Claude Code actually reads those real, live config locations, not a
+# sandboxed copy. That only stays safe inside the disposable "sandbox" user
+# tests/Dockerfile.sandbox creates (USER sandbox, HOME=/home/sandbox, see
+# tests/SANDBOX.md). Run this on a developer machine or a shared CI runner by
+# mistake and it pollutes/clobbers the real ~/.agents tree — this is the exact
+# class of test-isolation defect documented in
+# .agents/lessons/hermetic-home-for-state-resolving-tests/LESSON.md (the
+# my-skill/idem-skill/extra-skill/demo-skill fixture-skill leaks were the
+# unguarded-t.Setenv variant of the same mistake; this script is the
+# unguarded-real-binary variant). Refuse to run unless $HOME clearly is the
+# dedicated sandbox user's disposable home.
+if [[ "$(id -un 2>/dev/null)" != "sandbox" || "$HOME" != "/home/sandbox" ]]; then
+  echo "REFUSING TO RUN: this script writes into \$HOME/.agents and \$HOME/.claude" >&2
+  echo "unconditionally and must only run as the disposable 'sandbox' user inside" >&2
+  echo "tests/Dockerfile.sandbox (see tests/SANDBOX.md), never on a developer or CI" >&2
+  echo "host. Current user=$(id -un 2>/dev/null || echo '?') HOME=${HOME:-<unset>}." >&2
+  exit 1
+fi
+
 PASS=0
 FAIL=0
 

@@ -1,0 +1,113 @@
+name: Bug report
+description: Something in dot-agents (CLI, hooks, config sync, generated artifacts) is broken.
+title: "bug: <short summary>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Prefix the title with `bug:` and keep it short (e.g. `bug: da refresh drops kg mcp block`).
+        The more precise the repro, the faster this gets fixed — see the field reports in
+        recent PRs for the shape we're going for.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity / class
+      description: How bad is it?
+      options:
+        - data-corrupting (mutates or loses user data/config)
+        - blocking (command fails, workflow cannot proceed)
+        - behavior-gap (works, but not as documented/expected)
+        - cosmetic-ux (output/formatting/wording issue)
+        - validation-gap (bad input accepted silently, or good input rejected)
+    validations:
+      required: true
+
+  - type: input
+    id: commands
+    attributes:
+      label: Affected command(s)
+      description: Which `da` command(s) or subcommand(s) are involved?
+      placeholder: "da config sync, da refresh"
+    validations:
+      required: true
+
+  - type: textarea
+    id: version
+    attributes:
+      label: da version + binary provenance
+      description: Output of `da version` (or `da --version`), plus how the binary was obtained.
+      placeholder: |
+        da version: da version 0.5.0
+        provenance: release tag v0.5.0  (or: built from commit <sha>)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Platform(s) affected
+      description: Which agent platform(s) show the issue? Check all that apply.
+      options:
+        - label: Claude Code
+        - label: Codex
+        - label: Cursor
+        - label: Copilot
+        - label: OpenCode
+        - label: n/a — CLI core (not platform-specific)
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro steps
+      description: >
+        Minimal .agentsrc.json shape or fixture, the exact commands run, and observed vs.
+        expected behavior. Paste real output where possible.
+      value: |
+        1. Starting `.agentsrc.json` (minimal, redact anything sensitive):
+           ```json
+           {
+
+           }
+           ```
+        2. Commands run:
+           ```
+           da config sync && da refresh
+           ```
+        3. Observed:
+           ```
+           $ git diff .agentsrc.json
+           ...
+           ```
+        4. Expected:
+           ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope / blast radius
+      description: How many repos or projects have you observed this in? Single repo, or does it fan out?
+      placeholder: "Single repo. / Observed in 3 repos sharing the same home config."
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround in use (if any)
+      description: What are you doing to unblock yourself in the meantime?
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence links
+      description: Logs, scratch fixture paths, related PR/issue links.
+    validations:
+      required: false

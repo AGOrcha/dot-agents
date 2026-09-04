@@ -422,6 +422,16 @@ func lockedUnitRefs(units map[string]LockedUnit) map[string]bool {
 		if u.Kind != UnitKindLayer && u.Kind != UnitKindArtifact {
 			continue
 		}
+		// A transitively-pulled layer (config-transitive-layering: locked because
+		// ANOTHER layer's own extends named it, not because this project's
+		// manifest did) has no top-level declared identity either — the same
+		// false-positive shape as the derived-unit case just above. Counting it
+		// here trips ReasonDeclaredSet on every run for any project using
+		// transitive layering, even immediately after a clean `da config sync`
+		// (regression: config-verify-staleness-digest).
+		if u.Transitive {
+			continue
+		}
 		refs[declaredRefOf(key)] = true
 	}
 	return refs

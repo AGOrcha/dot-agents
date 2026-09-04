@@ -155,8 +155,8 @@ func TestSchemaRoundTrip_AgentsRC(t *testing.T) {
 		Project: "my-proj",
 		Skills:  []string{"alpha"},
 		Rules:   []string{"global", "project"},
-		Hooks:   StringsOrBool{Names: []string{"PreToolUse"}},
-		MCP:     StringsOrBool{All: true},
+		Hooks:   sob(StringsOrBool{Names: []string{"PreToolUse"}}),
+		MCP:     sob(StringsOrBool{All: true}),
 		Sources: []Source{
 			{Type: "local"},
 			{Type: "git", URL: "https://example.com/repo.git", Ref: "main"},

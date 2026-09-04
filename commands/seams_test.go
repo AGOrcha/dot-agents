@@ -483,7 +483,7 @@ func TestRunRefresh_ConfigLoadError(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := runRefresh("", deps, importD, stdAddDeps{})
+	err := runRefresh(refreshScope{AllProjects: true}, deps, importD, stdAddDeps{})
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected configLoad sentinel from refresh, got %v", err)
 	}
@@ -789,7 +789,7 @@ func TestRunRefresh_ProjectFilterNotFound(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := runRefresh("ghost-project", deps, importD, stdAddDeps{})
+	err := runRefresh(refreshScope{Project: "ghost-project"}, deps, importD, stdAddDeps{})
 	if err == nil || !strings.Contains(err.Error(), "project not found") {
 		t.Fatalf("expected project-not-found, got %v", err)
 	}

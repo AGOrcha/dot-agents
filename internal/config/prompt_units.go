@@ -137,14 +137,24 @@ func promptCacheDir(sourceID, promptPath string) string {
 	return filepath.Join(configCacheRoot(), sourceID, filepath.FromSlash(promptPath))
 }
 
+// promptTarget is the FetchTarget one prompt unit's bytes are cached under: the
+// content-addressed prompt cache dir plus the prompt's REAL basename
+// ("verifiers/ts-lint.md" -> "ts-lint.md"). The name is threaded through the
+// Fetcher interface (FetchTarget) rather than hard-coded, so a prompt caches as
+// <sha>/ts-lint.md while a config layer still caches as <sha>/layer.json — one
+// content-addressed writer/reader pair, two honest file names. A degenerate
+// basename falls back to the layer default (cacheFileName).
+func promptTarget(ref PromptUnitRef) FetchTarget {
+	return FetchTarget{Dir: promptCacheDir(ref.SourceID, ref.Path), FileName: cacheFileName(ref.Path)}
+}
+
 // CachedPromptPath is the absolute path a prompt unit's bytes are cached at for a
-// given resolved digest. The file name is the layer cache's "layer.json" because
-// the SAME Fetcher writes it — a prompt file rides the identical per-source-type
-// fetch plumbing — so there is ONE content-addressed cache writer/reader pair
-// rather than a parallel prompt-only cache. The bytes are the prompt's own
-// (markdown, usually), not JSON.
+// given resolved digest, e.g.
+// ~/.agents/cache/config/team/verifiers/ts-lint.md/<sha>/ts-lint.md. The bytes
+// are the prompt's own (markdown, usually), written by the SAME per-source-type
+// Fetcher an extends layer rides.
 func CachedPromptPath(ref PromptUnitRef, digest string) string {
-	return cachedLayerPath(promptCacheDir(ref.SourceID, ref.Path), digest)
+	return promptTarget(ref).pathFor(digest)
 }
 
 // LockedPromptFile resolves a source-qualified prompt ref against the lock's
@@ -234,7 +244,7 @@ func (r *LayeredResolver) fetchPromptUnit(trace auditTrace, ref PromptUnitRef, s
 		return LockedUnit{}, &ImportError{Ref: ref.Key(), SourceID: ref.SourceID, Reason: ReasonSchema, Err: err}
 	}
 	parts := LayerRefParts{SourceID: ref.SourceID, LayerPath: ref.Path, Version: ref.Version}
-	fetched, err := fetchWithRefresh(fetcher, src, parts, promptCacheDir(ref.SourceID, ref.Path), r.refresh)
+	fetched, err := fetchWithRefresh(fetcher, src, parts, promptTarget(ref), r.refresh)
 	if err != nil {
 		var ie *ImportError
 		if errors.As(err, &ie) {
@@ -246,9 +256,16 @@ func (r *LayeredResolver) fetchPromptUnit(trace auditTrace, ref PromptUnitRef, s
 	}
 	trace.emit(sourceFetchEvent(ref.SourceID, fetched.ResolvedSHA, fetched.CacheHit))
 	return LockedUnit{
-		Kind:     UnitKindPrompt,
-		Digest:   fetched.ResolvedSHA,
-		CacheKey: r.effectiveCacheKey(src, withResolvedSHA(fetched.KeyInputs, fetched.ResolvedSHA)),
+		Kind:   UnitKindPrompt,
+		Digest: fetched.ResolvedSHA,
+		// Commit-pinned, like an ordinary layer resolve: contentCacheKey derives
+		// the key from content facts (and any declared cache_keys override) but NOT
+		// from the per-resolve `--refresh` escape. `da config sync` always sets
+		// --refresh, so recording the escape would stamp every synced prompt unit
+		// with the AlwaysRevalidate sentinel permanently — a transient runtime flag
+		// frozen into the lock, forcing an upstream re-check on every later resolve.
+		// A source that declares always_revalidate still records the sentinel.
+		CacheKey: r.contentCacheKey(src, withResolvedSHA(fetched.KeyInputs, fetched.ResolvedSHA)),
 	}, nil
 }
 

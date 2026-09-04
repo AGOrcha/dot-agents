@@ -1,0 +1,53 @@
+name: Feature gap
+description: Something needs to be possible with dot-agents that isn't today.
+title: "feat: <short summary>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Prefix the title with `feat:`. This template is for capability gaps — things you
+        cannot do today, not bug reports (use the Bug report template for those).
+
+  - type: textarea
+    id: gap
+    attributes:
+      label: What can't be done today
+      description: State the behavioral gap plainly — what you tried, what's missing.
+      placeholder: "There is no way to X without Y."
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround and its cost
+      description: How are you working around this today, and what does that cost (time, risk, manual steps)?
+    validations:
+      required: true
+
+  - type: textarea
+    id: surface
+    attributes:
+      label: Suggested surface
+      description: What command, flag, or config field would close the gap?
+      placeholder: "da workflow archive --dry-run, or a new agentsrc.json field like `archive.retain_days`."
+    validations:
+      required: false
+
+  - type: textarea
+    id: payload
+    attributes:
+      label: Payload waiting on it
+      description: What gets unblocked once this exists? Who/what is downstream of this gap?
+    validations:
+      required: true
+
+  - type: input
+    id: spec-link
+    attributes:
+      label: Spec / plan linkage (if known)
+      description: Link to a workflow/specs/<id>/design.md, plan, or related issue/PR if one already exists.
+      placeholder: ".agents/workflow/specs/<id>/design.md or #123"
+    validations:
+      required: false

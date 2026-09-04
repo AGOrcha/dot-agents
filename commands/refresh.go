@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
@@ -29,6 +32,35 @@ var refreshImport bool
 // closure in NewRefreshCmd.
 var refreshInexact bool
 
+// errNotInManagedProject is the sentinel behind the "cd into a managed project
+// or pass --all" refusal. Internal callers that trigger a refresh as a side
+// effect of their own operation (`da sync pull`, `da review approve`) match on
+// it with errors.Is and downgrade the refusal to an informational skip — their
+// primary work already succeeded, so a missing projection target must not fail
+// (or roll back) the operation that asked for it.
+var errNotInManagedProject = errors.New("not inside a managed project")
+
+// refreshScope selects which managed projects one refresh invocation touches.
+//
+// The zero value is the DEFAULT scope: the single managed project containing
+// the working directory. Machine-wide fan-out is never implicit — it requires
+// AllProjects, which only an explicit `da refresh --all` sets. This polarity is
+// deliberate: a refresh mutates every managed project it visits, so a bug in
+// one invocation used to reach every repo on the machine. Cross-repo effects
+// must be explicit in the invocation that causes them.
+type refreshScope struct {
+	// Project names one managed project explicitly (the `da refresh [project]`
+	// positional). It wins over both the cwd default and AllProjects.
+	Project string
+	// AllProjects requests the machine-wide fan-out across every registered
+	// project, in deterministic (sorted) order.
+	AllProjects bool
+}
+
+// currentProjectScope is the scope internal callers use when they need the repo
+// they were invoked in re-projected — never the whole machine.
+func currentProjectScope() refreshScope { return refreshScope{} }
+
 // refreshConfigLoader is the narrow collaborator refresh.go's
 // fault-injectable LoadConfig operation needs (interface-DI per
 // docs/TEST_SEAMS.md). Single-method, file-prefixed -er form; file-scoped
@@ -54,19 +86,31 @@ func NewRefreshCmd() *cobra.Command {
 	return lifecycle.NewRefreshCmd(lifecycle.Deps{
 		ExampleBlock:          ExampleBlock,
 		MaximumNArgsWithHints: MaximumNArgsWithHints,
-		RunRefresh: func(projectFilter string, importAlso, inexact bool) error {
+		RunRefresh: func(projectFilter string, importAlso, inexact, allProjects bool) error {
 			refreshImport = importAlso
 			refreshInexact = inexact
-			return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
+			scope := refreshScope{Project: projectFilter, AllProjects: allProjects}
+			return runRefresh(scope, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 		},
 	})
 }
 
-func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDeps, addD addDeps) error {
-	if err := runImportFromRefresh(projectFilter, refreshImportScope(), importD); err != nil {
-		return fmt.Errorf("import before refresh: %w", err)
+// refreshCurrentProjectOrSkip runs a current-project-scoped refresh on behalf of
+// an internal caller that triggers refresh as a side effect (`da sync pull`,
+// `da review approve`). Both act on the current repo's config, so neither may
+// fan out across the machine. Being outside a managed project is not an error
+// for them — the pull or the proposal-apply already succeeded — so the refusal
+// is downgraded to an informational skip.
+func refreshCurrentProjectOrSkip() error {
+	err := runRefresh(currentProjectScope(), stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
+	if errors.Is(err, errNotInManagedProject) {
+		ui.Info("Not inside a managed project — skipped refresh. Run `da refresh` from a project, or `da refresh --all` for every registered project.")
+		return nil
 	}
+	return err
+}
 
+func runRefresh(scope refreshScope, deps refreshConfigLoader, importD importDeps, addD addDeps) error {
 	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -75,6 +119,17 @@ func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDe
 	if len(cfg.Projects) == 0 {
 		ui.Info("No managed projects. Add one with: da add <path>")
 		return nil
+	}
+
+	projects, err := resolveRefreshProjects(cfg, scope)
+	if err != nil {
+		return err
+	}
+
+	// The pre-refresh import pass inherits the refresh scope: a single-project
+	// refresh must not import on behalf of every other registered project.
+	if err := runImportFromRefresh(importFilterForScope(scope, projects), refreshImportScope(), importD); err != nil {
+		return fmt.Errorf("import before refresh: %w", err)
 	}
 
 	ui.Header("da refresh")
@@ -88,11 +143,6 @@ func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDe
 
 	installedEnabled := platform.InstalledEnabledPlatforms(cfg)
 	refreshCommit, refreshDescribe := resolveRefreshCommit()
-
-	projects, err := resolveRefreshProjects(cfg, projectFilter)
-	if err != nil {
-		return err
-	}
 
 	total := len(projects)
 	count := 0
@@ -163,20 +213,132 @@ func reportEnabledPlatforms(cfg *config.Config) []platform.Platform {
 	return enabled
 }
 
-// resolveRefreshProjects returns the project list to refresh: every managed
-// project, or just the filter target when one was provided. An unknown filter
-// produces a typed error with a recovery hint.
-func resolveRefreshProjects(cfg *config.Config, projectFilter string) ([]string, error) {
-	if projectFilter == "" {
-		return cfg.ListProjects(), nil
+// resolveRefreshProjects returns the project list to refresh for a scope:
+// the named project, every managed project under `--all` (sorted so the sweep
+// order is deterministic), or — by default — the single project containing the
+// working directory. An unknown name produces a typed error with a recovery
+// hint; a default-scoped run outside any managed project refuses rather than
+// silently widening to the whole machine.
+func resolveRefreshProjects(cfg *config.Config, scope refreshScope) ([]string, error) {
+	if scope.Project != "" {
+		if !cfg.IsProjectKnown(scope.Project) {
+			return nil, ErrorWithHints(
+				fmt.Sprintf("project not found: %s", scope.Project),
+				"Run `da status` to see the registered project names.",
+			)
+		}
+		return []string{scope.Project}, nil
 	}
-	if !cfg.IsProjectKnown(projectFilter) {
-		return nil, ErrorWithHints(
-			fmt.Sprintf("project not found: %s", projectFilter),
-			"Run `da status` to see the registered project names.",
-		)
+	if scope.AllProjects {
+		// Sorted for a reproducible sweep. A sibling workspace spec will later
+		// need members-before-roots ordering here; name order is the neutral
+		// placeholder until that lands.
+		names := cfg.ListProjects()
+		sort.Strings(names)
+		return names, nil
 	}
-	return []string{projectFilter}, nil
+	name, err := resolveCurrentProject(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return []string{name}, nil
+}
+
+// resolveCurrentProject returns the managed project containing the working
+// directory, or the errNotInManagedProject refusal when the cwd belongs to no
+// registered project.
+func resolveCurrentProject(cfg *config.Config) (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolving working directory: %w", err)
+	}
+	if name := matchProjectForDir(cfg, cwd); name != "" {
+		return name, nil
+	}
+	return "", &CLIError{
+		Message: "not inside a managed project: " + config.DisplayPath(cwd),
+		Hints: []string{
+			"cd into a managed project and re-run `da refresh`, or name one: `da refresh <project>`.",
+			"To refresh every registered project on this machine, run `da refresh --all`.",
+			"Run `da status` to see the registered project names and their paths.",
+		},
+		Cause: errNotInManagedProject,
+	}
+}
+
+// matchProjectForDir returns the managed project whose recorded path is dir or
+// an ancestor of it. The DEEPEST match wins, so a project nested inside another
+// resolves to the innermost owner; names are visited in sorted order so equal
+// depths tie-break deterministically. Projects known but unbound on this machine
+// (empty path) and the placeholder "." path never match.
+func matchProjectForDir(cfg *config.Config, dir string) string {
+	dirForms := pathForms(dir)
+	names := cfg.ListProjects()
+	sort.Strings(names)
+
+	best, bestDepth := "", -1
+	for _, name := range names {
+		path := cfg.GetProjectPath(name)
+		if path == "" || path == "." {
+			continue
+		}
+		depth := projectMatchDepth(dirForms, path)
+		if depth > bestDepth {
+			best, bestDepth = name, depth
+		}
+	}
+	return best
+}
+
+// projectMatchDepth returns the length of the project root that contains dir,
+// or -1 when the project does not contain it. Length stands in for nesting
+// depth: a nested project root is strictly longer than its ancestor's.
+func projectMatchDepth(dirForms []string, projectPath string) int {
+	depth := -1
+	for _, root := range pathForms(projectPath) {
+		if dirWithin(dirForms, root) && len(root) > depth {
+			depth = len(root)
+		}
+	}
+	return depth
+}
+
+// pathForms returns the comparable spellings of a path: the cleaned absolute
+// form and, when it differs, the symlink-resolved one. Both are needed because
+// macOS hands out /var/... working directories for /private/var/... roots (and
+// vice versa), so a raw string compare between cwd and a recorded project path
+// would miss the match.
+func pathForms(p string) []string {
+	clean := filepath.Clean(p)
+	if abs, err := filepath.Abs(clean); err == nil {
+		clean = abs
+	}
+	forms := []string{clean}
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil && resolved != clean {
+		forms = append(forms, resolved)
+	}
+	return forms
+}
+
+// dirWithin reports whether any spelling of the directory is the root itself or
+// lives beneath it. The separator guard keeps /repo-sandbox from matching /repo.
+func dirWithin(dirForms []string, root string) bool {
+	for _, dir := range dirForms {
+		if dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// importFilterForScope mirrors the refresh scope onto the pre-refresh import
+// pass. A machine-wide refresh keeps the registry-wide "" filter; any narrower
+// scope imports only for the project being refreshed.
+func importFilterForScope(scope refreshScope, projects []string) string {
+	if scope.AllProjects || len(projects) != 1 {
+		return ""
+	}
+	return projects[0]
 }
 
 // checkRefreshProjectPath reports whether the project's recorded path is a
@@ -430,7 +592,7 @@ func finalizeProjectRefresh(name, path string, projectFailed bool, refreshCommit
 		ui.Bullet("warn", "skipping refresh metadata for "+name+" — refresh was partial")
 		return false
 	}
-	if err := projectsync.WriteRefreshToLock(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+	if err := projectsync.WriteRefreshToLock(path, Version, refreshCommit, refreshDescribe); err != nil {
 		ui.Bullet("warn", fmt.Sprintf("lock refresh metadata: %v", err))
 		return false
 	}

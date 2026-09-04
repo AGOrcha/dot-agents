@@ -89,7 +89,13 @@ func TestRefreshMarkerContent_EmptyOptionals(t *testing.T) {
 	}
 }
 
-func TestWriteRefreshToLock_CreatesManifestWritesLockRemovesLegacy(t *testing.T) {
+// TestWriteRefreshToLock_WritesLockRemovesLegacyNeverCreatesManifest is the
+// core contract: refresh stamps the lock and clears the legacy marker, and
+// never brings a .agentsrc.json into existence. Bootstrapping a manifest here
+// was the old behavior; it round-tripped the whole file through AgentsRC and
+// injected `"hooks": false, "mcp": false, "settings": false`, which then beat
+// the config layers. A refresh must not author user-owned files.
+func TestWriteRefreshToLock_WritesLockRemovesLegacyNeverCreatesManifest(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -104,18 +110,13 @@ func TestWriteRefreshToLock_CreatesManifestWritesLockRemovesLegacy(t *testing.T)
 	if err := os.WriteFile(legacy, []byte("legacy\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectsync.WriteRefreshToLock("myproj", projectPath, "1.0.0", "deadbeef", "v1"); err != nil {
+	if err := projectsync.WriteRefreshToLock(projectPath, "1.0.0", "deadbeef", "v1"); err != nil {
 		t.Fatalf("WriteRefreshToLock: %v", err)
 	}
 
-	// .agentsrc.json is bootstrapped (git-portable manifest) but carries NO
-	// refresh metadata — that lives in the lock.
-	manifestData, err := os.ReadFile(filepath.Join(projectPath, ".agentsrc.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(manifestData), "refresh") {
-		t.Fatalf("manifest must NOT carry refresh metadata: %s", manifestData)
+	// No manifest existed before the refresh, so none may exist after it.
+	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.json")); !os.IsNotExist(err) {
+		t.Fatalf(".agentsrc.json must not be created by a refresh: stat err=%v", err)
 	}
 
 	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
@@ -251,46 +252,10 @@ func TestEnsureGitignoreEntry_UnreadableFileSkipsCleanly(t *testing.T) {
 	projectsync.EnsureGitignoreEntry("/nonexistent/path", "entry")
 }
 
-// TestWriteRefreshToLock_LoadErrorRegularFileProjectPath covers the
-// LoadAgentsRC !os.IsNotExist(err) branch via ENOTDIR: joining
-// ".agentsrc.json" onto a projectPath that is itself a regular file (not a
-// directory) fails with "not a directory", which os.IsNotExist does not
-// match, so WriteRefreshToLock returns it directly instead of falling
-// through to the generate-and-bootstrap path.
-func TestWriteRefreshToLock_LoadErrorRegularFileProjectPath(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	t.Setenv("AGENTS_HOME", agentsHome)
-	os.MkdirAll(agentsHome, 0755)
-
-	projectPath := filepath.Join(tmp, "regular")
-	os.WriteFile(projectPath, []byte("file"), 0644)
-	if err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d"); err == nil {
-		t.Error("expected Load error (ENOTDIR) when projectPath is a regular file")
-	}
-}
-
-// TestWriteRefreshToLock_SaveError covers the rc.Save error-propagation
-// branch. projectPath does not exist at all: LoadAgentsRC misses with
-// os.IsNotExist (falls through to GenerateAgentsRC, which always succeeds),
-// but rc.Save then fails writing .agentsrc.json because its parent
-// directory was never created — a cross-platform ENOENT on every OS.
-func TestWriteRefreshToLock_SaveError(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	t.Setenv("AGENTS_HOME", agentsHome)
-	os.MkdirAll(agentsHome, 0755)
-
-	projectPath := filepath.Join(tmp, "does-not-exist")
-	if err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d"); err == nil {
-		t.Error("expected Save error when projectPath directory does not exist")
-	}
-}
-
 // TestWriteRefreshToLock_WriteRefreshLockError covers the
-// config.WriteRefreshLock error-propagation branch: a valid, saveable
-// manifest exists, but a directory sits at .agentsrc.lock, so
-// agentslock.Open's os.ReadFile fails to read it (EISDIR, cross-platform).
+// config.WriteRefreshLock error-propagation branch: a directory sits at
+// .agentsrc.lock, so agentslock.Open's os.ReadFile fails to read it (EISDIR,
+// cross-platform).
 func TestWriteRefreshToLock_WriteRefreshLockError(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -306,12 +271,15 @@ func TestWriteRefreshToLock_WriteRefreshLockError(t *testing.T) {
 	if err := os.MkdirAll(config.AgentsLockPath(projectPath), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d"); err == nil {
+	if err := projectsync.WriteRefreshToLock(projectPath, "v", "c", "d"); err == nil {
 		t.Error("expected WriteRefreshLock error when .agentsrc.lock is a directory")
 	}
 }
 
-func TestWriteRefreshToLock_LoadError(t *testing.T) {
+// TestWriteRefreshToLock_UnparseableManifestIsUntouched proves the manifest is
+// never read or rewritten: a .agentsrc.json that does not even parse neither
+// fails the refresh nor gets modified. Refresh writes the lock only.
+func TestWriteRefreshToLock_UnparseableManifestIsUntouched(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -319,11 +287,20 @@ func TestWriteRefreshToLock_LoadError(t *testing.T) {
 	projectPath := filepath.Join(tmp, "repo")
 	os.MkdirAll(projectPath, 0755)
 
-	if err := os.WriteFile(filepath.Join(projectPath, ".agentsrc.json"), []byte("not json"), 0644); err != nil {
+	manifestPath := filepath.Join(projectPath, ".agentsrc.json")
+	const original = "not json"
+	if err := os.WriteFile(manifestPath, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d"); err == nil {
-		t.Error("expected error from malformed .agentsrc.json")
+	if err := projectsync.WriteRefreshToLock(projectPath, "v", "c", "d"); err != nil {
+		t.Fatalf("WriteRefreshToLock must not depend on a parseable manifest: %v", err)
+	}
+	got, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("manifest was rewritten: got %q, want %q", got, original)
 	}
 }
 
@@ -359,15 +336,16 @@ func TestWriteRefreshToLock_LegacyRemoveErrorPropagates(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(legacy, "child"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d")
+	err := projectsync.WriteRefreshToLock(projectPath, "v", "c", "d")
 	if err == nil {
 		t.Skip("filesystem allowed os.Remove on non-empty dir; legacy-error branch not exercised")
 	}
 }
 
 // TestWriteRefreshToLock_ExistingManifest is the direct acceptance check:
-// refresh stamps .agentsrc.lock, and a pre-existing .agentsrc.json gains NO
-// refresh block (even though it is re-saved to strip any legacy one).
+// refresh stamps .agentsrc.lock and leaves a pre-existing .agentsrc.json
+// byte-for-byte identical — it gains no refresh block, and just as importantly
+// no re-emitted hooks/mcp/settings keys the author never wrote.
 func TestWriteRefreshToLock_ExistingManifest(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -380,16 +358,22 @@ func TestWriteRefreshToLock_ExistingManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(projectPath, ".agentsrc.json"), []byte(`{"version":1,"project":"myproj","sources":[{"type":"local"}]}`), 0644); err != nil {
+	const manifest = `{"version":1,"project":"myproj","sources":[{"type":"local"}]}`
+	if err := os.WriteFile(filepath.Join(projectPath, ".agentsrc.json"), []byte(manifest), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectsync.WriteRefreshToLock("myproj", projectPath, "2.0", "c2", "v2"); err != nil {
+	if err := projectsync.WriteRefreshToLock(projectPath, "2.0", "c2", "v2"); err != nil {
 		t.Fatalf("WriteRefreshToLock: %v", err)
 	}
 
 	manifestData, _ := os.ReadFile(filepath.Join(projectPath, ".agentsrc.json"))
 	if strings.Contains(string(manifestData), "c2") || strings.Contains(string(manifestData), "refresh") {
 		t.Errorf("manifest must NOT gain refresh metadata: %s", manifestData)
+	}
+	// Undeclared hooks/mcp/settings must stay undeclared — the refresh must not
+	// rewrite the manifest at all.
+	if string(manifestData) != manifest {
+		t.Errorf("manifest must be left byte-for-byte identical:\n got: %s\nwant: %s", manifestData, manifest)
 	}
 
 	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
