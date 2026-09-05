@@ -21,11 +21,13 @@ for new work — the same layout import and refresh use when canonicalizing hook
 			"  da hooks list my-app",
 			"  da hooks show global session-orient",
 			"  da hooks remove global old-hook-bundle",
+			"  da hooks prune --import-artifacts",
 		),
 	}
 	cmd.AddCommand(newHooksListCmd(deps))
 	cmd.AddCommand(newHooksShowCmd(deps))
 	cmd.AddCommand(newHooksRemoveCmd(deps))
+	cmd.AddCommand(newHooksPruneCmd(deps))
 	return cmd
 }
 
