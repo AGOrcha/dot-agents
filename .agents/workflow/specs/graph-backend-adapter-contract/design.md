@@ -1659,6 +1659,25 @@ mode**: bootstrap writes to the new kg-native namespace, the bridge
 remains active for tools without parity, and `da` core prefers the
 new namespace when both are available.
 
+**Progress notes** (record only — the four conditions above are
+unchanged):
+
+- **2026-08-12 — Phase A native cutover (`t6-bridge-decommission`,
+  workstream 1).** Condition 3 is MET: the kg-native `crg` adapter is
+  registered in both production registries (via
+  `crgbridge.RegisterCRGFamily`, so `EnforceReadsFrom` runs) and is the
+  **default** backend for `kg build|update|code-status|impact|flows|
+  communities|postprocess|changes` and `da kg serve`. The Python
+  subprocess is off the default path; it is selected only by
+  `kg.graph_backend` (or `DA_KG_GRAPH_BACKEND`) naming the crg-bridge
+  family — the documented rollback. Conditions 1, 2 and 4 remain open,
+  and the condition-1/2 soak clock **restarts** from this date because
+  the parity matrix must now soak against a native path that is
+  actually serving production. Consumer state, the storage location,
+  and the observable behaviour deltas (Go-only ingestion, structural
+  rather than LLM-authored community descriptions, positional flow ids)
+  are recorded in `docs/crg-bridge-consumer-audit.md`.
+
 ### 11.5 `go-native-code-graph-analysis` re-scope
 
 That spec was framed against the assumption CRG remains a separate

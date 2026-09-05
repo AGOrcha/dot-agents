@@ -77,14 +77,93 @@ type MCPServer struct {
 	bridgeErr error
 	storeErr  error
 	workDir   string
+	// nodes caches the backend's node export for the fallbacks below, so one
+	// session never re-exports the graph per tool call.
+	nodes []GraphNode
+	// nodesLoaded distinguishes "not exported yet" from "exported, empty".
+	nodesLoaded bool
 }
 
+// nodeExporter is the slice of the backend used by the warm-store fallbacks:
+// the bulk node export. Both the bridge and the kg-native engine provide it.
+type nodeExporter interface {
+	ReadNodes(limit int) ([]GraphNode, error)
+}
+
+// backendNodes returns the backend's nodes, exported once per session.
+//
+// It exists because several MCP tools historically read the WARM store
+// ($KG_HOME/ops/graphstore.db), which is populated only by an explicit
+// `da kg warm --include-code` mirror pass. The authoritative code graph now
+// lives with the selected backend, so a tool whose warm-store read comes back
+// empty falls back here instead of reporting an empty graph.
+func (s *MCPServer) backendNodes() []GraphNode {
+	if s.nodesLoaded {
+		return s.nodes
+	}
+	s.nodesLoaded = true
+	exporter, ok := s.bridge.(nodeExporter)
+	if !ok || exporter == nil {
+		return nil
+	}
+	nodes, err := exporter.ReadNodes(0)
+	if err != nil {
+		return nil
+	}
+	s.nodes = nodes
+	return s.nodes
+}
+
+// matchBackendNodes returns backend nodes whose name or qualified name contains
+// query (case-insensitive), capped at limit.
+func (s *MCPServer) matchBackendNodes(query string, limit int) []GraphNode {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	var out []GraphNode
+	for _, n := range s.backendNodes() {
+		if n.Kind == NodeKindFile || !nodeMatches(n, needle) {
+			continue
+		}
+		out = append(out, n)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+// nodeMatches reports whether a node's name or qualified name contains needle
+// (already lower-cased). An empty needle matches everything.
+func nodeMatches(n GraphNode, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(n.Name), needle) ||
+		strings.Contains(strings.ToLower(n.QualifiedName), needle)
+}
+
+// NewMCPServer builds a server backed by the legacy Python CRG subprocess. It
+// is the pre-cutover constructor, kept because the bridge remains a supported
+// rollback backend until the §11.4 decommissioning gate passes. Production
+// `da kg serve` no longer calls it: commands/kg resolves the configured backend
+// and calls NewMCPServerWithProvider, so the eight tools are kg-native-backed
+// by default.
 func NewMCPServer(workDir string) *MCPServer {
-	s := &MCPServer{workDir: workDir}
-	if bridge, err := NewCRGBridge(workDir); err == nil {
-		s.bridge = bridge
-	} else {
-		s.bridgeErr = err
+	bridge, err := NewCRGBridge(workDir)
+	if err != nil {
+		return NewMCPServerWithProvider(workDir, nil, err)
+	}
+	return NewMCPServerWithProvider(workDir, bridge, nil)
+}
+
+// NewMCPServerWithProvider builds a server over an explicitly selected
+// code-graph backend. The tool surface — names, arguments and response shapes —
+// is identical whichever provider is passed; only the engine behind it changes.
+// A nil provider with a non-nil providerErr makes graph-backed tools report
+// that error rather than panicking, exactly as an undiscoverable bridge did.
+func NewMCPServerWithProvider(workDir string, provider CodeGraphProvider, providerErr error) *MCPServer {
+	s := &MCPServer{workDir: workDir, bridgeErr: providerErr}
+	if provider != nil {
+		s.bridge = provider
 	}
 	if store, err := OpenSQLite(defaultGraphstoreDBPath()); err == nil {
 		s.store = store
@@ -297,13 +376,31 @@ func (s *MCPServer) handleListGraphStats(_ json.RawMessage) (json.RawMessage, er
 	if err != nil {
 		return nil, err
 	}
+	nodes, edges := stats.TotalNodes, stats.TotalEdges
+	if nodes == 0 && edges == 0 {
+		// The warm store is a mirror, not the source of truth for the code
+		// graph; when it has not been mirrored, report the backend's counts.
+		nodes, edges = s.backendCounts()
+	}
 	payload := map[string]any{
-		"nodes":       stats.TotalNodes,
-		"edges":       stats.TotalEdges,
+		"nodes":       nodes,
+		"edges":       edges,
 		"languages":   s.collectStatsLanguages(stats),
 		"communities": s.countStatsCommunities(),
 	}
 	return json.Marshal(payload)
+}
+
+// backendCounts reads the node/edge totals straight off the backend.
+func (s *MCPServer) backendCounts() (int, int) {
+	if s.bridge == nil {
+		return 0, 0
+	}
+	status, err := s.bridge.Status()
+	if err != nil || status == nil {
+		return 0, 0
+	}
+	return status.Nodes, status.Edges
 }
 
 // countStatsCommunities returns the number of communities reported by the
@@ -393,27 +490,40 @@ func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessa
 // as the impact-radius seed. Falls back to a single-element slice containing
 // the raw symbol when the warm store is unavailable or returns nothing.
 func (s *MCPServer) resolveImpactFiles(symbol string) []string {
-	files := []string{symbol}
+	if dedup := uniqueFilePaths(s.warmSearch(symbol, 20)); len(dedup) > 0 {
+		return dedup
+	}
+	// Warm store empty or unmirrored — resolve against the backend's own graph.
+	if dedup := uniqueFilePaths(s.matchBackendNodes(symbol, 20)); len(dedup) > 0 {
+		return dedup
+	}
+	return []string{symbol}
+}
+
+// warmSearch runs a warm-store node search, tolerating an absent store.
+func (s *MCPServer) warmSearch(query string, limit int) []GraphNode {
 	if s.store == nil {
-		return files
+		return nil
 	}
-	nodes, err := s.store.SearchNodes(symbol, 20)
+	nodes, err := s.store.SearchNodes(query, limit)
 	if err != nil {
-		return files
+		return nil
 	}
+	return nodes
+}
+
+// uniqueFilePaths returns the distinct, non-empty file paths of nodes, in order.
+func uniqueFilePaths(nodes []GraphNode) []string {
 	seen := map[string]bool{}
-	var dedup []string
+	var out []string
 	for _, node := range nodes {
 		if node.FilePath == "" || seen[node.FilePath] {
 			continue
 		}
 		seen[node.FilePath] = true
-		dedup = append(dedup, node.FilePath)
+		out = append(out, node.FilePath)
 	}
-	if len(dedup) > 0 {
-		return dedup
-	}
-	return files
+	return out
 }
 
 // dedupImpactNodes returns the changed-then-impacted node sequence with
@@ -456,19 +566,18 @@ func (s *MCPServer) handleSemanticSearchNodes(params json.RawMessage) (json.RawM
 	if limit <= 0 {
 		limit = 20
 	}
+	nodes := s.warmSearch(req.Query, limit)
+	if len(nodes) == 0 {
+		nodes = s.matchBackendNodes(req.Query, limit)
+	}
 	results := []map[string]any{}
-	if s.store != nil {
-		nodes, err := s.store.SearchNodes(req.Query, limit)
-		if err == nil {
-			for _, node := range nodes {
-				results = append(results, map[string]any{
-					"name":    node.Name,
-					"type":    node.Kind,
-					"file":    node.FilePath,
-					"summary": node.QualifiedName,
-				})
-			}
-		}
+	for _, node := range nodes {
+		results = append(results, map[string]any{
+			"name":    node.Name,
+			"type":    node.Kind,
+			"file":    node.FilePath,
+			"summary": node.QualifiedName,
+		})
 	}
 	return json.Marshal(map[string]any{"results": results})
 }
@@ -570,6 +679,14 @@ func reviewChangedSymbols(fns []CRGChangedNode) []map[string]any {
 // context request, defaulting to an empty slice when the warm store is
 // unavailable or the query fails.
 func (s *MCPServer) reviewImpactNodes(files []string) []map[string]any {
+	if out := s.warmImpactNodes(files); len(out) > 0 {
+		return out
+	}
+	return s.backendImpactNodes(files)
+}
+
+// warmImpactNodes reads the impact radius from the warm mirror.
+func (s *MCPServer) warmImpactNodes(files []string) []map[string]any {
 	out := []map[string]any{}
 	if s.store == nil {
 		return out
@@ -585,6 +702,22 @@ func (s *MCPServer) reviewImpactNodes(files []string) []map[string]any {
 		out = append(out, graphNodeToMCP(node))
 	}
 	return out
+}
+
+// backendImpactNodes reads the impact radius from the selected backend, the
+// fallback when the warm mirror holds no code rows.
+func (s *MCPServer) backendImpactNodes(files []string) []map[string]any {
+	out := []map[string]any{}
+	if s.bridge == nil {
+		return out
+	}
+	result, err := s.bridge.GetImpactRadius(ImpactOptions{
+		ChangedFiles: files, MaxDepth: 2, MaxResults: 50,
+	})
+	if err != nil || result == nil {
+		return out
+	}
+	return dedupImpactNodes(result.ChangedNodes, result.ImpactedNodes)
 }
 
 func (s *MCPServer) handleGetDocsSection(params json.RawMessage) (json.RawMessage, error) {

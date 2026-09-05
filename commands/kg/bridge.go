@@ -434,13 +434,14 @@ func collectChangeAnalysisResults(query string, limit int) (GraphQueryResponse, 
 		Provider:      "crg",
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	}
-	bridge, err := graphstore.NewCRGBridge(crgRepoRoot())
+	provider, release, err := codeGraphProvider(crgRepoRoot())
 	if err != nil {
 		resp.Provider = "crg-unavailable"
 		resp.Warnings = append(resp.Warnings, err.Error())
 		return resp, nil
 	}
-	report, err := bridge.DetectChanges(graphstore.DetectChangesOptions{})
+	defer release()
+	report, err := provider.DetectChanges(graphstore.DetectChangesOptions{})
 	if err != nil {
 		return resp, err
 	}
@@ -554,13 +555,14 @@ func collectCommunityContextResults(query string, limit int) (GraphQueryResponse
 		Provider:      "crg",
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	}
-	bridge, err := graphstore.NewCRGBridge(crgRepoRoot())
+	provider, release, err := codeGraphProvider(crgRepoRoot())
 	if err != nil {
 		resp.Provider = "crg-unavailable"
 		resp.Warnings = append(resp.Warnings, err.Error())
 		return resp, nil
 	}
-	communities, err := bridge.ListCommunities(0, "size")
+	defer release()
+	communities, err := provider.ListCommunities(0, "size")
 	if err != nil {
 		return resp, err
 	}

@@ -75,6 +75,10 @@
           "enum": ["sqlite", "postgres"],
           "description": "Storage backend. 'postgres' requires KG_POSTGRES_URL."
         },
+        "graph_backend": {
+          "type": "string",
+          "description": "Adapter-ref selecting the code-graph backend that serves `da kg build|update|code-status|impact|flows|communities|postprocess|changes` and `da kg serve`. Defaults to the kg-native 'dotagents-builtin:graph/crg@^1.0'; 'dotagents-builtin:graph/crg-bridge@^0.1' routes back to the legacy Python subprocess bridge (graph-backend-adapter-contract §11.3/§11.4 rollback path)."
+        },
         "bridge": {
           "type": "object",
           "additionalProperties": false,

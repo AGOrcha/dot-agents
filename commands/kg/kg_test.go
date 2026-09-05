@@ -710,6 +710,7 @@ func TestCRGStatus_ReadinessStates(t *testing.T) {
 }
 
 func TestRunKGCodeStatus_JSONOutput(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
@@ -719,6 +720,7 @@ func TestRunKGCodeStatus_JSONOutput(t *testing.T) {
 	cmd.Flags().String("repo", repo, "")
 	cmd.Flags().Bool("json", true, "")
 
+	writeDiscoverableCRGStub(t, repo)
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -857,6 +859,7 @@ func captureStdout(t *testing.T, fn func()) []byte {
 // TestRunKGChanges_WarnOnUnbuiltGraph: without --require-graph, an unbuilt graph
 // emits a WarnBox but still calls the CRG binary and returns no error.
 func TestRunKGChanges_WarnOnUnbuiltGraph(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	// No CRG DB → Status() returns unbuilt.
 	// Fake CRG binary that returns valid JSON for detect-changes.
@@ -911,6 +914,7 @@ func TestRunKGChanges_RequireGraphFailsOnUnbuilt(t *testing.T) {
 
 // TestRunKGChanges_JSONOutputHasGraphState: --json output must include graph_state.
 func TestRunKGChanges_JSONOutputHasGraphState(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	// Write a ready CRG DB fixture.
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
@@ -2569,6 +2573,7 @@ func TestRunKGSync_NoSourceDir(t *testing.T) {
 }
 
 func TestRunKGPostprocess_NoGraph(t *testing.T) {
+	useBridgeBackend(t)
 	// postprocess requires a CRG binary; with no .venv or CRG on PATH,
 	// NewCRGBridge should fail gracefully. Neutralize CRG discovery so the
 	// no-binary error path is exercised deterministically regardless of what
@@ -2593,6 +2598,7 @@ func TestRunKGPostprocess_NoGraph(t *testing.T) {
 }
 
 func TestRunKGFlows_NoGraph(t *testing.T) {
+	useBridgeBackend(t)
 	// flows requires CRG — without the binary or graph it should fail.
 	repo := t.TempDir()
 
@@ -2610,6 +2616,7 @@ func TestRunKGFlows_NoGraph(t *testing.T) {
 }
 
 func TestRunKGCommunities_NoGraph(t *testing.T) {
+	useBridgeBackend(t)
 	// communities requires CRG — without the binary or graph it should fail.
 	repo := t.TempDir()
 
