@@ -136,6 +136,53 @@ jobs:
       - name: Run hermetic CRG parity harness
         run: go test -race -count=1 -run '^(TestPostprocessParity_TenCommitDualRead|TestPostprocessParity_CatchesDivergence|TestRegression_CrossPathParity_ClampsAreTheSameNumbers)$' ./internal/adapters/builtin/crg ./internal/graphstore
 
+  # §11.4 criterion 2 — the behavior-preservation gate. Where crg-parity-gate
+  # above is hermetic (synthetic 10-commit corpus, no Python), this job replays
+  # a corpus of REAL review tasks pinned from this repository's history against
+  # the LIVE legacy Python bridge and the kg-native adapter, under the same
+  # structural oracles. It therefore needs the code-review-graph CLI AND a real
+  # built graph, which is why it is slow and lives in its own job.
+  #
+  # continue-on-error: the gate is NON-REQUIRED until the §11.4 criterion-2
+  # sign-off. At sign-off: drop continue-on-error, and (once the advisory
+  # divergences recorded in testdata/crg-behavior/BEHAVIOR.md are resolved or
+  # accepted) add -strict so those surfaces gate too.
+  crg-behavior-gate:
+    name: CRG behavior-preservation gate (§11.4 criterion 2, non-required)
+    runs-on: ubuntu-latest
+    needs: lint-workflows
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The pinned corpus references real commits; the corpus builder and
+          # the manifest's provenance need history, not a 1-commit clone.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.x'
+
+      # Same install the per-OS test job uses for the KG CODE lane, so the
+      # bridge is discovered at .venv/bin/code-review-graph.
+      - name: Set up code-review-graph (.venv)
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --quiet --upgrade pip
+          .venv/bin/python -m pip install --quiet 'code-review-graph==2.2.0'
+          .venv/bin/code-review-graph --help >/dev/null
+
+      # The dual-read comparison reads the legacy bridge's OWN persisted
+      # derived views (flows / communities / risk_index / FTS), so the graph
+      # must be built with postprocess (no --skip-flows).
+      - name: Build the legacy CRG graph
+        run: .venv/bin/code-review-graph build --repo "${GITHUB_WORKSPACE}"
+
+      - name: Run behavior-preservation gate over the pinned review-task corpus
+        run: go run ./tools/crgbehaviorgate -repo . -graph-repo .
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
