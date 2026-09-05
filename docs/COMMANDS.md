@@ -83,6 +83,11 @@ To opt out entirely, set `"gitignore_projections": false` in `.agentsrc.json`.
 The next `install`/`refresh` removes the block (leaving your own ignore rules
 untouched) and stops maintaining it. Omitting the key means enabled.
 
+The knob is read from this project's own flat `.agentsrc.json`, not the
+resolved/extended effective config — there is no resolution round-trip before
+the check. This is deliberate: it means a broken or missing `extends` layer
+can never silently turn the block off underneath you.
+
 ## Worktrees
 
 `da worktree` creates and merges back managed sub-branch worktrees stacked on a

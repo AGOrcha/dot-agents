@@ -52,7 +52,7 @@
     },
     "gitignore_projections": {
       "type": "boolean",
-      "description": "Whether `da install` / `da refresh` maintain the dot-agents-managed block in this repo's .gitignore covering the outputs they project (platform links, generated configs, *.dot-agents-backup). Absent means enabled; set false to skip the block and remove one a previous run wrote. Only untracked files are affected — a projection the repo already commits stays tracked."
+      "description": "Whether `da install` / `da refresh` maintain the dot-agents-managed block in this repo's .gitignore covering the outputs they project (platform links, generated configs, *.dot-agents-backup). Absent means enabled; set false to skip the block and remove one a previous run wrote. Only untracked files are affected — a projection the repo already commits stays tracked. Read from THIS project's flat .agentsrc.json only, never from the resolved/extended effective config — a deliberate choice: no resolution round-trip means a broken or missing config layer can never silently disable the block."
     },
     "sources": {
       "type": "array",

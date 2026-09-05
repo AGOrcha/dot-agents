@@ -327,7 +327,7 @@ func (c *copilot) createClaudeCompatLinks(project, repoPath, agentsHome string) 
 }
 
 func (c *copilot) createProjectHookFiles(project, repoPath, agentsHome string) error {
-	hooksDir := filepath.Join(repoPath, copilotGitHubDir, "hooks")
+	hooksDir := filepath.Join(repoPath, copilotGitHubDir, copilotHooksDir)
 	canonicalSpecs, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err != nil {
 		return err
@@ -524,7 +524,7 @@ func (c *copilot) removeAgentLinks(project, repoPath, agentsHome string) error {
 }
 
 func (c *copilot) removeHookLinks(project, repoPath, agentsHome string) error {
-	hooksDir := filepath.Join(repoPath, copilotGitHubDir, "hooks")
+	hooksDir := filepath.Join(repoPath, copilotGitHubDir, copilotHooksDir)
 	canonicalSpecs, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(canonicalSpecs) > 0 {
 		_ = removeManagedRenderedHookFanout(c.io, canonicalSpecs, hooksDir, renderCopilotHookFile)
@@ -699,7 +699,7 @@ func (c *copilot) CountLinks(_, repoPath, _ string) (ok, broken int) {
 	})
 	addManagedDirCounts(&ok, &broken, []string{
 		filepath.Join(repoPath, copilotGitHubDir, "agents"),
-		filepath.Join(repoPath, copilotGitHubDir, "hooks"),
+		filepath.Join(repoPath, copilotGitHubDir, copilotHooksDir),
 		filepath.Join(repoPath, copilotAgentsDir, "skills"),
 	})
 	return ok, broken

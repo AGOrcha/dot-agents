@@ -39,9 +39,11 @@ var RestoreCanonicalResourceFileFn = func(project, resourcesDir, agentsHome, pat
 
 // IsBackupArtifact reports whether name is a dot-agents backup
 // artifact. Lifted from commands/add.go in
-// root-command-decomposition t02b.
+// root-command-decomposition t02b. Delegates to platform.HasBackupSuffix,
+// the single canonical matcher for the platform.BackupSuffix convention
+// (".dot-agents-backup") — same Contains-based semantics preserved.
 func IsBackupArtifact(name string) bool {
-	return strings.Contains(name, ".dot-agents-backup")
+	return platform.HasBackupSuffix(name)
 }
 
 // IsManagedCursorRuleRel reports whether rel points at a managed
