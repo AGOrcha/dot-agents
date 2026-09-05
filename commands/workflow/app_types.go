@@ -38,11 +38,17 @@ type workflowAppTypesView struct {
 }
 
 type workflowAppTypeEntry struct {
-	Name                 string   `json:"name"`
-	VerifierSequence     []string `json:"verifier_sequence"`
-	Recommended          bool     `json:"recommended,omitempty"`
-	AliasOf              string   `json:"alias_of,omitempty"`
-	RecommendationReason string   `json:"recommendation_reason,omitempty"`
+	Name             string   `json:"name"`
+	VerifierSequence []string `json:"verifier_sequence"`
+	// Model is the app_type's resolved model route (execution_profile facet 5),
+	// omitted when the profile pins none. It is the read-only projection an
+	// orchestrator queries to route a worker's model tier mechanically instead of
+	// reading an advisory lesson — see
+	// .agents/proposals/model-facet-apptypeprofile.md §D4.
+	Model                string `json:"model,omitempty"`
+	Recommended          bool   `json:"recommended,omitempty"`
+	AliasOf              string `json:"alias_of,omitempty"`
+	RecommendationReason string `json:"recommendation_reason,omitempty"`
 }
 
 func runWorkflowAppTypes(format string, verbose bool) error {
@@ -118,6 +124,9 @@ func renderWorkflowAppTypeList(entries []workflowAppTypeEntry) {
 		case entry.Recommended:
 			suffix = "  recommended"
 		}
+		if entry.Model != "" {
+			suffix = "  model=" + entry.Model + suffix
+		}
 		fmt.Fprintf(os.Stdout, "  %-24s -> [%s]%s\n", entry.Name, strings.Join(entry.VerifierSequence, ", "), suffix)
 	}
 }
@@ -157,20 +166,21 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 		Source:  config.DisplayPath(filepathAgentsRC(project.Path)),
 	}
 
-	appTypeMap, incomplete, err := resolveEffectiveAppTypeMap(project.Path)
+	profiles, incomplete, err := resolveEffectiveAppTypeProfiles(project.Path)
 	if err != nil {
 		return view, err
 	}
 	view.Incomplete = incomplete
-	if len(appTypeMap) == 0 {
+	if len(profiles) == 0 {
 		return view, nil
 	}
 
-	entries := make([]workflowAppTypeEntry, 0, len(appTypeMap))
-	for name, seq := range appTypeMap {
+	entries := make([]workflowAppTypeEntry, 0, len(profiles))
+	for name, prof := range profiles {
 		entries = append(entries, workflowAppTypeEntry{
 			Name:             name,
-			VerifierSequence: append([]string(nil), seq...),
+			VerifierSequence: append([]string(nil), prof.Topology.VerifierSequence...),
+			Model:            prof.ModelRef(),
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool {
@@ -181,15 +191,31 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 	return view, nil
 }
 
-// resolveEffectiveAppTypeMap reads the effective per-app_type verifier sequences
-// from the units-lock-backed config Snapshot so app-type detection sees the same
-// merged effective config every other surface does (config-distribution-model
-// §7A units model), rather than re-reading only the repo-local .agentsrc.json.
-// Resolution is read-only and offline: it reconstructs the imported layers from
-// the units lock at their locked digests without ever triggering a fetch (the
-// same seam `da config explain` parses through). The sequences live in the typed
-// execution_profile.by_app_type topology (the deprecated app_type_verifier_map is
-// folded into it on load), read directly off snap.Effective.
+// resolveEffectiveAppTypeMap is the verifier-sequence narrowing of
+// resolveEffectiveAppTypeProfiles: app_type -> its ordered verifier sequence,
+// which is all app_type validation needs.
+func resolveEffectiveAppTypeMap(projectPath string) (map[string][]string, []string, error) {
+	profiles, notes, err := resolveEffectiveAppTypeProfiles(projectPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return verifierSequencesOf(profiles), notes, nil
+}
+
+// resolveEffectiveAppTypeProfiles reads the effective per-app_type profiles from
+// the units-lock-backed config Snapshot so app-type detection sees the same merged
+// effective config every other surface does (config-distribution-model §7A units
+// model), rather than re-reading only the repo-local .agentsrc.json. Resolution is
+// read-only and offline: it reconstructs the imported layers from the units lock at
+// their locked digests without ever triggering a fetch (the same seam `da config
+// explain` parses through). The profiles live in typed
+// execution_profile.by_app_type (the deprecated app_type_verifier_map is folded
+// into it on load), read directly off snap.Effective.
+//
+// It returns whole profiles — every facet (topology, lenses, graph_backend, model)
+// — rather than only the verifier sequence, so a renderer needing more than one
+// facet resolves the snapshot once and both projections agree on the app_type set
+// by construction.
 //
 // A missing repo-local manifest is not an error here: it yields an empty map, so
 // `workflow app-types` prints the same "No app_types found" notice it did before
@@ -200,7 +226,7 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 // is missing, or a protected-field drop). Such a skip can shrink the effective
 // execution_profile, so the notes let the caller warn the user rather than
 // silently print an incomplete list (PR #207 adversarial-lens fix).
-func resolveEffectiveAppTypeMap(projectPath string) (map[string][]string, []string, error) {
+func resolveEffectiveAppTypeProfiles(projectPath string) (map[string]config.AppTypeProfile, []string, error) {
 	snap, err := appTypeSnapshot(projectPath)
 	if err != nil {
 		if isMissingManifestErr(err) {
@@ -208,28 +234,46 @@ func resolveEffectiveAppTypeMap(projectPath string) (map[string][]string, []stri
 		}
 		return nil, nil, err
 	}
-	m := appTypeVerifierSequencesFromExecution(snap.Effective.ExecutionProfile)
-	return m, incompleteResolutionNotes(snap.Warnings), nil
+	return appTypeProfilesFromExecution(snap.Effective.ExecutionProfile), incompleteResolutionNotes(snap.Warnings), nil
 }
 
-// appTypeVerifierSequencesFromExecution projects the execution_profile topology
-// into the app_type -> verifier sequence map app-type detection renders. This is
-// the successor to the retired app_type_verifier_map (legacy entries are folded
-// into execution_profile.topology.verifier_sequence on load); only app_types
-// whose topology declares a non-empty verifier_sequence are included.
-func appTypeVerifierSequencesFromExecution(ep *config.ExecutionProfile) map[string][]string {
+// appTypeProfilesFromExecution selects the execution_profile entries app-type
+// detection renders: the successor to the retired app_type_verifier_map (legacy
+// entries are folded into execution_profile.topology.verifier_sequence on load).
+// Only app_types whose topology declares a non-empty verifier_sequence are
+// included. Returns nil when nothing qualifies.
+func appTypeProfilesFromExecution(ep *config.ExecutionProfile) map[string]config.AppTypeProfile {
 	if ep == nil || len(ep.ByAppType) == 0 {
 		return nil
 	}
-	out := make(map[string][]string, len(ep.ByAppType))
+	out := make(map[string]config.AppTypeProfile, len(ep.ByAppType))
 	for appType, prof := range ep.ByAppType {
 		if len(prof.Topology.VerifierSequence) == 0 {
 			continue
 		}
-		out[appType] = append([]string(nil), prof.Topology.VerifierSequence...)
+		out[appType] = prof
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// appTypeVerifierSequencesFromExecution projects the execution_profile topology
+// into the app_type -> verifier sequence map app-type validation reads.
+func appTypeVerifierSequencesFromExecution(ep *config.ExecutionProfile) map[string][]string {
+	return verifierSequencesOf(appTypeProfilesFromExecution(ep))
+}
+
+// verifierSequencesOf narrows a selected profile set to the app_type -> verifier
+// sequence map, copying each sequence so callers cannot mutate resolved config.
+func verifierSequencesOf(profiles map[string]config.AppTypeProfile) map[string][]string {
+	if len(profiles) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(profiles))
+	for appType, prof := range profiles {
+		out[appType] = append([]string(nil), prof.Topology.VerifierSequence...)
 	}
 	return out
 }

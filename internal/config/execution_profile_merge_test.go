@@ -118,3 +118,100 @@ func TestExecutionProfileLayer_ProposedDiffPreservesTopologyAndLenses(t *testing
 			reviewClasses.Core)
 	}
 }
+
+// modelLayer builds a single-app_type execution_profile layer carrying only the
+// model facet — the shape a scope layer that pins nothing but model emits.
+func modelLayer(appType, model string) *ExecutionProfile {
+	return &ExecutionProfile{
+		ByAppType: map[string]AppTypeProfile{appType: {Model: model}},
+	}
+}
+
+// mergeExecutionLayers merges an ordered low→high precedence layer list through
+// the real resolver merge path and decodes the result, so a layering assertion
+// reads as one call instead of a nested mergeField chain.
+func mergeExecutionLayers(t *testing.T, layers ...*ExecutionProfile) *ExecutionProfile {
+	t.Helper()
+	var merged any
+	for _, l := range layers {
+		merged = mergeField("execution_profile", merged, asLayerRaw(t, l))
+	}
+	return decodeMergedProfile(t, merged)
+}
+
+// modelOf returns the merged model route for an app_type, failing the test when
+// the app_type was lost by the merge.
+func modelOf(t *testing.T, ep *ExecutionProfile, appType string) string {
+	t.Helper()
+	prof, ok := ep.ByAppType[appType]
+	if !ok {
+		t.Fatalf("merged profile lost app_type %q entirely", appType)
+	}
+	return prof.ModelRef()
+}
+
+// TestExecutionProfileLayer_ModelFacetLayering is the facet-5 layering proof
+// (.agents/proposals/model-facet-apptypeprofile.md §D3, rung 2): an org value is
+// INHERITED by a higher-precedence layer that omits model, and OVERRIDDEN by one
+// that sets it. Absence must not blank the value below — the same guarantee
+// topology/lenses already carry.
+func TestExecutionProfileLayer_ModelFacetLayering(t *testing.T) {
+	org := modelLayer("go-cli", "sonnet")
+
+	t.Run("omitted at higher scope inherits", func(t *testing.T) {
+		// The repo layer touches only topology; model must survive from org.
+		repo := &ExecutionProfile{ByAppType: map[string]AppTypeProfile{
+			"go-cli": {Topology: Topology{Executors: 2}},
+		}}
+		if got := modelOf(t, mergeExecutionLayers(t, org, repo), "go-cli"); got != "sonnet" {
+			t.Errorf("model = %q, want sonnet inherited from the org layer", got)
+		}
+	})
+
+	t.Run("explicit at higher scope overrides", func(t *testing.T) {
+		team := modelLayer("go-cli", "opus")
+		if got := modelOf(t, mergeExecutionLayers(t, org, team), "go-cli"); got != "opus" {
+			t.Errorf("model = %q, want opus from the higher-precedence layer", got)
+		}
+	})
+
+	t.Run("unpinned app_type stays unpinned", func(t *testing.T) {
+		merged := mergeExecutionLayers(t, org, modelLayer("docs", "haiku"))
+		if got := modelOf(t, merged, "docs"); got != "haiku" {
+			t.Errorf("docs model = %q, want haiku", got)
+		}
+		if got := modelOf(t, merged, "go-cli"); got != "sonnet" {
+			t.Errorf("go-cli model = %q, want sonnet (a sibling app_type must not leak)", got)
+		}
+	})
+}
+
+// TestExecutionProfileLayer_ModelOnlyDiffPreservesOtherFacets is the Defect-B
+// guarantee extended to facet 5: a layer carrying ONLY model must not wipe that
+// app_type's topology, lenses, or graph_backend — each facet is independently
+// scope-overridable.
+func TestExecutionProfileLayer_ModelOnlyDiffPreservesOtherFacets(t *testing.T) {
+	base := &ExecutionProfile{ByAppType: map[string]AppTypeProfile{
+		"go-cli": {
+			Topology:     Topology{Executors: 1, VerifierSequence: []string{"unit", "cli-runner"}},
+			Lenses:       Lenses{LensSet: []string{"adversarial"}, LensConcurrency: "gated"},
+			GraphBackend: "dotagents-builtin:graph/none@^1.0",
+		},
+	}}
+
+	merged := mergeExecutionLayers(t, base, modelLayer("go-cli", "haiku"))
+	prof := merged.ByAppType["go-cli"]
+
+	if prof.ModelRef() != "haiku" {
+		t.Errorf("model diff did not apply: %q", prof.ModelRef())
+	}
+	if prof.Topology.Executors != 1 || len(prof.Topology.VerifierSequence) != 2 {
+		t.Errorf("model-only diff wiped topology: %+v", prof.Topology)
+	}
+	if prof.Lenses.LensConcurrency != "gated" || len(prof.Lenses.LensSet) != 1 {
+		t.Errorf("model-only diff wiped lenses: %+v", prof.Lenses)
+	}
+	if prof.GraphBackendRef() != "dotagents-builtin:graph/none@^1.0" {
+		t.Errorf("model-only diff wiped graph_backend: %q", prof.GraphBackendRef())
+	}
+}

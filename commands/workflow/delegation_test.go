@@ -1729,6 +1729,66 @@ func TestMappedVerifierSequence(t *testing.T) {
 	})
 }
 
+// TestExecutionAppTypeModel covers facet 5's projection: a pinned route is
+// returned verbatim, and every absence path (nil profile, nil map, unknown
+// app_type, unpinned profile) reads as "" — inherit, never a fabricated model.
+func TestExecutionAppTypeModel(t *testing.T) {
+	pinned := &config.ExecutionProfile{ByAppType: map[string]config.AppTypeProfile{
+		"go-cli": {Model: "sonnet"},
+		"docs":   {Topology: config.Topology{Executors: 1}},
+	}}
+	cases := map[string]struct {
+		ep      *config.ExecutionProfile
+		appType string
+		want    string
+	}{
+		"pinned":        {pinned, "go-cli", "sonnet"},
+		"unpinned":      {pinned, "docs", ""},
+		"unknown type":  {pinned, "ghost", ""},
+		"nil profile":   {nil, "go-cli", ""},
+		"nil by_app...": {&config.ExecutionProfile{}, "go-cli", ""},
+	}
+	for name, tc := range cases {
+		if got := executionAppTypeModel(tc.ep, tc.appType); got != tc.want {
+			t.Errorf("%s: model = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// TestMappedAppTypeModel covers the dispatch-loading wrapper: an empty app_type
+// and a missing manifest both resolve to "" without error, and a configured
+// app_type resolves its pinned route through the same snapshot as the verifier
+// sequence.
+func TestMappedAppTypeModel(t *testing.T) {
+	t.Run("empty app_type", func(t *testing.T) {
+		got, err := mappedAppTypeModel(t.TempDir(), "")
+		if err != nil || got != "" {
+			t.Fatalf("empty app_type should be \"\",nil: %q %v", got, err)
+		}
+	})
+	t.Run("missing manifest", func(t *testing.T) {
+		stubFanoutSnapshot(t)
+		got, err := mappedAppTypeModel(t.TempDir(), "go-cli")
+		if err != nil || got != "" {
+			t.Fatalf("missing manifest should be \"\",nil: %q %v", got, err)
+		}
+	})
+	t.Run("pinned route", func(t *testing.T) {
+		repo := writeFanoutTestAgentsrc(t, `{"project":"t","version":1,
+"execution_profile":{"by_app_type":{"go-cli":{"model":"haiku"}}}}`)
+		got, err := mappedAppTypeModel(repo, "go-cli")
+		if err != nil || got != "haiku" {
+			t.Fatalf("pinned route = %q, %v; want haiku", got, err)
+		}
+	})
+	t.Run("resolution error propagates", func(t *testing.T) {
+		repo := writeFanoutTestAgentsrc(t, `{bad`)
+		if _, err := mappedAppTypeModel(repo, "go-cli"); err == nil {
+			t.Fatal("a config parse error must propagate, not resolve to an empty model")
+		}
+	})
+}
+
 // TestLoadFanoutDispatch_Errors covers the read- and parse-error branches.
 func TestLoadFanoutDispatch_Errors(t *testing.T) {
 	t.Run("malformed json", func(t *testing.T) {

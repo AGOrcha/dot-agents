@@ -474,6 +474,97 @@ func TestAppTypeVerifierSequencesFromExecution(t *testing.T) {
 	}
 }
 
+// appTypesWithModelManifest is a two-app_type manifest where only one app_type
+// pins execution_profile facet 5, so a test can assert both the carried value and
+// the absent case from one fixture.
+const appTypesWithModelManifest = `{
+  "project":"svc","version":1,"sources":[{"type":"local"}],
+  "execution_profile":{"by_app_type":{
+    "go-cli":{"topology":{"verifier_sequence":["unit"]},"model":"anthropic:claude-opus-4-8"},
+    "docs":{"topology":{"verifier_sequence":["schema-check"]}}
+  }}
+}`
+
+// appTypeEntryByName returns the rendered entry for an app_type, failing when the
+// view dropped it.
+func appTypeEntryByName(t *testing.T, view workflowAppTypesView, name string) workflowAppTypeEntry {
+	t.Helper()
+	for _, e := range view.AppTypes {
+		if e.Name == name {
+			return e
+		}
+	}
+	t.Fatalf("app_type %q missing from view %+v", name, view.AppTypes)
+	return workflowAppTypeEntry{}
+}
+
+// TestCollectWorkflowAppTypes_CarriesModelFacet proves the resolved JSON surface
+// an orchestrator reads carries the app_type's model route, and omits it for an
+// app_type that pins none (absence = inherit, never a fabricated model). See
+// .agents/proposals/model-facet-apptypeprofile.md §D4.
+func TestCollectWorkflowAppTypes_CarriesModelFacet(t *testing.T) {
+	repo := setupWorkflowAppTypesProject(t, appTypesWithModelManifest)
+
+	view, err := collectWorkflowAppTypes(workflowProjectRef{Name: "svc", Path: repo})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if got := appTypeEntryByName(t, view, "go-cli").Model; got != "anthropic:claude-opus-4-8" {
+		t.Errorf("go-cli model = %q, want anthropic:claude-opus-4-8", got)
+	}
+	if got := appTypeEntryByName(t, view, "docs").Model; got != "" {
+		t.Errorf("docs pins no model; got %q, want empty (inherit)", got)
+	}
+}
+
+// TestRunWorkflowAppTypes_RendersModelSuffix proves the human table surfaces the
+// model route inline, and that an app_type without one renders unchanged.
+func TestRunWorkflowAppTypes_RendersModelSuffix(t *testing.T) {
+	repo := setupWorkflowAppTypesProject(t, appTypesWithModelManifest)
+	out := captureWorkflowOutput(t, repo, func() error {
+		return executeWorkflowCommand(t, repo, "app-types")
+	})
+	if !strings.Contains(out, "model=anthropic:claude-opus-4-8") {
+		t.Fatalf("expected model suffix for go-cli, got:\n%s", out)
+	}
+	// Exactly one app_type pins a model, so exactly one row may carry the suffix.
+	if n := strings.Count(out, "model="); n != 1 {
+		t.Fatalf("model suffix rendered %d times, want 1 (docs pins none):\n%s", n, out)
+	}
+}
+
+// TestAppTypeProfilesFromExecution_SelectionParity proves the whole-profile
+// projection applies the SAME selection rule as the verifier-sequence projection
+// (non-empty verifier_sequence), so the two never disagree on the app_type set,
+// and that it carries the facets the sequence map drops.
+func TestAppTypeProfilesFromExecution_SelectionParity(t *testing.T) {
+	if got := appTypeProfilesFromExecution(nil); got != nil {
+		t.Fatalf("nil profile = %#v, want nil", got)
+	}
+	if got := appTypeProfilesFromExecution(&config.ExecutionProfile{}); got != nil {
+		t.Fatalf("empty by_app_type = %#v, want nil", got)
+	}
+
+	ep := &config.ExecutionProfile{
+		ByAppType: map[string]config.AppTypeProfile{
+			"go-cli": {Topology: config.Topology{VerifierSequence: []string{"unit"}}, Model: "sonnet"},
+			// Pins a model but declares no verifier sequence: excluded by the
+			// documented selection rule (proposal §D4 known limitation).
+			"model-only": {Model: "haiku"},
+		},
+	}
+	profiles := appTypeProfilesFromExecution(ep)
+	if profiles["go-cli"].ModelRef() != "sonnet" {
+		t.Errorf("go-cli model = %q, want sonnet", profiles["go-cli"].ModelRef())
+	}
+	if _, ok := profiles["model-only"]; ok {
+		t.Error("app_type with empty verifier_sequence must be excluded")
+	}
+	if len(profiles) != len(appTypeVerifierSequencesFromExecution(ep)) {
+		t.Errorf("selection drift: profiles=%d sequences=%d", len(profiles), len(appTypeVerifierSequencesFromExecution(ep)))
+	}
+}
+
 func TestIsMissingManifestErr(t *testing.T) {
 	if !isMissingManifestErr(fmt.Errorf("no %s found at /tmp/x", config.AgentsRCFile)) {
 		t.Error("resolver missing-manifest message should be classified as missing")

@@ -36,6 +36,7 @@ func sampleProfile() *ExecutionProfile {
 					LensConcurrency: "gated",
 				},
 				GraphBackend: "dotagents-builtin:graph/none@^1.0",
+				Model:        "anthropic:claude-opus-4-8",
 			},
 			"ideation": {
 				Topology: Topology{Executors: 3, VerifiersPerExecutor: 0, Reviewers: "0"},
@@ -459,7 +460,7 @@ func TestExecutionProfile_JSONRoundTrip(t *testing.T) {
 
 	// JSON keys must be snake_case per the config-v2 wire format.
 	for _, key := range []string{"by_app_type", "default_class", "verifiers_per_executor",
-		"verifier_sequence", "lens_set", "lens_concurrency", "graph_backend"} {
+		"verifier_sequence", "lens_set", "lens_concurrency", "graph_backend", "model"} {
 		if !contains(jsonKeys(t, data), key) {
 			t.Errorf("expected snake_case key %q in marshaled output: %s", key, data)
 		}
@@ -488,6 +489,45 @@ func assertGoCLIProfileRoundTrip(t *testing.T, gc AppTypeProfile) {
 	}
 	if gc.GraphBackendRef() != gc.GraphBackend {
 		t.Errorf("GraphBackendRef mismatch: %q vs %q", gc.GraphBackendRef(), gc.GraphBackend)
+	}
+	if gc.Model != "anthropic:claude-opus-4-8" {
+		t.Errorf("model round-trip lost: %q", gc.Model)
+	}
+	if gc.ModelRef() != gc.Model {
+		t.Errorf("ModelRef mismatch: %q vs %q", gc.ModelRef(), gc.Model)
+	}
+}
+
+// TestAppTypeProfile_ModelRef covers facet 5's accessor: a populated route is
+// returned verbatim, and an unset model reads as "" (inherit — never fabricated).
+func TestAppTypeProfile_ModelRef(t *testing.T) {
+	set := AppTypeProfile{Model: "haiku"}
+	if set.ModelRef() != "haiku" {
+		t.Errorf("ModelRef = %q, want haiku", set.ModelRef())
+	}
+	if (AppTypeProfile{}).ModelRef() != "" {
+		t.Error("empty profile should report no model (inherit)")
+	}
+}
+
+// TestAppTypeProfile_AbsentModelRoundTripsAsAbsent pins the omitempty contract
+// for facet 5: a profile that pins no model must not emit a "model" key, and the
+// decoded value must stay empty. This is the absent-optional corruption class PR
+// #535 fixed — an absent optional must never materialize as a value on re-save.
+func TestAppTypeProfile_AbsentModelRoundTripsAsAbsent(t *testing.T) {
+	data, err := json.Marshal(AppTypeProfile{Topology: Topology{Executors: 1}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if contains(jsonKeys(t, data), "model") {
+		t.Errorf("unset model must be omitted from the wire form, got %s", data)
+	}
+	var rt AppTypeProfile
+	if err := json.Unmarshal(data, &rt); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rt.ModelRef() != "" {
+		t.Errorf("absent model decoded as %q, want empty", rt.ModelRef())
 	}
 }
 

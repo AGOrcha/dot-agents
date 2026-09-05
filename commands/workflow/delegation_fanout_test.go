@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -476,6 +477,81 @@ func TestFanout_VerifierSequenceFromAppTypeInAgentsrc(t *testing.T) {
 		if b.Verification.VerifierSequence[i] != want[i] {
 			t.Fatalf("verifier_sequence = %#v, want %#v", b.Verification.VerifierSequence, want)
 		}
+	}
+}
+
+// pinDispatchAppTypeModel rewrites the verifier-dispatch fixture's manifest so the
+// `api` app_type also pins execution_profile facet 5 (the model route), leaving
+// every other facet identical to setupVerifierDispatchProject's.
+func pinDispatchAppTypeModel(t *testing.T, repo, model string) {
+	t.Helper()
+	rc := fmt.Sprintf(`{
+  "version": 1,
+  "project": "tmp",
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "sources": [{"type":"local"}],
+  "stage_profiles": {"verifier": {"unit":{"label":"U"},"api":{"label":"A"}}},
+  "execution_profile": {"by_app_type": {"api": {
+    "topology": {"verifier_sequence": ["unit","api"]},
+    "model": %q
+  }}}
+}`, model)
+	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(rc), 0644); err != nil {
+		t.Fatalf("write .agentsrc.json: %v", err)
+	}
+}
+
+// readFanoutBundleYAML returns the raw serialized bundle for a task, so a test can
+// assert on wire-form key presence (not just the decoded struct).
+func readFanoutBundleYAML(t *testing.T, repo, taskID string) string {
+	t.Helper()
+	c, err := loadDelegationContract(repo, taskID)
+	if err != nil {
+		t.Fatalf("load contract: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", c.ID+".yaml"))
+	if err != nil {
+		t.Fatalf("read bundle: %v", err)
+	}
+	return string(data)
+}
+
+// TestFanout_BundleCarriesAppTypeModel proves the hand-off boundary carries the
+// resolved model route: a bounded worker can read its model tier from the bundle
+// alone, resolved from the same execution_profile path as verifier_sequence
+// (.agents/proposals/model-facet-apptypeprofile.md §D4).
+func TestFanout_BundleCarriesAppTypeModel(t *testing.T) {
+	repo := setupVerifierDispatchProject(t, "api", "")
+	pinDispatchAppTypeModel(t, repo, "anthropic:claude-opus-4-8")
+
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-vd", "--task", "task-vd", "--owner", "w", "--skip-tdd-gate"); err != nil {
+		t.Fatal(err)
+	}
+	b := loadFanoutBundle(t, repo, "task-vd")
+	if b.Verification.Model != "anthropic:claude-opus-4-8" {
+		t.Fatalf("bundle model = %q, want anthropic:claude-opus-4-8", b.Verification.Model)
+	}
+	// The verifier dispatch must be unaffected by the added facet.
+	if len(b.Verification.VerifierSequence) != 2 {
+		t.Fatalf("verifier_sequence = %#v, want 2 entries", b.Verification.VerifierSequence)
+	}
+}
+
+// TestFanout_BundleOmitsModelWhenAppTypePinsNone proves absence stays absence: an
+// app_type with no model pin yields no `model` key in the bundle at all, so no
+// worker is handed a fabricated model.
+func TestFanout_BundleOmitsModelWhenAppTypePinsNone(t *testing.T) {
+	repo := setupVerifierDispatchProject(t, "api", "")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-vd", "--task", "task-vd", "--owner", "w", "--skip-tdd-gate"); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadFanoutBundle(t, repo, "task-vd").Verification.Model; got != "" {
+		t.Fatalf("bundle model = %q, want empty (no pin)", got)
+	}
+	if strings.Contains(readFanoutBundleYAML(t, repo, "task-vd"), "model:") {
+		t.Fatal("unpinned model must be omitted from the bundle wire form entirely")
 	}
 }
 

@@ -50,6 +50,20 @@ type AppTypeProfile struct {
 	// resolver (commands/config relevance --filter graph) turns this ref into a
 	// registered adapter and surfaces whether it resolves.
 	GraphBackend string `json:"graph_backend,omitempty"`
+	// Model is facet 5: the model route this app_type defaults to
+	// (.agents/proposals/model-facet-apptypeprofile.md; the flat per-app_type pin
+	// of task-tier-model-suggestion D4). Like GraphBackend it is an OPEN
+	// adapter-ref-style string — a bare tier alias ("haiku", "sonnet", "opus") or
+	// a provider-qualified ref ("anthropic:claude-opus-4-8") — never a closed
+	// enum, so model churn is not a schema bump (task-tier-model-suggestion D5).
+	//
+	// Empty means INHERIT, and absence must round-trip as absence: an explicit
+	// stage_profiles[<stage>][<slug>].model always wins over this app_type
+	// default, and an omitted value at one scope inherits the merged value from
+	// the layers below (org → team → repo → project-local) rather than blanking
+	// it. A still-empty value is "no opinion" — the harness default applies; no
+	// model is ever fabricated.
+	Model string `json:"model,omitempty"`
 }
 
 // GraphBackendRef returns the profile's declared graph-backend adapter ref, or
@@ -58,6 +72,14 @@ type AppTypeProfile struct {
 // so a later default-backend policy has one place to land.
 func (p AppTypeProfile) GraphBackendRef() string {
 	return p.GraphBackend
+}
+
+// ModelRef returns the profile's declared model route, or the empty string when
+// the profile pins none (and therefore inherits). Centralising the read — as
+// GraphBackendRef does for facet 4 — keeps callers from poking the field
+// directly, so a later default-model policy has exactly one place to land.
+func (p AppTypeProfile) ModelRef() string {
+	return p.Model
 }
 
 // RelevanceClasses partitions the units relevant to one app_type × stage into
