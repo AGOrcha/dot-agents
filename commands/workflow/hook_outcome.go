@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 )
@@ -41,49 +42,10 @@ const (
 // single-digit milliseconds.
 const hookOutcomeWriteTimeout = 8 * time.Second
 
-// hookOutcomeAllowedSkills mirrors the schema enum for `skill`.
-var hookOutcomeAllowedSkills = map[string]struct{}{
-	"iteration-close":            {},
-	"isp":                        {},
-	"loop-worker":                {},
-	"orchestrator-session-start": {},
-	"delegation-lifecycle":       {},
-}
-
-// hookOutcomeAllowedLifecyclePoints mirrors the schema enum for `lifecycle_point`.
-var hookOutcomeAllowedLifecyclePoints = map[string]struct{}{
-	"pre_tool_use":          {},
-	"stop":                  {},
-	"subagent_stop":         {},
-	"subagent_start":        {},
-	"pre_compact":           {},
-	"post_tool_use":         {},
-	"post_tool_use_failure": {},
-}
-
-// hookOutcomeAllowedInterventionClasses mirrors the schema enum for
-// `intervention_class`.
-var hookOutcomeAllowedInterventionClasses = map[string]struct{}{
-	"prevent_before_action": {},
-	"remediate_at_stop":     {},
-	"continuity_advice":     {},
-	"observe_tool_result":   {},
-}
-
-// hookOutcomeAllowedResults mirrors the schema enum for `result`.
-var hookOutcomeAllowedResults = map[string]struct{}{
-	"allow":     {},
-	"advise":    {},
-	"remediate": {},
-}
-
-// hookOutcomeAllowedPlatforms mirrors the schema enum for `platform`.
-var hookOutcomeAllowedPlatforms = map[string]struct{}{
-	"claude":  {},
-	"codex":   {},
-	"copilot": {},
-	"cursor":  {},
-}
+// The five hook-outcome enums mirror the schema enums in
+// workflow-hook-outcome.schema.json. Their vocabularies are declared once in
+// enums.go as EnumSpecs, so the `--help` listing, the completion candidates,
+// and these guards all read the same slice.
 
 // hookOutcomeRuleIDPattern mirrors the schema regex for rule_id.
 var hookOutcomeRuleIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*(?:\.[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)+$`)
@@ -174,28 +136,34 @@ func validateHookOutcomeSidecar(sc *HookOutcomeSidecar) error {
 // flag-specific message (the schema also enforces, but its errors are less
 // targeted than a "--skill must be one of …" message).
 func validHookOutcomeSkill(s string) bool {
-	_, ok := hookOutcomeAllowedSkills[s]
-	return ok
+	return s != "" && hookOutcomeSkillEnum.Contains(s)
 }
 
 func validHookOutcomeLifecyclePoint(s string) bool {
-	_, ok := hookOutcomeAllowedLifecyclePoints[s]
-	return ok
+	return s != "" && hookOutcomeLifecycleEnum.Contains(s)
 }
 
 func validHookOutcomeInterventionClass(s string) bool {
-	_, ok := hookOutcomeAllowedInterventionClasses[s]
-	return ok
+	return s != "" && hookOutcomeInterventionEnum.Contains(s)
 }
 
 func validHookOutcomeResult(s string) bool {
-	_, ok := hookOutcomeAllowedResults[s]
-	return ok
+	return s != "" && hookOutcomeResultEnum.Contains(s)
 }
 
 func validHookOutcomePlatform(s string) bool {
-	_, ok := hookOutcomeAllowedPlatforms[s]
-	return ok
+	return s != "" && hookOutcomePlatformEnum.Contains(s)
+}
+
+// requireHookOutcomeEnum rejects both a missing and an out-of-set value, naming
+// the vocabulary either way. Unlike EnumSpec.Validate — which lets an empty
+// value through because absence is usually a separate `required` check — every
+// hook-outcome enum is mandatory, so empty and wrong fail identically here.
+func requireHookOutcomeEnum(spec cmdutil.EnumSpec, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("--%s is required: pass one of %s", spec.Name, spec.ValueList())
+	}
+	return spec.Validate(value)
 }
 
 // validHookOutcomeRuleID enforces the schema regex up-front so the user sees
@@ -350,23 +318,23 @@ func buildHookOutcomeRecord(hod hookOutcomeDeps, in hookOutcomeWriteInputs) (Hoo
 	if in.SentinelID == "" {
 		return HookOutcomeRecord{}, fmt.Errorf("--sentinel-id is required")
 	}
-	if !validHookOutcomeSkill(in.Skill) {
-		return HookOutcomeRecord{}, fmt.Errorf("--skill must be one of iteration-close, isp, loop-worker, orchestrator-session-start, delegation-lifecycle (got %q)", in.Skill)
+	if err := requireHookOutcomeEnum(hookOutcomeSkillEnum, in.Skill); err != nil {
+		return HookOutcomeRecord{}, err
 	}
-	if !validHookOutcomeLifecyclePoint(in.LifecyclePoint) {
-		return HookOutcomeRecord{}, fmt.Errorf("--lifecycle-point must be one of pre_tool_use, stop, subagent_stop, subagent_start, pre_compact, post_tool_use, post_tool_use_failure (got %q)", in.LifecyclePoint)
+	if err := requireHookOutcomeEnum(hookOutcomeLifecycleEnum, in.LifecyclePoint); err != nil {
+		return HookOutcomeRecord{}, err
 	}
-	if !validHookOutcomeInterventionClass(in.InterventionClass) {
-		return HookOutcomeRecord{}, fmt.Errorf("--intervention-class must be one of prevent_before_action, remediate_at_stop, continuity_advice, observe_tool_result (got %q)", in.InterventionClass)
+	if err := requireHookOutcomeEnum(hookOutcomeInterventionEnum, in.InterventionClass); err != nil {
+		return HookOutcomeRecord{}, err
 	}
-	if !validHookOutcomeResult(in.Result) {
-		return HookOutcomeRecord{}, fmt.Errorf("--result must be one of allow, advise, remediate (got %q)", in.Result)
+	if err := requireHookOutcomeEnum(hookOutcomeResultEnum, in.Result); err != nil {
+		return HookOutcomeRecord{}, err
 	}
 	if !validHookOutcomeRuleID(in.RuleID) {
 		return HookOutcomeRecord{}, fmt.Errorf("--rule-id %q does not match required pattern (e.g. iteration-close.R1.1)", in.RuleID)
 	}
-	if !validHookOutcomePlatform(in.Platform) {
-		return HookOutcomeRecord{}, fmt.Errorf("--platform must be one of claude, codex, copilot, cursor (got %q)", in.Platform)
+	if err := requireHookOutcomeEnum(hookOutcomePlatformEnum, in.Platform); err != nil {
+		return HookOutcomeRecord{}, err
 	}
 	ts := strings.TrimSpace(in.TS)
 	if ts == "" {
@@ -573,12 +541,12 @@ func newWorkflowHookOutcomeWriteCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&in.SentinelID, "sentinel-id", "", "Stable <skill>-<run-id> identifier joining this record to the archived sentinel (required)")
-	cmd.Flags().StringVar(&in.Skill, "skill", "", "Skill whose sentinel this outcome anchors to (required)")
-	cmd.Flags().StringVar(&in.LifecyclePoint, "lifecycle-point", "", "Platform lifecycle event (pre_tool_use, stop, subagent_stop, subagent_start, pre_compact, post_tool_use, post_tool_use_failure) (required)")
-	cmd.Flags().StringVar(&in.InterventionClass, "intervention-class", "", "Gate intervention class (prevent_before_action, remediate_at_stop, continuity_advice, observe_tool_result) (required)")
-	cmd.Flags().StringVar(&in.Result, "result", "", "Outcome severity (allow, advise, remediate) (required)")
+	cmdutil.RegisterEnum(cmd, &in.Skill, hookOutcomeSkillEnum)
+	cmdutil.RegisterEnum(cmd, &in.LifecyclePoint, hookOutcomeLifecycleEnum)
+	cmdutil.RegisterEnum(cmd, &in.InterventionClass, hookOutcomeInterventionEnum)
+	cmdutil.RegisterEnum(cmd, &in.Result, hookOutcomeResultEnum)
 	cmd.Flags().StringVar(&in.RuleID, "rule-id", "", "Stable rule identifier such as iteration-close.R1.1 (required)")
-	cmd.Flags().StringVar(&in.Platform, "platform", "", "Agent platform (claude, codex, copilot, cursor) (required)")
+	cmdutil.RegisterEnum(cmd, &in.Platform, hookOutcomePlatformEnum)
 	cmd.Flags().StringVar(&in.CorrelationID, "correlation-id", "", "Groups pre+terminal records for the same intent (defaults to sentinel-id)")
 	cmd.Flags().StringVar(&in.ArchivedSentinelPath, "archived-sentinel-path", "", "Repo-relative POSIX path to the archived sentinel (empty for pre_tool_use records written before archive)")
 	cmd.Flags().StringVar(&in.TS, "ts", "", "RFC3339 timestamp; defaults to now (UTC, nanosecond precision)")

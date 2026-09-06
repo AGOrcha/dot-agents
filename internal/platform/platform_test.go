@@ -100,3 +100,36 @@ func TestCodexCreateLinksEmitsProjectAndUserHooks(t *testing.T) {
 		t.Fatalf(platformTestExpectedSymlinkTargetFmt, userHooks, hooksJSON)
 	}
 }
+
+// TestIDsMirrorsAllInDocumentedOrder pins the contract every platform-valued
+// CLI flag relies on: IDs() is All()'s identifiers, in the same order, so a
+// platform registered in All() shows up in `--help` listings and flag
+// validation without a second declaration.
+func TestIDsMirrorsAllInDocumentedOrder(t *testing.T) {
+	got := IDs()
+
+	want := make([]string, 0, len(All()))
+	for _, p := range All() {
+		want = append(want, p.ID())
+	}
+	if len(got) != len(want) {
+		t.Fatalf("IDs() has %d entries %v, All() has %d %v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("IDs()[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+
+	// The documented order is load-bearing: it is what the help text prints,
+	// so a reordering of All() is a user-visible change and must be deliberate.
+	documented := []string{"cursor", "claude", "codex", "opencode", "copilot", "antigravity"}
+	if len(got) != len(documented) {
+		t.Fatalf("IDs() = %v, want the documented set %v", got, documented)
+	}
+	for i, id := range documented {
+		if got[i] != id {
+			t.Fatalf("IDs()[%d] = %q, want %q (full: %v)", i, got[i], id, got)
+		}
+	}
+}

@@ -44,6 +44,7 @@ export const PUBLIC_PAGES = [
   { src: 'docs/OUTCOME_SCORING_RUBRIC.md', id: 'reference/outcome-scoring-rubric', order: 8 },
   { src: 'docs/VERIFIER_REVIEWER_TEMPLATES.md', id: 'reference/verifier-reviewer-templates', order: 9 },
   { src: 'docs/DASHBOARD_API.md', id: 'reference/dashboard-api', order: 10 },
+  { src: 'docs/CLI_HELP_CONVENTIONS.md', id: 'reference/cli-help-conventions', order: 11 },
 
   // Concepts
   { src: 'docs/concepts/ai-dev-lifecycle.md', id: 'concepts/ai-dev-lifecycle', order: 0 },

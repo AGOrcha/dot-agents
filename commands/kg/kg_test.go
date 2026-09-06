@@ -2336,7 +2336,8 @@ func TestNoteSymbolLink_InvalidKind(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for invalid link kind")
 	}
-	want := `invalid link kind "bad-kind": valid values are mentions, implements, documents, decides, references`
+	// Pipe-joined, matching the vocabulary rendering in `--kind`'s help text.
+	want := `invalid link kind "bad-kind": valid values are mentions|implements|documents|decides|references`
 	if err.Error() != want {
 		t.Fatalf("unexpected error:\n got: %q\nwant: %q", err.Error(), want)
 	}

@@ -408,7 +408,8 @@ func TestReviewUsersAddRejectsInvalidRoleAndDuplicates(t *testing.T) {
 
 	_, err := execUsersCmd(t, deps, "add", "x@example.com", "--role", "owner",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
-	mustErrContain(t, err, "unknown role", "reviewer|admin|readonly")
+	// The enum PreRunE now rejects the value, naming the vocabulary itself.
+	mustErrContain(t, err, "--role must be one of", "reviewer|admin|readonly")
 
 	_, err = execUsersCmd(t, deps, "add", "admin@example.com", "--role", "reviewer",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
@@ -418,6 +419,17 @@ func TestReviewUsersAddRejectsInvalidRoleAndDuplicates(t *testing.T) {
 	_, err = execUsersCmd(t, deps, "add", "  ", "--role", "reviewer",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
 	mustErrContain(t, err, "empty email")
+}
+
+func TestReviewUserRunnersRejectInvalidRoles(t *testing.T) {
+	// The runner keeps its own validation as defense in depth for callers that
+	// bypass Cobra's enum PreRunE.
+	var out bytes.Buffer
+	err := runReviewUsersAdd(&out, fakeReviewAdminDeps{}, nil, "x@example.com", "owner")
+	mustErrContain(t, err, "unknown role")
+
+	err = runReviewUsersSetRole(&out, fakeReviewAdminDeps{}, nil, "x@example.com", "supreme")
+	mustErrContain(t, err, "unknown role")
 }
 
 // ── users list ──────────────────────────────────────────────────────────────
@@ -602,7 +614,7 @@ func TestReviewUsersSetRoleErrorsAndJSON(t *testing.T) {
 
 	_, err := execUsersCmd(t, deps, "set-role", "rev@example.com", "--role", "supreme",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
-	mustErrContain(t, err, "unknown role")
+	mustErrContain(t, err, "--role must be one of", "reviewer|admin|readonly")
 
 	_, err = execUsersCmd(t, deps, "set-role", "ghost@example.com", "--role", "admin",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")

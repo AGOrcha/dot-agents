@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/journal"
@@ -194,8 +195,8 @@ for the reasoned-delta overlay and for testing, not routine workflow mutation.`,
 		},
 	}
 	appendCmd.Flags().StringVar(&in.Command, "command", "", "Canonical command name to record (required)")
-	appendCmd.Flags().StringVar(&in.Actor, "actor", string(journal.ActorMain), "Actor role: main|loop-worker|orchestrator")
-	appendCmd.Flags().StringVar(&in.EventType, "event-type", string(journal.EventDurableDelta), "Event type: durable_delta|input_only|failed")
+	cmdutil.RegisterEnum(appendCmd, &in.Actor, journalActorEnum)
+	cmdutil.RegisterEnum(appendCmd, &in.EventType, journalEventTypeEnum)
 	appendCmd.Flags().StringVar(&in.Input, "input", "", "Invoked-flags payload as a JSON object")
 	appendCmd.Flags().StringVar(&in.Observed, "observed", "", "Observed-delta payload as a JSON object")
 	_ = appendCmd.MarkFlagRequired("command")

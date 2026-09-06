@@ -8,8 +8,9 @@ import (
 
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
-		Short: "Show git status of ~/.agents/",
+		Use:     "status",
+		Short:   "Show git status of ~/.agents/",
+		Example: "  da sync status",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentsHome := config.AgentsHome()
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -51,6 +52,13 @@ func ErrorWithHints(message string, hints ...string) error {
 
 func UsageError(message string, hints ...string) error {
 	return &CLIError{Message: strings.TrimSpace(message), Hints: compactHints(hints), ShowUsage: true}
+}
+
+// Closed-set flag failures are usage mistakes, so route cmdutil's enum
+// validation through the same CLIError path every other usage error takes.
+// cmdutil cannot import this package (it is imported by it), hence the seam.
+func init() {
+	cmdutil.NewUsageError = UsageError
 }
 
 func ConfigureRootCommandUX(root *cobra.Command) {

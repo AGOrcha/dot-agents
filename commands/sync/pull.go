@@ -11,8 +11,9 @@ import (
 
 func newPullCmd(deps Deps) *cobra.Command {
 	return &cobra.Command{
-		Use:   "pull",
-		Short: "Pull latest changes from remote",
+		Use:     "pull",
+		Short:   "Pull latest changes from remote",
+		Example: "  da sync pull",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if deps.Flags.DryRun {
 				return fmt.Errorf("sync pull: --dry-run is not supported (git pull would still run); omit --dry-run for this subcommand")

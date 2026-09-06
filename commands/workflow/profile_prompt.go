@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
@@ -57,13 +58,13 @@ type composedPromptEntry struct {
 	Hint string `json:"hint,omitempty"`
 }
 
+// validateProfileKind checks --kind against the same vocabulary the flag's help
+// text and completions are generated from (resolvePromptKindEnum in enums.go).
 func validateProfileKind(kind string) error {
-	for _, s := range profileStages {
-		if kind == s {
-			return nil
-		}
+	if strings.TrimSpace(kind) == "" {
+		return fmt.Errorf("--kind is required: pass one of %s", resolvePromptKindEnum.ValueList())
 	}
-	return fmt.Errorf("--kind must be one of %s, got %q", strings.Join(profileStages, ", "), kind)
+	return resolvePromptKindEnum.Validate(kind)
 }
 
 // decodeProfilePromptFiles reads stage_profiles.<stage>.<slug>.prompt_files from
@@ -295,7 +296,7 @@ func newWorkflowResolvePromptCmd() *cobra.Command {
 			return runWorkflowResolvePrompt(kind, slug)
 		},
 	}
-	cmd.Flags().StringVar(&kind, "kind", "", "stage: executor, verifier, reviewer, or orchestrator (required)")
+	cmdutil.RegisterEnum(cmd, &kind, resolvePromptKindEnum)
 	cmd.Flags().StringVar(&slug, "slug", "", "profile slug (verifier_type, reviewer lens, …) (required)")
 	return cmd
 }

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/go-git/go-git/v6"
 	"github.com/spf13/cobra"
 
@@ -119,10 +120,15 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&baseBranch, "base-branch", "", "Parent branch whose current tip is recorded as the base")
 	cmd.Flags().StringVar(&purpose, "purpose", "", "Free-form registry note (task/slice this worktree serves)")
 	cmd.Flags().IntVar(&parentPR, "parent-pr", 0, "Pull-request number this work feeds into")
-	cmd.Flags().StringVar(&appType, "app-type", "", "app_type whose execution_profile shape is loaded + recorded. If unset, resolved from --task's app_type then --plan's default_app_type. Pass this flag to override or set a specific one.")
+	cmdutil.RegisterEnum(cmd, &appType, cmdutil.EnumSpec{
+		Name:        "app-type",
+		Usage:       "app_type whose execution_profile shape is loaded and recorded",
+		DynamicFrom: "da workflow app-types",
+		Note:        "omit to resolve it from --task's app_type, then --plan's default_app_type",
+	})
 	cmd.Flags().StringVar(&plan, "plan", "", "resolve app_type (and record identity) from this canonical plan/task's metadata")
 	cmd.Flags().StringVar(&task, "task", "", "resolve app_type (and record identity) from this canonical plan/task's metadata")
-	cmd.Flags().StringVar(&profile, "profile", "", "delegate profile to record (default loop-worker); not a task/plan field")
+	cmd.Flags().StringVar(&profile, "profile", "", "Delegate profile label recorded on the worktree (default loop-worker); a free-form registry note, not a task/plan field")
 	mustMarkRequired(cmd, "name", "path", "base-branch")
 	return cmd
 }

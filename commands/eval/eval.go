@@ -22,6 +22,7 @@ package eval
 import (
 	"os"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/spf13/cobra"
 )
 
@@ -34,12 +35,33 @@ const (
 	repoDirFlagHelp = "Repository root (default: current working directory)"
 )
 
-// languageFlagName / languageFlagHelp are shared by gen and run: the language
-// selects both the generator and (for run) the verifier.
-const (
-	languageFlagName = "language"
-	languageFlagHelp = "Task language: go, python, or typescript"
-)
+// languageFlagName is shared by gen and run: the language selects both the
+// generator and (for run) the verifier.
+const languageFlagName = "language"
+
+// languageEnum, difficultyEnum, and agentAdapterEnum are the closed-set flags
+// shared by `eval gen` and `eval run`. Declared once so the help listing, the
+// completions, and the validation error all read the same vocabulary
+// (docs/CLI_HELP_CONVENTIONS.md).
+var languageEnum = cmdutil.EnumSpec{
+	Name:   languageFlagName,
+	Usage:  "Language the generated task is written in",
+	Values: []string{"go", "python", "typescript"},
+}
+
+var difficultyEnum = cmdutil.EnumSpec{
+	Name:   difficultyFlagName,
+	Usage:  "Constrain the generated difficulty band",
+	Values: []string{"easy", "medium", "hard"},
+	Note:   "omit to let the generator choose",
+}
+
+var agentAdapterEnum = cmdutil.EnumSpec{
+	Name:    agentFlagName,
+	Usage:   "Agent adapter that runs the task",
+	Values:  []string{"claude", "codex", "copilot"},
+	Default: defaultAdapter,
+}
 
 // Shared generation-tuning + run flag names, named once so the constructors
 // (which define them) and the option readers (which read them back) cannot

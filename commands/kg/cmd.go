@@ -1,10 +1,9 @@
 package kg
 
 import (
-	"fmt"
-	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/spf13/cobra"
 )
 
@@ -45,6 +44,10 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgHealthCmd := &cobra.Command{
 		Use:   "health",
 		Short: "Show knowledge graph health",
+		Example: deps.ExampleBlock(
+			"  da kg health",
+			"  da --json kg health",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGHealth(deps, cmd)
 		},
@@ -59,13 +62,17 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgIngestCmd := &cobra.Command{
 		Use:   "ingest [file]",
 		Short: "Ingest a raw source into the knowledge graph",
+		Example: deps.ExampleBlock(
+			"  da kg ingest notes/design-review.md --type markdown",
+			"  da kg ingest --all",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGIngest(deps, cmd, args)
 		},
 	}
 	kgIngestCmd.Flags().Bool("all", false, "Process all pending sources in the inbox")
 	kgIngestCmd.Flags().String("title", "", "Override source title")
-	kgIngestCmd.Flags().String("type", "markdown", "Source type (markdown|text|pdf|url|transcript|meeting_notes|repo_doc)")
+	cmdutil.RegisterEnumFlag(kgIngestCmd, kgIngestTypeEnum)
 	kgIngestCmd.Flags().Bool("dry-run", false, "Show what would be created without writing")
 
 	kgQueueCmd := &cobra.Command{
@@ -79,22 +86,31 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgQueryCmd := &cobra.Command{
 		Use:   "query [query string]",
 		Short: "Query the knowledge graph by intent",
+		Example: deps.ExampleBlock(
+			"  da kg query --intent decision_lookup \"graph backend\"",
+			"  da kg query --intent repo_context \"workflow status\" --limit 5",
+			"  da --json kg query --intent contradictions \"resource plan\"",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGQuery(deps, cmd, args)
 		},
 	}
-	kgQueryCmd.Flags().String("intent", "", fmt.Sprintf("Query intent (required): %s", strings.Join(sortedKeys(validQueryIntents), "|")))
+	cmdutil.RegisterEnumFlag(kgQueryCmd, kgQueryIntentEnum)
 	kgQueryCmd.Flags().Int("limit", 10, "Max results to return")
-	kgQueryCmd.Flags().String("scope", "", "Optional scope filter")
+	kgQueryCmd.Flags().String("scope", "", "Narrow results to notes under this repo path, note id prefix, or source id")
 
 	kgLintCmd := &cobra.Command{
 		Use:   "lint",
 		Short: "Check graph integrity and knowledge quality",
+		Example: deps.ExampleBlock(
+			"  da kg lint",
+			"  da kg lint --check broken_links",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGLint(deps, cmd, args)
 		},
 	}
-	kgLintCmd.Flags().String("check", "", "Run only one check (broken_links|orphan_pages|missing_source_refs|stale_pages|index_drift|oversize_pages|contradictions)")
+	cmdutil.RegisterEnumFlag(kgLintCmd, kgLintCheckEnum)
 
 	kgMaintainCmd := &cobra.Command{
 		Use:   "maintain",
@@ -137,15 +153,22 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgBridgeQueryCmd := &cobra.Command{
 		Use:   "query [query string]",
 		Short: "Execute a bridge intent query",
+		Example: deps.ExampleBlock(
+			"  da kg bridge query --intent impact_radius \"internal/platform\"",
+			"  da kg bridge query --intent tests_for \"NewRootCommand\"",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGBridgeQuery(deps, cmd, args)
 		},
 	}
-	kgBridgeQueryCmd.Flags().String("intent", "", fmt.Sprintf("Bridge intent (required): %s", strings.Join(sortedKeys(validBridgeIntents), "|")))
+	cmdutil.RegisterEnumFlag(kgBridgeQueryCmd, kgBridgeIntentEnum)
 
 	kgBridgeHealthCmd := &cobra.Command{
 		Use:   "health",
 		Short: "Show adapter availability and health",
+		Example: deps.ExampleBlock(
+			"  da kg bridge health",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGBridgeHealth(deps, cmd, args)
 		},
@@ -153,6 +176,9 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgBridgeMappingCmd := &cobra.Command{
 		Use:   "mapping",
 		Short: "Show bridge intent to KG intent mapping",
+		Example: deps.ExampleBlock(
+			"  da kg bridge mapping",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGBridgeMapping(deps, cmd, args)
 		},
@@ -171,9 +197,14 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgWarmCmd := &cobra.Command{
 		Use:   "warm",
 		Short: "Sync hot filesystem notes into the warm SQLite layer",
-		RunE:  runKGWarm,
+		Example: deps.ExampleBlock(
+			"  da kg warm",
+			"  da kg warm --type decision",
+			"  da kg warm --include-code",
+		),
+		RunE: runKGWarm,
 	}
-	kgWarmCmd.Flags().String("type", "", "Only sync notes of this type (source|entity|concept|synthesis|decision|repo|session)")
+	cmdutil.RegisterEnumFlag(kgWarmCmd, kgWarmTypeEnum)
 	kgWarmCmd.Flags().Bool("include-code", false, "Also import CRG code nodes and edges into the warm store (requires 'kg build' to have run)")
 
 	kgWarmStatsCmd := &cobra.Command{
@@ -191,11 +222,15 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgLinkAddCmd := &cobra.Command{
 		Use:   "add <note-id> <qualified-name>",
 		Short: "Link a knowledge note to a code symbol",
+		Example: deps.ExampleBlock(
+			"  da kg link add note-042 internal/platform.All --kind documents",
+			"  da kg link add note-042 commands.NewRootCommand --kind mentions",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGLinkAdd(deps, cmd, args)
 		},
 	}
-	kgLinkAddCmd.Flags().String("kind", "mentions", "Link kind: mentions|implements|documents|decides|references")
+	cmdutil.RegisterEnumFlag(kgLinkAddCmd, kgLinkKindEnum)
 
 	kgLinkListCmd := &cobra.Command{
 		Use:   "list <note-id>",
@@ -290,11 +325,14 @@ analysis instead.`,
 	}
 	kgFlowsCmd.Flags().String("repo", "", repoRootHelpText)
 	kgFlowsCmd.Flags().Int("limit", 20, "Max flows to show")
-	kgFlowsCmd.Flags().String("sort", "criticality", "Sort by: criticality|size")
+	cmdutil.RegisterEnumFlag(kgFlowsCmd, kgFlowSortEnum)
 
 	kgCommunitiesCmd := &cobra.Command{
 		Use:   "communities",
 		Short: "List detected code communities",
+		Example: deps.ExampleBlock(
+			"  da kg communities --sort cohesion --min-size 5",
+		),
 		Long: `List detected code communities from the code graph.
 
 Community names, sizes, and dominant language are reliable. Member lists are
@@ -308,7 +346,7 @@ when sorting by size.`,
 	}
 	kgCommunitiesCmd.Flags().String("repo", "", repoRootHelpText)
 	kgCommunitiesCmd.Flags().Int("min-size", 0, "Only show communities with at least this many members")
-	kgCommunitiesCmd.Flags().String("sort", "size", "Sort by: size|cohesion")
+	cmdutil.RegisterEnumFlag(kgCommunitiesCmd, kgCommunitySortEnum)
 
 	kgPostprocessCmd := &cobra.Command{
 		Use:   "postprocess",

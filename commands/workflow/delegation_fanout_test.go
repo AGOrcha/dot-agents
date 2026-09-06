@@ -740,7 +740,9 @@ func TestMergeBack_InvalidVerificationStatus(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "invalid verification status") {
+	// The enum PreRunE rejects the value before the runner is reached, and
+	// names the vocabulary the caller should have picked from.
+	if !strings.Contains(err.Error(), "--verification-status must be one of pass|fail|partial|unknown") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

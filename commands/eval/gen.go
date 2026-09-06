@@ -8,6 +8,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	evalcore "github.com/AGOrcha/dot-agents/internal/eval"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/spf13/cobra"
@@ -33,8 +34,8 @@ func newGenCmd(runE handlerFunc) *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: runE,
 	}
-	cmd.Flags().String(languageFlagName, "", languageFlagHelp)
-	cmd.Flags().String(difficultyFlagName, "", "Constrain the difficulty band: easy, medium, or hard (default: generator's choice)")
+	cmdutil.RegisterEnumFlag(cmd, languageEnum)
+	cmdutil.RegisterEnumFlag(cmd, difficultyEnum)
 	cmd.Flags().String(templateFlagName, "", "Task template id (default: impl-pure-fn)")
 	cmd.Flags().String(outFlagName, "", "Write the TaskSpec YAML to this file instead of stdout")
 	return cmd

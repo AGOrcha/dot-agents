@@ -16,6 +16,8 @@ func newPushCmd(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Commit and push changes to remote",
+		Example: "  da sync push\n" +
+			"  da sync push --message \"sync agent rules\"",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSyncPush(deps, message)
 		},

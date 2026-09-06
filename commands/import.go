@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
@@ -303,7 +304,12 @@ to normalize hand-edited config back into the managed store.`,
 			return runImport(projectFilter, scope, stdImportDeps{})
 		},
 	}
-	cmd.Flags().StringVar(&scope, "scope", "all", "Import scope: project, global, or all")
+	cmdutil.RegisterEnum(cmd, &scope, cmdutil.EnumSpec{
+		Name:    "scope",
+		Usage:   "Which side of the config to import into",
+		Values:  []string{importScopeProject, importScopeGlobal, importScopeAll},
+		Default: importScopeAll,
+	})
 	return cmd
 }
 

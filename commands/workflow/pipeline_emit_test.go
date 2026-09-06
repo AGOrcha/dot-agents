@@ -12,6 +12,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/platform"
+	"github.com/spf13/cobra"
 )
 
 type failingPipelineProjector struct{}
@@ -161,8 +162,17 @@ func TestPipelineEmitMissingPlatform(t *testing.T) {
 func TestPipelineEmitUnknownPlatform(t *testing.T) {
 	withPipelineFixture(t, func(string) (*config.Snapshot, error) { return pipelineFixtureSnapshot(), nil })
 	_, err := runPipelineEmit(t, false, "--platform", "bogus")
-	if err == nil || !strings.Contains(err.Error(), "unknown pipeline platform") {
+	// The enum PreRunE fires first and lists the supported platforms, which the
+	// runner's "unknown pipeline platform" message did not.
+	if err == nil || !strings.Contains(err.Error(), "--platform must be one of claude-code|omp") {
 		t.Fatalf("want unknown-platform error, got %v", err)
+	}
+
+	// The runner also rejects unknown platforms for direct callers that bypass
+	// Cobra's enum PreRunE.
+	err = runWorkflowPipelineEmit(&cobra.Command{}, "bogus", "", "")
+	if err == nil || !strings.Contains(err.Error(), "unknown pipeline platform") {
+		t.Fatalf("want runner unknown-platform error, got %v", err)
 	}
 }
 

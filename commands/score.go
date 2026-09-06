@@ -75,6 +75,9 @@ func NewScoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "score",
 		Short: "Compute and query agent-run outcome scores",
+		Example: "  da score run\n" +
+			"  da score iteration 7\n" +
+			"  da --json score session <session-id>",
 		Long: "Scores every iteration of an agent run against the versioned outcome-scoring rubric\n" +
 			"(docs/OUTCOME_SCORING_RUBRIC.md) and renders the result.\n\n" +
 			"`score run` recomputes per-iteration and per-session scores from the active iteration\n" +
@@ -148,7 +151,9 @@ func newScoreSessionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "session <session-id>",
 		Short: "Render a persisted per-session score",
-		Args:  cobra.ExactArgs(1),
+		Example: "  da score session 0384c739\n" +
+			"  da --json score session 0384c739",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runScoreSession(cmd.OutOrStdout(), resolveIterLogDir(iterLogDir), args[0])
 		},

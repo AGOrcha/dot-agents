@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/sys/execabs"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
 	"github.com/AGOrcha/dot-agents/internal/links"
@@ -226,7 +227,11 @@ agent that must reason about the exact managed outputs.`,
 		},
 	}
 	cmd.Flags().BoolVar(&audit, "audit", false, "Show detailed link audit for each project")
-	cmd.Flags().StringVar(&agentFilter, "agent", "", "Filter to specific agent (cursor, claude, codex, opencode, copilot)")
+	cmdutil.RegisterEnum(cmd, &agentFilter, cmdutil.EnumSpec{
+		Name:   "agent",
+		Usage:  "Report only this agent platform",
+		Values: platform.IDs(),
+	})
 	return cmd
 }
 

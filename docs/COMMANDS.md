@@ -16,6 +16,11 @@ and each section below links to the guide that explains the area in depth. Run
 > persistent but not uniformly honored — see the
 > [Global Flag Contract](GLOBAL_FLAG_CONTRACT.md) for per-command support.
 
+> `--help` is the authority on flag semantics, not this page: every closed-set
+> flag lists its allowed values inline, and every command on the agent loop's
+> critical path carries worked examples. See the
+> [CLI Help Conventions](CLI_HELP_CONVENTIONS.md) for how that text is authored.
+
 ## Project Management
 
 | Command | Description |
