@@ -506,19 +506,66 @@ func TestMergeGenerateAgentsRCPreservesExtraFields(t *testing.T) {
 }
 
 // TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations proves
-// install --generate's repo-facing contract: re-generating over an existing
-// on-disk .agentsrc.json that carries pre-fix, over-captured global-scope
-// declarations (skills/agents/rules/hooks/mcp/settings all folding in
-// "global") REPLACES those scan-derived fields with the fresh project-only
-// scan rather than unioning onto the stale set — so a stale committed
-// manifest is cleaned up by the very next `da install --generate`, with no
-// separate prune step needed.
+// install --generate's repo-facing contract on a stale, pre-fix manifest that
+// over-captured global-scope entries into every scoped field.
+//
+// The two halves of the contract pull in opposite directions and are both
+// asserted here:
+//
+//   - skills/agents/rules are scan-derived SETS with no other convergence
+//     path, so the fresh project-only scan REPLACES them in either mode — that
+//     is how a stale committed manifest is cleaned up, with no prune step.
+//   - hooks/mcp/settings are scan-detectable but author-DECLARABLE. Replacing
+//     a committed declaration would silently re-enable a projection the repo
+//     turned off, so by default the declaration survives; --force-generate
+//     (MergeGenerateOptions{Force:true}) opts back into replace-from-scan.
 func TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations(t *testing.T) {
-	home := agentsHomeFixture(t)
-	t.Setenv("AGENTS_HOME", home)
+	cases := []struct {
+		name string
+		opts []MergeGenerateOptions
+		// wantHooks/wantMCP are the sorted expected name lists; wantHooksAll is
+		// the expected Hooks.All.
+		wantHooks    []string
+		wantHooksAll bool
+		wantMCP      []string
+	}{
+		{
+			name:         "default keeps the committed declarations",
+			wantHooks:    nil,
+			wantHooksAll: true,
+			wantMCP:      []string{"global-mcp-server", "server-a", "server-b"},
+		},
+		{
+			name:         "force-generate replaces them from the fresh scan",
+			opts:         []MergeGenerateOptions{{Force: true}},
+			wantHooks:    []string{testHookPostToolUse, testHookPreToolUse},
+			wantHooksAll: false,
+			wantMCP:      []string{"server-a", "server-b"},
+		},
+	}
 
-	// Simulate a stale, pre-fix-generated manifest: it declared the global
-	// entries alongside the project ones for every scoped field.
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := mergeOverStaleManifest(t, tc.opts...)
+			assertStaleScanSetsPruned(t, out)
+			assertSOBNames(t, "Hooks", out.Hooks, tc.wantHooks)
+			assertSOBNames(t, "MCP", out.MCP, tc.wantMCP)
+			if sobAll(out.Hooks) != tc.wantHooksAll {
+				t.Errorf("Hooks.All: got %v, want %v", sobAll(out.Hooks), tc.wantHooksAll)
+			}
+			if !boolVal(out.Settings) {
+				t.Error("Settings: want true in both modes — committed true, and the project-scoped cursor.json also detects true")
+			}
+		})
+	}
+}
+
+// mergeOverStaleManifest builds the stale pre-fix manifest, generates a fresh
+// project-only scan against the fixture ~/.agents/, and merges them.
+func mergeOverStaleManifest(t *testing.T, opts ...MergeGenerateOptions) *AgentsRC {
+	t.Helper()
+	t.Setenv("AGENTS_HOME", agentsHomeFixture(t))
+
 	existing := &AgentsRC{
 		Version:  1,
 		Project:  testProject,
@@ -530,42 +577,44 @@ func TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations(t *testing.
 		Settings: pbool(true),
 		Sources:  []Source{{Type: testSourceTypeLocal}},
 	}
-
 	generated, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
-	out := MergeGenerateAgentsRC(existing, generated)
+	return MergeGenerateAgentsRC(existing, generated, opts...)
+}
 
-	if !reflect.DeepEqual(out.Skills, []string{"skill-proj"}) {
-		t.Errorf("Skills: got %v, want [skill-proj] (stale global entry must be dropped)", out.Skills)
+// assertStaleScanSetsPruned pins the half of the contract that does not depend
+// on the force mode: the scan-derived sets always converge to project scope.
+func assertStaleScanSetsPruned(t *testing.T, out *AgentsRC) {
+	t.Helper()
+	sets := []struct {
+		field string
+		got   []string
+		want  []string
+	}{
+		{"Skills", out.Skills, []string{"skill-proj"}},
+		{"Agents", out.Agents, []string{"agent-proj"}},
+		{"Rules", out.Rules, []string{"project"}},
 	}
-	if !reflect.DeepEqual(out.Agents, []string{"agent-proj"}) {
-		t.Errorf("Agents: got %v, want [agent-proj] (stale global entry must be dropped)", out.Agents)
+	for _, s := range sets {
+		if !reflect.DeepEqual(s.got, s.want) {
+			t.Errorf("%s: got %v, want %v (stale global entry must be dropped)", s.field, s.got, s.want)
+		}
 	}
-	if !reflect.DeepEqual(out.Rules, []string{"project"}) {
-		t.Errorf("Rules: got %v, want [project] (stale global entry must be dropped)", out.Rules)
+}
+
+// assertSOBNames compares a StringsOrBool's names (sorted) against want. A nil
+// want matches an empty list, so a declaration carrying only All:true passes.
+func assertSOBNames(t *testing.T, field string, got *StringsOrBool, want []string) {
+	t.Helper()
+	names := append([]string(nil), sobNames(got)...)
+	sort.Strings(names)
+	if len(names) == 0 && len(want) == 0 {
+		return
 	}
-	gotMCP := append([]string(nil), sobNames(out.MCP)...)
-	sort.Strings(gotMCP)
-	wantMCP := []string{"server-a", "server-b"}
-	if !reflect.DeepEqual(gotMCP, wantMCP) {
-		t.Errorf("MCP.Names: got %v, want %v (stale global server must be dropped)", gotMCP, wantMCP)
-	}
-	if sobAll(out.MCP) {
-		t.Error("MCP.All should be false after regenerate")
-	}
-	gotHooks := append([]string(nil), sobNames(out.Hooks)...)
-	sort.Strings(gotHooks)
-	wantHooks := []string{testHookPostToolUse, testHookPreToolUse}
-	if !reflect.DeepEqual(gotHooks, wantHooks) {
-		t.Errorf("Hooks.Names: got %v, want %v (stale All:true must be replaced by the project scan)", gotHooks, wantHooks)
-	}
-	if sobAll(out.Hooks) {
-		t.Error("Hooks.All should be false after regenerate — project scope only has named events")
-	}
-	if !boolVal(out.Settings) {
-		t.Error("Settings should stay true — driven by the project-scoped cursor.json, not the stale global declaration")
+	if !reflect.DeepEqual(names, want) {
+		t.Errorf("%s.Names: got %v, want %v", field, names, want)
 	}
 }
 

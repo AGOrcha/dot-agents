@@ -30,7 +30,7 @@ and each section below links to the guide that explains the area in depth. Run
 | `remove <project>` | Remove a project from da management |
 | `refresh [project]` | Refresh managed setup from `~/.agents/` for the **current project** (the one containing the working directory); name a project to refresh that one, or pass `--all` for every project registered on this machine. Auto-enables newly-installed editors and updates their versions. EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep the additive behavior |
 | `import [project]` | Import configs from project/global scope into `~/.agents/` |
-| `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create one). EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep additive behavior, `--strict` to fail on a missing declared resource |
+| `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create or refresh one — additive: scan-derived skill/agent/rule lists are replaced, but declarations like `hooks`/`mcp`/`settings` and `extends` survive; `--force-generate` lets the scan replace those declarations too). EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep additive behavior, `--strict` to fail on a missing declared resource |
 | `status` | Show managed projects and link health; for effective-config detail run `da config explain` (use `--audit` for details) |
 | `doctor` | Check installations, validate links, detect issues (read-only — reports problems and the command to fix them; never repairs) |
 
@@ -114,7 +114,7 @@ the wrong commit.
 | `config explain [field]` | Show the effective `.agentsrc.json` value of a field and which layer set it (`--all`, `--flags`, `--json`) |
 | `config sync` | Re-fetch every declared layer regardless of TTL, re-resolve, and rewrite the `units` section + `inputs_digest` of `.agentsrc.lock` — the uv `--upgrade` analog (`--layer source-id:path`, `--json`) |
 | `config lint` | Validate the repo-local `.agentsrc.json` and each `extends` layer against the AgentsRC layer schema; non-zero exit if invalid (`--json`) |
-| `config verify` | Offline setup contract check — manifest parses, declared local source layers exist, integrations ready, and remote `extends` layers are cached at the lockfile's SHA (`--json`; non-zero exit on failure) |
+| `config verify` | Offline setup contract check — manifest parses, declared local source layers exist, integrations ready, remote `extends` layers are cached at the lockfile's SHA, and repo-local keys that shadow a layer value are reported as REDUNDANT (warn) or OVERRIDE (informational, both values named) (`--json`; non-zero exit on failure) |
 | `config relevance` | Resolve a task's execution profile (units, topology, lenses) by `app_type` (`--filter`, `--app-type`, `--task`, `--stage`, `--recompute`, `--json`; see [CONFIG_RELEVANCE.md](CONFIG_RELEVANCE.md)) |
 
 ### Layered config & the lockfile (`.agentsrc.lock`)

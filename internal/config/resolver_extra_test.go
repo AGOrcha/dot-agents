@@ -8,6 +8,37 @@ import (
 	"testing"
 )
 
+// TestFieldMergeCategory pins the exported view of the merge-category table.
+// It exists so callers outside this package — `da config verify`'s shadow
+// check, which only reports CategoryScalar keys — cannot drift from the
+// resolver's own classification.
+func TestFieldMergeCategory(t *testing.T) {
+	tests := []struct {
+		key  string
+		want MergeCategory
+	}{
+		{"skills", CategorySetUnion},
+		{"agents", CategorySetUnion},
+		{"rules", CategorySetUnion},
+		{"features", CategoryMapMerge},
+		{"stage_profiles", CategoryMapMerge},
+		{"sources", CategoryOrderedReplace},
+		{"extends", CategoryOrderedReplace},
+		{"settings", CategoryScalar},
+		{"hooks", CategoryScalar},
+		// An uncategorized key falls through to scalar, exactly as mergeField
+		// treats it.
+		{"not_a_real_field", CategoryScalar},
+	}
+	for _, tc := range tests {
+		t.Run(tc.key, func(t *testing.T) {
+			if got := FieldMergeCategory(tc.key); got != tc.want {
+				t.Errorf("FieldMergeCategory(%q) = %v, want %v", tc.key, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestScalarKeyUnmarshalable exercises the json.Marshal error fallback: a channel
 // cannot be marshaled, so scalarKey falls back to the %v form.
 func TestScalarKeyUnmarshalable(t *testing.T) {

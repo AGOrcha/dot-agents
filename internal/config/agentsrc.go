@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -532,8 +533,15 @@ func (a *AgentsRC) UseGitRefBackend() bool {
 //
 // See specs config-distribution-model §3-§5 + org-config-resolution §15.2.
 type AgentsRC struct {
-	Schema  string   `json:"$schema,omitempty"`
-	Version int      `json:"version"`
+	Schema string `json:"$schema,omitempty"`
+	// Version carries `omitempty` for the same absent-vs-explicit reason as
+	// hooks/mcp/settings below. The schema's version enum is [1,2], so 0 is not
+	// a value any valid manifest can hold: zero therefore means "the key was
+	// absent" unambiguously and a plain int + omitempty encodes that losslessly
+	// (no pointer needed). Without it, loading a manifest that omits `version`
+	// and saving it back INJECTED `"version": 0` — a key the author never wrote,
+	// carrying a value the schema rejects.
+	Version int      `json:"version,omitempty"`
 	Project string   `json:"project,omitempty"`
 	Skills  []string `json:"skills,omitempty"`
 	Rules   []string `json:"rules,omitempty"`
@@ -554,10 +562,18 @@ type AgentsRC struct {
 	//
 	// nil  => key omitted => defer to the layer stack / product defaults.
 	// set  => key emitted => repo-local declaration that overrides lower layers.
-	Hooks         *StringsOrBool         `json:"hooks,omitempty"`
-	MCP           *StringsOrBool         `json:"mcp,omitempty"`
-	Settings      *bool                  `json:"settings,omitempty"`
-	Sources       []Source               `json:"sources"`
+	Hooks    *StringsOrBool `json:"hooks,omitempty"`
+	MCP      *StringsOrBool `json:"mcp,omitempty"`
+	Settings *bool          `json:"settings,omitempty"`
+	// Sources is `omitempty` + synthesis-tracked (see sourcesSynthesized) so an
+	// absent `sources` key survives a load→save round trip. LoadAgentsRC
+	// synthesizes the default local source into this field for consumers, and
+	// without tracking that synthesis every manifest save re-emitted
+	// `"sources": [{"type":"local"}]` for a key the author never wrote — the
+	// same corruption class as the injected hooks/mcp/settings false above.
+	// Sources merge as an ordered replace, so an injected local-only list
+	// REPLACES the source set an org layer supplies.
+	Sources       []Source               `json:"sources,omitempty"`
 	KG            *AgentsRCKG            `json:"kg,omitempty"`
 	Observability *AgentsRCObservability `json:"observability,omitempty"`
 
@@ -672,6 +688,28 @@ type AgentsRC struct {
 	// surface a deprecation warning without re-parsing the file (config-v2
 	// §15.3 deprecation cadence). Not serialized.
 	LegacyKeys []string `json:"-"`
+
+	// sourcesSynthesized records that LoadAgentsRC — not the author — put the
+	// default local source into Sources, so MarshalJSON can leave the key
+	// absent instead of writing a declaration nobody made.
+	//
+	// A slice cannot carry presence in its own value the way a pointer can:
+	// `omitempty` alone treats nil and `[]` alike, and the whole point of the
+	// load-time default is that Sources is NEVER empty by the time anything
+	// can save it. So presence is tracked out-of-band, defaulting to
+	// "declared": the zero value (false) means "serialize Sources normally",
+	// which keeps every AgentsRC built by any other package — struct literals,
+	// a plain json.Unmarshal, GenerateAgentsRC — emitting sources exactly as
+	// before. Only LoadAgentsRC's own synthesis flips it.
+	//
+	// Suppression is additionally value-guarded (see sourcesAreSynthesizedDefault):
+	// if a caller mutates Sources after load — `da agents import` adding a git
+	// source — the value no longer matches what was synthesized and it
+	// serializes, so no real edit can be swallowed by a stale flag.
+	//
+	// Not serialized, and deliberately unexported: nothing outside this package
+	// should be able to mark an author's declaration as synthetic.
+	sourcesSynthesized bool
 }
 
 // GitignoreProjectionsEnabled reports whether install/refresh should maintain
@@ -1062,8 +1100,10 @@ var agentsRCKnown = map[string]bool{
 // infinite recursion while still using the standard json encoder.
 // Per [[schema-usage]]: this MUST mirror AgentsRC's typed fields exactly.
 type agentsRCCore struct {
-	Schema  string   `json:"$schema,omitempty"`
-	Version int      `json:"version"`
+	Schema string `json:"$schema,omitempty"`
+	// omitempty: 0 is not a valid schema version, so it can only mean "absent".
+	// MUST mirror AgentsRC exactly (see [[schema-usage]]).
+	Version int      `json:"version,omitempty"`
 	Project string   `json:"project,omitempty"`
 	Skills  []string `json:"skills,omitempty"`
 	Rules   []string `json:"rules,omitempty"`
@@ -1071,10 +1111,12 @@ type agentsRCCore struct {
 	// Pointers + omitempty so an absent hooks/mcp/settings key round-trips as
 	// absent rather than being re-emitted as an explicit false. MUST mirror
 	// AgentsRC exactly (see [[schema-usage]]).
-	Hooks         *StringsOrBool         `json:"hooks,omitempty"`
-	MCP           *StringsOrBool         `json:"mcp,omitempty"`
-	Settings      *bool                  `json:"settings,omitempty"`
-	Sources       []Source               `json:"sources"`
+	Hooks    *StringsOrBool `json:"hooks,omitempty"`
+	MCP      *StringsOrBool `json:"mcp,omitempty"`
+	Settings *bool          `json:"settings,omitempty"`
+	// omitempty so MarshalJSON can drop a LoadAgentsRC-synthesized default by
+	// nilling this field. MUST mirror AgentsRC exactly (see [[schema-usage]]).
+	Sources       []Source               `json:"sources,omitempty"`
 	KG            *AgentsRCKG            `json:"kg,omitempty"`
 	Observability *AgentsRCObservability `json:"observability,omitempty"`
 
@@ -1203,6 +1245,11 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Manifests:            a.Manifests,
 		GitignoreProjections: a.GitignoreProjections,
 	}
+	// Drop a sources list this package synthesized at load time so an absent
+	// `sources` key stays absent through load→save. See sourcesSynthesized.
+	if a.sourcesAreSynthesizedDefault() {
+		core.Sources = nil
+	}
 	data, err := json.Marshal(core)
 	if err != nil {
 		return nil, err
@@ -1302,11 +1349,40 @@ func LoadAgentsRC(projectPath string) (*AgentsRC, error) {
 	if err := json.Unmarshal(data, &rc); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", AgentsRCFile, err)
 	}
-	// Default to a local source if none declared
+	// Default to a local source if none declared. This is a CONVENIENCE for
+	// consumers (every reader of rc.Sources can assume a usable entry), not an
+	// authored declaration — so record that we synthesized it and MarshalJSON
+	// will keep the key absent rather than writing it back into the manifest.
 	if len(rc.Sources) == 0 {
-		rc.Sources = []Source{{Type: "local"}}
+		rc.Sources = defaultLocalSources()
+		rc.sourcesSynthesized = true
 	}
 	return &rc, nil
+}
+
+// defaultLocalSources is the source list LoadAgentsRC synthesizes for a
+// manifest that declares none. Built fresh per call so no caller can mutate a
+// shared backing array.
+func defaultLocalSources() []Source { return []Source{{Type: "local"}} }
+
+// sourcesAreSynthesizedDefault reports whether Sources still holds exactly what
+// LoadAgentsRC synthesized. It value-guards the sourcesSynthesized flag: a
+// caller that edited the list after load (adding a git source, say) has made a
+// real declaration, and that must serialize even though the flag is set.
+func (a *AgentsRC) sourcesAreSynthesizedDefault() bool {
+	if !a.sourcesSynthesized {
+		return false
+	}
+	def := defaultLocalSources()
+	if len(a.Sources) != len(def) {
+		return false
+	}
+	for i := range def {
+		if !reflect.DeepEqual(a.Sources[i], def[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Save writes the manifest to .agentsrc.json in projectPath.
@@ -1426,42 +1502,107 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	return rc, nil
 }
 
+// MergeGenerateOptions tunes MergeGenerateAgentsRC.
+type MergeGenerateOptions struct {
+	// Force lets a fresh scan REPLACE an explicit hooks/mcp/settings
+	// declaration instead of only filling an absent one. It is the opt-in
+	// behind `da install --generate --force-generate`; the default is
+	// fill-absent-only. See MergeGenerateAgentsRC for why the default flipped.
+	Force bool
+}
+
 // MergeGenerateAgentsRC overlays a freshly generated manifest onto an existing
-// on-disk manifest. Scan-derived lists (skills, rules, agents) come from
-// generated. hooks/mcp/settings also prefer generated, but only when the scan
-// actually detected something: an empty scan leaves the existing declaration
-// intact rather than erasing it (see the pickStringsOrBool call below).
+// on-disk manifest.
 //
-// An existing non-empty project name, unknown JSON keys (ExtraFields), and
-// supplemental sources (e.g. git remotes not produced by GenerateAgentsRC) are
-// preserved. Source entries are unioned with deduplication so the default local
-// source is not duplicated when merging.
-func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
+// The base is EXISTING, not generated: an author's declaration survives unless
+// a clause below deliberately replaces it. That inversion is the point of this
+// function's contract, and it is worth stating why, because the previous
+// `out := *generated` base said the opposite.
+//
+// Under the old base, every field the generator does not produce was dropped
+// on each `da install --generate` unless someone remembered to add a
+// preservation clause — and clauses were in fact added one incident at a time
+// (project, repo_id, ExtraFields, observability, stage_profiles, manifests),
+// each after a field went missing in the field. Destructive-by-default with a
+// hand-maintained exception list is not a contract anyone can hold; every new
+// typed field silently joined the casualty list. Basing on existing inverts
+// that to additive-by-default, so `extends`, `kg`, `features`, `packages`,
+// `work_tracking`, `execution_profile` and every future field are safe without
+// anyone having to notice.
+//
+// What the fresh scan still replaces, in BOTH modes:
+//
+//   - skills / agents / rules. These are scan-derived sets with no other
+//     convergence path: nothing else prunes a manifest entry for a resource
+//     deleted under ~/.agents/, and regenerating is the documented cleanup for
+//     a stale or over-captured committed manifest. Replacing them is
+//     load-bearing, so it is preserved exactly as before.
+//   - sources are unioned with generated (deduplicated), so the default local
+//     source is not duplicated and committed git remotes survive.
+//   - absent scalars are filled from the scan (project, repo_id, $schema,
+//     version, work_tracking), which keeps the v1-manifest bootstrap working.
+//     repo_id is a PROTECTED scalar per org-config-resolution §7.4, so a
+//     committed value always wins.
+//
+// hooks/mcp/settings are the fields this function used to overwrite silently.
+// They are scan-DETECTABLE but author-DECLARABLE: since the manifest-corruption
+// fix these are pointers, so "the author wrote hooks:false to override the org
+// layer" is finally distinguishable from "the key is absent". A generate pass
+// that replaced that false with a scanned list would silently re-enable a
+// projection the repo deliberately disabled — the same class of silent
+// override that the corruption fix removed everywhere else. So by default the
+// scan only fills an ABSENT declaration. Pass MergeGenerateOptions{Force:true}
+// (`--force-generate`) to get the old replace-from-current-state behavior.
+func MergeGenerateAgentsRC(existing, generated *AgentsRC, opts ...MergeGenerateOptions) *AgentsRC {
 	if existing == nil {
 		return generated
 	}
 	if generated == nil {
 		return existing
 	}
-	out := *generated
+	var opt MergeGenerateOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
+	out := *existing
+
+	// Scan-derived sets: the fresh scan is authoritative in both modes.
+	out.Skills = generated.Skills
+	out.Agents = generated.Agents
+	out.Rules = generated.Rules
 	out.Sources = mergeSourceSlices(generated.Sources, existing.Sources)
-	if existing.Project != "" {
-		out.Project = existing.Project
+
+	// Absent scalars fall back to the generated value so an incomplete or v1
+	// manifest is still completed in place.
+	if out.Project == "" {
+		out.Project = generated.Project
 	}
-	// repo_id is a PROTECTED scalar per org-config-resolution §7.4 — an
-	// explicit value committed in the manifest must survive regeneration.
-	// Falling back to the generated (derived-from-git) value when existing
-	// is empty preserves the bootstrap behaviour for v1 manifests being
-	// upgraded in place.
-	if existing.RepoID != "" {
-		out.RepoID = existing.RepoID
+	if out.RepoID == "" {
+		out.RepoID = generated.RepoID
 	}
+	if out.Schema == "" {
+		out.Schema = generated.Schema
+	}
+	if out.Version == 0 {
+		out.Version = generated.Version
+	}
+	// work_tracking is generate-time bootstrap for a git repo, not a rescan of
+	// live state: a committed backend choice must not be reset by regenerating.
+	if out.WorkTracking == nil {
+		out.WorkTracking = generated.WorkTracking
+	}
+
+	out.Hooks = pickStringsOrBool(generated.Hooks, existing.Hooks, opt.Force)
+	out.MCP = pickStringsOrBool(generated.MCP, existing.MCP, opt.Force)
+	out.Settings = pickBool(generated.Settings, existing.Settings, opt.Force)
+
+	// out already carries existing's author-owned containers by struct copy, but
+	// that copy shares backing maps/pointers. Deep-clone them so the merged
+	// manifest never aliases the input a caller may still hold.
 	if len(existing.ExtraFields) > 0 {
 		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)
 	}
-	// observability is author-owned endpoint/auth configuration. Preserve it
-	// across generated-manifest rewrites now that it no longer rides in
-	// ExtraFields, and clone the nested auth pointer to avoid aliasing.
 	if existing.Observability != nil {
 		observability := *existing.Observability
 		if existing.Observability.Auth != nil {
@@ -1470,42 +1611,26 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 		}
 		out.Observability = &observability
 	}
-	// stage_profiles are author-owned config, not scan-derived, so a committed set
-	// must survive regeneration. Before these were typed fields the profiles rode
-	// along in ExtraFields and were preserved by the clause above; now they are
-	// first-class and must be carried over explicitly or `da install`/refresh
-	// would silently drop a project's registered profiles.
 	if len(existing.StageProfiles) > 0 {
 		out.StageProfiles = cloneStageProfiles(existing.StageProfiles)
 	}
-	// manifests are author-owned config like stage_profiles: now that they are a
-	// typed field (L2) they no longer ride along in ExtraFields, so a generate /
-	// refresh rewrite must carry a committed set over explicitly or `da install` /
-	// refresh would silently drop a project's authored manifests (the
-	// schema-usage.md typed-field/ExtraFields breakage rule).
 	if len(existing.Manifests) > 0 {
 		out.Manifests = cloneManifests(existing.Manifests)
 	}
-	// hooks/mcp/settings are scan-derived, so a FRESH detection wins — but a
-	// scan that found nothing yields nil ("no declaration"), and nil must not
-	// delete a declaration the author committed. Absent-generated therefore
-	// falls back to the existing value instead of clobbering it, which keeps
-	// `da install --generate` from silently dropping an explicit `"hooks": false`
-	// (or an explicit true) that the repo deliberately set to override its
-	// org layer. Copy through the pointers so out never aliases existing.
-	out.Hooks = pickStringsOrBool(generated.Hooks, existing.Hooks)
-	out.MCP = pickStringsOrBool(generated.MCP, existing.MCP)
-	out.Settings = pickBool(generated.Settings, existing.Settings)
 	return &out
 }
 
-// pickStringsOrBool returns a copy of generated when the scan produced a
-// declaration, otherwise a copy of existing. Copies (never the input pointers)
-// so the merged manifest does not alias either input.
-func pickStringsOrBool(generated, existing *StringsOrBool) *StringsOrBool {
-	src := generated
-	if src == nil {
-		src = existing
+// pickStringsOrBool resolves one scan-detectable declaration.
+//
+// Default (force=false): an existing declaration wins; the scan only fills an
+// absent one. force=true: a scan that detected something wins, falling back to
+// existing when it detected nothing — a nil generated must never DELETE a
+// declaration, in either mode. Returns copies, never the input pointers, so
+// the merged manifest does not alias either input.
+func pickStringsOrBool(generated, existing *StringsOrBool, force bool) *StringsOrBool {
+	src := existing
+	if existing == nil || (force && generated != nil) {
+		src = generated
 	}
 	if src == nil {
 		return nil
@@ -1516,10 +1641,10 @@ func pickStringsOrBool(generated, existing *StringsOrBool) *StringsOrBool {
 }
 
 // pickBool is the bool analog of pickStringsOrBool.
-func pickBool(generated, existing *bool) *bool {
-	src := generated
-	if src == nil {
-		src = existing
+func pickBool(generated, existing *bool, force bool) *bool {
+	src := existing
+	if existing == nil || (force && generated != nil) {
+		src = generated
 	}
 	if src == nil {
 		return nil
