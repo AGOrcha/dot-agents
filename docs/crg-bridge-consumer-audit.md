@@ -146,21 +146,80 @@ the published `graphstore.CodeGraphWriter` contract. It is deliberately a
 different file from the bridge's `.code-review-graph/graph.db`, so a rollback
 can never read a graph the other backend wrote.
 
-### Documented deltas vs the Python bridge
+### The product contract is the pinned release, not a subset
 
-These are behaviour differences a consumer can observe. They are recorded here
-rather than silently absorbed:
+`da kg serve` advertises the FULL published surface of `code-review-graph`
+**v2.3.8** (tag `2c6dae32643572ee528eb9b77dbcc17f58f3a8c9`, graph schema v9): all
+30 tools with their released JSON schemas, defaults and required arguments, the
+5 prompts, the release's `initialize` identity, its argument-validation and
+error semantics, and its `tools/call` envelope. That surface is not
+hand-maintained — `internal/crgrelease` is generated from the release itself by
+`tools/crgrelease/generate_release_contract.py`, and the fixtures under
+`testdata/crg-release/v2.3.8/` are the oracle the contract tests compare
+against. Regenerating is reproducible and byte-stable.
 
-| Area | Bridge (Python) | kg-native | Impact |
-|---|---|---|---|
-| **Language coverage** | Tree-sitter, multi-language | **Go only** (`go/ast`) | Non-Go repos build an empty graph on the native backend. Additional languages are follow-on ingester work; the rollback backend still covers them today. |
-| **`get_review_context_tool` composite** | `changed_symbols` from the CRG `detect-changes` composite (its own risk model + LLM-assisted summaries) | `changed_symbols` derived from the persisted graph: degree-centrality risk, caller counts, TESTED_BY-derived test gaps | Same JSON keys and value types; `risk_score` is now a normalized 0–1 degree-centrality score rather than the CRG heuristic. |
-| **`semantic_search_nodes_tool`** | CRG-side FTS/vector index | warm-store `SearchNodes` substring match (unchanged — this tool already read the warm store, not the bridge) | No change from this PR; the vector-search richness gap is pre-existing. |
-| **Community descriptions** | LLM-authored `description` text | empty `description`; `cohesion` is a structural connected-pair ratio | Consumers that printed the description get an empty string. Members, size, dominant language and ids are unchanged in shape. |
-| **Flow / community ids** | CRG-assigned stable row ids | positional ids within one response (the derivation keys flows by entry-point symbol id, a string) | Ids are stable within a response, not across responses. §11.6 already compares flows by `(flow_id, member_id, position)` set equality, not by id. |
-| **`--skip-flows` / `--skip-postprocess`** | skip a materialization pass | accepted, no effect (derived views are computed on demand) | Flags remain valid; graphs are correct either way. |
-| **`postprocess`** | rebuilds flow/community/FTS tables | recomputes the derived views and records their sizes as store metadata (`flow_memberships`, `communities`, `fts_tokens`, `last_postprocess`) | Command still succeeds and is still the place to assert derived-view sizes. |
-| **`kg_crg.*` SDK namespace** | n/a | the engine persists through `graphstore.CodeGraphWriter`, not through a SQL-backed `sdk.Store`; the crg adapter's derivations read that storage back via a `crg.StoreReader` projection | Building a SQL-backed `sdk.Store` so ingestion literally lands in `kg_crg.*` remains Phase B work. The parity-verified derivation code is shared either way. |
+### Which backend answers a call
+
+Routing is per call and capability-based. A call is answered by the kg-native
+engine only when **both** hold:
+
+1. the tool has a native handler that reproduces the release's response, and
+2. every source file in the repository is one the native scanner extracts.
+
+Otherwise it is answered by the retained Python bridge, which runs the
+release's own MCP server in-process (`internal/graphstore/crg_tool_bridge.go`),
+so a bridge-routed answer *is* the release's answer rather than a
+re-derivation. When a call must reach the bridge and the release is not
+installed, the server returns an explicit capability error naming the missing
+capability — never an empty success, which a caller cannot distinguish from
+"the graph really is empty".
+
+The asymmetry is deliberate: routing to the bridge when native would have done
+is merely slower, while answering natively from a graph that is missing files
+is a wrong answer that looks right.
+
+`da kg code-capabilities [--json]` reports the decision for a repository: the
+pinned release, the selected backend, per-language file counts with their
+native/bridge classification, and the resolved backend **per tool** with the
+reason.
+
+### Tools the native backend cannot serve, and why
+
+Each of these depends on an upstream capability the native backend does not
+have. They are bridge-routed for **every** repository, including a Go-only one.
+
+| Tool(s) | Blocking upstream capability |
+|---|---|
+| `embed_graph_tool` | vector embeddings via sentence-transformers or a hosted provider |
+| `get_bridge_nodes_tool`, `get_suggested_questions_tool` | betweenness centrality, which networkx estimates from an **unseeded random sample** above 5000 nodes — not reproducible even by the release against itself |
+| `detect_changes_tool`, `get_minimal_context_tool` | changed-function attribution from git's own `--unified=0` hunk boundaries (xdiff Myers + `xdl_change_compact` + the default indent heuristic), plus git's rename score and diff-output ordering |
+| `generate_wiki_tool`, `get_wiki_page_tool` | the markdown wiki materialized under `.code-review-graph/wiki/` |
+| `refactor_tool`, `apply_refactor_tool` | the server-side ten-minute refactor-preview store and source rewriting |
+| `list_repos_tool`, `cross_repo_search_tool` | the cross-repository registry at `~/.code-review-graph/registry.json` |
+| `get_docs_section_tool` | `docs/LLM-OPTIMIZED-REFERENCE.md`, shipped inside the CRG wheel and not present in this repository |
+
+The single largest unblocking item is a faithful xdiff port (Myers +
+`xdl_change_compact` with the indent-heuristic scorer, diffcore rename
+detection at git's RenameScore 50 including tree-vs-worktree, and git's
+diff-queue ordering, oracle-tested against real `git diff --unified=0`). It
+alone would return `detect_changes_tool` and `get_minimal_context_tool` — the
+release's primary review tool and its documented entry point — to the native
+backend.
+
+### Repository coverage: Go only, today
+
+The native scanner extracts Go. The release indexes a much wider set, and it
+**collects** a file whenever `detect_language` recognizes its extension — which
+includes files that yield no graph nodes, such as a plain CI `.yaml`. Because
+`files_parsed` is part of `build_or_update_graph_tool`'s reported result, a
+repository containing such a file genuinely produces a different observable
+answer natively, so the capability scan counts it as bridge work.
+
+The practical consequence is stated plainly rather than softened: **in Phase A
+almost every real repository routes to the bridge**, and the native cutover
+serves Go-only repositories. That is why §11.4 bridge removal stays blocked,
+and why the bridge is retained as a working dependency rather than as a
+formality.
 
 ## [B] `crg-bridge` mirror adapter — zero consumers (removable in isolation)
 
