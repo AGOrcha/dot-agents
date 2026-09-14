@@ -1365,24 +1365,52 @@ func LoadAgentsRC(projectPath string) (*AgentsRC, error) {
 // shared backing array.
 func defaultLocalSources() []Source { return []Source{{Type: "local"}} }
 
+// IsDefaultHomeLocal reports whether s is the bare, path-less `local` source —
+// the one entry that names the USER's own resource home (config.AgentsHome())
+// rather than a root the project owns.
+//
+// Ownership, not type, is the discriminator. A `local` source carrying a path
+// (`{"type":"local","path":"../orglayer"}`) is an authored project/org root and
+// stays a first-class declaration everywhere; so does every git/http/oci
+// source. Only the zero-valued local entry is the user-home sentinel, whether
+// LoadAgentsRC synthesized it or a pre-fix `da install --generate` committed it
+// into the manifest. DeepEqual against the sentinel (rather than a
+// field-by-field check) keeps every future Source field automatically
+// disqualifying: anything an author can write makes the source theirs.
+func (s Source) IsDefaultHomeLocal() bool {
+	return reflect.DeepEqual(s, Source{Type: "local"})
+}
+
+// ProjectOwnedSources returns the resource roots this manifest actually owns:
+// Sources minus every default-home local entry (see IsDefaultHomeLocal).
+//
+// This is what the project side of install must resolve. The user's ~/.agents
+// home is not a project source: linkInstallResources appends it
+// unconditionally as the canonical store, so resolving it a second time from a
+// synthesized (or legacy-committed) declaration is redundant, and it lets a
+// user-scope resource masquerade as one the project declared. It is likewise
+// what `da install --generate` may serialize, so a generated manifest never
+// writes a user-home root into a committed, shared file.
+//
+// Returns nil when nothing is project-owned, so callers can range freely and
+// an assignment to AgentsRC.Sources keeps the `sources` key omitted.
+func (a *AgentsRC) ProjectOwnedSources() []Source {
+	var out []Source
+	for _, s := range a.Sources {
+		if s.IsDefaultHomeLocal() {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 // sourcesAreSynthesizedDefault reports whether Sources still holds exactly what
 // LoadAgentsRC synthesized. It value-guards the sourcesSynthesized flag: a
 // caller that edited the list after load (adding a git source, say) has made a
 // real declaration, and that must serialize even though the flag is set.
 func (a *AgentsRC) sourcesAreSynthesizedDefault() bool {
-	if !a.sourcesSynthesized {
-		return false
-	}
-	def := defaultLocalSources()
-	if len(a.Sources) != len(def) {
-		return false
-	}
-	for i := range def {
-		if !reflect.DeepEqual(a.Sources[i], def[i]) {
-			return false
-		}
-	}
-	return true
+	return a.sourcesSynthesized && len(a.Sources) == 1 && a.Sources[0].IsDefaultHomeLocal()
 }
 
 // Save writes the manifest to .agentsrc.json in projectPath.
@@ -1443,6 +1471,14 @@ func AppendUnique(slice []string, s string) []string {
 // user's global set changes on another machine that lacks it. Declaring a
 // project-scope resource is the only thing a project manifest can
 // meaningfully own.
+//
+// For the same reason the generated manifest declares NO `sources` at all. The
+// scan's own input root is the user's ~/.agents home, and that home is not a
+// project-owned resource root (see ProjectOwnedSources): install links
+// canonical resources from it unconditionally, so writing `[{"type":"local"}]`
+// into a committed, shared manifest only re-declares the reader's own machine.
+// An author's real roots — a git/http/oci source, or a path-bearing local one —
+// are preserved by MergeGenerateAgentsRC.
 func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	agentsHome := AgentsHome()
 
@@ -1450,7 +1486,6 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 		Schema:  "https://agorcha.dev/schemas/agentsrc.schema.json",
 		Version: 1,
 		Project: projectName,
-		Sources: []Source{{Type: "local"}},
 	}
 
 	// Auto-derive repo_id from the project's git remote (org-config-resolution §5).
@@ -1537,8 +1572,13 @@ type MergeGenerateOptions struct {
 //     deleted under ~/.agents/, and regenerating is the documented cleanup for
 //     a stale or over-captured committed manifest. Replacing them is
 //     load-bearing, so it is preserved exactly as before.
-//   - sources are unioned with generated (deduplicated), so the default local
-//     source is not duplicated and committed git remotes survive.
+//   - sources are narrowed to the PROJECT-OWNED roots of both sides, unioned
+//     and deduplicated. Committed git/http/oci remotes and path-bearing local
+//     roots survive; the bare default-home `{"type":"local"}` entry does not —
+//     neither the one LoadAgentsRC synthesizes for an existing manifest that
+//     declares no sources, nor the one a pre-fix generate pass committed into
+//     one. See ProjectOwnedSources for why a shared manifest must not name the
+//     reader's own resource home.
 //   - absent scalars are filled from the scan (project, repo_id, $schema,
 //     version, work_tracking), which keeps the v1-manifest bootstrap working.
 //     repo_id is a PROTECTED scalar per org-config-resolution §7.4, so a
@@ -1571,7 +1611,7 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC, opts ...MergeGenerateO
 	out.Skills = generated.Skills
 	out.Agents = generated.Agents
 	out.Rules = generated.Rules
-	out.Sources = mergeSourceSlices(generated.Sources, existing.Sources)
+	out.Sources = mergeSourceSlices(generated.ProjectOwnedSources(), existing.ProjectOwnedSources())
 
 	// Absent scalars fall back to the generated value so an incomplete or v1
 	// manifest is still completed in place.

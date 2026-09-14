@@ -2,8 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -136,7 +134,7 @@ func TestAgentsRC_SynthesizedSourcesSuppressionIsValueGuarded(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := roundTripWithMutation(t, `{"version": 2, "project": "fixture"}`, tc.mutate)
+			_, raw := roundTripManifest(t, `{"version": 2, "project": "fixture"}`, tc.mutate)
 			got, present := raw["sources"]
 			if tc.wantSources == nil {
 				if present {
@@ -190,38 +188,4 @@ func TestAgentsRC_SourcesSynthesisDefaultsToDeclared(t *testing.T) {
 	if _, ok := raw["sources"]; !ok {
 		t.Errorf("a struct built outside LoadAgentsRC must emit sources, got %s", data)
 	}
-}
-
-// seedManifest writes manifest into dir as .agentsrc.json.
-func seedManifest(t *testing.T, dir, manifest string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, AgentsRCFile), []byte(manifest), 0644); err != nil {
-		t.Fatalf("seeding manifest: %v", err)
-	}
-}
-
-// roundTripWithMutation seeds a manifest, loads it, applies mutate, saves it
-// back, and returns the re-saved manifest decoded as a JSON object.
-func roundTripWithMutation(t *testing.T, manifest string, mutate func(rc *AgentsRC)) map[string]any {
-	t.Helper()
-	tmp := t.TempDir()
-	seedManifest(t, tmp, manifest)
-
-	rc, err := LoadAgentsRC(tmp)
-	if err != nil {
-		t.Fatalf("LoadAgentsRC: %v", err)
-	}
-	mutate(rc)
-	if err := rc.Save(tmp); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	saved, err := os.ReadFile(filepath.Join(tmp, AgentsRCFile))
-	if err != nil {
-		t.Fatalf("reading saved manifest: %v", err)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(saved, &raw); err != nil {
-		t.Fatalf("parsing saved manifest: %v\n%s", err, saved)
-	}
-	return raw
 }

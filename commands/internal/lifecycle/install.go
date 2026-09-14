@@ -195,7 +195,13 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	if err != nil {
 		return err
 	}
-	resolvedSources, err := resolveInstallSources(rc.Sources, strict, deps)
+	// ProjectOwnedSources, not rc.Sources: the bare default-home `local` entry
+	// (synthesized by LoadAgentsRC for a manifest that declares none, or
+	// committed by a pre-fix generate pass) names the user's own ~/.agents home,
+	// which linkInstallResources already appends as the canonical store. Passing
+	// it here would resolve that home a second time as if the project declared
+	// it. Authored roots — git/http/oci, or a path-bearing local — are kept.
+	resolvedSources, err := resolveInstallSources(rc.ProjectOwnedSources(), strict, deps)
 	if err != nil {
 		return err
 	}

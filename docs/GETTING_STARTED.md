@@ -39,9 +39,12 @@ ls ~/.agents/config.json        # present → home already initialized here
 ls .agentsrc.json && cat .agentsrc.json   # check its "sources" / "extends"
 ```
 
-A manifest whose `sources` is only `{ "type": "local" }` is self-contained; an
-entry with `type: git | http | oci` (or an `extends` array) pulls **real upstream
-config** → that's path B.
+A manifest with no `sources` key — or one whose only entry is the bare
+`{ "type": "local" }` — is self-contained: it draws resources from your own
+`~/.agents` and nothing else. (`da install --generate` writes no `sources` key
+for exactly that reason; the key is for roots the project genuinely owns.) An
+entry with `type: git | http | oci`, a `local` entry with a `path`, or an
+`extends` array pulls **real upstream config** → that's path B.
 
 ---
 
