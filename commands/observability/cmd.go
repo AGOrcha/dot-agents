@@ -430,10 +430,10 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 }
 
 func apiURL(endpoint *url.URL, route string) string {
-	copy := *endpoint
-	copy.Path = strings.TrimRight(copy.Path, "/") + route
-	copy.RawPath = ""
-	return copy.String()
+	routed := *endpoint
+	routed.Path = strings.TrimRight(routed.Path, "/") + route
+	routed.RawPath = ""
+	return routed.String()
 }
 
 func applyHeaders(req *http.Request, headers http.Header) {

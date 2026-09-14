@@ -97,33 +97,49 @@ func TestResourceSourcePlan_ProvenanceAndEligibility(t *testing.T) {
 		t.Errorf("project source paths = %v, want %v", got, wantPaths)
 	}
 
-	if e := planEntry(t, plan, LayerUserLocal); e.ProjectEligible || e.IneligibleReason != IneligibleUserLayer {
-		t.Errorf("user-local source = %+v, want ineligible with reason %q", e, IneligibleUserLayer)
+	assertUserScopeLayersIneligible(t, plan)
+	assertInheritanceProvenance(t, plan)
+	assertHomeSentinelRecorded(t, plan)
+}
+
+// assertUserScopeLayersIneligible: neither machine-scope layer may supply a
+// project resource root, and each entry carries the reason that says so.
+func assertUserScopeLayersIneligible(t *testing.T, plan ResourceSourcePlan) {
+	t.Helper()
+	for _, layer := range []string{LayerUserLocal, LayerProductDefaults} {
+		if e := planEntry(t, plan, layer); e.ProjectEligible || e.IneligibleReason != IneligibleUserLayer {
+			t.Errorf("%s source = %+v, want ineligible with reason %q", layer, e, IneligibleUserLayer)
+		}
 	}
-	if e := planEntry(t, plan, LayerProductDefaults); e.ProjectEligible || e.IneligibleReason != IneligibleUserLayer {
-		t.Errorf("product-defaults source = %+v, want ineligible with reason %q", e, IneligibleUserLayer)
-	}
+}
+
+// assertInheritanceProvenance: a root that reached the project through
+// `extends` is marked inherited and stays eligible; the project's own
+// declaration is neither inherited nor attributed elsewhere.
+func assertInheritanceProvenance(t *testing.T, plan ResourceSourcePlan) {
+	t.Helper()
 	if e := planEntry(t, plan, "org:org/base.json"); !e.ProjectEligible || !e.Inherited {
 		t.Errorf("org layer source = %+v, want eligible and inherited", e)
 	}
 	if e := planEntry(t, plan, LayerRepoLocal); e.Inherited {
 		t.Errorf("repo-local source must not be marked inherited: %+v", e)
 	}
+}
 
-	// The sentinel is retained in the plan (so a caller can explain the skip)
-	// but is never a project source.
-	var sawSentinel bool
+// assertHomeSentinelRecorded: the sentinel is retained in the plan (so a
+// caller can explain the skip) but is never a project source.
+func assertHomeSentinelRecorded(t *testing.T, plan ResourceSourcePlan) {
+	t.Helper()
 	for _, rs := range plan.Sources {
-		if rs.Source.IsDefaultHomeLocal() {
-			sawSentinel = true
-			if rs.ProjectEligible || rs.IneligibleReason != IneligibleDefaultHome {
-				t.Errorf("home sentinel = %+v, want ineligible with reason %q", rs, IneligibleDefaultHome)
-			}
+		if !rs.Source.IsDefaultHomeLocal() {
+			continue
 		}
+		if rs.ProjectEligible || rs.IneligibleReason != IneligibleDefaultHome {
+			t.Errorf("home sentinel = %+v, want ineligible with reason %q", rs, IneligibleDefaultHome)
+		}
+		return
 	}
-	if !sawSentinel {
-		t.Error("the plan must record the synthesized home sentinel, not drop it silently")
-	}
+	t.Error("the plan must record the synthesized home sentinel, not drop it silently")
 }
 
 // TestResourceSourcePlan_HigherLayerShadowsSameID pins de-duplication: an id a
