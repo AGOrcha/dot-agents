@@ -1,26 +1,32 @@
 // Command crgbehaviorgate runs the CRG behavior-preservation gate
 // (graph-backend-adapter-contract §11.4 criterion 2) over a corpus of REAL
-// review tasks pinned from this repository's history, and regenerates that
-// corpus on request.
+// review tasks pinned from this repository's history, and maintains that
+// corpus plus its release-pinned upstream baseline.
 //
-// The hermetic §11.6 parity gate compares the kg-native CRG adapter against the
-// crg-bridge mirror on a synthetic 10-commit corpus. This gate replays the same
-// comparison discipline — the same structural oracles — against the LIVE legacy
-// Python bridge for real commits: for each pinned commit it issues the queries
-// a review of that commit issues (changed-file impact radius, flows touched,
-// community membership of the changed symbols, FTS over the changed
-// identifiers) on both sides and diffs the answers.
+// The gate certifies against ONE release — code-review-graph 2.3.8, graph
+// schema v9 — and it materializes every pinned commit in its own isolated
+// linked worktree (natively, via internal/gitwt over go-git) before comparing,
+// so a historical review task is replayed against the repository as it
+// actually was. Every oracle is exact.
 //
 // Usage:
 //
-//	go run ./tools/crgbehaviorgate [-repo DIR] [-graph-repo DIR]
-//	    [-manifest PATH] [-tasks N] [-depth N] [-strict]
-//	go run ./tools/crgbehaviorgate -regen [-ref REF] [-commits N]
+//	go run ./tools/crgbehaviorgate [-repo DIR] [-tasks N] [-depth N] [-json PATH]
+//	go run ./tools/crgbehaviorgate -record [-tasks N]
+//	go run ./tools/crgbehaviorgate -regen [-ref REF] [-commits N] [-window N]
 //
-// Regeneration is explicit: a gate run never rewrites the pinned corpus.
-// The gate exits 0 on PASS, 1 on a gating divergence, and 0 with a SKIP notice
-// when the legacy Python bridge is not available on this machine (a missing
-// legacy side is an environment fact, not a behavior divergence).
+// Regeneration and fixture recording are explicit: a gate run never rewrites
+// the pinned corpus and never re-records its own baseline.
+//
+// Exit codes:
+//
+//	0  PASS          — every required surface exercised, every oracle agreed
+//	1  FAIL          — a behavior diverged, a comparison failed, or a required
+//	                   surface went unexercised without a ratified exception
+//	2  ERROR         — usage, plumbing, off-release bridge, or incompatible schema
+//	3  INCONCLUSIVE  — the pinned bridge could not be driven, so the run produced
+//	                   no evidence. This is NOT a pass: an absent bridge cannot
+//	                   demonstrate preserved behavior.
 package main
 
 import (
@@ -29,15 +35,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/AGOrcha/dot-agents/internal/crgbehavior"
 )
 
-// exit codes: 0 pass or skip, 1 gating divergence, 2 usage/plumbing error.
 const (
-	exitPass  = 0
-	exitFail  = 1
-	exitError = 2
+	exitPass         = 0
+	exitFail         = 1
+	exitError        = 2
+	exitInconclusive = 3
 )
 
 func main() {
@@ -46,15 +53,21 @@ func main() {
 
 // options are the parsed command-line knobs.
 type options struct {
-	repo      string
-	graphRepo string
-	manifest  string
-	ref       string
-	commits   int
-	tasks     int
-	depth     int
-	strict    bool
-	regen     bool
+	repo       string
+	workDir    string
+	manifest   string
+	release    string
+	contract   string
+	fixtures   string
+	jsonReport string
+	ref        string
+	commits    int
+	window     int
+	tasks      int
+	depth      int
+	maxResults int
+	regen      bool
+	record     bool
 }
 
 // mainRun is the testable entry point: it never calls os.Exit.
@@ -63,10 +76,18 @@ func mainRun(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return code
 	}
-	if opts.regen {
-		return regenerate(opts, stdout, stderr)
+	rel, err := crgbehavior.LoadRelease(opts.release)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitError
 	}
-	return runGate(opts, stdout, stderr)
+	if opts.regen {
+		return regenerate(opts, rel, stdout, stderr)
+	}
+	if opts.record {
+		return record(opts, rel, stdout, stderr)
+	}
+	return runGate(opts, rel, stdout, stderr)
 }
 
 // parseArgs parses the flag set. ok is false when the caller should exit with
@@ -76,26 +97,41 @@ func parseArgs(args []string, stderr io.Writer) (options, int, bool) {
 	fs := flag.NewFlagSet("crgbehaviorgate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&o.repo, "repo", ".", "repository whose history the corpus is pinned from")
-	fs.StringVar(&o.graphRepo, "graph-repo", "", "repository holding the legacy .code-review-graph graph (defaults to -repo)")
+	fs.StringVar(&o.workDir, "work-dir", defaultWorkDir(), "parent directory for the per-commit worktrees")
 	fs.StringVar(&o.manifest, "manifest", crgbehavior.DefaultManifestPath, "pinned corpus manifest path")
+	fs.StringVar(&o.release, "release", crgbehavior.DefaultReleasePath, "pinned release capability fixture path")
+	fs.StringVar(&o.contract, "contract", crgbehavior.DefaultContractPath, "corpus contract path")
+	fs.StringVar(&o.fixtures, "fixtures", crgbehavior.DefaultFixtureDir, "release-pinned upstream behavior fixture directory")
+	fs.StringVar(&o.jsonReport, "json", "", "also write the machine-readable run artifact to this path")
 	fs.StringVar(&o.ref, "ref", crgbehavior.DefaultRef, "git ref the corpus window is taken from (-regen)")
-	fs.IntVar(&o.commits, "commits", crgbehavior.DefaultCommitCount, "commits to pin (-regen)")
+	fs.IntVar(&o.commits, "commits", crgbehavior.DefaultCommitCount, "review tasks to pin (-regen)")
+	fs.IntVar(&o.window, "window", 0, "commits to scan when pinning (-regen; 0 = release default)")
 	fs.IntVar(&o.tasks, "tasks", 0, "run only the first N corpus tasks (0 = all)")
 	fs.IntVar(&o.depth, "depth", crgbehavior.DefaultDepth, "impact-radius hop budget")
-	fs.BoolVar(&o.strict, "strict", false, "promote the advisory surfaces to gating (§11.4 sign-off)")
+	fs.IntVar(&o.maxResults, "max-results", crgbehavior.DefaultMaxResults, "impact-radius result cap")
 	fs.BoolVar(&o.regen, "regen", false, "regenerate the pinned corpus manifest and exit")
+	fs.BoolVar(&o.record, "record", false, "record the release-pinned upstream behavior fixtures and exit")
 	if err := fs.Parse(args); err != nil {
 		return o, exitError, false
 	}
-	if o.graphRepo == "" {
-		o.graphRepo = o.repo
+	if o.regen && o.record {
+		fmt.Fprintln(stderr, "crgbehaviorgate: -regen and -record are separate commands; run one at a time")
+		return o, exitError, false
 	}
 	return o, exitPass, true
 }
 
-// regenerate rewrites the pinned corpus manifest from real history.
-func regenerate(o options, stdout, stderr io.Writer) int {
-	m, err := crgbehavior.BuildManifest(o.repo, o.ref, o.commits)
+// defaultWorkDir is where per-commit worktrees are materialized. It is outside
+// the repository so a materialized checkout can never be mistaken for working
+// state or picked up by a build.
+func defaultWorkDir() string {
+	return filepath.Join(os.TempDir(), "crg-behavior-worktrees")
+}
+
+// regenerate rewrites the pinned corpus manifest from real history, using the
+// pinned release's own indexed-language set.
+func regenerate(o options, rel crgbehavior.Release, stdout, stderr io.Writer) int {
+	m, err := crgbehavior.BuildManifest(o.repo, o.ref, o.commits, o.window, rel)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitError
@@ -104,44 +140,111 @@ func regenerate(o options, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return exitError
 	}
-	fmt.Fprintf(stdout, "wrote %s: %d review task(s) pinned from %s at %s\n",
-		o.manifest, len(m.Tasks), m.GeneratedFrom, m.Head)
+	covered, uncovered := crgbehavior.ExtractorCoverage(rel)
+	fmt.Fprintf(stdout, "wrote %s: %d review task(s) pinned from %s at %s for %s %s\n",
+		o.manifest, len(m.Tasks), m.GeneratedFrom, m.Head, crgbehavior.PackageName, rel.Version)
+	fmt.Fprintf(stdout, "declaration extractors: %d release language(s) covered, %d without one (%v)\n",
+		len(covered), len(uncovered), uncovered)
 	return exitPass
 }
 
-// runGate executes the gate against the live legacy bridge.
-func runGate(o options, stdout, stderr io.Writer) int {
-	manifest, err := crgbehavior.LoadManifest(o.manifest)
+// record drives the pinned release over every corpus task and writes the
+// release-pinned upstream behavior fixtures the gate conforms against.
+func record(o options, rel crgbehavior.Release, stdout, stderr io.Writer) int {
+	cfg, code, ok := gateConfig(o, rel, stderr)
+	if !ok {
+		return code
+	}
+	mat, err := materializer(o, rel, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitError
 	}
-	report, err := crgbehavior.RunLive(crgbehavior.Config{
-		RepoRoot: o.repo,
-		Manifest: manifest,
-		Depth:    o.depth,
-		MaxTasks: o.tasks,
-		Strict:   o.strict,
-	}, o.graphRepo)
+	fixtures, err := crgbehavior.RecordFixtures(cfg, mat)
 	if err != nil {
 		return reportRunError(err, stdout, stderr)
 	}
-	report.Render(stdout)
-	if !report.Pass() {
-		return exitFail
+	for _, f := range fixtures {
+		fmt.Fprintf(stdout, "recorded %s from %s\n", crgbehavior.FixturePath(o.fixtures, f.Commit), f.Release)
 	}
 	return exitPass
 }
 
-// reportRunError maps a run failure onto an exit code: an unavailable legacy
-// bridge SKIPS (the gate cannot run, but nothing diverged), anything else is a
-// plumbing error.
+// runGate executes the gate against the pinned release.
+func runGate(o options, rel crgbehavior.Release, stdout, stderr io.Writer) int {
+	cfg, code, ok := gateConfig(o, rel, stderr)
+	if !ok {
+		return code
+	}
+	mat, err := materializer(o, rel, stdout)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitError
+	}
+	report, err := crgbehavior.Run(cfg, mat)
+	if err != nil {
+		return reportRunError(err, stdout, stderr)
+	}
+	report.Render(stdout)
+	if o.jsonReport != "" {
+		if err := report.WriteJSON(o.jsonReport); err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitError
+		}
+		fmt.Fprintf(stdout, "artifact: %s\n", o.jsonReport)
+	}
+	switch report.Verdict() {
+	case crgbehavior.VerdictPass:
+		return exitPass
+	case crgbehavior.VerdictInconclusive:
+		return exitInconclusive
+	default:
+		return exitFail
+	}
+}
+
+// gateConfig loads the corpus, the contract and the release into a run config.
+func gateConfig(o options, rel crgbehavior.Release, stderr io.Writer) (crgbehavior.Config, int, bool) {
+	manifest, err := crgbehavior.LoadManifest(o.manifest)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return crgbehavior.Config{}, exitError, false
+	}
+	contract, err := crgbehavior.LoadContract(o.contract)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return crgbehavior.Config{}, exitError, false
+	}
+	return crgbehavior.Config{
+		RepoRoot:   o.repo,
+		Manifest:   manifest,
+		Release:    rel,
+		Contract:   contract,
+		FixtureDir: o.fixtures,
+		Depth:      o.depth,
+		MaxResults: o.maxResults,
+		MaxTasks:   o.tasks,
+	}, exitPass, true
+}
+
+// materializer builds the same-SHA materializer, echoing progress because one
+// full pinned-release build per commit takes minutes.
+func materializer(o options, rel crgbehavior.Release, stdout io.Writer) (crgbehavior.Materializer, error) {
+	return crgbehavior.NewWorktreeMaterializer(o.repo, o.workDir, rel, o.depth, o.maxResults,
+		func(line string) { fmt.Fprintf(stdout, "... %s\n", line) })
+}
+
+// reportRunError maps a run failure onto an exit code. An unavailable bridge is
+// INCONCLUSIVE and still exits non-zero: the gate could not be driven, so it
+// has demonstrated nothing, and a silent success here is exactly how a missing
+// legacy side previously read as preserved behavior.
 func reportRunError(err error, stdout, stderr io.Writer) int {
 	if errors.Is(err, crgbehavior.ErrBridgeUnavailable) {
-		fmt.Fprintf(stdout, "SKIP: %v\n", err)
-		fmt.Fprintln(stdout, "SKIP: the dual-read comparison needs the legacy Python code-review-graph "+
-			"and a built .code-review-graph/graph.db; see testdata/crg-behavior/BEHAVIOR.md")
-		return exitPass
+		fmt.Fprintf(stdout, "GATE: %s\n", crgbehavior.VerdictInconclusive)
+		fmt.Fprintf(stdout, "SIGN-OFF: criterion 2 NOT ESTABLISHED — %v\n", err)
+		fmt.Fprintf(stdout, "the dual-read comparison needs %s %s on PATH or in .venv; "+
+			"see testdata/crg-behavior/BEHAVIOR.md\n", crgbehavior.PackageName, crgbehavior.PinnedVersion)
+		return exitInconclusive
 	}
 	fmt.Fprintln(stderr, err)
 	return exitError

@@ -1,16 +1,436 @@
 {
-  "schema_version": 1,
-  "generated_at": "2026-08-12T17:48:49Z",
+  "schema_version": 2,
+  "generated_at": "2026-09-14T00:21:24Z",
   "generated_from": "origin/master",
-  "head": "6638e339a1e566bf33b5e996f0c90906be04c1eb",
+  "head": "2a84b8825db4fa504f7720c5ef4839e78d29c6f3",
+  "window": 250,
+  "release": "2.3.8",
   "tasks": [
     {
-      "commit": "685a09a76790468b8ce8140bf8ae559f6cd31f9b",
-      "subject": "test(agentslock): widen acquire budget for the 16-way RMW contention test",
+      "commit": "dd7d86b93bbbc5c9633b826606f95774aa6805d9",
+      "subject": "test(hooks): use a portable trigger for the prune scan-error path",
       "changed_files": [
-        "internal/agentslock/lockfile_test.go"
+        "commands/hooks/prune_test.go"
       ],
-      "identifiers": []
+      "identifiers": [],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "9814699b86d86d66352d2a9e3e7c50a0424e5678",
+      "subject": "test(hooks): cover prune scan-error path for the 100% file ratchet",
+      "changed_files": [
+        "commands/hooks/prune_test.go"
+      ],
+      "identifiers": [
+        "TestRunHooksPruneImportArtifacts_ScanErrorPropagates"
+      ],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "470c485f424cfc37c9c5baaa64b145fd2a895ed2",
+      "subject": "test: preserve runner validation coverage",
+      "changed_files": [
+        "commands/review_admin_test.go",
+        "commands/workflow/pipeline_emit_test.go"
+      ],
+      "identifiers": [
+        "TestReviewUserRunnersRejectInvalidRoles"
+      ],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "73bbaa9125769a2c0d77ab552519f49c29a247e0",
+      "subject": "test: cover enum and platform help registries",
+      "changed_files": [
+        "commands/internal/cmdutil/enumflag_test.go",
+        "docs/web/src/public-pages.mjs",
+        "internal/platform/platform_test.go"
+      ],
+      "identifiers": [
+        "TestAnnotateEnumIgnoresMissingFlag",
+        "TestChainEnumValidationReturnsMissingFlagError",
+        "TestEnumDynamicSource",
+        "TestIDsMirrorsAllInDocumentedOrder"
+      ],
+      "languages": [
+        "go",
+        "javascript"
+      ]
+    },
+    {
+      "commit": "351cca611ad0700b93e84f63b2447c84e469311e",
+      "subject": "Update .agentsrc.json version, reintroduce observability and work tracking configurations, and enhance Homebrew cask with shell completions for bash, zsh, fish, and PowerShell. Update .gitignore to exclude new scratch files and add tests for completion scripts in root command.",
+      "changed_files": [
+        ".goreleaser.yaml",
+        "commands/root_test.go"
+      ],
+      "identifiers": [
+        "TestNewRootCommand_CompletionScripts"
+      ],
+      "languages": [
+        "go",
+        "yaml"
+      ]
+    },
+    {
+      "commit": "54b30963043014c4b295042ea03ea5056af5e549",
+      "subject": "chore(deps): bump the docs group across 1 directory with 8 updates",
+      "changed_files": [
+        "docs/web/pnpm-lock.yaml"
+      ],
+      "identifiers": [],
+      "languages": [
+        "yaml"
+      ]
+    },
+    {
+      "commit": "e24e24932b10e0c8ea680c9ee59cc5800af26906",
+      "subject": "chore(deps): bump the actions group with 2 updates",
+      "changed_files": [
+        ".github/workflows/auto-release.yml",
+        ".github/workflows/test.yml"
+      ],
+      "identifiers": [],
+      "languages": [
+        "yaml"
+      ]
+    },
+    {
+      "commit": "472390555ed3bd6bb6ca00879b4dc1b466ccb650",
+      "subject": "chore(deps): bump the docs group across 1 directory with 8 updates",
+      "changed_files": [
+        "docs/web/pnpm-lock.yaml"
+      ],
+      "identifiers": [],
+      "languages": [
+        "yaml"
+      ]
+    },
+    {
+      "commit": "9baa2c3ec75453dad946b57d77b2208a81695c5f",
+      "subject": "docs: add CLI help conventions and a tree-wide drift guard",
+      "changed_files": [
+        "commands/help_conventions_test.go"
+      ],
+      "identifiers": [
+        "TestAgentDrivenCommandsShipExamples",
+        "TestDynamicEnumFlagsPointAtRealCommands",
+        "TestEnumFlagDefaultsAreInTheirOwnValueSet",
+        "TestEnumFlagsListTheirValuesInHelp",
+        "TestEnumValidationRejectsOutOfSetValueNamingTheSet",
+        "TestKnownEnumFlagsUseTheHelper",
+        "containsValue",
+        "forEachEnumFlag",
+        "indexCommandTree",
+        "namesExistingCommand",
+        "splitFlagSpec"
+      ],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "a6320614786687056fbbd5af1a5074c3c507ffc2",
+      "subject": "commands: register remaining enum flags and fill example gaps",
+      "changed_files": [
+        "commands/eval/eval.go",
+        "commands/eval/gen.go",
+        "commands/eval/run.go",
+        "commands/import.go",
+        "commands/internal/lifecycle/status.go",
+        "commands/review_admin.go",
+        "commands/review_admin_test.go",
+        "commands/score.go",
+        "commands/sync/log.go",
+        "commands/sync/pull.go",
+        "commands/sync/push.go",
+        "commands/sync/status.go",
+        "commands/worktree/worktree.go"
+      ],
+      "identifiers": [],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "4f48f524d3ec9617322968eacbed4fcfe4e51f03",
+      "subject": "kg, config: register enum flags and add examples to the query surfaces",
+      "changed_files": [
+        "commands/config/enums.go",
+        "commands/config/explain.go",
+        "commands/config/relevance.go",
+        "commands/kg/cmd.go",
+        "commands/kg/enums.go",
+        "commands/kg/kg_test.go",
+        "commands/kg/sync_code_warm_link.go"
+      ],
+      "identifiers": [],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "e122c7dc154f8df09eb29ae90b357d70bb25b069",
+      "subject": "workflow: list enum values in help and converge validation on one declaration",
+      "changed_files": [
+        "commands/workflow/close_task.go",
+        "commands/workflow/cmd.go",
+        "commands/workflow/contract.go",
+        "commands/workflow/delegation_fanout_test.go",
+        "commands/workflow/enums.go",
+        "commands/workflow/hook_outcome.go",
+        "commands/workflow/hook_sentinel.go",
+        "commands/workflow/journal.go",
+        "commands/workflow/pipeline_emit.go",
+        "commands/workflow/pipeline_emit_test.go",
+        "commands/workflow/profile_prompt.go",
+        "commands/workflow/state.go"
+      ],
+      "identifiers": [
+        "requireHookOutcomeEnum"
+      ],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "4d6cb3ea165518b15c5594e2940fe27fbb34c934",
+      "subject": "cmdutil: add enum-flag helper declaring values once for help, completion, and validation",
+      "changed_files": [
+        "commands/internal/cmdutil/enumflag.go",
+        "commands/internal/cmdutil/enumflag_test.go",
+        "commands/ux.go",
+        "internal/platform/platform.go"
+      ],
+      "identifiers": [
+        "Contains",
+        "EnumDynamicSource",
+        "EnumSpec",
+        "EnumValues",
+        "IDs",
+        "RegisterEnum",
+        "RegisterEnumFlag",
+        "SortedValues",
+        "TestEnumSpecContainsAcceptsAnythingWhenDynamic",
+        "TestEnumSpecUsageString",
+        "TestEnumSpecValidate",
+        "TestEnumSpecValidateNamesEveryValue",
+        "TestEnumSpecValidateSuggestsNearMiss",
+        "TestEnumValuesReturnsNilForNonEnumFlag",
+        "TestRegisterEnumFlagValidatesUnboundFlag",
+        "TestRegisterEnumOffersCompletionCandidates",
+        "TestRegisterEnumPreservesExistingPreRunE",
+        "TestRegisterEnumRejectsDefaultOutsideSet",
+        "TestRegisterEnumSkipsCompletionForDynamicEnum",
+        "TestRegisterEnumWiresHelpAndValidation",
+        "TestSortedValuesDoesNotMutateInput",
+        "TestWithNoteAndWithUsageDoNotForkTheVocabulary",
+        "UsageString",
+        "Validate",
+        "ValueList",
+        "WithNote",
+        "WithUsage",
+        "Write",
+        "annotateEnum",
+        "assertContains",
+        "assertEnumDefault",
+        "assertEqual",
+        "assertErrorPresence",
+        "chainEnumValidation",
+        "discard",
+        "finishEnumRegistration",
+        "hintsOf",
+        "init",
+        "nearest",
+        "nonEmpty",
+        "registerEnumCompletion",
+        "runCommand",
+        "suggestionHint"
+      ],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "f47d9d0c367628f4e3446646fb7653875b8e7f19",
+      "subject": "refresh: default to current project, add --all for machine-wide",
+      "changed_files": [
+        "commands/internal/lifecycle/deps.go",
+        "commands/internal/lifecycle/refresh.go",
+        "commands/internal/lifecycle/refresh_test.go",
+        "commands/refresh.go",
+        "commands/refresh_fanout_manifest_test.go",
+        "commands/refresh_idempotency_test.go",
+        "commands/refresh_scope_test.go",
+        "commands/refresh_test.go",
+        "commands/review.go",
+        "commands/review_test.go",
+        "commands/seams_test.go",
+        "commands/sync.go",
+        "commands/sync/commit_test.go",
+        "commands/sync/coverage_test.go",
+        "commands/sync/deps.go",
+        "commands/sync/helpers.go",
+        "commands/sync/init_test.go",
+        "commands/sync/pull_test.go",
+        "commands/sync/push_test.go",
+        "commands/sync/sync_test.go"
+      ],
+      "identifiers": [
+        "RunRefresh",
+        "RunRefreshCurrentProject",
+        "TestImportFilterForScope",
+        "TestMatchProjectForDir_DeepestProjectWins",
+        "TestMatchProjectForDir_SiblingPrefixIsNotAMatch",
+        "TestMatchProjectForDir_SkipsUnboundAndPlaceholderPaths",
+        "TestNewRefreshCmd_AllFlagWiredAndDefaultsFalse",
+        "TestNewRefreshCmd_LongDocumentsCurrentProjectDefault",
+        "TestNewRefreshCmd_ProjectNameWithAllIsRejected",
+        "TestNewRefreshCmd_RunEPassesAllFlag",
+        "TestRefreshCurrentProjectOrSkip_RefreshesOnlyCurrentProject",
+        "TestRefreshCurrentProjectOrSkip_SkipsOutsideProject",
+        "TestResolveRefreshProjects_AllProjectsIsSorted",
+        "TestResolveRefreshProjects_ExplicitNameWins",
+        "TestResolveRefreshProjects_UnknownNameErrors",
+        "TestRunRefresh_AllProjectsReproducesMachineWideSweep",
+        "TestRunRefresh_AllProjectsWorksOutsideAnyProject",
+        "TestRunRefresh_CurrentProjectDefaultFromSubdirectory",
+        "TestRunRefresh_CurrentProjectDefaultLeavesSiblingsUntouched",
+        "TestRunRefresh_OutsideManagedProjectHintsRecovery",
+        "TestRunRefresh_OutsideManagedProjectRefuses",
+        "TestSyncAndReviewDepsScopeToCurrentProject",
+        "assertRefreshedExactly",
+        "currentProjectScope",
+        "dirWithin",
+        "importFilterForScope",
+        "matchProjectForDir",
+        "pathForms",
+        "projectMatchDepth",
+        "refreshCurrentProjectOrSkip",
+        "refreshScope",
+        "refreshedProjects",
+        "resolveCurrentProject",
+        "seedScopeFixture"
+      ],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "7c328201b3432579d125b3ac9eb64dc1704644c7",
+      "subject": "test: sandbox HOME-writing smoke scripts against accidental host runs",
+      "changed_files": [
+        "tests/test-claude-configs.sh",
+        "tests/test-loop-discipline-stop-hooks.sh"
+      ],
+      "identifiers": [],
+      "languages": [
+        "bash"
+      ]
+    },
+    {
+      "commit": "ef1dfb76ea46c20e78513350a56bea4876a01eae",
+      "subject": "test(workflow): stop overriding HOME for the kg-setup CLI subprocess",
+      "changed_files": [
+        "commands/workflow/testutil_test.go"
+      ],
+      "identifiers": [
+        "envWithOverrides"
+      ],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "ef845fd294e4d3df36170bf35da433961df65604",
+      "subject": "test: generalize and wire the hermetic home guard repo-wide",
+      "changed_files": [
+        "commands/agents/testmain_test.go",
+        "commands/config/testmain_test.go",
+        "commands/hooks/testmain_test.go",
+        "commands/internal/lifecycle/testmain_test.go",
+        "commands/internal/mcp/testmain_test.go",
+        "commands/internal/rules/testmain_test.go",
+        "commands/internal/settings/testmain_test.go",
+        "commands/sync/testmain_test.go",
+        "commands/testmain_test.go",
+        "commands/workflow/journal_emit_test.go",
+        "internal/config/testmain_test.go",
+        "internal/links/testmain_test.go",
+        "internal/platform/testmain_test.go",
+        "internal/projectsync/testmain_test.go",
+        "internal/review/auth/testmain_test.go",
+        "internal/testutil/homeguard.go"
+      ],
+      "identifiers": [
+        "CheckAndReport",
+        "HomeGuardBefore",
+        "HomeGuardSnapshot",
+        "TestMain",
+        "snapshotHomeManagedEntries",
+        "snapshotHomeSkillEntries"
+      ],
+      "languages": [
+        "go"
+      ]
+    },
+    {
+      "commit": "03b3d1e1405380adecf334439ae7e7398f6c6469",
+      "subject": "workflow: wire drift to graphstore.BridgeConsumers for \u00a711.4 criterion 4",
+      "changed_files": [
+        "commands/workflow/cmd.go",
+        "commands/workflow/drift.go",
+        "commands/workflow/drift_bridge_test.go",
+        "commands/workflow/state.go",
+        "scripts/crg-bridge-consumer-audit.sh"
+      ],
+      "identifiers": [
+        "BridgeSweepSummary",
+        "TestAggregateDrift_BridgeSweepBuckets",
+        "TestAggregateDrift_BridgeSweepEmptyBucketsNeverNil",
+        "TestDetectRepoDrift_BridgeConsumersFlipsStatusToWarn",
+        "TestDriftBridgeConsumerPhase_Clean",
+        "TestDriftBridgeConsumerPhase_ConsumersFound",
+        "TestDriftBridgeConsumerPhase_NotAKGRepo",
+        "TestDriftBridgeConsumerPhase_UnreadableLockfile",
+        "TestRenderBridgeSweepSummary_AllClean",
+        "TestRenderBridgeSweepSummary_ConsumersFound",
+        "TestRenderBridgeSweepSummary_ErrorReposListed",
+        "TestRenderBridgeSweepSummary_NothingCheckedIsSilent",
+        "TestResolveProjectNameForPath_FallsBackToDirBase",
+        "TestResolveProjectNameForPath_UsesAgentsRCProject",
+        "TestRunWorkflowDriftWithLister_PathFlagBypassesRegistry",
+        "TestRunWorkflowDriftWithLister_PathFlagJSON",
+        "TestRunWorkflowDriftWithLister_PathFlagRelative",
+        "da_bin",
+        "driftBridgeConsumerPhase",
+        "renderBridgeSweepSummary",
+        "resolveProjectNameForPath",
+        "run_workflow_drift_json",
+        "writeBridgeConsumerLockfile",
+        "writeCleanAdapterLockfile"
+      ],
+      "languages": [
+        "bash",
+        "go"
+      ]
+    },
+    {
+      "commit": "947ff24ff9bce9137c10d6764642fb46a5a22cda",
+      "subject": "config: make the prune path-dedupe test platform-neutral",
+      "changed_files": [
+        "internal/config/cache_prune_test.go"
+      ],
+      "identifiers": [],
+      "languages": [
+        "go"
+      ]
     },
     {
       "commit": "b5c805dc61aad809bb5bd34bd8c6d09ea4c02e97",
@@ -18,350 +438,185 @@
       "changed_files": [
         "obs/test/access-gate.test.ts"
       ],
-      "identifiers": []
-    },
-    {
-      "commit": "c48243b29b3401e55bedf1972273b716f5954bdb",
-      "subject": "test: extract assertion helpers to clear the S3776 complexity gate",
-      "changed_files": [
-        "commands/config/sync_manifest_untouched_test.go",
-        "commands/refresh_fanout_manifest_test.go",
-        "internal/config/agentsrc_optional_keys_test.go",
-        "internal/projectsync/refresh_manifest_untouched_test.go"
-      ],
-      "identifiers": [
-        "assertFileUnchanged",
-        "assertKeysAbsent",
-        "assertKeysEqual",
-        "assertLinkedManifestUntouched",
-        "assertLockWritten",
-        "assertManifestUntouched",
-        "roundTripManifest",
-        "seedBackdatedManifest",
-        "seedLinkedProject",
-        "snapshotBackdated"
-      ]
-    },
-    {
-      "commit": "054193c6cdd19a875f58e0e2a4888e3e69ebddfd",
-      "subject": "config: gofmt fix and coverage for staleness warn detail",
-      "changed_files": [
-        "commands/config/verify_staleness_test.go",
-        "internal/config/staleness_test.go"
-      ],
-      "identifiers": [
-        "TestAbbrevDigest",
-        "TestStaleWarnDetail",
-        "TestVerifyStaleness_DeclaredSetOnlyWarnsWithIdenticalDigests"
-      ]
-    },
-    {
-      "commit": "ef20c0ce3d4f7a141781b34a61c2a29c6ccd52de",
-      "subject": "lifecycle: cover the dry-run optional-declaration preview helpers",
-      "changed_files": [
-        "commands/internal/lifecycle/install_describe_test.go"
-      ],
-      "identifiers": [
-        "TestDescribeOptionalBool",
-        "TestDescribeStringsOrBool"
-      ]
-    },
-    {
-      "commit": "47116d279e5a0f0042c457682809a101b8c9514c",
-      "subject": "test: cover the error branches the new-code coverage gate flagged",
-      "changed_files": [
-        "commands/internal/lifecycle/gitignore_test.go",
-        "internal/links/gitignore_optout_test.go",
-        "internal/platform/enabled_platforms_test.go"
-      ],
-      "identifiers": [
-        "TestEnabledPlatforms",
-        "TestEnabledPlatforms_IgnoresInstallState",
-        "TestEnsureManagedGitignoreForInstall_FailuresAreNonFatal",
-        "TestMaintainManagedGitignore_WriteErrorsPropagate",
-        "TestRemoveManagedGitignore_ReadErrorIsPropagated",
-        "TestRemoveManagedGitignore_RemoveErrorIsPropagated",
-        "TestRemoveManagedGitignore_WriteErrorIsPropagated",
-        "idsOf"
-      ]
-    },
-    {
-      "commit": "ee7ca8ca407150d8246146823aa14a2bed832165",
-      "subject": "docs: clarify dry-run responsibility on MaintainManagedGitignore",
-      "changed_files": [
-        "commands/internal/lifecycle/gitignore.go"
-      ],
-      "identifiers": []
-    },
-    {
-      "commit": "7c8b21d39890e17f84eb9ca46d9c193395e29a03",
-      "subject": "test: pin per-project isolation of the managed .gitignore step",
-      "changed_files": [
-        "commands/internal/lifecycle/gitignore_test.go"
-      ],
-      "identifiers": [
-        "TestMaintainManagedGitignore_IsPerProject"
-      ]
-    },
-    {
-      "commit": "dfdc1cf2b22d1ec471c365f07aaedcd91db391fa",
-      "subject": "config: add sync + refresh-fanout manifest-untouched regression tests",
-      "changed_files": [
-        "commands/config/sync_manifest_untouched_test.go",
-        "commands/refresh_fanout_manifest_test.go"
-      ],
-      "identifiers": [
-        "TestRunRefresh_FanOutLeavesEveryLinkedManifestUntouched",
-        "TestRunSync_DoesNotInjectOptionalKeys",
-        "TestRunSync_LeavesManifestUntouched"
-      ]
-    },
-    {
-      "commit": "479e8e39d5bb4869d0c509b551f3cfa42052e044",
-      "subject": "config: fix false-positive staleness warning after sync",
-      "changed_files": [
-        "commands/config/verify.go",
-        "commands/config/verify_staleness_test.go",
-        "internal/config/lock_units.go",
-        "internal/config/resolver.go",
-        "internal/config/staleness.go",
-        "internal/config/staleness_test.go"
-      ],
-      "identifiers": [
-        "TestDeclaredSetChanged_IgnoresTransitiveLayers",
-        "TestStaleness_FreshImmediatelyAfterTransitiveSync",
-        "TestStaleness_GenuineDriftStillDetectedWithTransitiveLayers",
-        "abbrevDigest",
-        "staleWarnDetail",
-        "walk"
-      ]
-    },
-    {
-      "commit": "fbabbda560e71ea3075c14ac8f5ea2b9a0ff6672",
-      "subject": "install: maintain managed .gitignore block for projections",
-      "changed_files": [
-        "commands/internal/lifecycle/gitignore.go",
-        "commands/internal/lifecycle/gitignore_test.go",
-        "commands/internal/lifecycle/install.go",
-        "commands/refresh.go"
-      ],
-      "identifiers": [
-        "MaintainManagedGitignore",
-        "TestMaintainManagedGitignore_CorruptManifestSkips",
-        "TestMaintainManagedGitignore_KnobStates",
-        "TestMaintainManagedGitignore_OptOutRemovesAnExistingBlock",
-        "TestMaintainManagedGitignore_PreservesUserContentAndIsByteStable",
-        "TestMaintainManagedGitignore_UpdatesInPlaceWhenProjectionSetChanges",
-        "TestRunInstall_DryRunWritesNoGitignore",
-        "TestRunInstall_MaintainsManagedGitignore",
-        "TestRunInstall_ManagedGitignoreIsByteStableAcrossRuns",
-        "claudeAndCodex",
-        "ensureManagedGitignoreForInstall",
-        "installFixture",
-        "readProjectGitignore",
-        "writeManifest"
-      ]
-    },
-    {
-      "commit": "ccaee4d052edfd1b6054995f5cce6f3b3e48e871",
-      "subject": "config: add gitignore_projections opt-out knob to AgentsRC",
-      "changed_files": [
-        "internal/config/agentsrc.go",
-        "internal/config/agentsrc_gitignore_test.go"
-      ],
-      "identifiers": [
-        "GitignoreProjectionsEnabled",
-        "TestAgentsRCGitignoreProjectionsEnabled",
-        "TestAgentsRCGitignoreProjections_DecodeRoundTrip"
-      ]
-    },
-    {
-      "commit": "00e76bf2ce95a3455e746c0f8be02fb86d369bf0",
-      "subject": "workflow: add --app-type to task update",
-      "changed_files": [
-        "commands/workflow/app_types.go",
-        "commands/workflow/cmd.go",
-        "commands/workflow/journal_emit_test.go",
-        "commands/workflow/plan_task.go",
-        "commands/workflow/plan_task_test.go",
-        "commands/workflow/state_ref_test.go"
-      ],
-      "identifiers": [
-        "TestRunWorkflowTaskUpdate_AppType",
-        "TestRunWorkflowTaskUpdate_AppTypeDoesNotDisturbOtherFields",
-        "applyTaskFieldUpdates",
-        "runWorkflowTaskUpdate",
-        "stubAppTypeProfile",
-        "taskUpdateInputs",
-        "validateTaskAppType"
-      ]
-    },
-    {
-      "commit": "ddb4a0824947e158ad9b2e1c754eaa6abe6ed675",
-      "subject": "links: ignore backup sidecars and support managed-block removal",
-      "changed_files": [
-        "internal/links/gitignore.go",
-        "internal/links/gitignore_optout_test.go",
-        "internal/platform/config_platform.go"
-      ],
-      "identifiers": [
-        "EnabledPlatforms",
-        "RemoveManagedGitignore",
-        "TestEnsureManagedGitignore_AlwaysIgnoresBackupSidecars",
-        "TestRemoveManagedGitignore",
-        "TestRemoveManagedGitignore_EmptyRepoRootIsError",
-        "TestRemoveManagedGitignore_IsIdempotent",
-        "writeGitignore"
+      "identifiers": [],
+      "languages": [
+        "typescript"
       ]
     },
     {
       "commit": "bcac7eb5ef8abfdababd8e10d5d891953a50aa0c",
       "subject": "chore: anonymize company-specific example sources and evidence artifacts",
       "changed_files": [
+        ".agents/workflow/plans/config-transitive-layering/PLAN.yaml",
+        ".agents/workflow/plans/transcript-analysis-and-pipeline-craft/PLAN.yaml",
+        ".agents/workflow/plans/transcript-analysis-and-pipeline-craft/TASKS.yaml",
         ".agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/items/generate-sampling-manifest.py",
         "commands/workflow/app_types_test.go",
         "internal/agentslock/lockfile.go",
         "internal/agentslock/lockfile_test.go"
       ],
-      "identifiers": []
-    },
-    {
-      "commit": "8dbe9fcf153b934aa3a7071eb68dd81c50b6ee59",
-      "subject": "test: cover the source-qualified prompt failure branches",
-      "changed_files": [
-        "commands/workflow/profile_prompt_test.go",
-        "internal/config/prompt_units_test.go"
-      ],
-      "identifiers": [
-        "TestComposeProfilePrompt_CorruptLock",
-        "TestFetchPromptUnitErrors",
-        "TestLockedPromptFileRejectsUnusableUnits",
-        "TestPromptUnitsSurfacesLockReadError",
-        "isImportReason"
+      "identifiers": [],
+      "languages": [
+        "go",
+        "python",
+        "yaml"
       ]
     },
     {
-      "commit": "d45a5bc12084b966fd8be29c16d1f088683701cb",
-      "subject": "config: deep-merge intermediate paths in config explain",
+      "commit": "e921852c94c476e11c2ada709219a5d24950ced7",
+      "subject": "ci(obs): wire obs worker lcov into the SonarCloud scan",
       "changed_files": [
-        "commands/config/explain.go",
-        "commands/config/explain_test.go",
-        "internal/config/snapshot.go"
+        ".github/workflows/test.yml",
+        "sonar-project.properties"
       ],
-      "identifiers": [
-        "TestExplainField_IntermediateMergeMatchesLeafDrillDown",
-        "TestExplainField_IntermediateObjectPath"
+      "identifiers": [],
+      "languages": [
+        "properties",
+        "yaml"
       ]
     },
     {
-      "commit": "fe4fa02fcaaa02335c8c1cfe4196fc942643e66a",
-      "subject": "config: stop refresh rewriting the user-authored manifest",
+      "commit": "c4a2634dd5666025ef530af7fe4189d5a60ac2c0",
+      "subject": "feat(obs): serve dashboard with live WebSocket transport",
       "changed_files": [
-        "commands/refresh.go",
-        "commands/refresh_test.go",
-        "internal/projectsync/projectsync.go",
-        "internal/projectsync/projectsync_test.go",
-        "internal/projectsync/refresh_manifest_untouched_test.go"
+        "obs/src/index.ts",
+        "web/dashboard/src/api/eventStream.ts",
+        "web/dashboard/src/api/observabilityTransport.test.ts",
+        "web/dashboard/src/api/observabilityTransport.ts",
+        "web/dashboard/src/hooks/useLiveUpdates.test.ts",
+        "web/dashboard/src/hooks/useLiveUpdates.ts",
+        "web/dashboard/src/main.tsx",
+        "web/dashboard/src/vite-env.d.ts"
       ],
       "identifiers": [
-        "TestWriteRefreshToLock_CreatesManifestWritesLockRemovesLegacy",
-        "TestWriteRefreshToLock_DoesNotCreateManifestWhenAbsent",
-        "TestWriteRefreshToLock_LeavesManifestByteIdentical",
-        "TestWriteRefreshToLock_LoadError",
-        "TestWriteRefreshToLock_LoadErrorRegularFileProjectPath",
-        "TestWriteRefreshToLock_SaveError",
-        "TestWriteRefreshToLock_UnparseableManifestIsUntouched",
-        "TestWriteRefreshToLock_WritesLockRemovesLegacyNeverCreatesManifest",
-        "WriteRefreshToLock"
+        "Dashboard",
+        "DashboardEventType",
+        "EventSourceFactory",
+        "EventStreamController",
+        "EventStreamOptions",
+        "FakeTimer",
+        "ImportMetaEnv",
+        "LivePayload",
+        "MockEventSource",
+        "MockTransport",
+        "MockWebSocket",
+        "ObservabilityTransport",
+        "ObservabilityTransportConnection",
+        "ObservabilityTransportHandlers",
+        "ObservabilityTransportOptions",
+        "SseObservabilityTransportConfig",
+        "TimerCanceller",
+        "TimerScheduler",
+        "WebSocketFactory",
+        "WebSocketLike",
+        "WebSocketObservabilityTransportConfig",
+        "createSseObservabilityTransport",
+        "createWebSocketObservabilityTransport",
+        "dashboardEvent",
+        "disconnectAndReconnect",
+        "hasOnlyKeys",
+        "isDashboardEvent",
+        "isFakeTimer",
+        "isRecord",
+        "openSocket",
+        "parseDashboardEvent",
+        "readPayload",
+        "runNextTimer",
+        "socketHarness",
+        "streamOptions",
+        "timerHarness",
+        "validPayload",
+        "webSocketUrl"
+      ],
+      "languages": [
+        "tsx",
+        "typescript"
       ]
     },
     {
-      "commit": "85482d55dd5e9f70ab66fb41d3304979a872c074",
-      "subject": "import: skip re-capture of bundle-rendered hook entries",
+      "commit": "e16c32dd7557ea25b1b796a2ae6b418212c0e3e1",
+      "subject": "feat(obs): implement D1 ingest and read model",
       "changed_files": [
-        "commands/hook_import_fixed_point_test.go",
-        "commands/hook_normalization_roundtrip_test.go",
-        "commands/import.go",
-        "commands/import_test.go",
-        "commands/internal/lifecycle/project.go"
+        "obs/migrations/0002_seed_active_rubric.sql",
+        "obs/src/index.ts",
+        "obs/src/read-model.ts",
+        "obs/src/storage.ts",
+        "obs/src/validation.ts"
       ],
       "identifiers": [
-        "TestCanonicalHookOutputsForSpecs_AllOwnedStaysHandled",
-        "TestDropBundleRenderedHookSpecs",
-        "TestHookImportCapturesHandAuthoredEntryExactlyOnce",
-        "TestHookImportCapturesOneBundleForACommandInTwoHarnessFiles",
-        "TestHookImportDoesNotDuplicateAcrossHarnesses",
-        "TestHookImportDoesNotGrowAlternateSuffixedBundles",
-        "TestHookRefreshImportIsFixedPoint",
-        "canonicalHookBundleOutputsFromClaudeCompatFile",
-        "canonicalHookBundleOutputsFromCodexFile",
-        "canonicalHookBundleOutputsFromCopilotFile",
-        "canonicalHookBundleOutputsFromCursorFile",
-        "canonicalHookOutputsForSpecs",
-        "canonicalImportOutputs",
-        "canonicalImportOutputsNonPlugin",
-        "dropBundleRenderedHookSpecs",
-        "equalStrings",
-        "hookBundleNames",
-        "hookFixtureHome",
-        "importGlobal",
-        "readFileOrEmpty",
-        "renderHooks",
-        "writeHookBundle"
+        "BreakdownRow",
+        "BufferedEvent",
+        "CountRow",
+        "D1CommitInput",
+        "D1CommitResult",
+        "DashboardEventType",
+        "HashableIngestEvent",
+        "IterationHealthRow",
+        "IterationRow",
+        "RubricRow",
+        "RunRow",
+        "ScoreBreakdown",
+        "ScoreSidecar",
+        "assertValidUnicode",
+        "canonicalize",
+        "commitEventToD1",
+        "contentEtag",
+        "decodeJson",
+        "decodePathSegment",
+        "dispatchEvents",
+        "errorResponse",
+        "getHealth",
+        "getIteration",
+        "getRubric",
+        "getRun",
+        "handleReadRoute",
+        "hasOnlyKeys",
+        "ifNoneMatchSatisfied",
+        "integerField",
+        "isReadOrLiveRoute",
+        "isReadRoute",
+        "isRecord",
+        "isUnitNumber",
+        "listIterations",
+        "listRuns",
+        "mapIteration",
+        "mapRun",
+        "nullableIntegerField",
+        "nullableNumberField",
+        "parsePage",
+        "parseScoreSidecar",
+        "release",
+        "respond",
+        "scoreStatements",
+        "sha256Hex",
+        "stringField",
+        "validateEventContent",
+        "verifierProjection"
+      ],
+      "languages": [
+        "sql",
+        "typescript"
       ]
     },
     {
-      "commit": "2840d06779d6eb673729a9477c8b3cf0e7333aa8",
-      "subject": "config: preserve absent hooks/mcp/settings across manifest round-trip",
+      "commit": "8f5542fdd84a8d09622539ffd2291f8b9ec2209e",
+      "subject": "feat(obs): CF Access app + bound service token for obs.agorcha.dev",
       "changed_files": [
-        "commands/explain.go",
-        "commands/internal/lifecycle/install.go",
-        "internal/config/agentsrc.go",
-        "internal/config/agentsrc_optional_keys_test.go",
-        "internal/config/agentsrc_test.go",
-        "internal/config/resolver_optional_keys_test.go",
-        "internal/config/schema_roundtrip_test.go"
+        "infra/cloudflare/obs.tf",
+        "infra/cloudflare/outputs.tf",
+        "infra/cloudflare/variables.tf"
       ],
       "identifiers": [
-        "Contains",
-        "IsEnabled",
-        "TestAgentsRC_AbsentOptionalKeysDecodeToNil",
-        "TestAgentsRC_AbsentOptionalKeysSurviveRoundTrip",
-        "TestResolveSnapshot_AbsentRepoLocalKeepsOrgLayerForAllThree",
-        "TestResolveSnapshot_OptionalKeyLayerPrecedence",
-        "boolOrAbsent",
-        "boolVal",
-        "declaredOrAbsent",
-        "describeOptionalBool",
-        "describeStringsOrBool",
-        "jsonEqual",
-        "optBool",
-        "optSOB",
-        "pbool",
-        "pickBool",
-        "pickStringsOrBool",
-        "sob",
-        "sobAll",
-        "sobNames"
-      ]
-    },
-    {
-      "commit": "06292a908df9204b4ddf342c2691b699edbc83fb",
-      "subject": "platform: identify hook entries rendered from canonical bundles",
-      "changed_files": [
-        "internal/platform/hooks_provenance.go",
-        "internal/platform/hooks_provenance_test.go"
+        "cloudflare_zero_trust_access_application",
+        "cloudflare_zero_trust_access_policy",
+        "cloudflare_zero_trust_access_service_token",
+        "obs_audTag",
+        "obs_maintainer_emails",
+        "obs_service_token_client_id",
+        "obs_service_token_client_secret"
       ],
-      "identifiers": [
-        "HookProvenance",
-        "NewHookProvenance",
-        "Owner",
-        "TestHookProvenance_DegradesToOwnsNothing",
-        "TestHookProvenance_OwnerCases",
-        "TestHookProvenance_OwnsRenderedCommands",
-        "indexScope",
-        "ownerOfPath",
-        "writeProvenanceBundle"
+      "languages": [
+        "hcl"
       ]
     }
   ]

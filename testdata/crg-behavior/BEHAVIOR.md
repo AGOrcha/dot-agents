@@ -5,173 +5,293 @@ The decommissioning gate for the Python code-review-graph bridge
 **criterion 2**: "the behavior-preservation gate passes on a corpus of recent
 code-review tasks that consumed CRG output".
 
-Its sibling, `testdata/crg-parity/`, is criterion 1's soak signal: a hermetic
-10-commit **synthetic** corpus where both sides are driven in-process. That gate
-can never observe what the live Python bridge actually persisted for a real
-repository. This gate closes exactly that gap — same comparison discipline, same
-oracle functions, real history and a live bridge.
-
 - **Criterion 1** (parity matrix rows, 3-week soak) → `testdata/crg-parity/SOAK.md`
 - **Criterion 2** (behavior preservation) → this document
 - **Criterion 3** (migration plan for out-of-tree bridge consumers) →
   `scripts/crg-bridge-consumer-audit.sh`
-- **Criterion 4** (zero lockfiles declaring `reads_from: [crg-bridge]` across
-  the managed-repo set, per `workflow drift`) → **a separate workstream**; this
-  gate says nothing about it.
+- **Criterion 4** (zero lockfiles declaring `reads_from: [crg-bridge]`) → a
+  separate workstream; this gate says nothing about it.
 
-## What the gate compares
+Its sibling `testdata/crg-parity/` is criterion 1's soak signal: a hermetic
+10-commit **synthetic** corpus where both sides are driven in-process. That gate
+never touches the real bridge, so it cannot say whether the kg-native adapter
+reproduces what the shipped release actually does. This one can.
 
-For each pinned commit, the gate replays the graph queries a review of that
-commit issues, against **both** sides, and diffs the answers:
+## The release this gate certifies against
 
-| Surface | Query | Oracle | Tier |
-|---|---|---|---|
-| `changed_nodes` | which symbols the changed files resolve to | set equality (`graphstore.CompareImpactRadius`) | **gating** |
-| `flows` | membership of every execution flow the changed symbols touch | set equality (`crg.CompareFlowMemberships`) | **gating** |
-| `fts` | indexed tokens for the declaration identifiers the commit changed | token-set equality (`crg.CompareFTS`) | **gating** |
-| `impact_radius` | blast radius of the changed files | set equality (`graphstore.CompareImpactRadius`) | advisory |
-| `flow_order` | step numbering within the touched flows | set equality with positions (`crg.CompareFlowMemberships`) | advisory |
-| `communities` | community membership of the changed symbols | partition equivalence (`graphstore.PartitionAgreement`) | advisory |
-| `risk_index` | risk ranking of the changed symbols | Spearman ≥ `graphstore.DefaultSpearmanTau` (`graphstore.SpearmanTau`) | advisory |
+One release, pinned, asserted before anything is compared:
 
-Every oracle is the parity gate's own function — none is reimplemented here.
+| | |
+|---|---|
+| package | `code-review-graph` |
+| version | **2.3.8** |
+| upstream tag | `v2.3.8` (`2c6dae32643572ee528eb9b77dbcc17f58f3a8c9`) |
+| graph schema | **v9** (`metadata.schema_version`) |
 
-**Sides.** The legacy side is the Python bridge's real state: its persisted
-`flow_memberships`, `nodes.community_id`, `risk_index` and `nodes_fts` tables,
-plus its live `get_impact_radius` query. The kg-native side ingests the bridge's
-symbol graph through the adapter's own `crg.Bootstrap` and derives every view
-from the **store readback** (`FlowsFromStore`, `CommunitiesFromStore`,
-`RiskIndexFromStore`, `FTSFromStore`, `ImpactRadiusFromStore`) — driven through
-the adapter/Store API directly, never through `da kg`, so the gate is
-independent of which backend the production commands are wired to.
+`release-2.3.8.json` is the checked-in capability fixture for that release: its
+extension→language map and the schema tables and columns the gate reads. Every
+release-dependent decision — which changed files a commit contributes, which
+derived views exist, which columns must be present — is read from it, so moving
+the baseline is one reviewable data change plus a re-record.
 
-**Normalization.** Legacy absolute paths and qualified names are made
-repo-relative so both sides share one id space (`<file>::<symbol>@<file>`), and
-the legacy `IMPORTS_FROM` edge kind is mapped onto the kg-native `IMPORTS`
-spelling. Call edges the bridge stored with an unresolved bare target (e.g.
-`append`) match no symbol and are dropped at ingestion — the same resolvable
-subgraph the bridge's own flow derivation runs over.
+The observed bridge's `--version` and the graph's `schema_version` are printed
+in the report header and persisted in the JSON artifact. A CLI that reports a
+different version is a **hard failure**, not a baseline: comparing against an
+unpinned build certifies nothing while looking like evidence. Only the gate's
+own `.venv` is pinned; the repo's other CRG lanes are untouched.
 
-## Advisory tier — why, with measurements
+## Each task is replayed at its own commit
 
-The advisory surfaces are **reported with their structural diff but do not fail
-the gate**, because they are measured differences in derivation, not
-regressions. Numbers below are from a 21-task run against this repository
-(18,513 symbols / 228,319 references / 1,153 files):
+For every pinned review task the gate:
 
-- `impact_radius` — the bridge resolves CALLS targets **by bare symbol name at
-  query time**: 106,951 of its 120,400 stored CALLS edges (88.8%) have a target
-  that matches no node. Its blast radius therefore includes cross-language name
-  collisions (a Go change pulling in `.py` symbols named `blocks`) that an
-  id-based traversal cannot and should not reproduce, and it routinely truncates
-  at the result cap.
-- `communities` — the bridge's communities are **file-scoped clusters** (1,113
-  clusters over this repo); the kg-native partition is connected components over
-  CALLS+IMPORTS. Not one bridge community is contained in a single native
-  component: these are different notions of "community".
-- `risk_index` — the bridge's `risk_score` is a coverage/caller heuristic with 9
-  distinct values across 17,360 scored nodes; the kg-native score is degree
-  centrality. Measured Spearman correlation over the whole graph: **-0.21**.
-- `flow_order` — flow **membership** matches exactly (4,762 of 4,762 flows, mean
-  Jaccard 1.0 against a full kg-native BFS from each bridge entry point), but
-  the legacy `flow_memberships` table is keyed `(flow_id, node_id)` and numbers
-  steps along its own path order, while the kg-native positions follow a
-  deterministic sorted BFS. So `flows` gates on membership and `flow_order`
-  reports the numbering separately.
+1. creates an **isolated linked worktree with a detached HEAD at that task's
+   SHA** (natively, via `internal/gitwt` over go-git),
+2. runs a **full** pinned-release build there (a full build is the only mode
+   that also computes `community_summaries`, `flow_snapshots` and `risk_index`),
+3. reads every persisted view, issues the release's own impact query and its own
+   FTS5 searches,
+4. ingests the same graph through the kg-native adapter and derives its views
+   from the **store readback**,
+5. probes the release's build/postprocess lifecycle contract,
+6. tears the worktree down.
 
-## Uncomputed legacy views are skipped, loudly
+Replaying historical changed-file paths against a single graph built at HEAD —
+the previous model — cannot detect a historical-output regression at all: it
+resolves today's symbols, and a path that moved silently resolves to a different
+symbol, so agreement is an artifact of the shared input. The cost of doing it
+honestly is one worktree and one full build per task; that is why the CI job has
+a two-hour budget and its own runner.
 
-Which materialized views a legacy graph actually holds depends on the
-`code-review-graph` release and on optional native dependencies (community
-detection falls back to a file-based algorithm without `igraph`; some releases
-persist no `flow_memberships` rows at all). A view the legacy build never
-computed is **not** a behavior divergence, so its surface skips on every task —
-but the report states it up front and again in the summary:
+The gate runs **no git subprocess**. Revision resolution, the commit window,
+commit subjects, tree diffs and blob reads all go through go-git, and the
+per-commit checkout goes through `internal/gitwt`'s linked-worktree manager.
+The only process the gate starts is the pinned `code-review-graph` itself.
 
-```
-NOT EXERCISED: the legacy build computed no flows, flow_order data; those surfaces skip on every task
-...
-  surface(s) NOT exercised (legacy view not computed): flows, flow_order
-```
+## What is compared, and how exactly
 
-Read that line before reading `GATE: PASS`: a pass with `flows` unexercised is
-much weaker evidence than a pass with every surface live. Observed in practice:
-the CI-installed release persisted zero `flow_memberships` rows for this repo
-while a locally installed 2.1.0 populated 4,762 flows.
+The release's output for a given graph is deterministic. So every oracle is
+**exact set equality over canonical rows** — there is no rank correlation, no
+partition-similarity score and no token-set overlap anywhere in this gate. Only
+genuinely nondeterministic upstream values are normalized away:
 
-Running with `-strict` promotes every advisory surface to gating. That flag is
-the §11.4 sign-off switch: no code change is needed to tighten the gate once
-these differences are resolved or explicitly accepted.
+- `flows.id` and `communities.id` are AUTOINCREMENT rowids → flows are re-keyed
+  onto their entry-point symbol, communities onto their canonical cluster key
+  (the smallest member id, which is relabel-invariant);
+- `created_at` / `updated_at` / `risk_index.last_computed` are wall clocks →
+  not read at all.
 
-## Open finding: `flows` is release-sensitive
+| Surface | What is compared |
+|---|---|
+| `upstream_conformance` | the live bridge against the recorded release-pinned fixture for this commit |
+| `changed_nodes` | which symbols the changed files resolve to |
+| `impact_radius` | the blast radius reported for those files |
+| `flows` | flow identity and **ordered path** (`flows.path_json`) |
+| `flow_metrics` | per-flow `depth`, `node_count`, `file_count`, weighted `criticality` |
+| `flow_snapshots` | `flow_snapshots` rows, incl. the v2.3.8 **qualified-name** critical path |
+| `communities` | the community partition over the changed symbols |
+| `community_summaries` | `community_summaries` rows for the touched clusters |
+| `risk_index` | `risk_index.risk_score` |
+| `risk_detail` | `caller_count`, `test_coverage`, `security_relevant` |
+| `fts_index` | `nodes_fts` index content for the changed files |
+| `fts_search` | the release's own **FTS5 `MATCH` results** for the changed identifiers |
+| `edge_confidence` | the schema-v9 `edges.confidence` / `confidence_tier` columns |
+| `lifecycle` | the release's build/postprocess staleness contract |
 
-The gate's first CI runs recorded a divergence worth carrying into the §11.4
-sign-off discussion:
+### The lifecycle surface
 
-| environment | `code-review-graph` | `flows` verdict |
+In v2.3.8 a full `build` recomputes the summary tables; standalone
+`postprocess` rebuilds flows, communities and FTS but **does not** recompute
+them. Because `flows.id` is an AUTOINCREMENT rowid that `store_flows` deletes
+and re-inserts, a standalone postprocess leaves every `flow_snapshots.flow_id`
+pointing at a row that no longer exists. The gate observes exactly that, per
+commit: snapshots resolvable after the build, flows rebuilt by postprocess,
+snapshots left dangling, and `metadata.last_postprocessed_at` stamped. An
+adapter that eagerly recomputes summaries there — or one that assumes snapshots
+are fresh after a postprocess — diverges from the release.
+
+### Surfaces the kg-native adapter does not implement
+
+Several release surfaces have **no** kg-native counterpart today (per-flow
+metrics, flow snapshots, community summaries, the non-score risk columns, the
+edge confidence columns, FTS search). Those are reported as **divergences**,
+with the release's own rows attached so the report states exactly what would
+have to be implemented. They are deliberately not "skips": a surface the release
+produces and the native side cannot produce at all is the strongest possible
+negative answer for that surface, and recording it as unexercised would hide a
+product gap behind an environment-shaped excuse.
+
+**Expect this gate to be red against the current adapter.** That is the finding,
+not a defect in the gate. Do not resolve it by weakening an oracle.
+
+## Schema capabilities are probed, not guessed
+
+Before any view is read the gate probes `metadata.schema_version`,
+`sqlite_master` and `pragma_table_info` and classifies every table the release
+fixture describes into one of four states:
+
+| state | meaning | verdict |
 |---|---|---|
-| local | 2.1.0 | **PASS on all 21 tasks** — the kg-native derivation reproduces the bridge's `flow_memberships` exactly (4,762 of 4,762 flows, mean Jaccard 1.0) |
-| CI | current release from PyPI | **FAIL on 18 of 21 tasks**, and an earlier run of the same job persisted no `flow_memberships` rows at all |
+| `populated` | table, columns and rows present | surfaces are exercised |
+| `empty` | table and columns present, zero rows | the release computed no such data — surfaces reported **NOTRUN** with the detected release |
+| `table_missing` | absent from `sqlite_master` | required → hard failure; optional → surfaces NOTRUN |
+| `column_missing` | table present, a read column absent | **always** a plumbing failure |
 
-The CI divergence is two-way (rows only in NATIVE *and* rows only in BRIDGE),
-so it is not merely a partially populated table. Either the newer bridge release
-derives flows differently, or its flow view is unstable across builds. This is
-exactly the signal criterion 2 exists to produce: it is **not** resolved by this
-change, and the `crg-behavior-gate` job is expected to be red on the current
-release until it is. Resolve it before the criterion-2 sign-off — do not silence
-it by downgrading `flows` to advisory.
+A `schema_version` other than 9, a missing required table, a missing column, or
+an empty required table all fail immediately as a release/schema
+incompatibility. **Any other SQL error fails too** — a corrupt page, a locked
+database or an FTS5 module the driver cannot load is a failure, never "that view
+is unavailable". Collapsing those cases is how a broken environment previously
+produced a green run.
+
+## Required surfaces must actually be exercised
+
+`contract.json` names the surfaces a criterion-2 run **must** exercise. After a
+run the gate folds every task's outcome into per-surface coverage: a required
+surface that no task exercised **fails the run** unless `ratified_exceptions`
+carries an entry for it with a reason and a ratifier.
+
+Without that, a run that skipped half its surfaces reported the same verdict as
+one that compared everything. There are currently **no** ratified exceptions.
+
+## The release-pinned upstream recordings
+
+`fixtures/<sha12>.json` records what the pinned release itself produced for each
+corpus commit, in the same canonical row form the live comparison uses. They are
+**recorded, never hand-authored**:
+
+```sh
+go run ./tools/crgbehaviorgate -record -repo .
+```
+
+A hand-written "expected" file asserts what someone believed; a recorded one
+asserts what the release did. A missing recording fails its task's
+`upstream_conformance` surface with the command to produce it — there is no
+baseline, so there is nothing to certify. Recording is an explicit command: a
+gate that re-recorded its own baseline on every run could never detect upstream
+drift.
+
+**No recording is committed.** The directory ships with this README and nothing
+else. A checked-in "expected upstream" file that no run of the release ever
+produced is a fabrication, and diffing a bridge against a fabrication certifies
+nothing — so the baseline is produced, per run, by the release. CI is
+**record-then-compare**: the `crg-behavior-gate` job installs the pinned wheel,
+runs `-record -fixtures crg-upstream-recordings` to write the baseline into the
+job workspace, then runs the gate with the same `-fixtures` directory and
+uploads both the recordings and the verdict as the run's evidence. Locally the
+recordings land in `fixtures/` (gitignored) and stay on your machine.
+
+## The pinned corpus
+
+`manifest.json` (schema v2) pins the review tasks: commit SHA, subject, the
+release-indexed files the commit touched, the release's language labels for
+them, and the declarations the commit added or removed.
+
+Both the eligible-file set and the identifier extraction are derived from
+`release-2.3.8.json`, not from a hardcoded language list. The previous builder
+recognized only the Go and Python declaration forms, so a TypeScript, Rust, Java
+or Ruby commit was kept with an **empty** identifier list and silently left the
+FTS search surface unexercised. Languages the extractor does not cover are
+reported by `-regen` rather than hidden.
+
+Identifiers are the **symmetric difference of each changed file's declaration
+sets** at the commit and at its parent — computed from file CONTENT, not by
+reading `+`/`-` diff lines. Git's hunk boundaries come from its own xdiff
+implementation (Myers plus change compaction and an indent heuristic), which no
+other differ reproduces, so a hunk-reading extractor silently depends on which
+of several equally valid alignments git happened to choose. The set difference
+is exactly the contract the corpus wants and is differ-independent.
+
+Selection is **language-coverage-first**: the builder scans a wide window
+(`-window`, default 250 commits), keeps the commits that touched a
+release-indexed file, then pins the newest commit for each language before
+filling the remainder newest-first. Each pinned commit costs a full release
+build, so the corpus is necessarily a sample — and a plain newest-N sample of
+this repository is almost entirely Go. The rule maximizes exercised surfaces; it
+can never hide a divergence, because a pinned commit is never dropped for
+diverging.
+
+```sh
+go run ./tools/crgbehaviorgate -regen -repo . -ref origin/master -commits 25 -window 250
+```
 
 ## Running it locally
 
 ```sh
-# 1. install the legacy bridge (once)
-python3 -m venv .venv && .venv/bin/python -m pip install code-review-graph
+# 1. install the pinned release and put it on PATH (once)
+python3 -m venv .venv
+.venv/bin/python -m pip install 'code-review-graph==2.3.8'
+export PATH="$PWD/.venv/bin:$PATH"
 
-# 2. build the legacy graph for this repo (needs postprocess — no --skip-flows)
-.venv/bin/code-review-graph build --repo "$PWD"
+# 2. record the upstream baseline for the pinned corpus (once per corpus/release)
+go run ./tools/crgbehaviorgate -record -repo .
 
-# 3. run the gate over the pinned corpus
-go run ./tools/crgbehaviorgate -repo . -graph-repo .
+# 3. run the gate
+go run ./tools/crgbehaviorgate -repo . -json crg-behavior-gate.json
 
-# useful flags: -tasks N (first N tasks), -depth N, -strict
+# useful flags: -tasks N (first N tasks), -depth N, -work-dir DIR
 ```
 
-Exit codes: `0` pass or skip, `1` gating divergence, `2` plumbing error. Without
-the Python CLI or a built graph the gate prints `SKIP:` and exits 0 — an absent
-legacy bridge is an environment fact, not a behavior divergence.
+CI caps both passes at the same prefix (`CRG_GATE_TASKS`, currently **1** of the
+25 pinned tasks). That cap is measured, not guessed: on the CI runner class one
+full pinned-release build of this repository takes ~15 min (~25 s parsing,
+~14.5 min file-based community detection — `igraph not available`), and each
+task additionally runs a standalone postprocess for the lifecycle probe, so one
+task costs ~29 min per pass and ~58 min across record-then-compare. The full
+corpus would need roughly a day; the job's budget is 120 minutes.
 
-The same gate runs inside the Go suite as
-`TestBehaviorGate_RealHistoryCorpus` (`internal/crgbehavior`), capped at three
-tasks, and skips the same way.
+The cap softens no oracle. Contract coverage is judged over the tasks that
+**actually ran**, so every required surface the capped prefix does not exercise
+still `FAIL`s instead of being quietly waived, and the report's `corpus:` line
+states how many of the pinned tasks a run executed. Restoring corpus breadth
+needs a larger budget or a faster community-detection path — not a weaker
+contract.
 
-## The pinned corpus
+PATH matters: each pinned commit is built inside a worktree **outside** the
+repository, so the bridge cannot be found as a sibling `.venv` from there. An
+undiscoverable bridge is reported as `INCONCLUSIVE`, not as a pass.
 
-`manifest.json` pins the review tasks: commit SHA, subject, the
-graph-indexable files the commit touched, and the declaration identifiers its
-diff added or removed. Regeneration is an **explicit command**, never a side
-effect of a gate run:
+Exit codes:
 
-```sh
-go run ./tools/crgbehaviorgate -regen -repo . -ref origin/master -commits 25
-```
+| code | verdict | meaning |
+|---|---|---|
+| 0 | `PASS` | every required surface exercised, every exact oracle agreed |
+| 1 | `FAIL` | a behavior diverged, a comparison failed, or a required surface went unexercised without a ratified exception |
+| 2 | `ERROR` | usage, plumbing, off-release bridge, or incompatible schema |
+| 3 | `INCONCLUSIVE` | the pinned bridge could not be driven — **no evidence produced** |
 
-Commits that touched no graph-indexable source file are dropped (a docs-only
-commit issues no graph query), so the task count is normally lower than
-`-commits`.
+An absent bridge is `INCONCLUSIVE` and still exits non-zero. It used to exit 0
+with a `SKIP:` notice, which meant "we could not test this" and "behavior is
+preserved" produced the same green result.
+
+## CI
+
+The `crg-behavior-gate` job keeps a **non-required status**
+(`continue-on-error: true`) until the §11.4 sign-off, but its **result is a real
+sign-off signal**: the recording pass and the gate pass both preserve their exit
+codes through `pipefail`, every run publishes the `GATE:`, `SIGN-OFF:` and
+`corpus:` lines plus the observed bridge version to the job summary, and the
+JSON artifact, both logs and the fresh recordings are uploaded on every outcome.
+The gate pass runs under `if: always()` so a partial recording still produces a
+verdict — a missing recording is a reported evidence gap, not a skipped step.
+At sign-off, delete `continue-on-error`.
 
 ## Reading a failure
 
-A divergence names the commit, the query surface, and the structural diff:
+A divergence names the commit, the surface, and the structural diff:
 
 ```
-commit 685a09a7  test(agentslock): widen acquire budget ...
-  files: internal/agentslock/lockfile_test.go
-  PASS  changed_nodes  native=91 bridge=91
-  FAIL  flows          native=61 members bridge=59 members
-        flow_membership only in a: ...::TestReclaim...@... 0 ...::mustWriteFile@...
+commit 685a09a76790  test(agentslock): widen acquire budget ...
+  files:  internal/agentslock/lockfile_test.go
+  langs:  go
+  graph:  18513 symbols / 228319 edges / 1153 files; 18513 symbols ingested natively
+  AGREE  changed_nodes         native=91 bridge=91 row(s)
+  DIFFER flows                 native=61 bridge=59 row(s)
+         only in NATIVE: entry=...::TestReclaim@... path=...
+         only in BRIDGE: entry=...::mustWriteFile@... path=...
+  NOTRUN community_summaries   code-review-graph 2.3.8 materializes community_summaries but computed no rows for this graph
 ```
 
-`a` / `NATIVE` is the kg-native adapter; `b` / `BRIDGE` is the legacy Python
-side. A task whose changed files resolve to no symbol on either side is SKIPped
-(the commit is outside the built graph) and does not count toward the verdict; a
-run that executes zero tasks never reports PASS.
+`NATIVE` is the kg-native adapter; `BRIDGE` is the pinned Python release. The
+report ends with the run's coverage table and a one-line sign-off claim stating
+what was compared, at which release, and over how many tasks — the sentence to
+quote in the §11.4 decision.

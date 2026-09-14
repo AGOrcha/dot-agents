@@ -1,205 +1,33 @@
 package crgbehavior
 
 import (
+	"errors"
 	"fmt"
-	"path/filepath"
 	"sort"
-	"strings"
 
-	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
 	"github.com/AGOrcha/dot-agents/internal/adapters/sdk"
-	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
-
-// Surface names — one per review-relevant query the gate replays.
-const (
-	SurfaceChangedNodes = "changed_nodes"
-	SurfaceImpactRadius = "impact_radius"
-	SurfaceFlows        = "flows"
-	SurfaceFlowOrder    = "flow_order"
-	SurfaceCommunities  = "communities"
-	SurfaceRiskIndex    = "risk_index"
-	SurfaceFTS          = "fts"
-)
-
-// advisoryReasons lists the surfaces that are REPORTED but do not fail the gate
-// today, each with the measured reason it cannot be strict yet. §11.4 sign-off
-// flips them to gating with Config.Strict (no code change) once the underlying
-// derivation difference is resolved or accepted.
-var advisoryReasons = map[string]string{
-	SurfaceImpactRadius: "the legacy bridge resolves CALLS targets by bare symbol name at query time " +
-		"(most stored call edges have an unresolved target), so its blast radius includes " +
-		"name collisions a storage-id traversal cannot reproduce",
-	SurfaceCommunities: "the legacy bridge's communities are file-scoped clusters; the kg-native " +
-		"partition is connected components over CALLS+IMPORTS — different notions of community",
-	SurfaceRiskIndex: "the legacy bridge's risk_score is a coverage/caller heuristic with few " +
-		"distinct values; the kg-native risk_index is degree centrality",
-	SurfaceFlowOrder: "the legacy flow_memberships table is keyed (flow_id, node_id) and numbers " +
-		"its steps along the bridge's own path order; the kg-native positions follow a " +
-		"deterministic sorted BFS, so step numbers may differ where membership agrees",
-}
-
-// maxDetailLines caps the per-surface structural diff so one systematically
-// divergent surface cannot bury the rest of the report.
-const maxDetailLines = 10
-
-// noteFieldFilePath is the CRG adapter's file-path note field, read back to map
-// a review task's changed files onto persisted symbol ids.
-const noteFieldFilePath = "file_path"
-
-// DefaultDepth is the impact-radius hop budget the review skills query at.
-const DefaultDepth = 2
-
-// DefaultMaxResults bounds the legacy bridge's impact query.
-const DefaultMaxResults = 2000
-
-// BridgeImpact is the legacy bridge's answer to one review task's impact-radius
-// query, normalized into the kg-native id space.
-type BridgeImpact struct {
-	// ChangedIDs are the symbols the bridge resolved for the changed files.
-	ChangedIDs []string
-	// ImpactedIDs are the symbols the bridge reported as blast radius.
-	ImpactedIDs []string
-	// Truncated reports that the bridge capped its own result set.
-	Truncated bool
-}
-
-// ImpactQuerier is the live legacy query surface the gate drives once per
-// review task. The production implementation shells out to the Python CRG
-// (live.go); tests inject a recorded double.
-type ImpactQuerier interface {
-	ImpactRadius(changedFiles []string, maxDepth, maxResults int) (BridgeImpact, error)
-}
 
 // Config parameterizes a gate run.
 type Config struct {
-	// RepoRoot is the repository the corpus and bridge graph belong to.
+	// RepoRoot is the repository whose history the corpus is pinned from.
 	RepoRoot string
 	// Manifest is the pinned review-task corpus.
 	Manifest Manifest
+	// Release is the pinned release capability fixture.
+	Release Release
+	// Contract is the corpus contract: which surfaces a run must exercise.
+	Contract Contract
+	// FixtureDir holds the recorded release-pinned upstream behavior fixtures.
+	FixtureDir string
 	// Depth is the impact-radius hop budget (DefaultDepth when zero).
 	Depth int
-	// MaxResults bounds the bridge's impact query (DefaultMaxResults when zero).
+	// MaxResults bounds the release's impact query (DefaultMaxResults when zero).
 	MaxResults int
-	// MaxTasks caps how many corpus tasks run (all when zero).
+	// MaxTasks caps how many corpus tasks run (all when zero). A capped run is
+	// recorded as capped: the contract's surface coverage is judged over the
+	// tasks that actually ran, so trimming the corpus cannot buy a pass.
 	MaxTasks int
-	// Strict promotes the advisory surfaces to gating — the §11.4 sign-off flip.
-	Strict bool
-	// SpearmanTau is the risk_index rank-correlation floor
-	// (graphstore.DefaultSpearmanTau when zero).
-	SpearmanTau float64
-}
-
-// nativeSide is the kg-native adapter's state for a gate run: the persisted
-// namespace plus the derived views computed from its readback.
-type nativeSide struct {
-	store    crg.StoreReader
-	fileByID map[string]string
-	postproc crg.Postprocess
-}
-
-// Run executes the behavior-preservation gate: for every pinned review task it
-// drives the review-relevant queries against BOTH the legacy bridge state and
-// the kg-native adapter, and applies the §11.6 structural oracles. The native
-// side is driven through the adapter/Store API directly (crg.Bootstrap plus the
-// *FromStore readback surfaces), so the gate is independent of which backend
-// the `da kg` commands are currently wired to.
-func Run(cfg Config, views BridgeViews, impact ImpactQuerier) (Report, error) {
-	cfg = cfg.withDefaults()
-	if err := checkNormalized(views); err != nil {
-		return Report{}, err
-	}
-	native, err := bootstrapNative(sdk.NewMemStore(), views, cfg.Manifest.Head)
-	if err != nil {
-		return Report{}, err
-	}
-	report := Report{
-		RepoRoot:      cfg.RepoRoot,
-		Head:          cfg.Manifest.Head,
-		Strict:        cfg.Strict,
-		GraphSymbols:  len(views.Symbols),
-		GraphEdges:    len(views.References),
-		GraphFiles:    views.FilesIndexed,
-		NativeSymbols: len(native.fileByID),
-	}
-	report.UnavailableViews = unavailableViews(views)
-	unavailable := setOf(report.UnavailableViews)
-	for _, task := range cfg.tasks() {
-		tr, err := evaluateTask(cfg, task, views, native, impact, unavailable)
-		if err != nil {
-			return Report{}, err
-		}
-		report.Tasks = append(report.Tasks, tr)
-	}
-	return report, nil
-}
-
-// unavailableViews names the derived views the legacy build never computed —
-// an EMPTY bridge-side table is not a per-task divergence, it means that
-// materialized view does not exist in this graph (code-review-graph releases
-// differ in which postprocess steps they run, and some need optional native
-// dependencies). Those surfaces are skipped rather than failed, and the report
-// says so, so an unexercised surface is never mistaken for an agreeing one.
-func unavailableViews(views BridgeViews) []string {
-	var out []string
-	if len(views.FlowMemberships) == 0 {
-		out = append(out, SurfaceFlows, SurfaceFlowOrder)
-	}
-	if views.CommunitiesAssigned == 0 {
-		out = append(out, SurfaceCommunities)
-	}
-	if len(views.RiskIndex) == 0 {
-		out = append(out, SurfaceRiskIndex)
-	}
-	if len(views.FTS) == 0 {
-		out = append(out, SurfaceFTS)
-	}
-	return out
-}
-
-// looksAbsolute reports whether a stored path is absolute in the host's
-// convention OR in the other platform's. A graph built elsewhere must still be
-// recognized as un-normalized: filepath.IsAbs("/repo/a.go") is false on
-// Windows and filepath.IsAbs(`C:\repo\a.go`) is false on POSIX, so either
-// spelling would otherwise slip past the guard.
-func looksAbsolute(path string) bool {
-	return filepath.IsAbs(path) || strings.HasPrefix(path, "/") || hasDriveLetter(path)
-}
-
-// hasDriveLetter reports whether path starts with a Windows drive root.
-func hasDriveLetter(path string) bool {
-	if len(path) < 3 || path[1] != ':' {
-		return false
-	}
-	if path[2] != '\\' && path[2] != '/' {
-		return false
-	}
-	c := path[0] | ' ' // fold case
-	return c >= 'a' && c <= 'z'
-}
-
-// unavailableReason explains a surface the legacy build did not compute.
-func unavailableReason(surface string) string {
-	return "the legacy bridge persisted no " + surface + " data — this graph build did not compute that view"
-}
-
-// checkNormalized fails fast when the bridge graph's paths did not normalize to
-// the repo-relative form the corpus pins its queries in — the symptom of a
-// graph built under a different absolute root than the one being compared. A
-// silent mismatch would resolve zero symbols per task and read as a total
-// behavior divergence rather than a configuration error.
-func checkNormalized(views BridgeViews) error {
-	if len(views.Symbols) == 0 {
-		return fmt.Errorf("crgbehavior: the bridge graph holds no symbols to compare")
-	}
-	for _, s := range views.Symbols {
-		if !looksAbsolute(s.FilePath) {
-			return nil
-		}
-	}
-	return fmt.Errorf("crgbehavior: every bridge symbol path is still absolute (e.g. %q) — "+
-		"the graph was built under a different root than the repository being compared",
-		views.Symbols[0].FilePath)
 }
 
 // withDefaults fills the unset knobs.
@@ -210,8 +38,8 @@ func (c Config) withDefaults() Config {
 	if c.MaxResults <= 0 {
 		c.MaxResults = DefaultMaxResults
 	}
-	if c.SpearmanTau <= 0 {
-		c.SpearmanTau = graphstore.DefaultSpearmanTau
+	if c.FixtureDir == "" {
+		c.FixtureDir = DefaultFixtureDir
 	}
 	return c
 }
@@ -224,402 +52,355 @@ func (c Config) tasks() []Task {
 	return c.Manifest.Tasks
 }
 
-// bootstrapNative ingests the bridge's symbol graph through the kg-native
-// adapter and computes its derived views from the STORE READBACK — never from
-// the ingestion input, so a dropped write is visible to the comparison.
-func bootstrapNative(store sdk.Store, views BridgeViews, commit string) (nativeSide, error) {
-	s := sdk.For(crg.Name, store)
-	if _, err := crg.Bootstrap(s, store, views.Corpus(commit), nil); err != nil {
-		return nativeSide{}, fmt.Errorf("crgbehavior: native bootstrap: %w", err)
+// Run executes the behavior-preservation gate.
+//
+// For every pinned review task it materializes BOTH sides at that task's OWN
+// commit, then replays the review-relevant queries against the pinned release's
+// persisted state and against the kg-native adapter's derivations of the same
+// views, under EXACT oracles. It finishes by judging the run against the corpus
+// contract, so a run that never exercised a required surface fails instead of
+// reporting the same verdict as one that compared everything.
+func Run(cfg Config, mat Materializer) (Report, error) {
+	cfg = cfg.withDefaults()
+	report := Report{
+		RepoRoot:            cfg.RepoRoot,
+		Head:                cfg.Manifest.Head,
+		GeneratedFrom:       cfg.Manifest.GeneratedFrom,
+		PinnedVersion:       PinnedVersion,
+		PinnedSchemaVersion: PinnedSchemaVersion,
+		CorpusTasks:         len(cfg.Manifest.Tasks),
 	}
-	notes, err := store.Notes(sdk.OwnReadToken(crg.Name, "behavior-gate"), crg.Name)
-	if err != nil {
-		return nativeSide{}, fmt.Errorf("crgbehavior: native readback: %w", err)
+	for _, task := range cfg.tasks() {
+		tr, err := evaluateTask(cfg, mat, task)
+		if err != nil {
+			if isFatal(err) {
+				return Report{}, err
+			}
+			tr = TaskReport{Commit: task.Commit, Subject: task.Subject,
+				ChangedFiles: task.ChangedFiles, Identifiers: task.Identifiers,
+				Languages: task.Languages, Failure: err.Error()}
+		}
+		if report.Release.Version == "" {
+			report.Release = tr.Release
+		}
+		report.Tasks = append(report.Tasks, tr)
 	}
-	fileByID := make(map[string]string, len(notes))
-	for _, n := range notes {
-		path, _ := n.Fields[noteFieldFilePath].(string)
-		fileByID[n.ID] = path
-	}
-	pp, err := crg.PostprocessFromStore(store, crg.Name)
-	if err != nil {
-		return nativeSide{}, fmt.Errorf("crgbehavior: native derived views: %w", err)
-	}
-	return nativeSide{store: store, fileByID: fileByID, postproc: pp}, nil
+	report.Coverage = cfg.Contract.Coverage(report.Tasks)
+	return report, nil
 }
 
-// evaluateTask replays one review task against both sides.
-func evaluateTask(cfg Config, task Task, views BridgeViews, native nativeSide,
-	impact ImpactQuerier, unavailable map[string]bool) (TaskReport, error) {
-	tr := TaskReport{Commit: task.Commit, Subject: task.Subject, ChangedFiles: task.ChangedFiles}
-	bridge, err := impact.ImpactRadius(task.ChangedFiles, cfg.Depth, cfg.MaxResults)
+// isFatal reports whether an error invalidates the WHOLE run rather than one
+// task: an absent bridge, an off-release bridge, or an incompatible graph
+// schema. None of them is a behavior fact, and none of them is a pass.
+func isFatal(err error) bool {
+	return errors.Is(err, ErrBridgeUnavailable) ||
+		errors.Is(err, ErrReleaseMismatch) ||
+		errors.Is(err, ErrSchemaIncompatible)
+}
+
+// RecordFixtures materializes every corpus task at its own commit and records
+// the pinned release's behavior as this corpus's conformance baseline. It is an
+// explicit command, never a side effect of a gate run: a gate that silently
+// re-recorded its own baseline could never detect upstream drift.
+func RecordFixtures(cfg Config, mat Materializer) ([]UpstreamFixture, error) {
+	cfg = cfg.withDefaults()
+	out := make([]UpstreamFixture, 0, len(cfg.tasks()))
+	for _, task := range cfg.tasks() {
+		state, err := mat.Materialize(task)
+		if err != nil {
+			return nil, err
+		}
+		fixture := NewFixture(state.Release, task.Commit, bridgeRows(state, task), state.Lifecycle)
+		if err := fixture.Save(cfg.FixtureDir); err != nil {
+			return nil, err
+		}
+		out = append(out, fixture)
+	}
+	return out, nil
+}
+
+// evaluateTask materializes one task at its own SHA and compares both sides.
+func evaluateTask(cfg Config, mat Materializer, task Task) (TaskReport, error) {
+	state, err := mat.Materialize(task)
 	if err != nil {
-		return TaskReport{}, fmt.Errorf("crgbehavior: bridge impact query for %s: %w", short(task.Commit), err)
+		return TaskReport{}, err
 	}
-	seeds := native.seedsFor(task.ChangedFiles)
-	if len(seeds) == 0 && len(bridge.ChangedIDs) == 0 {
-		tr.Skipped = true
-		tr.SkipReason = "no symbol in either graph for the changed files (commit outside the built graph)"
-		return tr, nil
+	native, err := bootstrapNative(sdk.NewMemStore(), state.Views, task.Commit)
+	if err != nil {
+		return TaskReport{}, err
 	}
-	tr.Surfaces = taskSurfaces(cfg, task, views, native, seeds, bridge, unavailable)
+	tr := TaskReport{
+		Commit:        task.Commit,
+		Subject:       task.Subject,
+		ChangedFiles:  task.ChangedFiles,
+		Identifiers:   task.Identifiers,
+		Languages:     task.Languages,
+		Release:       state.Release,
+		Schema:        state.Schema,
+		GraphSymbols:  len(state.Views.Symbols),
+		GraphEdges:    len(state.Views.Edges),
+		GraphFiles:    state.Views.FilesIndexed,
+		NativeSymbols: len(native.fileByID),
+	}
+	tr.Surfaces = taskSurfaces(cfg, task, state, native)
 	return tr, nil
 }
 
-// taskSurfaces runs every review-relevant query comparison for one task,
-// skipping the surfaces whose legacy view this graph build never computed.
-func taskSurfaces(cfg Config, task Task, views BridgeViews, native nativeSide,
-	seeds []string, bridge BridgeImpact, unavailable map[string]bool) []Surface {
+// taskSurfaces runs every comparison for one task and attributes each surface a
+// table could not back to the exact capability that disabled it.
+func taskSurfaces(cfg Config, task Task, state TaskState, native nativeSide) []Surface {
+	seeds := native.seedsFor(task.ChangedFiles)
 	surfaces := []Surface{
-		changedNodesSurface(seeds, bridge),
-		impactSurface(cfg, native, seeds, bridge),
-		flowsSurface(native, views, seeds),
-		flowOrderSurface(native, views, seeds),
-		communitiesSurface(native, views, seeds),
-		riskSurface(cfg, native, views, seeds),
-		ftsSurface(native, views, task.Identifiers),
+		conformanceSurface(cfg, task, state),
+		compareRows(SurfaceChangedNodes, idRows(seeds), idRows(state.Impact.ChangedIDs)),
+		impactSurface(cfg, native, seeds, state.Impact),
 	}
+	surfaces = append(surfaces, flowSurfaces(state, native, seeds)...)
+	surfaces = append(surfaces, communitySurfaces(state, native, seeds)...)
+	surfaces = append(surfaces, riskSurfaces(state, native, seeds)...)
+	surfaces = append(surfaces, ftsSurfaces(task, state, native)...)
+	surfaces = append(surfaces,
+		edgeConfidenceSurface(task, state),
+		state.Lifecycle.Surface())
+	return attributeUncomputed(surfaces, state.Schema)
+}
+
+// attributeUncomputed replaces any surface whose backing table the capability
+// probe found missing or empty with an explicit not-exercised verdict naming
+// the detected release. An unexercised surface must never read as agreement.
+func attributeUncomputed(surfaces []Surface, schema SchemaReport) []Surface {
+	uncomputed := schema.UncomputedSurfaces()
 	for i, s := range surfaces {
-		if unavailable[s.Name] {
-			surfaces[i] = skippedSurface(s.Name, unavailableReason(s.Name))
+		if reason, ok := uncomputed[s.Name]; ok {
+			surfaces[i] = notExercised(s.Name, reason)
 		}
 	}
 	return surfaces
 }
 
-// seedsFor resolves the changed files to native symbol ids, from the PERSISTED
-// namespace readback (not the ingestion corpus).
-func (n nativeSide) seedsFor(files []string) []string {
-	want := map[string]bool{}
-	for _, f := range files {
-		want[f] = true
-	}
-	var out []string
-	for id, path := range n.fileByID {
-		if want[path] {
-			out = append(out, id)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// changedNodesSurface compares which symbols each side resolved for the changed
-// files — the seed set every downstream review query starts from.
-func changedNodesSurface(seeds []string, bridge BridgeImpact) Surface {
-	s := surfaceFrom(SurfaceChangedNodes, compareIDs(SurfaceChangedNodes, seeds, bridge.ChangedIDs))
-	s.Metric = fmt.Sprintf("native=%d bridge=%d", len(seeds), len(bridge.ChangedIDs))
-	return s
-}
-
-// impactSurface compares the blast radius each side reports for the changed
-// files: the bridge's own query answer against the kg-native BFS over the
-// persisted edge graph.
-func impactSurface(cfg Config, native nativeSide, seeds []string, bridge BridgeImpact) Surface {
-	rows, err := crg.ImpactRadiusFromStore(native.store, crg.Name, seeds, cfg.Depth)
+// conformanceSurface compares the live bridge's behavior at this commit against
+// the recorded release-pinned baseline.
+func conformanceSurface(cfg Config, task Task, state TaskState) Surface {
+	fixture, err := LoadFixture(cfg.FixtureDir, task.Commit)
 	if err != nil {
-		return failedSurface(SurfaceImpactRadius, err)
+		return failed(SurfaceUpstreamFixture, err)
 	}
-	ids := make([]string, 0, len(rows))
-	for _, r := range rows {
-		ids = append(ids, r.NodeID)
-	}
-	s := surfaceFrom(SurfaceImpactRadius, compareIDs(SurfaceImpactRadius, ids, bridge.ImpactedIDs))
-	s.Metric = fmt.Sprintf("native=%d bridge=%d depth=%d truncated=%v",
-		len(ids), len(bridge.ImpactedIDs), cfg.Depth, bridge.Truncated)
-	return s
+	return fixture.Conform(bridgeRows(state, task))
 }
 
-// flowsSurface compares the MEMBERSHIP of every flow the changed symbols
-// participate in, under the §11.6 flow_memberships set-equality oracle. The
-// rows are position-normalized first: the review question is "which flows does
-// this change touch, and which symbols are in them" — step ordering is compared
-// separately by flowOrderSurface, because the legacy flow_memberships table is
-// keyed (flow_id, node_id) and numbers its steps along its own path order.
-func flowsSurface(native nativeSide, views BridgeViews, seeds []string) Surface {
-	nativeRows, bridgeRows, ok := touchedFlowRows(native, views, seeds)
-	if !ok {
-		return skippedSurface(SurfaceFlows, "no execution flow touches the changed symbols")
+// bridgeRows renders every release-side surface of one materialized task into
+// its canonical row form — the same rendering the live comparison and the
+// recorded fixture both use, so conformance is judged by the one exact oracle.
+func bridgeRows(state TaskState, task Task) map[string][]string {
+	ids := taskSymbolIDs(state, task)
+	touched := flowsTouching(state.Views.Flows, setOf(ids))
+	risk := restrictScores(state.Views.RiskIndex, ids)
+	return map[string][]string{
+		SurfaceFlows:              flowRows(touched),
+		SurfaceFlowMetrics:        flowMetricRows(touched),
+		SurfaceFlowSnapshots:      flowSnapshotRows(snapshotsOf(state.Views, touched)),
+		SurfaceCommunities:        communityRows(restrictPartition(state.Views.Communities, ids)),
+		SurfaceCommunitySummaries: communitySummaryRows(summariesOf(state.Views, ids)),
+		SurfaceRiskIndex:          riskScoreRows(bridgeScores(risk)),
+		SurfaceRiskDetail:         riskDetailRows(risk),
+		SurfaceFTSIndex:           ftsIndexOf(state.Views, task.ChangedFiles),
+		SurfaceFTSSearch:          ftsSearchRows(state.FTS),
+		SurfaceEdgeConfidence:     edgeConfidenceRows(edgesOf(state.Views, task.ChangedFiles)),
 	}
-	s := surfaceFrom(SurfaceFlows, crg.CompareFlowMemberships(withoutPositions(nativeRows), withoutPositions(bridgeRows)))
-	s.Metric = fmt.Sprintf("native=%d members bridge=%d members", len(nativeRows), len(bridgeRows))
-	return s
 }
 
-// flowOrderSurface compares the step ORDER of the touched flows under the same
-// oracle with positions kept.
-func flowOrderSurface(native nativeSide, views BridgeViews, seeds []string) Surface {
-	nativeRows, bridgeRows, ok := touchedFlowRows(native, views, seeds)
-	if !ok {
-		return skippedSurface(SurfaceFlowOrder, "no execution flow touches the changed symbols")
+// taskSymbolIDs is the release's OWN answer for which symbols a task's changed
+// files hold. Keying the release-side rows off the release's answer (rather
+// than off the native seed set) keeps the recorded fixture a pure statement
+// about upstream behavior, independent of the adapter under test.
+func taskSymbolIDs(state TaskState, task Task) []string {
+	if len(state.Impact.ChangedIDs) > 0 {
+		return state.Impact.ChangedIDs
 	}
-	s := surfaceFrom(SurfaceFlowOrder, crg.CompareFlowMemberships(nativeRows, bridgeRows))
-	s.Metric = fmt.Sprintf("native=%d rows bridge=%d rows (position-sensitive)", len(nativeRows), len(bridgeRows))
-	return s
-}
-
-// touchedFlowRows returns both sides' membership rows for the flows the changed
-// symbols participate in. ok is false when neither side has such a flow.
-func touchedFlowRows(native nativeSide, views BridgeViews, seeds []string) (nativeRows, bridgeRows []crg.FlowMembership, ok bool) {
-	seedSet := setOf(seeds)
-	nativeRows = flowsTouching(native.postproc.FlowMemberships, seedSet)
-	bridgeRows = flowsTouching(views.FlowMemberships, seedSet)
-	return nativeRows, bridgeRows, len(nativeRows) > 0 || len(bridgeRows) > 0
-}
-
-// withoutPositions projects membership rows onto (flow_id, member_id) so the
-// oracle compares membership rather than step numbering.
-func withoutPositions(rows []crg.FlowMembership) []crg.FlowMembership {
-	out := make([]crg.FlowMembership, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, crg.FlowMembership{FlowID: r.FlowID, MemberID: r.MemberID})
-	}
-	return out
-}
-
-// flowsTouching returns every membership row of every flow that contains at
-// least one changed symbol — the "flows touched by this review" query.
-func flowsTouching(rows []crg.FlowMembership, seeds map[string]bool) []crg.FlowMembership {
-	touched := map[string]bool{}
-	for _, r := range rows {
-		if seeds[r.MemberID] {
-			touched[r.FlowID] = true
-		}
-	}
-	var out []crg.FlowMembership
-	for _, r := range rows {
-		if touched[r.FlowID] {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-// communitiesSurface compares the community membership of the changed symbols
-// under the parity gate's partition-equivalence oracle (cluster ids may differ;
-// only the co-membership relation is compared).
-func communitiesSurface(native nativeSide, views BridgeViews, seeds []string) Surface {
-	a := restrictStrings(native.postproc.Communities, seeds)
-	b := restrictStrings(views.Communities, seeds)
-	if len(a) < 2 || len(b) < 2 {
-		return skippedSurface(SurfaceCommunities, "fewer than two changed symbols carry a community assignment")
-	}
-	agree, ok := graphstore.PartitionAgreement(a, b)
-	rep := graphstore.ParityReport{Row: SurfaceCommunities, Pass: ok && agree == 1.0}
-	if !rep.Pass {
-		rep.Detail = append(rep.Detail, partitionDetail(a, b, agree, ok))
-	}
-	s := surfaceFrom(SurfaceCommunities, rep)
-	s.Metric = fmt.Sprintf("agreement=%.3f (want 1.000) over %d changed symbols", agree, len(a))
-	return s
-}
-
-// partitionDetail explains a community divergence in review terms: how the two
-// sides cluster the changed symbols.
-func partitionDetail(a, b map[string]string, agree float64, ok bool) string {
-	if !ok {
-		return "the two sides do not cover the same changed-symbol set"
-	}
-	return fmt.Sprintf("pairwise co-membership agreement %.3f: native groups the changed symbols into %d cluster(s), bridge into %d",
-		agree, distinctValues(a), distinctValues(b))
-}
-
-// riskSurface compares the risk ranking of the changed symbols under the
-// parity gate's Spearman oracle.
-func riskSurface(cfg Config, native nativeSide, views BridgeViews, seeds []string) Surface {
-	// The bridge does not score every node it stores, so the ranking is
-	// compared over the changed symbols BOTH sides score; the coverage gap is
-	// reported rather than silently treated as agreement.
-	scored := scoredBySides(native.postproc.RiskIndex, views.RiskIndex, seeds)
-	a := restrictFloats(native.postproc.RiskIndex, scored)
-	b := restrictFloats(views.RiskIndex, scored)
-	if len(scored) < 2 {
-		return skippedSurface(SurfaceRiskIndex, "fewer than two changed symbols are scored by both sides")
-	}
-	tau, ok := graphstore.SpearmanTau(a, b)
-	rep := graphstore.ParityReport{Row: SurfaceRiskIndex, Pass: ok && tau >= cfg.SpearmanTau}
-	if !rep.Pass {
-		rep.Detail = append(rep.Detail, fmt.Sprintf(
-			"rank correlation %.3f over %d changed symbols (floor %.2f, same-key-set=%v)", tau, len(a), cfg.SpearmanTau, ok))
-	}
-	s := surfaceFrom(SurfaceRiskIndex, rep)
-	s.Metric = fmt.Sprintf("spearman=%.3f (floor %.2f) over %d of %d changed symbols scored by both sides",
-		tau, cfg.SpearmanTau, len(scored), len(seeds))
-	return s
-}
-
-// scoredBySides returns the changed symbols both risk indexes score.
-func scoredBySides(a, b map[string]float64, seeds []string) []string {
+	// The impact query resolved nothing: fall back to the persisted graph's own
+	// file → symbol mapping so the release-side rows still describe the task.
+	want := setOf(task.ChangedFiles)
 	var out []string
-	for _, id := range seeds {
-		if _, inA := a[id]; !inA {
-			continue
-		}
-		if _, inB := b[id]; inB {
-			out = append(out, id)
-		}
-	}
-	return out
-}
-
-// ftsSurface compares the searchable token set each side exposes for the
-// declaration identifiers this commit added or removed.
-func ftsSurface(native nativeSide, views BridgeViews, identifiers []string) Surface {
-	if len(identifiers) == 0 {
-		return skippedSurface(SurfaceFTS, "the commit changed no declaration identifier")
-	}
-	nativeTokens := tokensFor(native.postproc.FTS, identifiers)
-	bridgeTokens := tokensFor(views.FTS, identifiers)
-	if len(nativeTokens) == 0 && len(bridgeTokens) == 0 {
-		return skippedSurface(SurfaceFTS, "no indexed symbol matches the changed identifiers")
-	}
-	s := surfaceFrom(SurfaceFTS, crg.CompareFTS(nativeTokens, bridgeTokens))
-	s.Metric = fmt.Sprintf("native=%d tokens bridge=%d tokens for %d identifier(s)",
-		len(nativeTokens), len(bridgeTokens), len(identifiers))
-	return s
-}
-
-// tokensFor is the FTS query: the indexed tokens whose symbol name is one of
-// the changed identifiers. Bridge and native tokens share the
-// "<file>::<name>" qualified-name spelling after normalization.
-func tokensFor(tokens, identifiers []string) []string {
-	want := setOf(identifiers)
-	var out []string
-	for _, tok := range tokens {
-		if want[symbolNameOf(tok)] {
-			out = append(out, tok)
+	for _, sym := range state.Views.Symbols {
+		if want[sym.FilePath] {
+			out = append(out, symbolIDOf(sym.QualifiedName, sym.FilePath))
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-// symbolNameOf returns the bare symbol name of a qualified-name token.
-func symbolNameOf(token string) string {
-	if i := strings.LastIndex(token, "::"); i >= 0 {
-		return token[i+2:]
+// impactSurface compares the blast radius each side reports.
+func impactSurface(cfg Config, native nativeSide, seeds []string, bridge BridgeImpact) Surface {
+	ids, err := native.impact(seeds, cfg.Depth)
+	if err != nil {
+		return failed(SurfaceImpactRadius, err)
 	}
-	return token
+	s := compareRows(SurfaceImpactRadius, idRows(ids), idRows(bridge.ImpactedIDs))
+	s.Metric = fmt.Sprintf("%s depth=%d bridge_truncated=%v", s.Metric, cfg.Depth, bridge.Truncated)
+	return s
 }
 
-// compareIDs applies the parity gate's impact-radius set-equality oracle to two
-// id sets and relabels the report for the surface under comparison. A = the
-// kg-native side, B = the legacy bridge.
-func compareIDs(row string, native, bridge []string) graphstore.ParityReport {
-	rep := graphstore.CompareImpactRadius(impactRowsOf(native), impactRowsOf(bridge))
-	rep.Row = row
-	return rep
-}
-
-// impactRowsOf lifts bare ids into the oracle's row shape.
-func impactRowsOf(ids []string) []graphstore.ImpactRow {
-	rows := make([]graphstore.ImpactRow, 0, len(ids))
-	for _, id := range ids {
-		rows = append(rows, graphstore.ImpactRow{NodeID: id})
+// flowSurfaces compares the flows the changed symbols participate in.
+func flowSurfaces(state TaskState, native nativeSide, seeds []string) []Surface {
+	seedSet := setOf(seeds)
+	bridgeFlows := flowsTouching(state.Views.Flows, seedSet)
+	nativeFlows := flowsTouching(native.flowRows(), seedSet)
+	if len(bridgeFlows) == 0 && len(nativeFlows) == 0 {
+		reason := "no execution flow touches the changed symbols"
+		return []Surface{
+			notExercised(SurfaceFlows, reason),
+			notExercised(SurfaceFlowMetrics, reason),
+			notExercised(SurfaceFlowSnapshots, reason),
+		}
 	}
-	return rows
-}
-
-// surfaceFrom turns an oracle verdict into a reported surface, classifying it
-// as gating or advisory and capping its structural diff.
-func surfaceFrom(name string, rep graphstore.ParityReport) Surface {
-	reason, advisory := advisoryReasons[name]
-	return Surface{
-		Name:           name,
-		Advisory:       advisory,
-		AdvisoryReason: reason,
-		Pass:           rep.Pass,
-		Detail:         capDetail(readableDetail(rep.Detail)),
+	snapshots := snapshotsOf(state.Views, bridgeFlows)
+	metrics := unimplemented(SurfaceFlowMetrics, flowMetricRows(bridgeFlows))
+	snapshotSurface := unimplemented(SurfaceFlowSnapshots, flowSnapshotRows(snapshots))
+	if len(snapshots) == 0 {
+		snapshotSurface = notExercised(SurfaceFlowSnapshots,
+			"the release recorded no flow_snapshots row for the flows this change touches")
+	}
+	return []Surface{
+		compareRows(SurfaceFlows, flowRows(nativeFlows), flowRows(bridgeFlows)),
+		metrics,
+		snapshotSurface,
 	}
 }
 
-// detailReplacer makes an oracle's raw diagnostics readable in the gate report:
-// the oracles name their two inputs "a"/"A" and "b"/"B", and the
-// flow_memberships oracle keys rows with a NUL separator. The gate's reader is
-// deciding a decommission, so the report names the SIDES and prints no control
-// characters.
-var detailReplacer = strings.NewReplacer(
-	"only in a", "only in NATIVE",
-	"only in b", "only in BRIDGE",
-	"only in A", "only in NATIVE",
-	"only in B", "only in BRIDGE",
-	"\x00", " | ",
-)
-
-// readableDetail applies detailReplacer to every diagnostic line.
-func readableDetail(detail []string) []string {
-	out := make([]string, 0, len(detail))
-	for _, d := range detail {
-		out = append(out, detailReplacer.Replace(d))
+// communitySurfaces compares the community partition and the release's
+// community summaries over the changed symbols.
+func communitySurfaces(state TaskState, native nativeSide, seeds []string) []Surface {
+	bridgePartition := restrictPartition(state.Views.Communities, seeds)
+	if len(bridgePartition) == 0 {
+		reason := "no changed symbol carries a community assignment in the release graph"
+		return []Surface{
+			notExercised(SurfaceCommunities, reason),
+			notExercised(SurfaceCommunitySummaries, reason),
+		}
 	}
-	return out
-}
-
-// failedSurface reports a surface that could not be computed at all.
-func failedSurface(name string, err error) Surface {
-	return surfaceFrom(name, graphstore.ParityReport{Row: name, Pass: false, Detail: []string{err.Error()}})
-}
-
-// skippedSurface reports a surface this task cannot exercise.
-func skippedSurface(name, reason string) Surface {
-	_, advisory := advisoryReasons[name]
-	return Surface{Name: name, Advisory: advisory, Pass: true, Skipped: true, SkipReason: reason}
-}
-
-// capDetail bounds a structural diff, keeping the report readable.
-func capDetail(detail []string) []string {
-	sort.Strings(detail)
-	if len(detail) <= maxDetailLines {
-		return detail
+	summaries := summariesOf(state.Views, seeds)
+	summarySurface := unimplemented(SurfaceCommunitySummaries, communitySummaryRows(summaries))
+	if len(summaries) == 0 {
+		summarySurface = notExercised(SurfaceCommunitySummaries,
+			"the release recorded no community_summaries row for the clusters this change touches")
 	}
-	out := append([]string{}, detail[:maxDetailLines]...)
-	return append(out, fmt.Sprintf("... and %d more difference(s)", len(detail)-maxDetailLines))
+	return []Surface{
+		compareRows(SurfaceCommunities,
+			communityRows(native.communities(seeds)), communityRows(bridgePartition)),
+		summarySurface,
+	}
 }
 
-// restrictStrings narrows a partition map to the given ids present in it.
-func restrictStrings(m map[string]string, ids []string) map[string]string {
-	out := map[string]string{}
-	for _, id := range ids {
-		if v, ok := m[id]; ok {
-			out[id] = v
+// riskSurfaces compares the release's risk_index over the changed symbols.
+func riskSurfaces(state TaskState, native nativeSide, seeds []string) []Surface {
+	bridgeRisk := restrictScores(state.Views.RiskIndex, seeds)
+	if len(bridgeRisk) == 0 {
+		reason := "the release scored none of the changed symbols in risk_index"
+		return []Surface{
+			notExercised(SurfaceRiskIndex, reason),
+			notExercised(SurfaceRiskDetail, reason),
+		}
+	}
+	return []Surface{
+		compareRows(SurfaceRiskIndex,
+			riskScoreRows(native.risk(seeds)), riskScoreRows(bridgeScores(bridgeRisk))),
+		unimplemented(SurfaceRiskDetail, riskDetailRows(bridgeRisk)),
+	}
+}
+
+// ftsSurfaces compares the release's search index content and its own search
+// RESULTS for the declaration identifiers this commit changed.
+func ftsSurfaces(task Task, state TaskState, native nativeSide) []Surface {
+	index := compareRows(SurfaceFTSIndex,
+		native.ftsIndex(task.ChangedFiles), ftsIndexOf(state.Views, task.ChangedFiles))
+	if len(task.Identifiers) == 0 {
+		return []Surface{index, notExercised(SurfaceFTSSearch,
+			"the commit changed no declaration identifier in a language the release's extractor covers")}
+	}
+	return []Surface{index, unimplemented(SurfaceFTSSearch, ftsSearchRows(state.FTS))}
+}
+
+// edgeConfidenceSurface compares the schema-v9 edge confidence columns for the
+// edges this change touches.
+func edgeConfidenceSurface(task Task, state TaskState) Surface {
+	edges := edgesOf(state.Views, task.ChangedFiles)
+	if len(edges) == 0 {
+		return notExercised(SurfaceEdgeConfidence,
+			"the release stored no edge in the changed files")
+	}
+	return unimplemented(SurfaceEdgeConfidence, edgeConfidenceRows(edges))
+}
+
+// flowsTouching returns every flow that contains at least one changed symbol —
+// the "flows touched by this review" query.
+func flowsTouching(flows []BridgeFlow, seeds map[string]bool) []BridgeFlow {
+	var out []BridgeFlow
+	for _, f := range flows {
+		for _, member := range f.Path {
+			if seeds[member] {
+				out = append(out, f)
+				break
+			}
 		}
 	}
 	return out
 }
 
-// restrictFloats narrows a score map to the given ids present in it.
-func restrictFloats(m map[string]float64, ids []string) map[string]float64 {
-	out := map[string]float64{}
-	for _, id := range ids {
-		if v, ok := m[id]; ok {
-			out[id] = v
+// snapshotsOf returns the release's snapshot rows for a set of flows.
+func snapshotsOf(views BridgeViews, flows []BridgeFlow) []BridgeFlowSnapshot {
+	want := map[string]bool{}
+	for _, f := range flows {
+		want[f.EntryPoint] = true
+	}
+	var out []BridgeFlowSnapshot
+	for _, s := range views.FlowSnapshots {
+		if want[s.EntryPoint] {
+			out = append(out, s)
 		}
 	}
 	return out
 }
 
-// distinctValues counts the distinct cluster ids in a partition.
-func distinctValues(m map[string]string) int {
-	seen := map[string]bool{}
-	for _, v := range m {
-		seen[v] = true
+// summariesOf returns the release's community summaries for the clusters the
+// changed symbols belong to.
+func summariesOf(views BridgeViews, ids []string) []BridgeCommunitySummary {
+	want := map[string]bool{}
+	for _, id := range ids {
+		if cluster, ok := views.Communities[id]; ok && cluster != unassignedCluster {
+			want[cluster] = true
+		}
 	}
-	return len(seen)
-}
-
-// setOf builds a lookup set.
-func setOf(xs []string) map[string]bool {
-	out := make(map[string]bool, len(xs))
-	for _, x := range xs {
-		out[x] = true
+	var out []BridgeCommunitySummary
+	for _, s := range views.CommunitySummaries {
+		if want[s.Cluster] {
+			out = append(out, s)
+		}
 	}
 	return out
 }
 
-// short abbreviates a commit SHA for messages.
-func short(sha string) string {
-	if len(sha) > 8 {
-		return sha[:8]
+// ftsIndexOf returns the release's index content for a task's changed files.
+func ftsIndexOf(views BridgeViews, files []string) []string {
+	want := setOf(files)
+	var out []string
+	for _, token := range views.FTSIndex {
+		if want[filePartOf(token)] {
+			out = append(out, token)
+		}
 	}
-	return sha
+	sort.Strings(out)
+	return out
+}
+
+// edgesOf returns the release's edges stored against a task's changed files.
+func edgesOf(views BridgeViews, files []string) []BridgeEdge {
+	want := setOf(files)
+	var out []BridgeEdge
+	for _, e := range views.Edges {
+		if want[e.FilePath] {
+			out = append(out, e)
+		}
+	}
+	return out
 }

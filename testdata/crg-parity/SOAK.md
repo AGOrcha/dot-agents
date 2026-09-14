@@ -18,8 +18,10 @@ It is hermetic by design: a synthetic corpus, both sides driven in-process, no
 Python. It therefore cannot speak to criterion 2.
 
 §11.4 **criterion 2** — the behavior-preservation gate over a corpus of REAL
-review tasks, compared against the LIVE Python bridge under the same structural
-oracles — is the separate `crg-behavior-gate` job, documented in
+review tasks, each replayed against a graph built by the pinned
+`code-review-graph` release at that task's OWN commit, under EXACT oracles
+(this job's structural/ranking oracles are deliberately not reused there) — is
+the separate `crg-behavior-gate` job, documented in
 `testdata/crg-behavior/BEHAVIOR.md`. Criterion 4 (the managed-repo `reads_from:
 [crg-bridge]` lockfile sweep) is its own workstream again.
 

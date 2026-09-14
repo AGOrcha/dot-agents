@@ -2,55 +2,106 @@ package crgbehavior
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
+
+	"golang.org/x/sys/execabs"
 
 	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
-// LiveBridge drives the legacy Python CRG for one repository: it reads the
-// bridge's persisted derived views out of its own store, and issues the live
-// impact-radius query the review skills issue. It is the only part of the gate
-// that needs the Python runtime; everything else is Go over the Store seam.
-type LiveBridge struct {
-	bridge   *graphstore.CRGBridge
-	repoRoot string
+// DefaultDepth is the impact-radius hop budget the review skills query at.
+const DefaultDepth = 2
+
+// DefaultMaxResults bounds the bridge's impact query.
+const DefaultMaxResults = 2000
+
+// BridgeImpact is the release's own answer to one review task's impact-radius
+// query, normalized into the comparison id space.
+type BridgeImpact struct {
+	// ChangedIDs are the symbols the release resolved for the changed files.
+	ChangedIDs []string
+	// ImpactedIDs are the symbols the release reported as blast radius.
+	ImpactedIDs []string
+	// Truncated reports that the release capped its own result set.
+	Truncated bool
 }
 
-// NewLiveBridge binds the legacy bridge for graphRepoRoot — the repository
-// whose .code-review-graph/graph.db the comparison reads. It returns
-// ErrBridgeUnavailable (not a hard error) when the Python CLI is not installed,
-// so callers can SKIP rather than fail on a machine without the legacy side.
-func NewLiveBridge(graphRepoRoot string) (*LiveBridge, error) {
-	// The legacy graph stores ABSOLUTE paths, so the root the gate normalizes
-	// them against must be absolute too; a relative "." would leave every id in
-	// the bridge's absolute spelling and diverge from the native id space. An
-	// unresolvable working directory falls back to the caller's spelling, where
-	// Run's normalization guard reports the mismatch explicitly.
-	root := graphRepoRoot
-	if abs, err := filepath.Abs(graphRepoRoot); err == nil {
-		root = abs
-	}
-	// NewCRGBridge only returns a binary it has already stat'd (workspace
-	// .venv, then PATH), so discovery success IS availability.
-	b, err := graphstore.NewCRGBridge(root)
+// LiveBridge drives the pinned Python code-review-graph release for ONE
+// materialized worktree: it builds the graph, reads the persisted views, issues
+// the live impact query, runs the release's own FTS5 search, and probes the
+// release's build/postprocess lifecycle contract.
+type LiveBridge struct {
+	cli     *graphstore.CRGBridge
+	root    string
+	version string
+}
+
+// NewLiveBridge binds the pinned release to graphRoot and verifies that the
+// discovered CLI IS the pinned release before anything is built.
+//
+// Discovery failure returns ErrBridgeUnavailable so the caller can report an
+// explicit inconclusive verdict; a CLI that reports a DIFFERENT version returns
+// ErrReleaseMismatch, which is a hard failure — running the comparison against
+// an unpinned build would certify nothing while looking like evidence.
+func NewLiveBridge(graphRoot string, rel Release) (*LiveBridge, error) {
+	cli, err := graphstore.NewCRGBridge(graphRoot)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBridgeUnavailable, err)
 	}
-	return &LiveBridge{bridge: b, repoRoot: root}, nil
+	version, err := cliVersion(cli.Bin)
+	if err != nil {
+		return nil, err
+	}
+	if err := rel.CheckVersion(version); err != nil {
+		return nil, err
+	}
+	return &LiveBridge{cli: cli, root: graphRoot, version: version}, nil
 }
 
-// Views reads the legacy bridge's persisted graph and derived materialized
-// views (flows, communities, risk_index, FTS) out of its own store.
-func (l *LiveBridge) Views() (BridgeViews, error) {
-	return ReadBridgeViews(l.repoRoot, graphstore.CRGDBPath(l.repoRoot))
+// Version is the CLI's own `--version` answer, recorded in every report and
+// artifact so a run names the release it was produced against.
+func (l *LiveBridge) Version() string { return l.version }
+
+// cliVersion asks the discovered binary which release it is.
+func cliVersion(bin string) (string, error) {
+	out, err := execabs.Command(bin, "--version").CombinedOutput() //nolint:gosec // bin is a discovered CRG executable
+	if err != nil {
+		return "", fmt.Errorf("%w: %s --version failed: %v: %s",
+			ErrBridgeUnavailable, bin, err, strings.TrimSpace(string(out)))
+	}
+	return ParseCLIVersion(string(out))
 }
 
-// ImpactRadius issues the legacy bridge's own blast-radius query for a review
-// task's changed files and normalizes its answer into the kg-native id space.
-func (l *LiveBridge) ImpactRadius(changedFiles []string, maxDepth, maxResults int) (BridgeImpact, error) {
-	res, err := l.bridge.GetImpactRadius(graphstore.ImpactOptions{
+// Build runs a FULL build. A full build is the only mode that also computes the
+// release's summary tables (community_summaries, flow_snapshots, risk_index),
+// so it is the state a review consumer actually reads.
+func (l *LiveBridge) Build() error {
+	if _, err := l.cli.BuildReport(graphstore.BuildOptions{}); err != nil {
+		return fmt.Errorf("crgbehavior: build the pinned release graph at %s: %w", l.root, err)
+	}
+	return nil
+}
+
+// Postprocess runs the release's STANDALONE postprocess — the command whose
+// documented behavior (flows/communities/FTS rebuilt, summary tables left
+// stale) the lifecycle surface asserts.
+func (l *LiveBridge) Postprocess() error {
+	if err := l.cli.Postprocess(graphstore.PostprocessOptions{}); err != nil {
+		return fmt.Errorf("crgbehavior: postprocess the pinned release graph at %s: %w", l.root, err)
+	}
+	return nil
+}
+
+// Open opens the built graph read-only and probes its schema capabilities.
+func (l *LiveBridge) Open(rel Release) (*BridgeStore, error) {
+	return OpenBridgeStore(l.root, graphstore.CRGDBPath(l.root), l.version, rel)
+}
+
+// ImpactRadius issues the release's own blast-radius query for a review task's
+// changed files and normalizes its answer into the comparison id space.
+func (l *LiveBridge) ImpactRadius(norm Normalizer, changedFiles []string, maxDepth, maxResults int) (BridgeImpact, error) {
+	res, err := l.cli.GetImpactRadius(graphstore.ImpactOptions{
 		ChangedFiles: changedFiles,
 		MaxDepth:     maxDepth,
 		MaxResults:   maxResults,
@@ -58,34 +109,23 @@ func (l *LiveBridge) ImpactRadius(changedFiles []string, maxDepth, maxResults in
 	if err != nil {
 		return BridgeImpact{}, classifyQueryError(err)
 	}
-	return BridgeImpact{
-		ChangedIDs:  l.nativeIDs(res.ChangedNodes),
-		ImpactedIDs: l.nativeIDs(res.ImpactedNodes),
-		Truncated:   res.Truncated,
-	}, nil
-}
-
-// RunLive binds the legacy Python bridge for graphRepoRoot and executes the
-// gate against it. It returns ErrBridgeUnavailable when the legacy side cannot
-// be driven on this machine, so callers SKIP rather than report a divergence.
-func RunLive(cfg Config, graphRepoRoot string) (Report, error) {
-	live, err := NewLiveBridge(graphRepoRoot)
+	changed, err := nativeIDs(norm, res.ChangedNodes)
 	if err != nil {
-		return Report{}, err
+		return BridgeImpact{}, err
 	}
-	views, err := live.Views()
+	impacted, err := nativeIDs(norm, res.ImpactedNodes)
 	if err != nil {
-		return Report{}, err
+		return BridgeImpact{}, err
 	}
-	return Run(cfg, views, live)
+	return BridgeImpact{ChangedIDs: changed, ImpactedIDs: impacted, Truncated: res.Truncated}, nil
 }
 
 // interpreterFailures are the signatures of a code-review-graph install whose
 // interpreter cannot actually run the bridge — a CLI found on PATH whose
-// sibling interpreter lacks the package (e.g. a `uv tool` install, where the
-// discovered binary's directory holds no venv python). That is the SAME
-// environment fact as "not installed", so it must SKIP the gate rather than be
-// reported as a behavior divergence.
+// sibling interpreter lacks the package. That is the SAME environment fact as
+// "not installed": the gate cannot be driven, so it reports an inconclusive
+// verdict rather than inventing a behavior divergence — and, because an
+// unavailable bridge is not a green path, it still exits non-zero.
 var interpreterFailures = []string{
 	"ModuleNotFoundError",
 	"No module named",
@@ -94,8 +134,8 @@ var interpreterFailures = []string{
 	"no such file or directory",
 }
 
-// classifyQueryError marks an unusable legacy interpreter as an unavailable
-// bridge; any other query failure stays a hard error.
+// classifyQueryError marks an unusable interpreter as an unavailable bridge;
+// any other query failure stays a hard error.
 func classifyQueryError(err error) error {
 	msg := strings.ToLower(err.Error())
 	for _, marker := range interpreterFailures {
@@ -106,15 +146,20 @@ func classifyQueryError(err error) error {
 	return err
 }
 
-// nativeIDs maps legacy impact nodes onto the kg-native symbol id space so both
-// sides of a comparison are keyed identically.
-func (l *LiveBridge) nativeIDs(nodes []graphstore.ImpactNode) []string {
+// nativeIDs maps the release's impact nodes onto the comparison id space so
+// both sides are keyed identically.
+func nativeIDs(norm Normalizer, nodes []graphstore.ImpactNode) ([]string, error) {
 	out := make([]string, 0, len(nodes))
 	for _, n := range nodes {
-		out = append(out, crg.SymbolID(crg.Symbol{
-			QualifiedName: relativize(n.QualifiedName, l.repoRoot),
-			FilePath:      relativize(n.FilePath, l.repoRoot),
-		}))
+		qualified, err := norm.Qualified(n.QualifiedName)
+		if err != nil {
+			return nil, err
+		}
+		file, err := norm.Path(n.FilePath)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, crg.SymbolID(crg.Symbol{QualifiedName: qualified, FilePath: file}))
 	}
-	return out
+	return out, nil
 }

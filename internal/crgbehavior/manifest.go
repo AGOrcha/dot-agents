@@ -1,23 +1,44 @@
 // Package crgbehavior implements the CRG behavior-preservation gate
-// (graph-backend-adapter-contract §11.4 criterion 2): the dual-read comparison
-// the hermetic §11.6 parity gate performs over a SYNTHETIC corpus, re-run over
-// a corpus of REAL review tasks derived from this repository's own history.
+// (graph-backend-adapter-contract §11.4 criterion 2): does the kg-native
+// adapter preserve the behavior consumers get from the code-review-graph
+// release the product actually ships against?
 //
-// The parity gate (testdata/crg-parity) proves the kg-native adapter and the
-// crg-bridge mirror agree on 10 pinned synthetic commits. It cannot prove the
-// kg-native derivations reproduce what the legacy Python bridge actually
-// persisted for a real repository, because it never touches the live bridge.
-// This package closes that gap: for each pinned real commit it drives the
-// review-relevant queries the review skills issue (changed-file impact radius,
-// flows touched, community membership of changed symbols, FTS over changed
-// identifiers) against BOTH sides and applies the SAME structural oracles as
-// the parity gate (crg.CompareFlowMemberships, graphstore.PartitionAgreement,
-// graphstore.SpearmanTau, crg.CompareFTS, graphstore.CompareImpactRadius).
+// The hermetic §11.6 parity gate (testdata/crg-parity) compares the kg-native
+// adapter against an in-process mirror over a SYNTHETIC corpus. It never
+// touches the real bridge, so it cannot answer that question. This package
+// does, under four rules that together decide whether a run is evidence:
 //
-// The bridge side is the legacy Python CRG's own persisted state and its own
-// query surface; the native side is driven through the adapter/Store API
-// directly (crg.Bootstrap + the *FromStore readback surfaces), never through
-// the `da kg` command layer, so the gate is independent of which backend the
+//  1. ONE PINNED RELEASE. Every run is driven against code-review-graph
+//     PinnedVersion and its graph schema PinnedSchemaVersion, both verified
+//     before anything is compared and both printed and persisted in the run's
+//     report and JSON artifact. An unidentified or off-release bridge is a
+//     hard failure, not a baseline.
+//
+//  2. SAME-SHA MATERIALIZATION. Each pinned review task is replayed against a
+//     graph BUILT AT THAT TASK'S OWN COMMIT, in an isolated worktree. Replaying
+//     historical changed-file paths against one current graph cannot detect a
+//     historical-output regression and lets a moved path resolve to a
+//     different symbol.
+//
+//  3. EXACT ORACLES. The release's output for a given graph is deterministic,
+//     so every surface is compared by exact set equality over canonical rows —
+//     flow identity and ordered path, per-flow depth/counts/criticality, flow
+//     snapshots, the community partition and its summaries, the full risk_index
+//     row, the FTS5 index and its search RESULTS, the schema-v9 edge confidence
+//     columns, and the release's build/postprocess staleness contract. Only
+//     genuinely nondeterministic upstream values (autoincrement flow and
+//     community ids, wall-clock timestamps) are normalized away. No rank
+//     correlation, no partition-similarity score, no token-set overlap.
+//
+//  4. EXPLICIT COVERAGE. A corpus contract names the surfaces a run must
+//     actually exercise. An unexercised required surface fails unless a
+//     ratified, attributed exception covers it, so "we compared nothing here"
+//     can never report the same verdict as "these behaviors match".
+//
+// The release side is the Python CRG's own persisted state and its own query
+// surfaces; the native side is driven through the adapter/Store API directly
+// (crg.Bootstrap plus the *FromStore readback surfaces), never through the
+// `da kg` command layer, so the gate is independent of which backend the
 // production commands are currently wired to.
 package crgbehavior
 
@@ -30,9 +51,12 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
-// ManifestSchemaVersion is the pinned manifest format version. A manifest
-// written by an older builder is rejected rather than silently misread.
-const ManifestSchemaVersion = 1
+// ManifestSchemaVersion is the pinned manifest format version. v2 records the
+// release the corpus was derived from and each task's languages, because both
+// decide which commits are eligible and which surfaces a run can exercise — a
+// v1 manifest was derived from a narrower, hardcoded language set and would
+// silently under-report coverage.
+const ManifestSchemaVersion = 2
 
 // DefaultManifestPath is the repo-relative path of the checked-in corpus
 // manifest. Regeneration is an explicit command (tools/crgbehaviorgate
@@ -48,12 +72,15 @@ type Task struct {
 	Commit string `json:"commit"`
 	// Subject is the commit subject line, for human-readable gate reports.
 	Subject string `json:"subject"`
-	// ChangedFiles are the repo-relative graph-indexable files the commit
-	// touched — the impact-radius / flows / communities query input.
+	// ChangedFiles are the repo-relative files the pinned release INDEXES that
+	// the commit touched — the impact-radius / flows / communities query input.
 	ChangedFiles []string `json:"changed_files"`
 	// Identifiers are the declaration names added or removed by the commit —
-	// the FTS query input ("FTS over changed identifiers").
+	// the FTS search input.
 	Identifiers []string `json:"identifiers"`
+	// Languages are the release's language labels for ChangedFiles, recorded
+	// so parser coverage is auditable per task rather than assumed.
+	Languages []string `json:"languages"`
 }
 
 // Manifest is the pinned review-task corpus. It is checked in so a gate run is
@@ -66,6 +93,13 @@ type Manifest struct {
 	GeneratedFrom string `json:"generated_from"`
 	// Head is the SHA GeneratedFrom pointed at when the manifest was written.
 	Head string `json:"head"`
+	// Window is how many commits the builder SCANNED to pin Tasks from. A
+	// corpus is a sample; recording the window it was sampled from is what
+	// makes the sample reproducible and its language coverage auditable.
+	Window int `json:"window"`
+	// Release is the code-review-graph release whose indexed-language set
+	// decided which files and identifiers each task carries.
+	Release string `json:"release"`
 	// Tasks are the pinned review tasks, newest commit first.
 	Tasks []Task `json:"tasks"`
 }
@@ -92,12 +126,19 @@ func (m Manifest) Validate() error {
 		return fmt.Errorf("crgbehavior: manifest schema_version %d, want %d (regenerate with tools/crgbehaviorgate -regen)",
 			m.SchemaVersion, ManifestSchemaVersion)
 	}
+	if m.Release != PinnedVersion {
+		return fmt.Errorf("crgbehavior: manifest was derived from release %q, the gate certifies against %q "+
+			"(regenerate with tools/crgbehaviorgate -regen)", m.Release, PinnedVersion)
+	}
 	if len(m.Tasks) == 0 {
 		return fmt.Errorf("crgbehavior: manifest has no tasks")
 	}
 	for i, t := range m.Tasks {
 		if t.Commit == "" {
 			return fmt.Errorf("crgbehavior: manifest task %d has no commit", i)
+		}
+		if len(t.ChangedFiles) == 0 {
+			return fmt.Errorf("crgbehavior: manifest task %d (%s) lists no indexed file", i, short(t.Commit))
 		}
 	}
 	return nil
