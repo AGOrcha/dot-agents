@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -560,6 +561,12 @@ func (a *AgentsRC) UseGitRefBackend() bool {
 // `"hooks": false` their authors never wrote, and honoring it would disable hook
 // projection for every such repo at once. The invariant is pinned by
 // TestRunRefresh_ProjectionIgnoresHooksMCPSettingsFlags.
+//
+// Contrast with GitignoreProjections, which IS a live projection gate: install
+// and refresh read it from the resolved effective snapshot
+// (lifecycle.EffectiveGitignoreProjections), so an org/team layer's value
+// governs the managed block. That field carries no pre-migration fabricated
+// values, which is exactly why it can be honored and these three cannot.
 type AgentsRC struct {
 	Schema  string   `json:"$schema,omitempty"`
 	Version int      `json:"version"`
@@ -1301,6 +1308,22 @@ func (s SourceScope) IsValid() bool {
 	default:
 		return false
 	}
+}
+
+// IsDefaultHomeLocal reports whether s is the path-less `{"type":"local"}`
+// sentinel — the implicit source LoadAgentsRC synthesizes for a manifest that
+// declares none, and the one GenerateAgentsRC historically wrote into every
+// generated manifest. It names the user's ~/.agents home (resolveSourceRoot
+// falls back to config.AgentsHome() when Path is empty), not anything the
+// project owns, so it is never a project resource root.
+//
+// The comparison is a strict DeepEqual against the bare sentinel rather than a
+// field checklist: `{"type":"local","cache_ttl":"4h"}`, or a local source
+// carrying auth/cache_keys/scope, is an AUTHORED declaration and must stay
+// project-owned. DeepEqual also disqualifies any future Source field
+// automatically instead of waiting for someone to extend the predicate.
+func (s Source) IsDefaultHomeLocal() bool {
+	return reflect.DeepEqual(s, Source{Type: "local"})
 }
 
 const AgentsRCFile = ".agentsrc.json"
