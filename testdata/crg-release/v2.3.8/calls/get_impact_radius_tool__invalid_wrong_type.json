@@ -1,0 +1,14 @@
+{
+  "arguments": {
+    "max_depth": "deep"
+  },
+  "case": "invalid_wrong_type",
+  "content": [
+    {
+      "text": "1 validation error for call[get_impact_radius_tool]\nmax_depth\n  Input should be a valid integer, unable to parse string as an integer [type=int_parsing, input_value='deep', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/int_parsing",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "get_impact_radius_tool"
+}

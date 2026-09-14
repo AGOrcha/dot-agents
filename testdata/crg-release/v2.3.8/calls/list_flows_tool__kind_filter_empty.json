@@ -1,0 +1,47 @@
+{
+  "arguments": {
+    "kind": "Test"
+  },
+  "case": "kind_filter_empty",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Found 0 execution flow(s)\",\"flows\":[],\"total\":0,\"truncated\":false,\"_hints\":{\"next_steps\":[{\"tool\":\"get_flow\",\"suggestion\":\"Drill into a specific flow for step-by-step details\"},{\"tool\":\"get_affected_flows\",\"suggestion\":\"Check which flows are affected by recent changes\"},{\"tool\":\"get_architecture_overview\",\"suggestion\":\"See the high-level architecture\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Drill into a specific flow for step-by-step details",
+          "tool": "get_flow"
+        },
+        {
+          "suggestion": "Check which flows are affected by recent changes",
+          "tool": "get_affected_flows"
+        },
+        {
+          "suggestion": "See the high-level architecture",
+          "tool": "get_architecture_overview"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "flows": [],
+    "status": "ok",
+    "summary": "Found 0 execution flow(s)",
+    "total": 0,
+    "truncated": false
+  },
+  "tool": "list_flows_tool"
+}

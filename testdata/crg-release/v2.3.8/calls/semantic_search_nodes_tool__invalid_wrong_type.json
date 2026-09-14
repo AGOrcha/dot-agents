@@ -1,0 +1,15 @@
+{
+  "arguments": {
+    "limit": "many",
+    "query": "x"
+  },
+  "case": "invalid_wrong_type",
+  "content": [
+    {
+      "text": "1 validation error for call[semantic_search_nodes_tool]\nlimit\n  Input should be a valid integer, unable to parse string as an integer [type=int_parsing, input_value='many', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/int_parsing",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "semantic_search_nodes_tool"
+}

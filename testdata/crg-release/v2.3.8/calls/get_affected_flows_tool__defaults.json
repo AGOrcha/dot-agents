@@ -1,0 +1,48 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"0 flow(s) affected by changes in 1 file(s)\",\"changed_files\":[\"pkg/auth/token.go\"],\"affected_flows\":[],\"total\":0,\"truncated\":false,\"_hints\":{\"next_steps\":[{\"tool\":\"detect_changes\",\"suggestion\":\"Get risk-scored change analysis\"},{\"tool\":\"get_flow\",\"suggestion\":\"Inspect a specific affected flow\"},{\"tool\":\"get_review_context\",\"suggestion\":\"Build a full review context for the changes\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Get risk-scored change analysis",
+          "tool": "detect_changes"
+        },
+        {
+          "suggestion": "Inspect a specific affected flow",
+          "tool": "get_flow"
+        },
+        {
+          "suggestion": "Build a full review context for the changes",
+          "tool": "get_review_context"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "affected_flows": [],
+    "changed_files": [
+      "pkg/auth/token.go"
+    ],
+    "status": "ok",
+    "summary": "0 flow(s) affected by changes in 1 file(s)",
+    "total": 0,
+    "truncated": false
+  },
+  "tool": "get_affected_flows_tool"
+}

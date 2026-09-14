@@ -1,0 +1,14 @@
+{
+  "arguments": {
+    "max_results": 0
+  },
+  "case": "bound_max_results",
+  "content": [
+    {
+      "text": "Error calling tool 'list_communities_tool': max_results must be an integer greater than or equal to 1",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "list_communities_tool"
+}

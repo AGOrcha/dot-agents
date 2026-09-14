@@ -1,0 +1,574 @@
+{
+  "clean_full_build": {
+    "bare_edges_resolved": 0,
+    "base_resolved": null,
+    "build_type": "full",
+    "communities_detected": 2,
+    "cpp_scoped_edges_resolved": 0,
+    "errors": [],
+    "event_resolution": {
+      "calls_emitted": 0,
+      "events_indexed": 0,
+      "stale_calls_removed": 0
+    },
+    "files_parsed": 4,
+    "flows_detected": 3,
+    "fts_indexed": 16,
+    "fts_rebuilt": true,
+    "hcl_resolution": {
+      "files_indexed": 0,
+      "imports_resolved": 0,
+      "references_resolved": 0
+    },
+    "postprocess_level": "full",
+    "postprocess_timing": {
+      "communities_s": "${DURATION}",
+      "flows_s": "${DURATION}",
+      "fts_s": "${DURATION}",
+      "signatures_s": "${DURATION}",
+      "summaries_s": "${DURATION}"
+    },
+    "python_resolution": {
+      "files_indexed": 0,
+      "imports_ambiguous": 0,
+      "imports_resolved": 0,
+      "imports_updated": 0
+    },
+    "rescript_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0,
+      "imports_resolved": 0
+    },
+    "scoped_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "signatures_updated": true,
+    "spring_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summaries_computed": true,
+    "summary": "Full build complete: parsed 4 files, created 16 nodes and 29 edges.",
+    "temporal_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "total_edges": 29,
+    "total_nodes": 16
+  },
+  "final_full_build": {
+    "bare_edges_resolved": 0,
+    "base_resolved": null,
+    "build_type": "full",
+    "communities_detected": 2,
+    "cpp_scoped_edges_resolved": 0,
+    "errors": [],
+    "event_resolution": {
+      "calls_emitted": 0,
+      "events_indexed": 0,
+      "stale_calls_removed": 0
+    },
+    "files_parsed": 4,
+    "flows_detected": 3,
+    "fts_indexed": 16,
+    "fts_rebuilt": true,
+    "hcl_resolution": {
+      "files_indexed": 0,
+      "imports_resolved": 0,
+      "references_resolved": 0
+    },
+    "postprocess_level": "full",
+    "postprocess_timing": {
+      "communities_s": "${DURATION}",
+      "flows_s": "${DURATION}",
+      "fts_s": "${DURATION}",
+      "signatures_s": "${DURATION}",
+      "summaries_s": "${DURATION}"
+    },
+    "python_resolution": {
+      "files_indexed": 0,
+      "imports_ambiguous": 0,
+      "imports_resolved": 0,
+      "imports_updated": 0
+    },
+    "rescript_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0,
+      "imports_resolved": 0
+    },
+    "scoped_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "signatures_updated": true,
+    "spring_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summaries_computed": true,
+    "summary": "Full build complete: parsed 4 files, created 16 nodes and 29 edges.",
+    "temporal_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "total_edges": 29,
+    "total_nodes": 16
+  },
+  "full_build": {
+    "bare_edges_resolved": 0,
+    "base_resolved": null,
+    "build_type": "full",
+    "communities_detected": 2,
+    "cpp_scoped_edges_resolved": 0,
+    "errors": [],
+    "event_resolution": {
+      "calls_emitted": 0,
+      "events_indexed": 0,
+      "stale_calls_removed": 0
+    },
+    "files_parsed": 4,
+    "flows_detected": 3,
+    "fts_indexed": 16,
+    "fts_rebuilt": true,
+    "hcl_resolution": {
+      "files_indexed": 0,
+      "imports_resolved": 0,
+      "references_resolved": 0
+    },
+    "postprocess_level": "full",
+    "postprocess_timing": {
+      "communities_s": "${DURATION}",
+      "flows_s": "${DURATION}",
+      "fts_s": "${DURATION}",
+      "signatures_s": "${DURATION}",
+      "summaries_s": "${DURATION}"
+    },
+    "python_resolution": {
+      "files_indexed": 0,
+      "imports_ambiguous": 0,
+      "imports_resolved": 0,
+      "imports_updated": 0
+    },
+    "rescript_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0,
+      "imports_resolved": 0
+    },
+    "scoped_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "signatures_updated": true,
+    "spring_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summaries_computed": true,
+    "summary": "Full build complete: parsed 4 files, created 16 nodes and 29 edges.",
+    "temporal_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "total_edges": 29,
+    "total_nodes": 16
+  },
+  "full_build_again": {
+    "bare_edges_resolved": 0,
+    "base_resolved": null,
+    "build_type": "full",
+    "communities_detected": 2,
+    "cpp_scoped_edges_resolved": 0,
+    "errors": [],
+    "event_resolution": {
+      "calls_emitted": 0,
+      "events_indexed": 0,
+      "stale_calls_removed": 0
+    },
+    "files_parsed": 4,
+    "flows_detected": 3,
+    "fts_indexed": 16,
+    "fts_rebuilt": true,
+    "hcl_resolution": {
+      "files_indexed": 0,
+      "imports_resolved": 0,
+      "references_resolved": 0
+    },
+    "postprocess_level": "full",
+    "postprocess_timing": {
+      "communities_s": "${DURATION}",
+      "flows_s": "${DURATION}",
+      "fts_s": "${DURATION}",
+      "signatures_s": "${DURATION}",
+      "summaries_s": "${DURATION}"
+    },
+    "python_resolution": {
+      "files_indexed": 0,
+      "imports_ambiguous": 0,
+      "imports_resolved": 0,
+      "imports_updated": 0
+    },
+    "rescript_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0,
+      "imports_resolved": 0
+    },
+    "scoped_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "signatures_updated": true,
+    "spring_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summaries_computed": true,
+    "summary": "Full build complete: parsed 4 files, created 16 nodes and 29 edges.",
+    "temporal_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "total_edges": 29,
+    "total_nodes": 16
+  },
+  "full_build_restoring_summaries": {
+    "bare_edges_resolved": 0,
+    "base_resolved": null,
+    "build_type": "full",
+    "communities_detected": 2,
+    "cpp_scoped_edges_resolved": 0,
+    "errors": [],
+    "event_resolution": {
+      "calls_emitted": 0,
+      "events_indexed": 0,
+      "stale_calls_removed": 0
+    },
+    "files_parsed": 4,
+    "flows_detected": 3,
+    "fts_indexed": 16,
+    "fts_rebuilt": true,
+    "hcl_resolution": {
+      "files_indexed": 0,
+      "imports_resolved": 0,
+      "references_resolved": 0
+    },
+    "postprocess_level": "full",
+    "postprocess_timing": {
+      "communities_s": "${DURATION}",
+      "flows_s": "${DURATION}",
+      "fts_s": "${DURATION}",
+      "signatures_s": "${DURATION}",
+      "summaries_s": "${DURATION}"
+    },
+    "python_resolution": {
+      "files_indexed": 0,
+      "imports_ambiguous": 0,
+      "imports_resolved": 0,
+      "imports_updated": 0
+    },
+    "rescript_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0,
+      "imports_resolved": 0
+    },
+    "scoped_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "signatures_updated": true,
+    "spring_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summaries_computed": true,
+    "summary": "Full build complete: parsed 4 files, created 16 nodes and 29 edges.",
+    "temporal_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "total_edges": 29,
+    "total_nodes": 16
+  },
+  "incremental_auto_base_no_changes": {
+    "base_resolved": "${HEAD_SHA}",
+    "build_type": "incremental",
+    "changed_files": [],
+    "dependent_files": [],
+    "errors": [],
+    "files_updated": 0,
+    "postprocess_level": "full",
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summary": "No changes detected. Graph is up to date.",
+    "total_edges": 0,
+    "total_nodes": 0
+  },
+  "incremental_auto_base_with_changes": {
+    "bare_edges_resolved": 0,
+    "base_resolved": "${HEAD_SHA}",
+    "build_type": "incremental",
+    "changed_files": [
+      "pkg/auth/auth.go"
+    ],
+    "communities_detected": 0,
+    "cpp_scoped_edges_resolved": 0,
+    "dependent_files": [],
+    "errors": [],
+    "event_resolution": null,
+    "files_updated": 1,
+    "flows_detected": 0,
+    "fts_indexed": 16,
+    "fts_rebuilt": true,
+    "hcl_resolution": null,
+    "postprocess_level": "full",
+    "postprocess_timing": {
+      "communities_s": "${DURATION}",
+      "flows_s": "${DURATION}",
+      "fts_s": "${DURATION}",
+      "signatures_s": "${DURATION}",
+      "summaries_s": "${DURATION}"
+    },
+    "python_resolution": null,
+    "rescript_resolution": null,
+    "scoped_resolution": null,
+    "signatures_updated": true,
+    "spring_resolution": null,
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summaries_computed": true,
+    "summary": "Incremental update: 1 files re-parsed, 7 nodes and 9 edges updated. Changed: ['pkg/auth/auth.go']. Dependents also updated: [].",
+    "temporal_resolution": null,
+    "total_edges": 9,
+    "total_nodes": 7
+  },
+  "incremental_empty_base": {
+    "base_resolved": "",
+    "build_type": "incremental",
+    "changed_files": [],
+    "dependent_files": [],
+    "errors": [],
+    "files_updated": 0,
+    "postprocess_level": "full",
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summary": "No changes detected. Graph is up to date.",
+    "total_edges": 0,
+    "total_nodes": 0
+  },
+  "incremental_explicit_base": {
+    "base_resolved": "${BASE_SHA}",
+    "build_type": "incremental",
+    "changed_files": [
+      "pkg/auth/token.go"
+    ],
+    "dependent_files": [],
+    "errors": [],
+    "event_resolution": null,
+    "files_updated": 0,
+    "hcl_resolution": null,
+    "postprocess_level": "full",
+    "python_resolution": null,
+    "rescript_resolution": null,
+    "scoped_resolution": null,
+    "spring_resolution": null,
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summary": "No changes detected. Graph is up to date.",
+    "temporal_resolution": null,
+    "total_edges": 0,
+    "total_nodes": 0
+  },
+  "incremental_unresolvable_base": {
+    "base_resolved": "0000000000000000000000000000000000000000",
+    "build_type": "incremental",
+    "changed_files": [],
+    "dependent_files": [],
+    "errors": [],
+    "files_updated": 0,
+    "postprocess_level": "full",
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summary": "No changes detected. Graph is up to date.",
+    "total_edges": 0,
+    "total_nodes": 0
+  },
+  "postprocess_minimal_build": {
+    "bare_edges_resolved": 0,
+    "base_resolved": null,
+    "build_type": "full",
+    "cpp_scoped_edges_resolved": 0,
+    "errors": [],
+    "event_resolution": {
+      "calls_emitted": 0,
+      "events_indexed": 0,
+      "stale_calls_removed": 0
+    },
+    "files_parsed": 4,
+    "fts_indexed": 16,
+    "fts_rebuilt": true,
+    "hcl_resolution": {
+      "files_indexed": 0,
+      "imports_resolved": 0,
+      "references_resolved": 0
+    },
+    "postprocess_level": "minimal",
+    "postprocess_timing": {
+      "fts_s": "${DURATION}",
+      "signatures_s": "${DURATION}"
+    },
+    "python_resolution": {
+      "files_indexed": 0,
+      "imports_ambiguous": 0,
+      "imports_resolved": 0,
+      "imports_updated": 0
+    },
+    "rescript_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0,
+      "imports_resolved": 0
+    },
+    "scoped_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "signatures_updated": true,
+    "spring_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summary": "Full build complete: parsed 4 files, created 16 nodes and 29 edges.",
+    "temporal_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "total_edges": 29,
+    "total_nodes": 16
+  },
+  "postprocess_none_build": {
+    "base_resolved": null,
+    "build_type": "full",
+    "errors": [],
+    "event_resolution": {
+      "calls_emitted": 0,
+      "events_indexed": 0,
+      "stale_calls_removed": 0
+    },
+    "files_parsed": 4,
+    "hcl_resolution": {
+      "files_indexed": 0,
+      "imports_resolved": 0,
+      "references_resolved": 0
+    },
+    "postprocess_level": "none",
+    "python_resolution": {
+      "files_indexed": 0,
+      "imports_ambiguous": 0,
+      "imports_resolved": 0,
+      "imports_updated": 0
+    },
+    "rescript_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0,
+      "imports_resolved": 0
+    },
+    "scoped_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "spring_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "stale_files_removed": 0,
+    "status": "ok",
+    "summary": "Full build complete: parsed 4 files, created 16 nodes and 29 edges.",
+    "temporal_resolution": {
+      "calls_resolved": 0,
+      "files_indexed": 0
+    },
+    "total_edges": 29,
+    "total_nodes": 16
+  },
+  "standalone_postprocess": {
+    "bare_edges_resolved": 0,
+    "communities_detected": 2,
+    "cpp_scoped_edges_resolved": 0,
+    "flows_detected": 3,
+    "fts_indexed": 16,
+    "signatures_updated": true,
+    "status": "ok",
+    "summary": "Post-processing complete."
+  },
+  "standalone_postprocess_flows_only": {
+    "bare_edges_resolved": 0,
+    "cpp_scoped_edges_resolved": 0,
+    "flows_detected": 3,
+    "signatures_updated": true,
+    "status": "ok",
+    "summary": "Post-processing complete."
+  },
+  "standalone_postprocess_no_flows": {
+    "bare_edges_resolved": 0,
+    "cpp_scoped_edges_resolved": 0,
+    "signatures_updated": true,
+    "status": "ok",
+    "summary": "Post-processing complete."
+  },
+  "summary_tables_after_full_build": {
+    "communities": 2,
+    "community_summaries": 2,
+    "flow_memberships": 7,
+    "flow_snapshots": 3,
+    "flows": 3,
+    "nodes_fts": 16,
+    "risk_index": 12
+  },
+  "summary_tables_after_selective_postprocess": {
+    "communities": 2,
+    "community_summaries": 0,
+    "flow_memberships": 7,
+    "flow_snapshots": 0,
+    "flows": 3,
+    "nodes_fts": 16,
+    "risk_index": 0
+  },
+  "summary_tables_after_standalone_postprocess": {
+    "communities": 2,
+    "community_summaries": 0,
+    "flow_memberships": 7,
+    "flow_snapshots": 0,
+    "flows": 3,
+    "nodes_fts": 16,
+    "risk_index": 0
+  },
+  "summary_tables_before_standalone_postprocess": {
+    "communities": 2,
+    "community_summaries": 0,
+    "flow_memberships": 7,
+    "flow_snapshots": 0,
+    "flows": 3,
+    "nodes_fts": 16,
+    "risk_index": 0
+  },
+  "summary_tables_restored": {
+    "communities": 2,
+    "community_summaries": 2,
+    "flow_memberships": 7,
+    "flow_snapshots": 3,
+    "flows": 3,
+    "nodes_fts": 16,
+    "risk_index": 12
+  }
+}

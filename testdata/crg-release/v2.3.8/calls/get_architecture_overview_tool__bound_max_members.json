@@ -1,0 +1,14 @@
+{
+  "arguments": {
+    "max_members": -1
+  },
+  "case": "bound_max_members",
+  "content": [
+    {
+      "text": "Error calling tool 'get_architecture_overview_tool': max_members must be an integer greater than or equal to 1",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "get_architecture_overview_tool"
+}

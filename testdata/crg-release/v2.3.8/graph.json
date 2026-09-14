@@ -1,0 +1,920 @@
+{
+  "communities": [
+    {
+      "cohesion": 0.2857,
+      "description": "Directory-based community: cmd",
+      "dominant_language": "go",
+      "id": 1,
+      "level": 0,
+      "name": "cmd-handle",
+      "parent_id": null,
+      "size": 3
+    },
+    {
+      "cohesion": 0.15,
+      "description": "Directory-based community: pkg/auth",
+      "dominant_language": "go",
+      "id": 2,
+      "level": 0,
+      "name": "auth-token",
+      "parent_id": null,
+      "size": 9
+    }
+  ],
+  "community_summaries": [
+    {
+      "community_id": 1,
+      "dominant_language": "go",
+      "key_symbols": "[\"handleLogin\", \"main\", \"renderSession\"]",
+      "name": "cmd-handle",
+      "purpose": "cmd",
+      "risk": "unknown",
+      "size": 3
+    },
+    {
+      "community_id": 2,
+      "dominant_language": "go",
+      "key_symbols": "[\"TestLogin\", \"TestValidateToken\", \"Login\", \"Session\", \"hashPassword\"]",
+      "name": "auth-token",
+      "purpose": "auth",
+      "risk": "unknown",
+      "size": 9
+    }
+  ],
+  "edges": [
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 1,
+      "kind": "IMPORTS_FROM",
+      "line": 3,
+      "source_qualified": "${REPO_ROOT}/cmd/main.go",
+      "target_qualified": "example.com/fixture/pkg/auth"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 2,
+      "kind": "CONTAINS",
+      "line": 5,
+      "source_qualified": "${REPO_ROOT}/cmd/main.go",
+      "target_qualified": "${REPO_ROOT}/cmd/main.go::main"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 3,
+      "kind": "CALLS",
+      "line": 6,
+      "source_qualified": "${REPO_ROOT}/cmd/main.go::main",
+      "target_qualified": "${REPO_ROOT}/cmd/main.go::handleLogin"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 4,
+      "kind": "CONTAINS",
+      "line": 9,
+      "source_qualified": "${REPO_ROOT}/cmd/main.go",
+      "target_qualified": "${REPO_ROOT}/cmd/main.go::handleLogin"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 5,
+      "kind": "CALLS",
+      "line": 10,
+      "source_qualified": "${REPO_ROOT}/cmd/main.go::handleLogin",
+      "target_qualified": "Login"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 6,
+      "kind": "CALLS",
+      "line": 11,
+      "source_qualified": "${REPO_ROOT}/cmd/main.go::handleLogin",
+      "target_qualified": "ValidateToken"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 7,
+      "kind": "CALLS",
+      "line": 12,
+      "source_qualified": "${REPO_ROOT}/cmd/main.go::handleLogin",
+      "target_qualified": "${REPO_ROOT}/cmd/main.go::renderSession"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 8,
+      "kind": "CONTAINS",
+      "line": 15,
+      "source_qualified": "${REPO_ROOT}/cmd/main.go",
+      "target_qualified": "${REPO_ROOT}/cmd/main.go::renderSession"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 9,
+      "kind": "CONTAINS",
+      "line": 4,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth.go",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 10,
+      "kind": "CONTAINS",
+      "line": 10,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth.go::Session",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 11,
+      "kind": "CONTAINS",
+      "line": 15,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth.go",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 12,
+      "kind": "CALLS",
+      "line": 16,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+      "target_qualified": "mintToken"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 13,
+      "kind": "CALLS",
+      "line": 16,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 14,
+      "kind": "CONTAINS",
+      "line": 19,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth.go",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 15,
+      "kind": "CONTAINS",
+      "line": 24,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth.go",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 16,
+      "kind": "CALLS",
+      "line": 25,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth.go::revoked"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 17,
+      "kind": "CONTAINS",
+      "line": 28,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth.go",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth.go::revoked"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 18,
+      "kind": "IMPORTS_FROM",
+      "line": 3,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "target_qualified": "testing"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 19,
+      "kind": "CONTAINS",
+      "line": 5,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 20,
+      "kind": "CALLS",
+      "line": 6,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin",
+      "target_qualified": "Login"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 21,
+      "kind": "CALLS",
+      "line": 7,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin",
+      "target_qualified": "Fatal"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 22,
+      "kind": "CONTAINS",
+      "line": 11,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 23,
+      "kind": "CALLS",
+      "line": 12,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken",
+      "target_qualified": "ValidateToken"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 24,
+      "kind": "CALLS",
+      "line": 13,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken",
+      "target_qualified": "Fatal"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 25,
+      "kind": "TESTED_BY",
+      "line": 6,
+      "source_qualified": "Login",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 26,
+      "kind": "TESTED_BY",
+      "line": 7,
+      "source_qualified": "Fatal",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 27,
+      "kind": "TESTED_BY",
+      "line": 12,
+      "source_qualified": "ValidateToken",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 28,
+      "kind": "TESTED_BY",
+      "line": 13,
+      "source_qualified": "Fatal",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken"
+    },
+    {
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED",
+      "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+      "id": 29,
+      "kind": "CONTAINS",
+      "line": 4,
+      "source_qualified": "${REPO_ROOT}/pkg/auth/token.go",
+      "target_qualified": "${REPO_ROOT}/pkg/auth/token.go::mintToken"
+    }
+  ],
+  "flow_memberships": [
+    {
+      "flow_id": 1,
+      "node_id": 8,
+      "position": 0
+    },
+    {
+      "flow_id": 1,
+      "node_id": 9,
+      "position": 1
+    },
+    {
+      "flow_id": 2,
+      "node_id": 2,
+      "position": 0
+    },
+    {
+      "flow_id": 2,
+      "node_id": 3,
+      "position": 1
+    },
+    {
+      "flow_id": 2,
+      "node_id": 4,
+      "position": 2
+    },
+    {
+      "flow_id": 3,
+      "node_id": 10,
+      "position": 0
+    },
+    {
+      "flow_id": 3,
+      "node_id": 11,
+      "position": 1
+    }
+  ],
+  "flow_snapshots": [
+    {
+      "critical_path": "[\"${REPO_ROOT}/pkg/auth/auth.go::Login\", \"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\"]",
+      "criticality": 0.45,
+      "entry_point": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+      "file_count": 1,
+      "flow_id": 1,
+      "name": "Login",
+      "node_count": 2
+    },
+    {
+      "critical_path": "[\"${REPO_ROOT}/cmd/main.go::main\", \"${REPO_ROOT}/cmd/main.go::handleLogin\", \"${REPO_ROOT}/cmd/main.go::renderSession\"]",
+      "criticality": 0.4167,
+      "entry_point": "${REPO_ROOT}/cmd/main.go::main",
+      "file_count": 1,
+      "flow_id": 2,
+      "name": "main",
+      "node_count": 3
+    },
+    {
+      "critical_path": "[\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\", \"${REPO_ROOT}/pkg/auth/auth.go::revoked\"]",
+      "criticality": 0.41,
+      "entry_point": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken",
+      "file_count": 1,
+      "flow_id": 3,
+      "name": "ValidateToken",
+      "node_count": 2
+    }
+  ],
+  "flows": [
+    {
+      "criticality": 0.45,
+      "depth": 1,
+      "entry_point_id": 8,
+      "file_count": 1,
+      "id": 1,
+      "name": "Login",
+      "node_count": 2,
+      "path_json": "[8, 9]"
+    },
+    {
+      "criticality": 0.4167,
+      "depth": 2,
+      "entry_point_id": 2,
+      "file_count": 1,
+      "id": 2,
+      "name": "main",
+      "node_count": 3,
+      "path_json": "[2, 3, 4]"
+    },
+    {
+      "criticality": 0.41,
+      "depth": 1,
+      "entry_point_id": 10,
+      "file_count": 1,
+      "id": 3,
+      "name": "ValidateToken",
+      "node_count": 2,
+      "path_json": "[10, 11]"
+    }
+  ],
+  "fts": [
+    {
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "name": "${REPO_ROOT}/cmd/main.go",
+      "node_id": 1,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go",
+      "signature": "${REPO_ROOT}/cmd/main.go"
+    },
+    {
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "name": "main",
+      "node_id": 2,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go::main",
+      "signature": "def main(())"
+    },
+    {
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "name": "handleLogin",
+      "node_id": 3,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin",
+      "signature": "def handleLogin(())"
+    },
+    {
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "name": "renderSession",
+      "node_id": 4,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go::renderSession",
+      "signature": "def renderSession((s *auth.Session))"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "name": "${REPO_ROOT}/pkg/auth/auth.go",
+      "node_id": 5,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go",
+      "signature": "${REPO_ROOT}/pkg/auth/auth.go"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "name": "Session",
+      "node_id": 6,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session",
+      "signature": "class Session"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "name": "Expired",
+      "node_id": 7,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired",
+      "signature": "def Expired((s *Session))"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "name": "Login",
+      "node_id": 8,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+      "signature": "def Login((user, password string))"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "name": "hashPassword",
+      "node_id": 9,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword",
+      "signature": "def hashPassword((password string))"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "name": "ValidateToken",
+      "node_id": 10,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken",
+      "signature": "def ValidateToken((token string))"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "name": "revoked",
+      "node_id": 11,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked",
+      "signature": "def revoked((token string))"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "name": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "node_id": 12,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "signature": "${REPO_ROOT}/pkg/auth/auth_test.go"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "name": "TestLogin",
+      "node_id": 13,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin",
+      "signature": "def TestLogin((t *testing.T))"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "name": "TestValidateToken",
+      "node_id": 14,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken",
+      "signature": "def TestValidateToken((t *testing.T))"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+      "name": "${REPO_ROOT}/pkg/auth/token.go",
+      "node_id": 15,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/token.go",
+      "signature": "${REPO_ROOT}/pkg/auth/token.go"
+    },
+    {
+      "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+      "name": "mintToken",
+      "node_id": 16,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken",
+      "signature": "def mintToken((user, digest string))"
+    }
+  ],
+  "nodes": [
+    {
+      "community_id": null,
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 1,
+      "is_test": 0,
+      "kind": "File",
+      "language": "go",
+      "line_end": 18,
+      "line_start": 1,
+      "modifiers": null,
+      "name": "${REPO_ROOT}/cmd/main.go",
+      "params": null,
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go",
+      "return_type": null,
+      "signature": "${REPO_ROOT}/cmd/main.go"
+    },
+    {
+      "community_id": 1,
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 2,
+      "is_test": 0,
+      "kind": "Function",
+      "language": "go",
+      "line_end": 7,
+      "line_start": 5,
+      "modifiers": null,
+      "name": "main",
+      "params": "()",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go::main",
+      "return_type": null,
+      "signature": "def main(())"
+    },
+    {
+      "community_id": 1,
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 3,
+      "is_test": 0,
+      "kind": "Function",
+      "language": "go",
+      "line_end": 13,
+      "line_start": 9,
+      "modifiers": null,
+      "name": "handleLogin",
+      "params": "()",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin",
+      "return_type": null,
+      "signature": "def handleLogin(())"
+    },
+    {
+      "community_id": 1,
+      "file_path": "${REPO_ROOT}/cmd/main.go",
+      "id": 4,
+      "is_test": 0,
+      "kind": "Function",
+      "language": "go",
+      "line_end": 17,
+      "line_start": 15,
+      "modifiers": null,
+      "name": "renderSession",
+      "params": "(s *auth.Session)",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go::renderSession",
+      "return_type": null,
+      "signature": "def renderSession((s *auth.Session))"
+    },
+    {
+      "community_id": null,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 5,
+      "is_test": 0,
+      "kind": "File",
+      "language": "go",
+      "line_end": 31,
+      "line_start": 1,
+      "modifiers": null,
+      "name": "${REPO_ROOT}/pkg/auth/auth.go",
+      "params": null,
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go",
+      "return_type": null,
+      "signature": "${REPO_ROOT}/pkg/auth/auth.go"
+    },
+    {
+      "community_id": 2,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 6,
+      "is_test": 0,
+      "kind": "Class",
+      "language": "go",
+      "line_end": 7,
+      "line_start": 4,
+      "modifiers": null,
+      "name": "Session",
+      "params": null,
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session",
+      "return_type": null,
+      "signature": "class Session"
+    },
+    {
+      "community_id": 2,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 7,
+      "is_test": 0,
+      "kind": "Function",
+      "language": "go",
+      "line_end": 12,
+      "line_start": 10,
+      "modifiers": null,
+      "name": "Expired",
+      "params": "(s *Session)",
+      "parent_name": "Session",
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired",
+      "return_type": null,
+      "signature": "def Expired((s *Session))"
+    },
+    {
+      "community_id": 2,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 8,
+      "is_test": 0,
+      "kind": "Function",
+      "language": "go",
+      "line_end": 17,
+      "line_start": 15,
+      "modifiers": null,
+      "name": "Login",
+      "params": "(user, password string)",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+      "return_type": null,
+      "signature": "def Login((user, password string))"
+    },
+    {
+      "community_id": 2,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 9,
+      "is_test": 0,
+      "kind": "Function",
+      "language": "go",
+      "line_end": 21,
+      "line_start": 19,
+      "modifiers": null,
+      "name": "hashPassword",
+      "params": "(password string)",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword",
+      "return_type": null,
+      "signature": "def hashPassword((password string))"
+    },
+    {
+      "community_id": 2,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 10,
+      "is_test": 0,
+      "kind": "Function",
+      "language": "go",
+      "line_end": 26,
+      "line_start": 24,
+      "modifiers": null,
+      "name": "ValidateToken",
+      "params": "(token string)",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken",
+      "return_type": null,
+      "signature": "def ValidateToken((token string))"
+    },
+    {
+      "community_id": 2,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+      "id": 11,
+      "is_test": 0,
+      "kind": "Function",
+      "language": "go",
+      "line_end": 30,
+      "line_start": 28,
+      "modifiers": null,
+      "name": "revoked",
+      "params": "(token string)",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked",
+      "return_type": null,
+      "signature": "def revoked((token string))"
+    },
+    {
+      "community_id": null,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 12,
+      "is_test": 1,
+      "kind": "File",
+      "language": "go",
+      "line_end": 16,
+      "line_start": 1,
+      "modifiers": null,
+      "name": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "params": null,
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "return_type": null,
+      "signature": "${REPO_ROOT}/pkg/auth/auth_test.go"
+    },
+    {
+      "community_id": 2,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 13,
+      "is_test": 1,
+      "kind": "Test",
+      "language": "go",
+      "line_end": 9,
+      "line_start": 5,
+      "modifiers": null,
+      "name": "TestLogin",
+      "params": "(t *testing.T)",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin",
+      "return_type": null,
+      "signature": "def TestLogin((t *testing.T))"
+    },
+    {
+      "community_id": 2,
+      "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+      "id": 14,
+      "is_test": 1,
+      "kind": "Test",
+      "language": "go",
+      "line_end": 15,
+      "line_start": 11,
+      "modifiers": null,
+      "name": "TestValidateToken",
+      "params": "(t *testing.T)",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken",
+      "return_type": null,
+      "signature": "def TestValidateToken((t *testing.T))"
+    },
+    {
+      "community_id": null,
+      "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+      "id": 15,
+      "is_test": 0,
+      "kind": "File",
+      "language": "go",
+      "line_end": 7,
+      "line_start": 1,
+      "modifiers": null,
+      "name": "${REPO_ROOT}/pkg/auth/token.go",
+      "params": null,
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/token.go",
+      "return_type": null,
+      "signature": "${REPO_ROOT}/pkg/auth/token.go"
+    },
+    {
+      "community_id": 2,
+      "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+      "id": 16,
+      "is_test": 0,
+      "kind": "Function",
+      "language": "go",
+      "line_end": 6,
+      "line_start": 4,
+      "modifiers": null,
+      "name": "mintToken",
+      "params": "(user, digest string)",
+      "parent_name": null,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken",
+      "return_type": null,
+      "signature": "def mintToken((user, digest string))"
+    }
+  ],
+  "risk_index": [
+    {
+      "caller_count": 0,
+      "node_id": 2,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go::main",
+      "risk_score": 0.3,
+      "security_relevant": 0,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 1,
+      "node_id": 3,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin",
+      "risk_score": 0.7,
+      "security_relevant": 1,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 1,
+      "node_id": 4,
+      "qualified_name": "${REPO_ROOT}/cmd/main.go::renderSession",
+      "risk_score": 0.7,
+      "security_relevant": 1,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 0,
+      "node_id": 6,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session",
+      "risk_score": 0.7,
+      "security_relevant": 1,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 0,
+      "node_id": 7,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired",
+      "risk_score": 0.3,
+      "security_relevant": 0,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 0,
+      "node_id": 8,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+      "risk_score": 0.7,
+      "security_relevant": 1,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 1,
+      "node_id": 9,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword",
+      "risk_score": 0.7,
+      "security_relevant": 1,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 0,
+      "node_id": 10,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken",
+      "risk_score": 0.7,
+      "security_relevant": 1,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 1,
+      "node_id": 11,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked",
+      "risk_score": 0.3,
+      "security_relevant": 0,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 0,
+      "node_id": 13,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin",
+      "risk_score": 0.7,
+      "security_relevant": 1,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 0,
+      "node_id": 14,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken",
+      "risk_score": 0.7,
+      "security_relevant": 1,
+      "test_coverage": "untested"
+    },
+    {
+      "caller_count": 0,
+      "node_id": 16,
+      "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken",
+      "risk_score": 0.7,
+      "security_relevant": 1,
+      "test_coverage": "untested"
+    }
+  ]
+}

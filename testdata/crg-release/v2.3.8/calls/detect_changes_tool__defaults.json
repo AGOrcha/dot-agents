@@ -1,0 +1,99 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Analyzed 1 changed file(s):\\n  - 1 changed function(s)/class(es)\\n  - 0 affected flow(s)\\n  - 1 test gap(s)\\n  - Overall risk score: 0.50\\n  - Untested: mintToken\",\"risk_score\":0.5,\"changed_functions\":[{\"id\":16,\"kind\":\"Function\",\"name\":\"mintToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":4,\"line_end\":6,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"risk_score\":0.5}],\"affected_flows\":[],\"test_gaps\":[{\"name\":\"mintToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"file\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":4,\"line_end\":6}],\"review_priorities\":[{\"id\":16,\"kind\":\"Function\",\"name\":\"mintToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":4,\"line_end\":6,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"risk_score\":0.5}],\"functions_truncated\":false,\"changed_files\":[\"pkg/auth/token.go\"],\"changed_file_count\":1,\"changed_functions_total\":1,\"test_gaps_total\":1,\"affected_flows_total\":0,\"truncated\":false,\"_hints\":{\"next_steps\":[{\"tool\":\"get_review_context\",\"suggestion\":\"Build a full review context with source snippets\"},{\"tool\":\"get_affected_flows\",\"suggestion\":\"See which execution flows are affected\"},{\"tool\":\"get_impact_radius\",\"suggestion\":\"Expand the blast radius analysis\"}],\"related\":[],\"warnings\":[\"Test coverage gaps: mintToken\"]},\"context_savings\":{\"estimated\":true,\"saved_tokens\":\"${SAVED_TOKENS}\",\"saved_percent\":\"${SAVED_PERCENT}\"},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Build a full review context with source snippets",
+          "tool": "get_review_context"
+        },
+        {
+          "suggestion": "See which execution flows are affected",
+          "tool": "get_affected_flows"
+        },
+        {
+          "suggestion": "Expand the blast radius analysis",
+          "tool": "get_impact_radius"
+        }
+      ],
+      "related": [],
+      "warnings": [
+        "Test coverage gaps: mintToken"
+      ]
+    },
+    "affected_flows": [],
+    "affected_flows_total": 0,
+    "changed_file_count": 1,
+    "changed_files": [
+      "pkg/auth/token.go"
+    ],
+    "changed_functions": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 16,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 6,
+        "line_start": 4,
+        "name": "mintToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken",
+        "risk_score": 0.5
+      }
+    ],
+    "changed_functions_total": 1,
+    "context_savings": {
+      "estimated": true,
+      "saved_percent": "${SAVED_PERCENT}",
+      "saved_tokens": "${SAVED_TOKENS}"
+    },
+    "functions_truncated": false,
+    "review_priorities": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 16,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 6,
+        "line_start": 4,
+        "name": "mintToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken",
+        "risk_score": 0.5
+      }
+    ],
+    "risk_score": 0.5,
+    "status": "ok",
+    "summary": "Analyzed 1 changed file(s):\n  - 1 changed function(s)/class(es)\n  - 0 affected flow(s)\n  - 1 test gap(s)\n  - Overall risk score: 0.50\n  - Untested: mintToken",
+    "test_gaps": [
+      {
+        "file": "${REPO_ROOT}/pkg/auth/token.go",
+        "line_end": 6,
+        "line_start": 4,
+        "name": "mintToken",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken"
+      }
+    ],
+    "test_gaps_total": 1,
+    "truncated": false
+  },
+  "tool": "detect_changes_tool"
+}

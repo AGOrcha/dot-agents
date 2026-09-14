@@ -1,0 +1,81 @@
+{
+  "arguments": {
+    "flow_name": ""
+  },
+  "case": "empty_name",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Flow 'Login': 2 nodes, depth 1, criticality 0.4500\",\"flow\":{\"id\":1,\"name\":\"Login\",\"entry_point_id\":8,\"depth\":1,\"node_count\":2,\"file_count\":1,\"criticality\":0.45,\"path\":[8,9],\"steps\":[{\"node_id\":8,\"name\":\"Login\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":15,\"line_end\":17,\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\"},{\"node_id\":9,\"name\":\"hashPassword\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":19,\"line_end\":21,\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\"}],\"created_at\":\"${TIMESTAMP}\",\"updated_at\":\"${TIMESTAMP}\",\"total_steps\":2,\"truncated\":false},\"_hints\":{\"next_steps\":[{\"tool\":\"query_graph\",\"suggestion\":\"Inspect callers/callees of a step in this flow\"},{\"tool\":\"get_affected_flows\",\"suggestion\":\"Check if changes affect this flow\"},{\"tool\":\"list_flows\",\"suggestion\":\"Browse other execution flows\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Inspect callers/callees of a step in this flow",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "Check if changes affect this flow",
+          "tool": "get_affected_flows"
+        },
+        {
+          "suggestion": "Browse other execution flows",
+          "tool": "list_flows"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "flow": {
+      "created_at": "${TIMESTAMP}",
+      "criticality": 0.45,
+      "depth": 1,
+      "entry_point_id": 8,
+      "file_count": 1,
+      "id": 1,
+      "name": "Login",
+      "node_count": 2,
+      "path": [
+        8,
+        9
+      ],
+      "steps": [
+        {
+          "file": "${REPO_ROOT}/pkg/auth/auth.go",
+          "kind": "Function",
+          "line_end": 17,
+          "line_start": 15,
+          "name": "Login",
+          "node_id": 8,
+          "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+        },
+        {
+          "file": "${REPO_ROOT}/pkg/auth/auth.go",
+          "kind": "Function",
+          "line_end": 21,
+          "line_start": 19,
+          "name": "hashPassword",
+          "node_id": 9,
+          "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+        }
+      ],
+      "total_steps": 2,
+      "truncated": false,
+      "updated_at": "${TIMESTAMP}"
+    },
+    "status": "ok",
+    "summary": "Flow 'Login': 2 nodes, depth 1, criticality 0.4500"
+  },
+  "tool": "get_flow_tool"
+}

@@ -1,0 +1,27 @@
+{
+  "arguments": {
+    "pattern": "no_such_pattern",
+    "target": "Login"
+  },
+  "case": "unknown_pattern",
+  "content": [
+    {
+      "text": "{\"status\":\"error\",\"error\":\"Unknown pattern 'no_such_pattern'. Available: ['callers_of', 'references_to', 'callees_of', 'imports_of', 'importers_of', 'children_of', 'tests_for', 'inheritors_of', 'triggers_of', 'triggered_by', 'publishers_of', 'listeners_of', 'handlers_of', 'endpoints_for', 'consumers_of', 'file_summary']\",\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "error": "Unknown pattern 'no_such_pattern'. Available: ['callers_of', 'references_to', 'callees_of', 'imports_of', 'importers_of', 'children_of', 'tests_for', 'inheritors_of', 'triggers_of', 'triggered_by', 'publishers_of', 'listeners_of', 'handlers_of', 'endpoints_for', 'consumers_of', 'file_summary']",
+    "status": "error"
+  },
+  "tool": "query_graph_tool"
+}

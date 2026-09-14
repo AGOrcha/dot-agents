@@ -1,0 +1,117 @@
+{
+  "arguments": {
+    "file_path_pattern": "pkg/auth",
+    "kind": "Function",
+    "limit": 10,
+    "min_lines": 3
+  },
+  "case": "kind_and_pattern",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Found 6 node(s) with >= 3 lines (kind=Function) matching 'pkg/auth':\\n     3 lines | Function | Expired (pkg/auth/auth.go:10)\\n     3 lines | Function | Login (pkg/auth/auth.go:15)\\n     3 lines | Function | hashPassword (pkg/auth/auth.go:19)\\n     3 lines | Function | ValidateToken (pkg/auth/auth.go:24)\\n     3 lines | Function | revoked (pkg/auth/auth.go:28)\\n     3 lines | Function | mintToken (pkg/auth/token.go:4)\",\"total_found\":6,\"min_lines\":3,\"results\":[{\"id\":7,\"kind\":\"Function\",\"name\":\"Expired\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session.Expired\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":10,\"line_end\":12,\"language\":\"go\",\"parent_name\":\"Session\",\"is_test\":false,\"line_count\":3,\"relative_path\":\"pkg/auth/auth.go\"},{\"id\":8,\"kind\":\"Function\",\"name\":\"Login\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"line_count\":3,\"relative_path\":\"pkg/auth/auth.go\"},{\"id\":9,\"kind\":\"Function\",\"name\":\"hashPassword\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":19,\"line_end\":21,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"line_count\":3,\"relative_path\":\"pkg/auth/auth.go\"},{\"id\":10,\"kind\":\"Function\",\"name\":\"ValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":24,\"line_end\":26,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"line_count\":3,\"relative_path\":\"pkg/auth/auth.go\"},{\"id\":11,\"kind\":\"Function\",\"name\":\"revoked\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::revoked\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":28,\"line_end\":30,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"line_count\":3,\"relative_path\":\"pkg/auth/auth.go\"},{\"id\":16,\"kind\":\"Function\",\"name\":\"mintToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":4,\"line_end\":6,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"line_count\":3,\"relative_path\":\"pkg/auth/token.go\"}],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "min_lines": 3,
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 7,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_count": 3,
+        "line_end": 12,
+        "line_start": 10,
+        "name": "Expired",
+        "parent_name": "Session",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired",
+        "relative_path": "pkg/auth/auth.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 8,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_count": 3,
+        "line_end": 17,
+        "line_start": 15,
+        "name": "Login",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+        "relative_path": "pkg/auth/auth.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 9,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_count": 3,
+        "line_end": 21,
+        "line_start": 19,
+        "name": "hashPassword",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword",
+        "relative_path": "pkg/auth/auth.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 10,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_count": 3,
+        "line_end": 26,
+        "line_start": 24,
+        "name": "ValidateToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken",
+        "relative_path": "pkg/auth/auth.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 11,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_count": 3,
+        "line_end": 30,
+        "line_start": 28,
+        "name": "revoked",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked",
+        "relative_path": "pkg/auth/auth.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 16,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_count": 3,
+        "line_end": 6,
+        "line_start": 4,
+        "name": "mintToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken",
+        "relative_path": "pkg/auth/token.go"
+      }
+    ],
+    "status": "ok",
+    "summary": "Found 6 node(s) with >= 3 lines (kind=Function) matching 'pkg/auth':\n     3 lines | Function | Expired (pkg/auth/auth.go:10)\n     3 lines | Function | Login (pkg/auth/auth.go:15)\n     3 lines | Function | hashPassword (pkg/auth/auth.go:19)\n     3 lines | Function | ValidateToken (pkg/auth/auth.go:24)\n     3 lines | Function | revoked (pkg/auth/auth.go:28)\n     3 lines | Function | mintToken (pkg/auth/token.go:4)",
+    "total_found": 6
+  },
+  "tool": "find_large_functions_tool"
+}

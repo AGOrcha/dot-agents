@@ -1,0 +1,52 @@
+{
+  "arguments": {
+    "detail_level": "minimal",
+    "top_n": 3
+  },
+  "case": "minimal",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"12 hub node(s) ranked by degree, showing 3 of 12\",\"hub_nodes\":[{\"name\":\"handleLogin\",\"kind\":\"Function\",\"total_degree\":5},{\"name\":\"TestLogin\",\"kind\":\"Test\",\"total_degree\":5},{\"name\":\"TestValidateToken\",\"kind\":\"Test\",\"total_degree\":5}],\"count\":3,\"total\":12,\"truncated\":true,\"next_tool_suggestions\":[\"get_impact_radius -- check blast radius of a hub\",\"query_graph callers_of -- see what calls a hub\",\"get_bridge_nodes -- find architectural chokepoints\"],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "count": 3,
+    "hub_nodes": [
+      {
+        "kind": "Function",
+        "name": "handleLogin",
+        "total_degree": 5
+      },
+      {
+        "kind": "Test",
+        "name": "TestLogin",
+        "total_degree": 5
+      },
+      {
+        "kind": "Test",
+        "name": "TestValidateToken",
+        "total_degree": 5
+      }
+    ],
+    "next_tool_suggestions": [
+      "get_impact_radius -- check blast radius of a hub",
+      "query_graph callers_of -- see what calls a hub",
+      "get_bridge_nodes -- find architectural chokepoints"
+    ],
+    "status": "ok",
+    "summary": "12 hub node(s) ranked by degree, showing 3 of 12",
+    "total": 12,
+    "truncated": true
+  },
+  "tool": "get_hub_nodes_tool"
+}

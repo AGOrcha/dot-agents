@@ -1,0 +1,346 @@
+{
+  "arguments": {
+    "pattern": "callers_of",
+    "target": "auth"
+  },
+  "case": "ambiguous_target",
+  "content": [
+    {
+      "text": "{\"status\":\"ambiguous\",\"summary\":\"'auth' matches 13 node(s). Re-run with a qualified_name from disambiguation.\",\"candidates\":[{\"id\":5,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":1,\"line_end\":31,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":8,\"kind\":\"Function\",\"name\":\"Login\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":6,\"kind\":\"Class\",\"name\":\"Session\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":4,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":7,\"kind\":\"Function\",\"name\":\"Expired\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session.Expired\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":10,\"line_end\":12,\"language\":\"go\",\"parent_name\":\"Session\",\"is_test\":false},{\"id\":10,\"kind\":\"Function\",\"name\":\"ValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":24,\"line_end\":26,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":9,\"kind\":\"Function\",\"name\":\"hashPassword\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":19,\"line_end\":21,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":11,\"kind\":\"Function\",\"name\":\"revoked\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::revoked\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":28,\"line_end\":30,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":12,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line_start\":1,\"line_end\":16,\"language\":\"go\",\"parent_name\":null,\"is_test\":true},{\"id\":13,\"kind\":\"Test\",\"name\":\"TestLogin\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line_start\":5,\"line_end\":9,\"language\":\"go\",\"parent_name\":null,\"is_test\":true},{\"id\":14,\"kind\":\"Test\",\"name\":\"TestValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line_start\":11,\"line_end\":15,\"language\":\"go\",\"parent_name\":null,\"is_test\":true},{\"id\":15,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":1,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":16,\"kind\":\"Function\",\"name\":\"mintToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":4,\"line_end\":6,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":4,\"kind\":\"Function\",\"name\":\"renderSession\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::renderSession\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false}],\"disambiguation\":[{\"id\":5,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":1,\"line_end\":31,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":8,\"kind\":\"Function\",\"name\":\"Login\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":6,\"kind\":\"Class\",\"name\":\"Session\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":4,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":7,\"kind\":\"Function\",\"name\":\"Expired\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session.Expired\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":10,\"line_end\":12,\"language\":\"go\",\"parent_name\":\"Session\",\"is_test\":false},{\"id\":10,\"kind\":\"Function\",\"name\":\"ValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":24,\"line_end\":26,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":9,\"kind\":\"Function\",\"name\":\"hashPassword\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":19,\"line_end\":21,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":11,\"kind\":\"Function\",\"name\":\"revoked\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::revoked\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":28,\"line_end\":30,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":12,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line_start\":1,\"line_end\":16,\"language\":\"go\",\"parent_name\":null,\"is_test\":true},{\"id\":13,\"kind\":\"Test\",\"name\":\"TestLogin\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line_start\":5,\"line_end\":9,\"language\":\"go\",\"parent_name\":null,\"is_test\":true},{\"id\":14,\"kind\":\"Test\",\"name\":\"TestValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line_start\":11,\"line_end\":15,\"language\":\"go\",\"parent_name\":null,\"is_test\":true},{\"id\":15,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":1,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":16,\"kind\":\"Function\",\"name\":\"mintToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":4,\"line_end\":6,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":4,\"kind\":\"Function\",\"name\":\"renderSession\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::renderSession\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false}],\"candidate_count\":13,\"candidates_truncated\":false,\"hint\":\"Use a qualified_name from disambiguation as the target parameter.\",\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "candidate_count": 13,
+    "candidates": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 5,
+        "is_test": false,
+        "kind": "File",
+        "language": "go",
+        "line_end": 31,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/auth.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 8,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 17,
+        "line_start": 15,
+        "name": "Login",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 6,
+        "is_test": false,
+        "kind": "Class",
+        "language": "go",
+        "line_end": 7,
+        "line_start": 4,
+        "name": "Session",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 7,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 12,
+        "line_start": 10,
+        "name": "Expired",
+        "parent_name": "Session",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 10,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 26,
+        "line_start": 24,
+        "name": "ValidateToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 9,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 21,
+        "line_start": 19,
+        "name": "hashPassword",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 11,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 30,
+        "line_start": 28,
+        "name": "revoked",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 12,
+        "is_test": true,
+        "kind": "File",
+        "language": "go",
+        "line_end": 16,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 13,
+        "is_test": true,
+        "kind": "Test",
+        "language": "go",
+        "line_end": 9,
+        "line_start": 5,
+        "name": "TestLogin",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 14,
+        "is_test": true,
+        "kind": "Test",
+        "language": "go",
+        "line_end": 15,
+        "line_start": 11,
+        "name": "TestValidateToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 15,
+        "is_test": false,
+        "kind": "File",
+        "language": "go",
+        "line_end": 7,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/token.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 16,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 6,
+        "line_start": 4,
+        "name": "mintToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken"
+      },
+      {
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 4,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 17,
+        "line_start": 15,
+        "name": "renderSession",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::renderSession"
+      }
+    ],
+    "candidates_truncated": false,
+    "disambiguation": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 5,
+        "is_test": false,
+        "kind": "File",
+        "language": "go",
+        "line_end": 31,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/auth.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 8,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 17,
+        "line_start": 15,
+        "name": "Login",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 6,
+        "is_test": false,
+        "kind": "Class",
+        "language": "go",
+        "line_end": 7,
+        "line_start": 4,
+        "name": "Session",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 7,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 12,
+        "line_start": 10,
+        "name": "Expired",
+        "parent_name": "Session",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 10,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 26,
+        "line_start": 24,
+        "name": "ValidateToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 9,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 21,
+        "line_start": 19,
+        "name": "hashPassword",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 11,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 30,
+        "line_start": 28,
+        "name": "revoked",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 12,
+        "is_test": true,
+        "kind": "File",
+        "language": "go",
+        "line_end": 16,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 13,
+        "is_test": true,
+        "kind": "Test",
+        "language": "go",
+        "line_end": 9,
+        "line_start": 5,
+        "name": "TestLogin",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 14,
+        "is_test": true,
+        "kind": "Test",
+        "language": "go",
+        "line_end": 15,
+        "line_start": 11,
+        "name": "TestValidateToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 15,
+        "is_test": false,
+        "kind": "File",
+        "language": "go",
+        "line_end": 7,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/token.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 16,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 6,
+        "line_start": 4,
+        "name": "mintToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken"
+      },
+      {
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 4,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 17,
+        "line_start": 15,
+        "name": "renderSession",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::renderSession"
+      }
+    ],
+    "hint": "Use a qualified_name from disambiguation as the target parameter.",
+    "status": "ambiguous",
+    "summary": "'auth' matches 13 node(s). Re-run with a qualified_name from disambiguation."
+  },
+  "tool": "query_graph_tool"
+}

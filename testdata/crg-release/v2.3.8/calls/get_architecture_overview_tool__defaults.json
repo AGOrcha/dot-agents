@@ -1,0 +1,67 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Architecture: 2 communities, 0 community pairs, 0 warning(s)\",\"communities\":[{\"id\":2,\"name\":\"auth-token\",\"size\":9,\"cohesion\":0.15,\"dominant_language\":\"go\"},{\"id\":1,\"name\":\"cmd-handle\",\"size\":3,\"cohesion\":0.2857,\"dominant_language\":\"go\"}],\"cross_community_edges\":[],\"warnings\":[],\"cross_community_edges_total\":0,\"truncated\":false,\"_hints\":{\"next_steps\":[{\"tool\":\"list_communities\",\"suggestion\":\"Drill into individual communities\"},{\"tool\":\"detect_changes\",\"suggestion\":\"See how recent changes affect the architecture\"},{\"tool\":\"list_flows\",\"suggestion\":\"Explore execution flows\"}],\"related\":[],\"warnings\":[]},\"context_savings\":{\"estimated\":true,\"saved_tokens\":\"${SAVED_TOKENS}\",\"saved_percent\":\"${SAVED_PERCENT}\"},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Drill into individual communities",
+          "tool": "list_communities"
+        },
+        {
+          "suggestion": "See how recent changes affect the architecture",
+          "tool": "detect_changes"
+        },
+        {
+          "suggestion": "Explore execution flows",
+          "tool": "list_flows"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "communities": [
+      {
+        "cohesion": 0.15,
+        "dominant_language": "go",
+        "id": 2,
+        "name": "auth-token",
+        "size": 9
+      },
+      {
+        "cohesion": 0.2857,
+        "dominant_language": "go",
+        "id": 1,
+        "name": "cmd-handle",
+        "size": 3
+      }
+    ],
+    "context_savings": {
+      "estimated": true,
+      "saved_percent": "${SAVED_PERCENT}",
+      "saved_tokens": "${SAVED_TOKENS}"
+    },
+    "cross_community_edges": [],
+    "cross_community_edges_total": 0,
+    "status": "ok",
+    "summary": "Architecture: 2 communities, 0 community pairs, 0 warning(s)",
+    "truncated": false,
+    "warnings": []
+  },
+  "tool": "get_architecture_overview_tool"
+}

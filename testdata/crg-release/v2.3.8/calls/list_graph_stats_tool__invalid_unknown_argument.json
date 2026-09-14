@@ -1,0 +1,14 @@
+{
+  "arguments": {
+    "bogus": 1
+  },
+  "case": "invalid_unknown_argument",
+  "content": [
+    {
+      "text": "1 validation error for call[list_graph_stats_tool]\nbogus\n  Unexpected keyword argument [type=unexpected_keyword_argument, input_value=1, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.13/v/unexpected_keyword_argument",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "list_graph_stats_tool"
+}

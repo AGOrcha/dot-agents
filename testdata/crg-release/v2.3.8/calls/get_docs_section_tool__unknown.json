@@ -1,0 +1,18 @@
+{
+  "arguments": {
+    "section_name": "no-such-section"
+  },
+  "case": "unknown",
+  "content": [
+    {
+      "text": "{\"status\":\"not_found\",\"error\":\"Section 'no-such-section' not found. Available: usage, review-delta, review-pr, commands, legal, watch, embeddings, languages, troubleshooting\"}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "error": "Section 'no-such-section' not found. Available: usage, review-delta, review-pr, commands, legal, watch, embeddings, languages, troubleshooting",
+    "status": "not_found"
+  },
+  "tool": "get_docs_section_tool"
+}

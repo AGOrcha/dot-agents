@@ -1,0 +1,58 @@
+{
+  "arguments": {
+    "pattern": "callers_of",
+    "target": "hashPassword"
+  },
+  "case": "callers_of",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"pattern\":\"callers_of\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"description\":\"Find all functions that call a given function\",\"summary\":\"Found 1 result(s) for callers_of('${REPO_ROOT}/pkg/auth/auth.go::hashPassword')\",\"result_count\":1,\"results_omitted\":0,\"results\":[{\"id\":8,\"kind\":\"Function\",\"name\":\"Login\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false}],\"edges\":[{\"id\":13,\"kind\":\"CALLS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line\":16,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"}],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "description": "Find all functions that call a given function",
+    "edges": [
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 13,
+        "kind": "CALLS",
+        "line": 16,
+        "source": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+        "target": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+      }
+    ],
+    "pattern": "callers_of",
+    "result_count": 1,
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 8,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 17,
+        "line_start": 15,
+        "name": "Login",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+      }
+    ],
+    "results_omitted": 0,
+    "status": "ok",
+    "summary": "Found 1 result(s) for callers_of('${REPO_ROOT}/pkg/auth/auth.go::hashPassword')",
+    "target": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+  },
+  "tool": "query_graph_tool"
+}

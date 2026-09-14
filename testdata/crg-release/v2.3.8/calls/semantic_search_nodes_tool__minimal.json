@@ -1,0 +1,57 @@
+{
+  "arguments": {
+    "detail_level": "minimal",
+    "query": "token"
+  },
+  "case": "minimal",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"query\":\"token\",\"search_mode\":\"fts\",\"summary\":\"Found 4 node(s) matching 'token'\",\"results\":[{\"name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"kind\":\"File\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"score\":0.016393},{\"name\":\"mintToken\",\"kind\":\"Function\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"score\":0.016129},{\"name\":\"ValidateToken\",\"kind\":\"Function\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"score\":0.015873},{\"name\":\"revoked\",\"kind\":\"Function\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"score\":0.015625}],\"result_count\":4,\"results_omitted\":0,\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "query": "token",
+    "result_count": 4,
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "kind": "File",
+        "name": "${REPO_ROOT}/pkg/auth/token.go",
+        "score": 0.016393
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "kind": "Function",
+        "name": "mintToken",
+        "score": 0.016129
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Function",
+        "name": "ValidateToken",
+        "score": 0.015873
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Function",
+        "name": "revoked",
+        "score": 0.015625
+      }
+    ],
+    "results_omitted": 0,
+    "search_mode": "fts",
+    "status": "ok",
+    "summary": "Found 4 node(s) matching 'token'"
+  },
+  "tool": "semantic_search_nodes_tool"
+}

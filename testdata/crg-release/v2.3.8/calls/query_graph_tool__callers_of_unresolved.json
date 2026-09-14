@@ -1,0 +1,82 @@
+{
+  "arguments": {
+    "pattern": "callers_of",
+    "target": "Login"
+  },
+  "case": "callers_of_unresolved",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"pattern\":\"callers_of\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"description\":\"Find all functions that call a given function\",\"summary\":\"Found 2 result(s) for callers_of('${REPO_ROOT}/pkg/auth/auth.go::Login')\",\"result_count\":2,\"results_omitted\":0,\"results\":[{\"id\":3,\"kind\":\"Function\",\"name\":\"handleLogin\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":9,\"line_end\":13,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"target_resolution\":\"unresolved\"},{\"id\":13,\"kind\":\"Test\",\"name\":\"TestLogin\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line_start\":5,\"line_end\":9,\"language\":\"go\",\"parent_name\":null,\"is_test\":true,\"target_resolution\":\"unresolved\"}],\"edges\":[{\"id\":5,\"kind\":\"CALLS\",\"source\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"target\":\"Login\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line\":10,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":20,\"kind\":\"CALLS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin\",\"target\":\"Login\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line\":6,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"}],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "description": "Find all functions that call a given function",
+    "edges": [
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 5,
+        "kind": "CALLS",
+        "line": 10,
+        "source": "${REPO_ROOT}/cmd/main.go::handleLogin",
+        "target": "Login"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 20,
+        "kind": "CALLS",
+        "line": 6,
+        "source": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin",
+        "target": "Login"
+      }
+    ],
+    "pattern": "callers_of",
+    "result_count": 2,
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 3,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 13,
+        "line_start": 9,
+        "name": "handleLogin",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin",
+        "target_resolution": "unresolved"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 13,
+        "is_test": true,
+        "kind": "Test",
+        "language": "go",
+        "line_end": 9,
+        "line_start": 5,
+        "name": "TestLogin",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin",
+        "target_resolution": "unresolved"
+      }
+    ],
+    "results_omitted": 0,
+    "status": "ok",
+    "summary": "Found 2 result(s) for callers_of('${REPO_ROOT}/pkg/auth/auth.go::Login')",
+    "target": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+  },
+  "tool": "query_graph_tool"
+}

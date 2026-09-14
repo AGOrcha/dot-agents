@@ -1,0 +1,72 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":{\"isolated_nodes\":2,\"thin_communities\":0,\"untested_hotspots\":1,\"single_file_communities\":1},\"gaps\":{\"isolated_nodes\":[{\"name\":\"Expired\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session.Expired\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"degree\":1},{\"name\":\"mintToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/token.go\",\"degree\":1}],\"thin_communities\":[],\"untested_hotspots\":[{\"name\":\"handleLogin\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/cmd/main.go\",\"degree\":5}],\"single_file_communities\":[{\"community_id\":1,\"name\":\"cmd-handle\",\"size\":3,\"file\":\"${REPO_ROOT}/cmd/main.go\"}]},\"total_gaps\":4,\"truncated\":false,\"next_tool_suggestions\":[\"refactor dead_code -- find unused symbols\",\"get_hub_nodes -- find high-impact nodes\",\"get_suggested_questions -- review prompts\"],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "gaps": {
+      "isolated_nodes": [
+        {
+          "degree": 1,
+          "file": "${REPO_ROOT}/pkg/auth/auth.go",
+          "kind": "Function",
+          "name": "Expired",
+          "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired"
+        },
+        {
+          "degree": 1,
+          "file": "${REPO_ROOT}/pkg/auth/token.go",
+          "kind": "Function",
+          "name": "mintToken",
+          "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken"
+        }
+      ],
+      "single_file_communities": [
+        {
+          "community_id": 1,
+          "file": "${REPO_ROOT}/cmd/main.go",
+          "name": "cmd-handle",
+          "size": 3
+        }
+      ],
+      "thin_communities": [],
+      "untested_hotspots": [
+        {
+          "degree": 5,
+          "file": "${REPO_ROOT}/cmd/main.go",
+          "kind": "Function",
+          "name": "handleLogin",
+          "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin"
+        }
+      ]
+    },
+    "next_tool_suggestions": [
+      "refactor dead_code -- find unused symbols",
+      "get_hub_nodes -- find high-impact nodes",
+      "get_suggested_questions -- review prompts"
+    ],
+    "status": "ok",
+    "summary": {
+      "isolated_nodes": 2,
+      "single_file_communities": 1,
+      "thin_communities": 0,
+      "untested_hotspots": 1
+    },
+    "total_gaps": 4,
+    "truncated": false
+  },
+  "tool": "get_knowledge_gaps_tool"
+}

@@ -1,0 +1,88 @@
+{
+  "arguments": {
+    "community_name": "auth",
+    "include_members": true,
+    "max_members": 2
+  },
+  "case": "by_name",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Community 'auth-token': 9 nodes, cohesion 0.1500\",\"community\":{\"id\":2,\"name\":\"auth-token\",\"level\":0,\"cohesion\":0.15,\"size\":9,\"dominant_language\":\"go\",\"description\":\"Directory-based community: pkg/auth\",\"members\":[\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"${REPO_ROOT}/pkg/auth/auth.go::Session.Expired\"],\"member_details\":[{\"id\":6,\"kind\":\"Class\",\"name\":\"Session\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":4,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":7,\"kind\":\"Function\",\"name\":\"Expired\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session.Expired\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":10,\"line_end\":12,\"language\":\"go\",\"parent_name\":\"Session\",\"is_test\":false}],\"members_total\":9,\"members_truncated\":true,\"member_details_total\":9},\"_hints\":{\"next_steps\":[{\"tool\":\"query_graph\",\"suggestion\":\"Explore callers/callees of community members\"},{\"tool\":\"list_communities\",\"suggestion\":\"Browse other communities\"},{\"tool\":\"get_architecture_overview\",\"suggestion\":\"See how this community fits the architecture\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Explore callers/callees of community members",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "Browse other communities",
+          "tool": "list_communities"
+        },
+        {
+          "suggestion": "See how this community fits the architecture",
+          "tool": "get_architecture_overview"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "community": {
+      "cohesion": 0.15,
+      "description": "Directory-based community: pkg/auth",
+      "dominant_language": "go",
+      "id": 2,
+      "level": 0,
+      "member_details": [
+        {
+          "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+          "id": 6,
+          "is_test": false,
+          "kind": "Class",
+          "language": "go",
+          "line_end": 7,
+          "line_start": 4,
+          "name": "Session",
+          "parent_name": null,
+          "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+        },
+        {
+          "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+          "id": 7,
+          "is_test": false,
+          "kind": "Function",
+          "language": "go",
+          "line_end": 12,
+          "line_start": 10,
+          "name": "Expired",
+          "parent_name": "Session",
+          "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired"
+        }
+      ],
+      "member_details_total": 9,
+      "members": [
+        "${REPO_ROOT}/pkg/auth/auth.go::Session",
+        "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired"
+      ],
+      "members_total": 9,
+      "members_truncated": true,
+      "name": "auth-token",
+      "size": 9
+    },
+    "status": "ok",
+    "summary": "Community 'auth-token': 9 nodes, cohesion 0.1500"
+  },
+  "tool": "get_community_tool"
+}
