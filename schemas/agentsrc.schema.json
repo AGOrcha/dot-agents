@@ -40,15 +40,15 @@
     },
     "hooks": {
       "$ref": "#/$defs/stringsOrBool",
-      "description": "Hook projection for this repo. OPTIONAL: omitting the key defers to the config layer stack (an org/team layer pulled in via extends, then product defaults). Present-and-false is NOT the same as absent — it is an explicit repo-local override that wins the layer merge and disables hooks even when an org layer enables them."
+      "description": "Declared hook posture for this repo. OPTIONAL: omitting the key defers to the config layer stack (an org/team layer pulled in via extends, then product defaults). Present-and-false is NOT the same as absent — it is an explicit repo-local override that wins the layer merge, so `da config explain hooks` reports false even when an org layer enables them. NOTE: this key is declarative only today — refresh/install project hooks from whatever exists under ~/.agents/hooks/<scope>/ and do not consult the resolved value."
     },
     "mcp": {
       "$ref": "#/$defs/stringsOrBool",
-      "description": "MCP server projection for this repo. OPTIONAL: omitting the key defers to the config layer stack. Present-and-false is an explicit repo-local override that wins the layer merge."
+      "description": "Declared MCP server posture for this repo. OPTIONAL: omitting the key defers to the config layer stack. Present-and-false is an explicit repo-local override that wins the layer merge. NOTE: declarative only today — refresh/install project MCP configs from ~/.agents/mcp/<scope>/ and do not consult the resolved value."
     },
     "settings": {
       "type": "boolean",
-      "description": "Platform settings projection for this repo. OPTIONAL: omitting the key defers to the config layer stack. Present-and-false is an explicit repo-local override that wins the layer merge."
+      "description": "Declared platform-settings posture for this repo. OPTIONAL: omitting the key defers to the config layer stack. Present-and-false is an explicit repo-local override that wins the layer merge. NOTE: declarative only today — refresh/install project settings from ~/.agents/settings/<scope>/ and do not consult the resolved value."
     },
     "gitignore_projections": {
       "type": "boolean",

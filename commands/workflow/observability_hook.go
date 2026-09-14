@@ -90,8 +90,16 @@ func publishLatestIterationBestEffort(projectPath string) {
 	publishCheckpointBestEffort(projectPath, iteration)
 }
 
+// loadEffectiveObservabilityConfig is the layered-config seam the publication
+// hook admits on. It resolves the EFFECTIVE manifest (read-only, no lock write,
+// no fetch — see config.LoadEffectiveAgentsRC) so a checkpoint/score event is
+// published for a repo whose `observability` block is supplied by an org/team
+// layer, which a flat .agentsrc.json read never saw. Overridable so unit tests
+// can exercise the hook without a resolved layer stack.
+var loadEffectiveObservabilityConfig = config.LoadEffectiveAgentsRC
+
 func publishIterationBestEffort(projectPath string, iteration int, kind string, withScore bool) {
-	rc, err := config.LoadAgentsRC(projectPath)
+	rc, err := loadEffectiveObservabilityConfig(projectPath)
 	if err != nil || rc == nil || rc.Observability == nil || !rc.Observability.Enabled {
 		return
 	}

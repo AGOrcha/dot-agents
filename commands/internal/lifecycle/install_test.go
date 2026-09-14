@@ -234,10 +234,39 @@ func TestResolveSourceRoot_GitMissingURL(t *testing.T) {
 	}
 }
 
-func TestResolveSourceRoot_UnknownType(t *testing.T) {
-	root, err := resolveSourceRoot(config.Source{Type: "ftp"}, StdInstallDeps{})
-	if err != nil || root != "" {
-		t.Errorf("unknown type: root=%q err=%v, want empty", root, err)
+// TestResolveSourceRoot_UnsupportedType pins how a source kind that cannot
+// supply a resource TREE is handled. `http` and `oci` are valid config-LAYER
+// kinds: now that the source plan surfaces inherited declarations, install
+// sees them, and it must skip them without failing — a layer that declares an
+// oci source to fetch a nested layer has not broken the consuming repo's
+// install. A typo lands in the same branch and is likewise non-fatal; the
+// resource lookup that follows is what reports an actual gap.
+func TestResolveSourceRoot_UnsupportedType(t *testing.T) {
+	for _, kind := range []string{"ftp", "http", "oci"} {
+		root, err := resolveSourceRoot(config.Source{Type: kind, ID: "policy"}, StdInstallDeps{})
+		if root != "" {
+			t.Errorf("%s: root = %q, want empty", kind, root)
+		}
+		if err != nil {
+			t.Errorf("%s: a layer-transport source kind must not fail the run: %v", kind, err)
+		}
+	}
+}
+
+// TestResolveInstallSources_UnsupportedKindDoesNotFailStrict: `--strict` is
+// about unresolved RESOURCES, not about every declaration install cannot turn
+// into a root. A repo whose team layer declares an oci config source must
+// still install strictly, keeping every root it could resolve.
+func TestResolveInstallSources_UnsupportedKindDoesNotFailStrict(t *testing.T) {
+	custom := t.TempDir()
+	sources := []config.Source{{Type: "local", Path: custom}, {Type: "oci", ID: "policy", URL: "ghcr.io/acme/policy:v1"}}
+
+	got, err := resolveInstallSources(sources, true, StdInstallDeps{})
+	if err != nil {
+		t.Fatalf("--strict must not fail on a layer-transport source kind: %v", err)
+	}
+	if len(got) != 1 || got[0] != custom {
+		t.Errorf("resolved = %v, want [%s]", got, custom)
 	}
 }
 
@@ -256,6 +285,9 @@ func TestResolveSources_MixedAndCustomDirs(t *testing.T) {
 		{Type: "git"},
 	}
 	resolved, err := resolveSources(sources, StdInstallDeps{})
+	// Neither the unsupported "ftp" entry nor the url-less git entry fails the
+	// run; resolution keeps going so one unusable declaration cannot hide the
+	// roots that do work.
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}

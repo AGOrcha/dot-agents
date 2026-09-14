@@ -21,6 +21,16 @@ const (
 	managedEnd   = "# <<< dot-agents managed (project outputs) <<<"
 )
 
+// isolateAgentsHome points AGENTS_HOME at an empty temp dir. Tests that call
+// MaintainManagedGitignore with a nil snapshot exercise its read-only fallback
+// resolve, which merges the USER-LOCAL layer (<AGENTS_HOME>/.agentsrc.json) —
+// without this the developer's real ~/.agents manifest would be a hidden input
+// and a user-local `gitignore_projections` would flip the assertions.
+func isolateAgentsHome(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGENTS_HOME", t.TempDir())
+}
+
 // writeManifest writes a .agentsrc.json carrying the given knob state. A nil
 // knob writes a manifest with the key absent (the default-on case).
 func writeManifest(t *testing.T, dir string, knob *bool) {
@@ -101,10 +111,11 @@ func TestMaintainManagedGitignore_KnobStates(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			isolateAgentsHome(t)
 			dir := t.TempDir()
 			tc.setupManifest(t, dir)
 
-			msg, err := MaintainManagedGitignore(dir, claudeAndCodex(t))
+			msg, err := MaintainManagedGitignore(dir, claudeAndCodex(t), nil)
 			if err != nil {
 				t.Fatalf("MaintainManagedGitignore: %v", err)
 			}
@@ -138,6 +149,7 @@ func TestMaintainManagedGitignore_KnobStates(t *testing.T) {
 }
 
 func TestMaintainManagedGitignore_PreservesUserContentAndIsByteStable(t *testing.T) {
+	isolateAgentsHome(t)
 	dir := t.TempDir()
 	writeManifest(t, dir, nil)
 	userContent := "# my ignores\nnode_modules/\ndist/\n"
@@ -145,7 +157,7 @@ func TestMaintainManagedGitignore_PreservesUserContentAndIsByteStable(t *testing
 		t.Fatal(err)
 	}
 
-	if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t)); err != nil {
+	if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t), nil); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	first := readProjectGitignore(t, dir)
@@ -153,7 +165,7 @@ func TestMaintainManagedGitignore_PreservesUserContentAndIsByteStable(t *testing
 		t.Errorf("user content must be preserved byte-for-byte at the head:\n%s", first)
 	}
 
-	if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t)); err != nil {
+	if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t), nil); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
 	if second := readProjectGitignore(t, dir); second != first {
@@ -162,10 +174,11 @@ func TestMaintainManagedGitignore_PreservesUserContentAndIsByteStable(t *testing
 }
 
 func TestMaintainManagedGitignore_UpdatesInPlaceWhenProjectionSetChanges(t *testing.T) {
+	isolateAgentsHome(t)
 	dir := t.TempDir()
 	writeManifest(t, dir, nil)
 
-	if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t)); err != nil {
+	if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t), nil); err != nil {
 		t.Fatalf("wide run: %v", err)
 	}
 	wide := readProjectGitignore(t, dir)
@@ -174,7 +187,7 @@ func TestMaintainManagedGitignore_UpdatesInPlaceWhenProjectionSetChanges(t *test
 	}
 
 	// Drop codex from the projection set (a platform disabled between runs).
-	if _, err := MaintainManagedGitignore(dir, []platform.Platform{platform.ByID("claude")}); err != nil {
+	if _, err := MaintainManagedGitignore(dir, []platform.Platform{platform.ByID("claude")}, nil); err != nil {
 		t.Fatalf("narrow run: %v", err)
 	}
 	narrow := readProjectGitignore(t, dir)
@@ -190,6 +203,7 @@ func TestMaintainManagedGitignore_UpdatesInPlaceWhenProjectionSetChanges(t *test
 }
 
 func TestMaintainManagedGitignore_OptOutRemovesAnExistingBlock(t *testing.T) {
+	isolateAgentsHome(t)
 	dir := t.TempDir()
 	userContent := "node_modules/\n"
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(userContent), 0o644); err != nil {
@@ -199,7 +213,7 @@ func TestMaintainManagedGitignore_OptOutRemovesAnExistingBlock(t *testing.T) {
 	// Install once with the knob on, then flip it off — the previously-written
 	// block must be retracted, not merely left unrefreshed.
 	writeManifest(t, dir, nil)
-	if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t)); err != nil {
+	if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t), nil); err != nil {
 		t.Fatalf("opt-in run: %v", err)
 	}
 	if !strings.Contains(readProjectGitignore(t, dir), managedBegin) {
@@ -208,7 +222,7 @@ func TestMaintainManagedGitignore_OptOutRemovesAnExistingBlock(t *testing.T) {
 
 	optOut := false
 	writeManifest(t, dir, &optOut)
-	msg, err := MaintainManagedGitignore(dir, claudeAndCodex(t))
+	msg, err := MaintainManagedGitignore(dir, claudeAndCodex(t), nil)
 	if err != nil {
 		t.Fatalf("opt-out run: %v", err)
 	}
@@ -226,6 +240,7 @@ func TestMaintainManagedGitignore_OptOutRemovesAnExistingBlock(t *testing.T) {
 // across every registered project in one run, so each must get a block derived
 // from its OWN manifest, and one project's opt-out must not leak to a sibling.
 func TestMaintainManagedGitignore_IsPerProject(t *testing.T) {
+	isolateAgentsHome(t)
 	root := t.TempDir()
 	optIn := filepath.Join(root, "opted-in")
 	optOut := filepath.Join(root, "opted-out")
@@ -240,13 +255,13 @@ func TestMaintainManagedGitignore_IsPerProject(t *testing.T) {
 	writeManifest(t, optOut, &disabled)
 
 	// Seed the opted-out project with a block, as an earlier run would have.
-	if _, err := MaintainManagedGitignore(optOut, claudeAndCodex(t)); err != nil {
+	if _, err := MaintainManagedGitignore(optOut, claudeAndCodex(t), nil); err != nil {
 		t.Fatalf("seed opt-out: %v", err)
 	}
 
 	// One fan-out pass over all three, as refreshOneProject does per project.
 	for _, d := range []string{optIn, optOut, noManifest} {
-		if _, err := MaintainManagedGitignore(d, claudeAndCodex(t)); err != nil {
+		if _, err := MaintainManagedGitignore(d, claudeAndCodex(t), nil); err != nil {
 			t.Fatalf("maintain %s: %v", d, err)
 		}
 	}
@@ -289,7 +304,7 @@ func TestMaintainManagedGitignore_WriteErrorsPropagate(t *testing.T) {
 			name: "remove path",
 			knob: &optOut,
 			seed: func(t *testing.T, dir string) {
-				if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t)); err != nil {
+				if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t), nil); err != nil {
 					t.Fatalf("seed block: %v", err)
 				}
 			},
@@ -298,6 +313,7 @@ func TestMaintainManagedGitignore_WriteErrorsPropagate(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			isolateAgentsHome(t)
 			dir := t.TempDir()
 			// Seed with the knob ON so the seed step can write a block, then
 			// rewrite the manifest to the case's knob before freezing.
@@ -310,7 +326,7 @@ func TestMaintainManagedGitignore_WriteErrorsPropagate(t *testing.T) {
 			}
 			defer os.Chmod(dir, 0o755)
 
-			if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t)); err == nil {
+			if _, err := MaintainManagedGitignore(dir, claudeAndCodex(t), nil); err == nil {
 				t.Error("expected a write error under a read-only project directory, got nil")
 			}
 		})
@@ -329,13 +345,14 @@ func TestEnsureManagedGitignoreForInstall_FailuresAreNonFatal(t *testing.T) {
 	t.Cleanup(func() { Flags = saved })
 
 	t.Run("config load error", func(t *testing.T) {
+		isolateAgentsHome(t)
 		dir := t.TempDir()
 		writeManifest(t, dir, nil)
 		deps := fakeInstallDeps{loadConfig: func() (*config.Config, error) {
 			return nil, errors.New("boom")
 		}}
 
-		ensureManagedGitignoreForInstall(dir, deps)
+		ensureManagedGitignoreForInstall(dir, nil, deps)
 
 		if got := readProjectGitignore(t, dir); got != "" {
 			t.Errorf("no .gitignore should be written when the config cannot load:\n%s", got)
@@ -343,6 +360,7 @@ func TestEnsureManagedGitignoreForInstall_FailuresAreNonFatal(t *testing.T) {
 	})
 
 	t.Run("gitignore write error", func(t *testing.T) {
+		isolateAgentsHome(t)
 		dir := t.TempDir()
 		writeManifest(t, dir, nil)
 		if err := os.Chmod(dir, 0o555); err != nil {
@@ -351,7 +369,7 @@ func TestEnsureManagedGitignoreForInstall_FailuresAreNonFatal(t *testing.T) {
 		defer os.Chmod(dir, 0o755)
 
 		// Must not panic or abort — the warn-and-return path.
-		ensureManagedGitignoreForInstall(dir, fakeInstallDeps{})
+		ensureManagedGitignoreForInstall(dir, nil, fakeInstallDeps{})
 	})
 }
 
@@ -487,11 +505,12 @@ func TestRunInstall_DryRunWritesNoGitignore(t *testing.T) {
 // or failing the run — refresh tolerates a corrupt manifest everywhere else,
 // and this step must not be the one place that starts failing it.
 func TestMaintainManagedGitignore_CorruptManifestSkips(t *testing.T) {
+	isolateAgentsHome(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, config.AgentsRCFile), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	msg, err := MaintainManagedGitignore(dir, claudeAndCodex(t))
+	msg, err := MaintainManagedGitignore(dir, claudeAndCodex(t), nil)
 	if err != nil {
 		t.Fatalf("an unreadable manifest must not fail the run: %v", err)
 	}

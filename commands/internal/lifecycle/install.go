@@ -181,7 +181,22 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	if err != nil {
 		return err
 	}
-	resolvedSources, err := resolveInstallSources(rc.Sources, strict, deps)
+	// ONE effective-config read per install. Both the resource set and the
+	// resource SOURCE roots come from this snapshot, so they can never
+	// disagree about which layer stack is in force.
+	snap := installSnapshot(projectPath, ensureRes)
+	// Resolve roots from the provenance-preserving source PLAN, not from the
+	// raw repo `sources` and not from Effective.Sources. The raw list omits
+	// every source an org/team layer declared — so install could select an
+	// inherited skill name it had no root to fetch from — while
+	// Effective.Sources is ordered-replace and discards that ancestry
+	// entirely. The plan keeps both halves: inherited roots are searched, and
+	// user-scope/default-home roots are excluded from project materialization.
+	plan, err := installSourcePlan(rc, snap)
+	if err != nil {
+		return err
+	}
+	resolvedSources, err := resolveInstallSources(plan.ProjectSources(), strict, deps)
 	if err != nil {
 		return err
 	}
@@ -191,17 +206,8 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	// rc) is what materializes transitively-inherited resources
 	// (config-transitive-layering). Effective ⊇ the flat rc's skills/agents.
 	resolvedManifest := rc
-	switch {
-	case ensureRes != nil:
-		resolvedManifest = &ensureRes.Snapshot.Effective
-	case Flags.DryRun:
-		// Dry-run writes no lock (ensureRes is nil), but the PREVIEW must still
-		// reflect the effective/layered config, not the flat manifest. Resolve
-		// read-only from the committed lock (Frozen — no write, no fetch); a
-		// project with no lock yet has nothing to preview, so fall back to rc.
-		if ro, roErr := config.EnsureResolved(projectPath, config.EnsureOpts{Frozen: true}); roErr == nil {
-			resolvedManifest = &ro.Snapshot.Effective
-		}
+	if snap != nil {
+		resolvedManifest = &snap.Effective
 	}
 	if err := linkInstallResources(projectName, resolvedManifest, resolvedSources, strict, deps); err != nil {
 		return err
@@ -221,7 +227,7 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	if err := createInstallPlatformLinks(projectName, projectPath, opts, packagesUnits, packagesParticipated); err != nil {
 		return err
 	}
-	ensureManagedGitignoreForInstall(projectPath, deps)
+	ensureManagedGitignoreForInstall(projectPath, snap, deps)
 	if err := finalizeInstall(projectName, projectPath, opts); err != nil {
 		return err
 	}
@@ -260,6 +266,50 @@ func ensureInstallResolved(projectPath string) (*config.EnsureResult, error) {
 	}
 	ui.Bullet("ok", "Config lock current")
 	return res, nil
+}
+
+// installSnapshot returns the ONE effective-config snapshot this install run
+// reads from, or nil when no layered view can be produced.
+//
+// The real run already has it: ensureInstallResolved resolved (and, when
+// stale, rewrote) the lock. A dry-run resolved nothing, but its PREVIEW must
+// still describe the layered config rather than the flat manifest — so it
+// resolves read-only from the committed lock (Frozen: no write, no fetch),
+// which is also why a dry-run over a project that has never been resolved
+// simply gets nil and falls back to the raw manifest.
+//
+// Centralizing the access mode here is deliberate: every downstream consumer
+// (resource set, source plan, managed .gitignore) takes this snapshot instead
+// of calling EnsureResolved on its own, so no consumer can accidentally
+// promote a dry-run into a lock write or disagree about the layer stack.
+func installSnapshot(projectPath string, ensureRes *config.EnsureResult) *config.Snapshot {
+	if ensureRes != nil {
+		return ensureRes.Snapshot
+	}
+	if !Flags.DryRun {
+		return nil
+	}
+	ro, err := config.EnsureResolved(projectPath, config.EnsureOpts{Frozen: true})
+	if err != nil {
+		return nil
+	}
+	return ro.Snapshot
+}
+
+// installSourcePlan produces the provenance-preserving resource-source plan
+// install materializes project skills/agents from: every root the resolved
+// layer stack made reachable (including the ones only an org/team layer
+// declares), minus the roots that belong to the user's machine rather than to
+// the project.
+//
+// Without a snapshot (dry-run before the first resolve) the repo's own
+// declarations are classified under the same rules, so the preview never
+// resolves a root the real install would refuse.
+func installSourcePlan(rc *config.AgentsRC, snap *config.Snapshot) (config.ResourceSourcePlan, error) {
+	if snap == nil {
+		return config.RepoResourceSourcePlan(rc), nil
+	}
+	return snap.ResourceSourcePlan()
 }
 
 // hydrateInstallPackages runs pass 2 (H9/H13) after pass-1 config resolution
@@ -493,11 +543,15 @@ func createInstallPlatformLink(p platform.Platform, projectName, projectPath str
 // set (platform.EnabledPlatforms) — the same input refresh uses — so install and
 // refresh converge on a byte-identical block instead of fighting over it.
 //
+// The knob is read from the snapshot install already resolved (installSnapshot)
+// so a `gitignore_projections: false` that only an org/team layer declares is
+// honored here exactly as `da config explain` reports it.
+//
 // Non-fatal by design, matching refresh: a repo whose .gitignore cannot be
 // written (read-only tree, exotic permissions) is a fully working install with
 // noisier `git status`, not a failed one, so this warns and returns rather than
 // unwinding the install.
-func ensureManagedGitignoreForInstall(projectPath string, deps InstallDeps) {
+func ensureManagedGitignoreForInstall(projectPath string, snap *config.Snapshot, deps InstallDeps) {
 	if Flags.DryRun {
 		ui.DryRun("Update dot-agents managed .gitignore block")
 		return
@@ -507,7 +561,7 @@ func ensureManagedGitignoreForInstall(projectPath string, deps InstallDeps) {
 		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: loading config: %v", err))
 		return
 	}
-	line, err := MaintainManagedGitignore(projectPath, platform.EnabledPlatforms(cfg))
+	line, err := MaintainManagedGitignore(projectPath, platform.EnabledPlatforms(cfg), snap)
 	if err != nil {
 		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: %v", err))
 		return
@@ -671,8 +725,35 @@ func resolveSourceRoot(src config.Source, deps InstallDeps) (string, error) {
 		ui.Bullet("ok", "Git source: "+src.URL)
 		return cacheDir, nil
 	default:
-		ui.Bullet("warn", fmt.Sprintf("Unknown source type '%s' — skipping", src.Type))
+		// `http` and `oci` are legitimate CONFIG-LAYER source kinds (§15 D13):
+		// a layer can declare one purely to fetch a nested layer, and since the
+		// source plan now surfaces inherited declarations, install SEES those
+		// for the first time. They resolve to a fetched blob, not to a resource
+		// tree, so there is no root to search — but that is a declaration
+		// install cannot use, NOT a broken install, so it must not fail the run
+		// (and must not fail `--strict`, which is about unresolved RESOURCES).
+		//
+		// It is still named explicitly, with the source's identity, because a
+		// silently ignored root is exactly how an inherited skill turns into an
+		// unexplained "not found in any source". If a resource really did live
+		// behind it, the resource lookup fails next with an actionable message.
+		ui.Bullet("warn", fmt.Sprintf("Source %s (type '%s') cannot supply project resources — skipping", describeSourceIdentity(src), src.Type))
 		return "", nil
+	}
+}
+
+// describeSourceIdentity renders the most identifying thing a source declares,
+// so a skip line points at a specific declaration rather than just its kind.
+func describeSourceIdentity(src config.Source) string {
+	switch {
+	case src.ID != "":
+		return "'" + src.ID + "'"
+	case src.URL != "":
+		return src.URL
+	case src.Path != "":
+		return config.DisplayPath(src.Path)
+	default:
+		return "(unnamed)"
 	}
 }
 

@@ -121,7 +121,7 @@ func syncProject(ctx context.Context, projectDir string, deps Deps, options sync
 	var report SyncReport
 	rc, err := deps.loadConfig(projectDir)
 	if err != nil {
-		return report, fmt.Errorf("load .agentsrc.json: %w", err)
+		return report, fmt.Errorf("resolve effective config: %w", err)
 	}
 	obs, err := requireObservability(rc)
 	if err != nil {

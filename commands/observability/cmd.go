@@ -45,7 +45,14 @@ type Deps struct {
 	Version string
 	JSON    func() bool
 
-	getwd       func() (string, error)
+	getwd func() (string, error)
+	// loadConfig resolves the manifest every observability path admits and
+	// publishes against. It defaults to the LAYERED effective config
+	// (cfg.LoadEffectiveAgentsRC), not the flat repo-local file: the
+	// `observability` block is normally supplied by an org/team layer, and a
+	// flat read made that block invisible to login, status, sync, and the
+	// best-effort outbox drain alike. The seam stays injectable so same-package
+	// tests can drive the state machine without standing up a layer stack.
 	loadConfig  func(string) (*cfg.AgentsRC, error)
 	newResolver func() credentialResolver
 	openStore   func() (credentialStore, error)
@@ -61,7 +68,7 @@ func (d Deps) withDefaults() Deps {
 		d.getwd = os.Getwd
 	}
 	if d.loadConfig == nil {
-		d.loadConfig = cfg.LoadAgentsRC
+		d.loadConfig = cfg.LoadEffectiveAgentsRC
 	}
 	if d.newResolver == nil {
 		d.newResolver = func() credentialResolver { return credstore.NewLoader() }
@@ -132,7 +139,7 @@ func newLoginCmd(deps Deps) *cobra.Command {
 func runLogin(out io.Writer, projectDir string, deps Deps) error {
 	rc, err := deps.loadConfig(projectDir)
 	if err != nil {
-		return fmt.Errorf("load .agentsrc.json: %w", err)
+		return fmt.Errorf("resolve effective config: %w", err)
 	}
 	obs, err := requireObservability(rc)
 	if err != nil {
@@ -192,7 +199,7 @@ type statusResult struct {
 func runStatus(ctx context.Context, out io.Writer, projectDir string, deps Deps) error {
 	rc, err := deps.loadConfig(projectDir)
 	if err != nil {
-		return fmt.Errorf("load .agentsrc.json: %w", err)
+		return fmt.Errorf("resolve effective config: %w", err)
 	}
 	obs, err := requireObservability(rc)
 	if err != nil {
@@ -315,10 +322,10 @@ func writeSyncReport(out io.Writer, report SyncReport, jsonOut bool) error {
 
 func requireObservability(rc *cfg.AgentsRC) (*cfg.AgentsRCObservability, error) {
 	if rc == nil || rc.Observability == nil {
-		return nil, errors.New("observability is not configured in .agentsrc.json")
+		return nil, errors.New("observability is not configured in the effective config")
 	}
 	if !rc.Observability.Enabled {
-		return nil, errors.New("observability is disabled in .agentsrc.json")
+		return nil, errors.New("observability is disabled in the effective config")
 	}
 	if strings.TrimSpace(rc.Observability.Endpoint) == "" {
 		return nil, errors.New("observability endpoint is empty")
@@ -423,10 +430,10 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 }
 
 func apiURL(endpoint *url.URL, route string) string {
-	copy := *endpoint
-	copy.Path = strings.TrimRight(copy.Path, "/") + route
-	copy.RawPath = ""
-	return copy.String()
+	routed := *endpoint
+	routed.Path = strings.TrimRight(routed.Path, "/") + route
+	routed.RawPath = ""
+	return routed.String()
 }
 
 func applyHeaders(req *http.Request, headers http.Header) {

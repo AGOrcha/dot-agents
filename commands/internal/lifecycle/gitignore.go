@@ -16,6 +16,7 @@ package lifecycle
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
@@ -27,38 +28,32 @@ import (
 const (
 	managedGitignoreWroteMsg   = "managed .gitignore block updated"
 	managedGitignoreRemovedMsg = "managed .gitignore block removed (gitignore_projections: false)"
-	managedGitignoreSkipMsg    = "managed .gitignore skipped (manifest unreadable)"
+	managedGitignoreSkipMsg    = "managed .gitignore skipped (effective config unreadable)"
 )
 
 // MaintainManagedGitignore brings the consuming project's managed `.gitignore`
 // block in line with what dot-agents projects into it, and returns the status
 // line describing what it did.
 //
-// The manifest's `gitignore_projections` knob selects the direction: enabled
+// The EFFECTIVE `gitignore_projections` knob selects the direction: enabled
 // (the default, including for a manifest-less project) regenerates the block
 // from the enabled platforms' declared outputs; an explicit false removes any
-// block a previous run left. A missing `.agentsrc.json` is not an error — a
-// project can be managed without one, and it should still get the block.
+// block a previous run left.
 //
-// An UNREADABLE manifest is different from a missing one: the knob's value is
-// genuinely unknown, so this reports a skip rather than writing a block against
-// a guessed default or failing the run. (`da install` never reaches this case —
-// it aborts on a corrupt manifest much earlier — and `da refresh` already
-// tolerates one everywhere else, so skipping keeps refresh's failure semantics
-// unchanged.) Only a real write failure is returned as an error.
+// snap is the layered snapshot the caller already resolved before projecting
+// (install/refresh both hold one). Passing it — rather than reloading a flat
+// manifest here — is what makes an org/team layer's `gitignore_projections`
+// actually govern the block: the knob is a plain scalar, so the highest-
+// precedence layer that declares it wins, and a repo that declares nothing
+// inherits its layer's answer instead of silently defaulting to on.
 //
 // This function performs no dry-run check of its own — callers gate it.
-func MaintainManagedGitignore(projectPath string, enabled []platform.Platform) (string, error) {
-	rc, err := config.LoadAgentsRC(projectPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return managedGitignoreSkipMsg, nil
-		}
-		// Manifest-less: fall through with a nil rc, which reads as the
-		// default-on knob rather than as "opted out".
-		rc = nil
+func MaintainManagedGitignore(projectPath string, enabled []platform.Platform, snap *config.Snapshot) (string, error) {
+	on, known := EffectiveGitignoreProjections(projectPath, snap)
+	if !known {
+		return managedGitignoreSkipMsg, nil
 	}
-	if !rc.GitignoreProjectionsEnabled() {
+	if !on {
 		if err := links.RemoveManagedGitignore(projectPath); err != nil {
 			return "", err
 		}
@@ -68,4 +63,32 @@ func MaintainManagedGitignore(projectPath string, enabled []platform.Platform) (
 		return "", err
 	}
 	return managedGitignoreWroteMsg, nil
+}
+
+// EffectiveGitignoreProjections resolves the tri-state `gitignore_projections`
+// knob against the layer stack, returning (enabled, known).
+//
+// It prefers the snapshot the caller already resolved. When the caller has none
+// — refresh whose pass-1 resolve failed, or a caller outside the install/refresh
+// flow — it resolves READ-ONLY (EnsureOpts{Frozen}: no fetch, no lock write, no
+// cache write), so consulting the knob can never itself produce a lock a
+// dry-run or best-effort path was supposed to avoid.
+//
+// known=false is the deliberate third state: an UNREADABLE manifest, or an
+// `extends` project whose layers cannot be replayed offline, leaves the knob's
+// value genuinely unknown. Reporting a skip is correct there — writing a block
+// against a guessed default, or retracting one the project asked for, are both
+// worse than doing nothing. A MISSING manifest is not that case: a project can
+// be managed without one and still gets the default-on block.
+func EffectiveGitignoreProjections(projectPath string, snap *config.Snapshot) (enabled, known bool) {
+	if snap != nil {
+		return snap.Effective.GitignoreProjectionsEnabled(), true
+	}
+	if res, err := config.EnsureResolved(projectPath, config.EnsureOpts{Frozen: true}); err == nil {
+		return res.Snapshot.Effective.GitignoreProjectionsEnabled(), true
+	}
+	if _, err := os.Stat(filepath.Join(projectPath, config.AgentsRCFile)); os.IsNotExist(err) {
+		return true, true
+	}
+	return false, false
 }
