@@ -1,0 +1,224 @@
+{
+  "package": "code-review-graph",
+  "version": "2.3.8",
+  "tag": "v2.3.8",
+  "commit": "2c6dae32643572ee528eb9b77dbcc17f58f3a8c9",
+  "schema_version": 9,
+  "extension_to_language": {
+    ".astro": "typescript",
+    ".bash": "bash",
+    ".c": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cs": "csharp",
+    ".cxx": "cpp",
+    ".dart": "dart",
+    ".ex": "elixir",
+    ".exs": "elixir",
+    ".gd": "gdscript",
+    ".go": "go",
+    ".h": "c",
+    ".hcl": "hcl",
+    ".hh": "cpp",
+    ".hpp": "cpp",
+    ".ipynb": "notebook",
+    ".java": "java",
+    ".jl": "julia",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ksh": "bash",
+    ".kt": "kotlin",
+    ".lua": "lua",
+    ".luau": "luau",
+    ".m": "objc",
+    ".mjs": "javascript",
+    ".nix": "nix",
+    ".php": "php",
+    ".pl": "perl",
+    ".pm": "perl",
+    ".properties": "properties",
+    ".ps1": "powershell",
+    ".psd1": "powershell",
+    ".psm1": "powershell",
+    ".py": "python",
+    ".r": "r",
+    ".rb": "ruby",
+    ".res": "rescript",
+    ".resi": "rescript",
+    ".rs": "rust",
+    ".scala": "scala",
+    ".sh": "bash",
+    ".sol": "solidity",
+    ".sql": "sql",
+    ".sv": "verilog",
+    ".svelte": "svelte",
+    ".svh": "verilog",
+    ".swift": "swift",
+    ".t": "perl",
+    ".tf": "hcl",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".v": "verilog",
+    ".vb": "vbnet",
+    ".vh": "verilog",
+    ".vue": "vue",
+    ".xs": "c",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".zig": "zig",
+    ".zsh": "bash"
+  },
+  "tables": [
+    {
+      "name": "metadata",
+      "required": true,
+      "columns": [
+        "key",
+        "value"
+      ]
+    },
+    {
+      "name": "nodes",
+      "required": true,
+      "columns": [
+        "id",
+        "name",
+        "qualified_name",
+        "file_path",
+        "kind",
+        "language",
+        "line_start",
+        "line_end",
+        "file_hash",
+        "signature",
+        "is_test",
+        "community_id"
+      ]
+    },
+    {
+      "name": "edges",
+      "required": true,
+      "columns": [
+        "id",
+        "kind",
+        "source_qualified",
+        "target_qualified",
+        "file_path",
+        "line",
+        "confidence",
+        "confidence_tier"
+      ],
+      "surfaces": [
+        "edge_confidence"
+      ]
+    },
+    {
+      "name": "flows",
+      "required": false,
+      "columns": [
+        "id",
+        "name",
+        "entry_point_id",
+        "depth",
+        "node_count",
+        "file_count",
+        "criticality",
+        "path_json",
+        "created_at",
+        "updated_at"
+      ],
+      "surfaces": [
+        "flows",
+        "flow_metrics"
+      ]
+    },
+    {
+      "name": "flow_memberships",
+      "required": false,
+      "columns": [
+        "flow_id",
+        "node_id",
+        "position"
+      ]
+    },
+    {
+      "name": "communities",
+      "required": false,
+      "columns": [
+        "id",
+        "name",
+        "level",
+        "parent_id",
+        "cohesion",
+        "size",
+        "dominant_language"
+      ],
+      "surfaces": [
+        "communities"
+      ]
+    },
+    {
+      "name": "community_summaries",
+      "required": false,
+      "columns": [
+        "community_id",
+        "name",
+        "purpose",
+        "key_symbols",
+        "risk",
+        "size",
+        "dominant_language"
+      ],
+      "surfaces": [
+        "community_summaries"
+      ]
+    },
+    {
+      "name": "flow_snapshots",
+      "required": false,
+      "columns": [
+        "flow_id",
+        "name",
+        "entry_point",
+        "critical_path",
+        "criticality",
+        "node_count",
+        "file_count"
+      ],
+      "surfaces": [
+        "flow_snapshots"
+      ]
+    },
+    {
+      "name": "risk_index",
+      "required": false,
+      "columns": [
+        "node_id",
+        "qualified_name",
+        "risk_score",
+        "caller_count",
+        "test_coverage",
+        "security_relevant",
+        "last_computed"
+      ],
+      "surfaces": [
+        "risk_index",
+        "risk_detail"
+      ]
+    },
+    {
+      "name": "nodes_fts",
+      "required": false,
+      "columns": [
+        "name",
+        "qualified_name",
+        "file_path",
+        "signature"
+      ],
+      "surfaces": [
+        "fts_index",
+        "fts_search"
+      ]
+    }
+  ]
+}

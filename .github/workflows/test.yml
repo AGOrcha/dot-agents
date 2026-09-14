@@ -136,6 +136,156 @@ jobs:
       - name: Run hermetic CRG parity harness
         run: go test -race -count=1 -run '^(TestPostprocessParity_TenCommitDualRead|TestPostprocessParity_CatchesDivergence|TestRegression_CrossPathParity_ClampsAreTheSameNumbers)$' ./internal/adapters/builtin/crg ./internal/graphstore
 
+  # §11.4 criterion 2 — the behavior-preservation gate. Where crg-parity-gate
+  # above is hermetic (synthetic 10-commit corpus, no Python), this job replays
+  # a corpus of REAL review tasks pinned from this repository's history against
+  # the pinned code-review-graph release and the kg-native adapter, under EXACT
+  # oracles. It materializes every pinned commit in its own worktree and runs a
+  # full release build there, which is why it is slow and lives in its own job.
+  #
+  # The run is record-then-compare: the job first drives the pinned release
+  # over the corpus to RECORD the upstream-conformance baseline, then runs the
+  # gate against those fresh recordings. The baseline therefore never ships in
+  # the repository — it is produced by the release, on this corpus, in this job.
+  #
+  # continue-on-error: the job's STATUS is non-required until the §11.4
+  # criterion-2 sign-off. Its RESULT is not advisory: the gate exits non-zero
+  # on a divergence, on an unexercised required surface, and on an unavailable
+  # bridge, and every run publishes its verdict and sign-off line to the job
+  # summary plus a machine-readable artifact. A red run here is the signal.
+  crg-behavior-gate:
+    name: CRG behavior-preservation gate (§11.4 criterion 2, non-required status)
+    runs-on: ubuntu-latest
+    needs: lint-workflows
+    continue-on-error: true
+    # Two isolated worktrees and two full release builds per pinned task —
+    # one for the recording pass, one for the comparison pass — plus a
+    # standalone postprocess each. See CRG_GATE_TASKS for the measured cost.
+    timeout-minutes: 120
+    env:
+      # The ONE release criterion 2 certifies against. Pinned here and asserted
+      # again in Go (crgbehavior.PinnedVersion): an off-release bridge fails
+      # the run rather than quietly becoming the baseline.
+      CRG_PINNED_VERSION: '2.3.8'
+      CRG_GATE_REPORT: crg-behavior-gate.json
+      # The upstream-conformance baseline is RECORDED IN THIS JOB, into the job
+      # workspace, and thrown away with the runner. Nothing here is committed:
+      # a checked-in "expected upstream" file that no run of the release ever
+      # produced is a fabrication, and diffing a bridge against a fabrication
+      # certifies nothing. Recording first and comparing second means the
+      # baseline is always what THIS release actually did on THIS corpus.
+      CRG_GATE_RECORDINGS: crg-upstream-recordings
+      # Tasks per pass; 0 runs the whole pinned corpus.
+      #
+      # MEASURED against the PINNED release on this runner class (run
+      # 34797081532): one task costs ~29 s per pass — a full 2.3.8 build of
+      # this repository plus the standalone postprocess the lifecycle probe
+      # needs — so ~58 s across both passes of record-then-compare, and the
+      # 25 pinned tasks come to ~25 min inside a 120-minute budget.
+      #
+      # Do NOT re-derive this from an older release's logs: 2.2.0 spent ~14.5
+      # min per build in file-based community detection, which would have made
+      # the same corpus look like a day of work and forced a pointless cap.
+      # The cap knob stays because contract coverage is judged over the tasks
+      # that ACTUALLY ran (crgbehavior.Config.MaxTasks) — trimming the corpus
+      # can never buy a pass, so reducing it is safe if the cost ever changes.
+      CRG_GATE_TASKS: '0'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The gate checks every pinned commit out into its own worktree, so
+          # it needs real history, not a 1-commit clone.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.x'
+
+      # Only the GATE's bridge is pinned to the certified release. The KG CODE
+      # lane in the per-OS test job keeps tracking whatever it installs; this
+      # pin is a statement about what criterion 2 certifies, not a repo-wide
+      # dependency change.
+      - name: Set up the pinned code-review-graph release (.venv)
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --quiet --upgrade pip
+          .venv/bin/python -m pip install --quiet "code-review-graph==${CRG_PINNED_VERSION}"
+          .venv/bin/code-review-graph --version | tee crg-version.txt
+          # The gate builds each pinned commit inside a worktree OUTSIDE the
+          # repository, so the bridge cannot be discovered as a sibling .venv
+          # from there — it has to be on PATH. Without this the gate would
+          # report INCONCLUSIVE on every run.
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
+
+      # Record the pinned release's OWN behavior over the corpus, into the job
+      # workspace; the gate below conforms both sides against these recordings.
+      #
+      # Neither pass pre-builds a workspace-wide graph: each task's graph is
+      # built inside its own worktree at its own commit, because a graph built
+      # at HEAD cannot answer a historical review task.
+      - name: Record the pinned release's upstream behavior baseline
+        id: record
+        # Bounded so a pathologically slow build cannot consume the whole job
+        # budget and starve the comparison pass of its verdict.
+        timeout-minutes: 55
+        # pipefail: `tee` must not be allowed to supply the step's exit status.
+        run: |
+          set -o pipefail
+          go run ./tools/crgbehaviorgate -record -repo . \
+            -tasks "${CRG_GATE_TASKS}" \
+            -fixtures "${CRG_GATE_RECORDINGS}" | tee crg-behavior-record.log
+
+      # always(): a partial or failed recording must still produce a verdict.
+      # The gate treats a missing recording as a FAILURE rather than a skip, so
+      # an incomplete baseline is reported as the evidence gap it is instead of
+      # vanishing into a skipped step.
+      - name: Run the behavior-preservation gate over the pinned review-task corpus
+        id: gate
+        timeout-minutes: 55
+        if: always()
+        # pipefail: without it `tee` would supply the step's exit status and a
+        # divergent gate would report success — the exact failure mode this
+        # job exists to prevent.
+        run: |
+          set -o pipefail
+          go run ./tools/crgbehaviorgate -repo . \
+            -tasks "${CRG_GATE_TASKS}" \
+            -fixtures "${CRG_GATE_RECORDINGS}" \
+            -json "${CRG_GATE_REPORT}" | tee crg-behavior-gate.log
+
+      - name: Publish the criterion-2 sign-off
+        if: always()
+        run: |
+          recorded=$(find "${CRG_GATE_RECORDINGS}" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+          {
+            echo "## CRG behavior-preservation gate (§11.4 criterion 2)"
+            echo
+            echo "- bridge: \`$(cat crg-version.txt 2>/dev/null || echo 'not installed')\`"
+            echo "- pinned: \`code-review-graph ${CRG_PINNED_VERSION}\` (graph schema v9)"
+            echo "- baseline: \`${recorded}\` recording(s) made in this job (\`${{ steps.record.outcome }}\`); nothing committed"
+            echo "- outcome: \`${{ steps.gate.outcome }}\`"
+            echo
+            echo '```'
+            grep -E '^(GATE|SIGN-OFF|observed|pinned|corpus):' crg-behavior-gate.log 2>/dev/null \
+              || echo 'the gate produced no verdict line — treat as INCONCLUSIVE'
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload the criterion-2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crg-behavior-gate
+          path: |
+            crg-behavior-gate.json
+            crg-behavior-gate.log
+            crg-behavior-record.log
+            crg-version.txt
+            ${{ env.CRG_GATE_RECORDINGS }}
+          if-no-files-found: warn
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

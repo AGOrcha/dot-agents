@@ -67,6 +67,15 @@ htmlcov/
 # Perf benchmark reports (scripts/perf/run-benchmarks.sh output — regenerated
 # per run, not committed; the harness script itself is tracked)
 scripts/perf/reports/*.txt
+
+# CRG behavior-gate upstream recordings (§11.4 criterion 2). The baseline is
+# RECORDED from the pinned release per run — in CI into the job workspace,
+# locally into testdata/crg-behavior/fixtures — and is deliberately never
+# committed: a checked-in "expected upstream" file that no run of the release
+# produced would be a fabrication. Only the directory's README is tracked.
+testdata/crg-behavior/fixtures/*.json
+crg-upstream-recordings/
+
 # Temporary files
 *.tmp
 *.temp

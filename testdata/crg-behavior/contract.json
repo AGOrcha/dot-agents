@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "release": "2.3.8",
+  "required_surfaces": [
+    "upstream_conformance",
+    "changed_nodes",
+    "impact_radius",
+    "flows",
+    "flow_metrics",
+    "flow_snapshots",
+    "communities",
+    "community_summaries",
+    "risk_index",
+    "risk_detail",
+    "fts_index",
+    "fts_search",
+    "edge_confidence",
+    "lifecycle"
+  ],
+  "ratified_exceptions": []
+}
