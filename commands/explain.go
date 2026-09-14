@@ -129,10 +129,11 @@ func printManifestExplanation() {
 	fmt.Fprintf(os.Stdout, "    da agents new <n> --project <p>  → manifest updated automatically\n")
 	fmt.Fprintf(os.Stdout, "    da hooks list|show|remove       → inspect ~/.agents/hooks bundles (author on disk, then refresh/install)\n")
 	fmt.Fprintf(os.Stdout, "    da rules list|show|remove       → inspect ~/.agents/rules files (author on disk, then refresh/install)\n")
-	fmt.Fprintf(os.Stdout, "    da install --generate            → regenerate from current state\n\n")
+	fmt.Fprintf(os.Stdout, "    da install --generate            → regenerate scan-derived lists, keep declarations\n\n")
 
 	ui.Section("Flags")
-	fmt.Fprintf(os.Stdout, "  %s--generate%s  Create/overwrite .agentsrc.json from current ~/.agents/ state\n", ui.Cyan, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %s--generate%s  Create/refresh .agentsrc.json from current ~/.agents/ state (additive: declarations are kept)\n", ui.Cyan, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %s--force-generate%s  With --generate: let the scan replace an explicit hooks/mcp/settings declaration\n", ui.Cyan, ui.Reset)
 	fmt.Fprintf(os.Stdout, "  %s--strict%s    Fail if any declared resource is not found\n", ui.Cyan, ui.Reset)
 	fmt.Fprintf(os.Stdout, "  %s--dry-run%s   Preview changes without applying\n", ui.Cyan, ui.Reset)
 	fmt.Fprintf(os.Stdout, "  %s--force%s     Re-fetch git sources even if recently cached\n\n", ui.Cyan, ui.Reset)

@@ -26,6 +26,9 @@ const (
 	errFmtGenerateRC    = "GenerateAgentsRC: %v"
 	testSkillMarkerFile = "SKILL" + ".md"
 	testRealSkillName   = "real" + "-skill"
+	// staleManifestGitURL is the authored remote that must survive every
+	// install --generate pass over the stale fixture manifest.
+	staleManifestGitURL = "https://example.com/stale-org.git"
 )
 
 // ── optional-field test helpers ──────────────────────────────────────────────
@@ -442,38 +445,39 @@ func TestMergeGenerateAgentsRCPreservesGitSource(t *testing.T) {
 		Version: 1,
 		Project: "scan-name",
 		Skills:  []string{"a"},
-		Sources: []Source{{Type: testSourceTypeLocal}},
 	}
 	out := MergeGenerateAgentsRC(existing, generated)
 	if out.Project != "keep-me" {
 		t.Errorf("Project: got %q, want preserved existing", out.Project)
 	}
-	if len(out.Sources) != 2 {
-		t.Fatalf("Sources: got %d entries, want local + git", len(out.Sources))
+	if len(out.Sources) != 1 {
+		t.Fatalf("Sources: got %+v, want the git source alone", out.Sources)
 	}
-	if out.Sources[0].Type != testSourceTypeLocal {
-		t.Errorf("first source should be generated local, got %+v", out.Sources[0])
-	}
-	if out.Sources[1].Type != "git" || out.Sources[1].URL != "https://example.com/skills.git" {
-		t.Errorf("git source not preserved: %+v", out.Sources[1])
+	if out.Sources[0].Type != "git" || out.Sources[0].URL != "https://example.com/skills.git" {
+		t.Errorf("git source not preserved: %+v", out.Sources[0])
 	}
 	if len(out.Skills) != 1 || out.Skills[0] != "a" {
 		t.Errorf("generated skills should win: %+v", out.Skills)
 	}
 }
 
+// TestMergeGenerateAgentsRCDedupesLocalSources covers the two halves of local
+// source handling that now diverge: a path-BEARING local root is an authored
+// project source and is deduplicated across the two sides, while the path-less
+// default-home entry is dropped from either side (see ProjectOwnedSources).
 func TestMergeGenerateAgentsRCDedupesLocalSources(t *testing.T) {
+	shared := Source{Type: testSourceTypeLocal, Path: "../shared"}
 	existing := &AgentsRC{
 		Version: 1,
-		Sources: []Source{{Type: testSourceTypeLocal}},
+		Sources: []Source{{Type: testSourceTypeLocal}, shared},
 	}
 	generated := &AgentsRC{
 		Version: 1,
-		Sources: []Source{{Type: testSourceTypeLocal}},
+		Sources: []Source{{Type: testSourceTypeLocal}, shared},
 	}
 	out := MergeGenerateAgentsRC(existing, generated)
-	if len(out.Sources) != 1 {
-		t.Fatalf("Sources: got %v, want single local", out.Sources)
+	if len(out.Sources) != 1 || !reflect.DeepEqual(out.Sources[0], shared) {
+		t.Fatalf("Sources: got %+v, want the single authored ../shared root", out.Sources)
 	}
 }
 
@@ -482,8 +486,8 @@ func TestMergeGenerateAgentsRCDedupesGitSources(t *testing.T) {
 	existing := &AgentsRC{Version: 1, Sources: []Source{gitSrc}}
 	generated := &AgentsRC{Version: 1, Sources: []Source{{Type: testSourceTypeLocal}, gitSrc}}
 	out := MergeGenerateAgentsRC(existing, generated)
-	if len(out.Sources) != 2 {
-		t.Fatalf("Sources: got %d entries %+v, want local + git only", len(out.Sources), out.Sources)
+	if len(out.Sources) != 1 || out.Sources[0].URL != gitSrc.URL {
+		t.Fatalf("Sources: got %d entries %+v, want the git source once", len(out.Sources), out.Sources)
 	}
 }
 
@@ -506,19 +510,71 @@ func TestMergeGenerateAgentsRCPreservesExtraFields(t *testing.T) {
 }
 
 // TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations proves
-// install --generate's repo-facing contract: re-generating over an existing
-// on-disk .agentsrc.json that carries pre-fix, over-captured global-scope
-// declarations (skills/agents/rules/hooks/mcp/settings all folding in
-// "global") REPLACES those scan-derived fields with the fresh project-only
-// scan rather than unioning onto the stale set — so a stale committed
-// manifest is cleaned up by the very next `da install --generate`, with no
-// separate prune step needed.
+// install --generate's repo-facing contract on a stale, pre-fix manifest that
+// over-captured global-scope entries into every scoped field.
+//
+// The two halves of the contract pull in opposite directions and are both
+// asserted here:
+//
+//   - skills/agents/rules are scan-derived SETS with no other convergence
+//     path, so the fresh project-only scan REPLACES them in either mode — that
+//     is how a stale committed manifest is cleaned up, with no prune step.
+//   - hooks/mcp/settings are scan-detectable but author-DECLARABLE. Replacing
+//     a committed declaration would silently re-enable a projection the repo
+//     turned off, so by default the declaration survives; --force-generate
+//     (MergeGenerateOptions{Force:true}) opts back into replace-from-scan.
+//   - sources keep only the PROJECT-OWNED roots in either mode. The stale
+//     manifest's bare `{"type":"local"}` entry named the generating user's own
+//     ~/.agents home, so regenerating drops it from the committed file, while
+//     the authored git remote beside it survives.
 func TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations(t *testing.T) {
-	home := agentsHomeFixture(t)
-	t.Setenv("AGENTS_HOME", home)
+	cases := []struct {
+		name string
+		opts []MergeGenerateOptions
+		// wantHooks/wantMCP are the sorted expected name lists; wantHooksAll is
+		// the expected Hooks.All.
+		wantHooks    []string
+		wantHooksAll bool
+		wantMCP      []string
+	}{
+		{
+			name:         "default keeps the committed declarations",
+			wantHooks:    nil,
+			wantHooksAll: true,
+			wantMCP:      []string{"global-mcp-server", "server-a", "server-b"},
+		},
+		{
+			name:         "force-generate replaces them from the fresh scan",
+			opts:         []MergeGenerateOptions{{Force: true}},
+			wantHooks:    []string{testHookPostToolUse, testHookPreToolUse},
+			wantHooksAll: false,
+			wantMCP:      []string{"server-a", "server-b"},
+		},
+	}
 
-	// Simulate a stale, pre-fix-generated manifest: it declared the global
-	// entries alongside the project ones for every scoped field.
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := mergeOverStaleManifest(t, tc.opts...)
+			assertStaleScanSetsPruned(t, out)
+			assertStaleManifestSourcesNarrowed(t, out)
+			assertSOBNames(t, "Hooks", out.Hooks, tc.wantHooks)
+			assertSOBNames(t, "MCP", out.MCP, tc.wantMCP)
+			if sobAll(out.Hooks) != tc.wantHooksAll {
+				t.Errorf("Hooks.All: got %v, want %v", sobAll(out.Hooks), tc.wantHooksAll)
+			}
+			if !boolVal(out.Settings) {
+				t.Error("Settings: want true in both modes — committed true, and the project-scoped cursor.json also detects true")
+			}
+		})
+	}
+}
+
+// mergeOverStaleManifest builds the stale pre-fix manifest, generates a fresh
+// project-only scan against the fixture ~/.agents/, and merges them.
+func mergeOverStaleManifest(t *testing.T, opts ...MergeGenerateOptions) *AgentsRC {
+	t.Helper()
+	t.Setenv("AGENTS_HOME", agentsHomeFixture(t))
+
 	existing := &AgentsRC{
 		Version:  1,
 		Project:  testProject,
@@ -528,44 +584,60 @@ func TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations(t *testing.
 		Hooks:    sob(StringsOrBool{All: true}),
 		MCP:      sob(StringsOrBool{Names: []string{"global-mcp-server", "server-a", "server-b"}}),
 		Settings: pbool(true),
-		Sources:  []Source{{Type: testSourceTypeLocal}},
+		Sources: []Source{
+			{Type: testSourceTypeLocal},
+			{Type: "git", URL: staleManifestGitURL, Ref: "main"},
+		},
 	}
-
 	generated, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
-	out := MergeGenerateAgentsRC(existing, generated)
+	return MergeGenerateAgentsRC(existing, generated, opts...)
+}
 
-	if !reflect.DeepEqual(out.Skills, []string{"skill-proj"}) {
-		t.Errorf("Skills: got %v, want [skill-proj] (stale global entry must be dropped)", out.Skills)
+// assertStaleScanSetsPruned pins the half of the contract that does not depend
+// on the force mode: the scan-derived sets always converge to project scope.
+func assertStaleScanSetsPruned(t *testing.T, out *AgentsRC) {
+	t.Helper()
+	sets := []struct {
+		field string
+		got   []string
+		want  []string
+	}{
+		{"Skills", out.Skills, []string{"skill-proj"}},
+		{"Agents", out.Agents, []string{"agent-proj"}},
+		{"Rules", out.Rules, []string{"project"}},
 	}
-	if !reflect.DeepEqual(out.Agents, []string{"agent-proj"}) {
-		t.Errorf("Agents: got %v, want [agent-proj] (stale global entry must be dropped)", out.Agents)
+	for _, s := range sets {
+		if !reflect.DeepEqual(s.got, s.want) {
+			t.Errorf("%s: got %v, want %v (stale global entry must be dropped)", s.field, s.got, s.want)
+		}
 	}
-	if !reflect.DeepEqual(out.Rules, []string{"project"}) {
-		t.Errorf("Rules: got %v, want [project] (stale global entry must be dropped)", out.Rules)
+}
+
+// assertStaleManifestSourcesNarrowed pins the source half of the contract in
+// both force modes: the stale default-home local entry is gone, the authored
+// git remote is intact, and the generated scan contributed no source of its own.
+func assertStaleManifestSourcesNarrowed(t *testing.T, out *AgentsRC) {
+	t.Helper()
+	want := []Source{{Type: "git", URL: staleManifestGitURL, Ref: "main"}}
+	if !reflect.DeepEqual(out.Sources, want) {
+		t.Errorf("Sources: got %+v, want %+v (default-home local must be dropped, git remote kept)", out.Sources, want)
 	}
-	gotMCP := append([]string(nil), sobNames(out.MCP)...)
-	sort.Strings(gotMCP)
-	wantMCP := []string{"server-a", "server-b"}
-	if !reflect.DeepEqual(gotMCP, wantMCP) {
-		t.Errorf("MCP.Names: got %v, want %v (stale global server must be dropped)", gotMCP, wantMCP)
+}
+
+// assertSOBNames compares a StringsOrBool's names (sorted) against want. A nil
+// want matches an empty list, so a declaration carrying only All:true passes.
+func assertSOBNames(t *testing.T, field string, got *StringsOrBool, want []string) {
+	t.Helper()
+	names := append([]string(nil), sobNames(got)...)
+	sort.Strings(names)
+	if len(names) == 0 && len(want) == 0 {
+		return
 	}
-	if sobAll(out.MCP) {
-		t.Error("MCP.All should be false after regenerate")
-	}
-	gotHooks := append([]string(nil), sobNames(out.Hooks)...)
-	sort.Strings(gotHooks)
-	wantHooks := []string{testHookPostToolUse, testHookPreToolUse}
-	if !reflect.DeepEqual(gotHooks, wantHooks) {
-		t.Errorf("Hooks.Names: got %v, want %v (stale All:true must be replaced by the project scan)", gotHooks, wantHooks)
-	}
-	if sobAll(out.Hooks) {
-		t.Error("Hooks.All should be false after regenerate — project scope only has named events")
-	}
-	if !boolVal(out.Settings) {
-		t.Error("Settings should stay true — driven by the project-scoped cursor.json, not the stale global declaration")
+	if !reflect.DeepEqual(names, want) {
+		t.Errorf("%s.Names: got %v, want %v", field, names, want)
 	}
 }
 
@@ -1111,8 +1183,11 @@ func TestGenerateAgentsRCDefaultFields(t *testing.T) {
 	if rc.Project != testProject {
 		t.Errorf("Project: got %q, want myproject", rc.Project)
 	}
-	if len(rc.Sources) != 1 || rc.Sources[0].Type != testSourceTypeLocal {
-		t.Errorf("Sources: got %+v, want [{Type:local}]", rc.Sources)
+	// A generated manifest declares no sources at all: the only root the scan
+	// reads is the user's own ~/.agents home, which is not project-owned and
+	// must never be written into a committed, shared manifest.
+	if len(rc.Sources) != 0 {
+		t.Errorf("Sources: got %+v, want none declared", rc.Sources)
 	}
 }
 
@@ -1437,12 +1512,24 @@ func TestSaveAgentsRC_BadPath(t *testing.T) {
 	}
 }
 
-func TestMergeGenerateAgentsRC_GenLocalSourceDeduplicatedAcrossSlices(t *testing.T) {
-	g := &AgentsRC{Sources: []Source{{Type: "local"}, {Type: "local"}}}
-	e := &AgentsRC{Sources: []Source{{Type: "local"}}}
+func TestMergeGenerateAgentsRC_LocalSourceDeduplicatedAcrossSlices(t *testing.T) {
+	shared := Source{Type: "local", Path: "../shared"}
+	g := &AgentsRC{Sources: []Source{shared, shared}}
+	e := &AgentsRC{Sources: []Source{shared}}
 	out := MergeGenerateAgentsRC(e, g)
 	if len(out.Sources) != 1 {
-		t.Errorf("expected dedupe to 1 local, got %v", out.Sources)
+		t.Errorf("expected dedupe to 1 authored local root, got %v", out.Sources)
+	}
+}
+
+// TestMergeGenerateAgentsRC_DefaultHomeLocalDroppedFromBothSlices is the
+// counterpart: the path-less sentinel is not deduplicated, it is removed
+// wherever it appears.
+func TestMergeGenerateAgentsRC_DefaultHomeLocalDroppedFromBothSlices(t *testing.T) {
+	g := &AgentsRC{Sources: []Source{{Type: "local"}}}
+	e := &AgentsRC{Sources: []Source{{Type: "local"}}}
+	if out := MergeGenerateAgentsRC(e, g); len(out.Sources) != 0 {
+		t.Errorf("expected no sources, got %v", out.Sources)
 	}
 }
 

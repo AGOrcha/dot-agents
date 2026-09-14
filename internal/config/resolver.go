@@ -70,6 +70,13 @@ var fieldCategories = map[string]MergeCategory{
 	"packages":              CategoryOrderedReplace,
 }
 
+// FieldMergeCategory reports how a top-level manifest key combines across
+// layers. Exported so callers outside this package — `da config verify`'s
+// shadow check, for one — can reason about layering without re-declaring the
+// category table and drifting from it. A key with no explicit entry answers
+// CategoryScalar, exactly as mergeField treats it.
+func FieldMergeCategory(key string) MergeCategory { return fieldCategories[key] }
+
 // protectedSet is the lookup form of ProtectedFields.
 var protectedSet = func() map[string]struct{} {
 	m := make(map[string]struct{}, len(ProtectedFields))

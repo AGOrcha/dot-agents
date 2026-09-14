@@ -94,23 +94,34 @@ func TestAgentsRC_AbsentOptionalKeysSurviveRoundTrip(t *testing.T) {
 	}
 }
 
-// roundTripManifest seeds a manifest, loads it through LoadAgentsRC, saves it
-// back with Save, and returns the re-saved bytes plus their decoded object.
-func roundTripManifest(t *testing.T, manifest string) ([]byte, map[string]any) {
+// seedManifest writes manifest into dir as .agentsrc.json.
+func seedManifest(t *testing.T, dir, manifest string) {
 	t.Helper()
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, AgentsRCFile)
-	if err := os.WriteFile(path, []byte(manifest), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, AgentsRCFile), []byte(manifest), 0644); err != nil {
 		t.Fatalf("seeding manifest: %v", err)
 	}
+}
+
+// roundTripManifest is the one load→save fixture for this package's
+// manifest-fidelity tests: it seeds manifest into a temp dir, loads it through
+// LoadAgentsRC, applies each mutate hook (the `da agents import` shape — load,
+// edit, save), saves it back with Save, and returns the re-saved bytes plus
+// their decoded object. Pass no hook to assert pure round-trip fidelity.
+func roundTripManifest(t *testing.T, manifest string, mutate ...func(rc *AgentsRC)) ([]byte, map[string]any) {
+	t.Helper()
+	tmp := t.TempDir()
+	seedManifest(t, tmp, manifest)
 	rc, err := LoadAgentsRC(tmp)
 	if err != nil {
 		t.Fatalf("LoadAgentsRC: %v", err)
 	}
+	for _, m := range mutate {
+		m(rc)
+	}
 	if err := rc.Save(tmp); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	saved, err := os.ReadFile(path)
+	saved, err := os.ReadFile(filepath.Join(tmp, AgentsRCFile))
 	if err != nil {
 		t.Fatalf("reading saved manifest: %v", err)
 	}

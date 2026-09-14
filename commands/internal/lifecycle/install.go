@@ -61,6 +61,11 @@ type installOptions struct {
 	// exactly what the lock declares. True (`--inexact`) keeps the additive
 	// behavior: write the wanted set, leave stale managed outputs in place.
 	inexact bool
+	// forceGenerate lets `--generate`'s fresh scan REPLACE an explicit
+	// hooks/mcp/settings declaration in an existing manifest instead of only
+	// filling an absent one. Default false ⇒ a committed declaration wins, so
+	// regenerating cannot silently re-enable a projection the repo turned off.
+	forceGenerate bool
 	// version/commit/describe are the build-stamp values finalizeInstall writes
 	// into the install lock section, sourced from the lifecycle Version/Commit/
 	// Describe package vars (populated by applyDepsToGlobals) at invocation time.
@@ -105,6 +110,7 @@ type installLockStamp struct {
 // wrapper re-applies the same values from deps. Both writes are idempotent.
 func NewInstallCmd(deps Deps) *cobra.Command {
 	var generate bool
+	var forceGenerate bool
 	var strict bool
 	var inexact bool
 
@@ -125,20 +131,27 @@ Commit .agentsrc.json to git so any contributor can run 'da install'
 after cloning — no manual init or sync required.
 
 Use --generate to create or refresh .agentsrc.json from the current ~/.agents/ state.
-If a manifest already exists, generated skill and platform lists replace stale values,
-but existing source entries (for example git remotes), a non-empty project name, and
-unknown JSON keys are preserved.`,
+If a manifest already exists, the merge is ADDITIVE: generated skill, agent and rule
+lists replace stale values (that is how a stale manifest converges), sources are
+unioned, absent fields are filled from the scan, and everything the author declared
+is preserved — project name, repo_id, extends, hooks/mcp/settings, unknown JSON keys.
+
+An explicit hooks/mcp/settings declaration therefore survives regeneration, so
+--generate cannot silently re-enable a projection the repo deliberately turned off.
+Pass --force-generate to let the fresh scan replace those declarations instead.`,
 		Example: deps.ExampleBlock(
 			"  da install",
 			"  da install --strict",
 			"  da install --generate",
 			"  da install --generate --force",
+			"  da install --generate --force-generate",
 		),
 		Args: deps.NoArgsWithHints("Run install from the target repository directory instead of passing a path."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			applyDepsToGlobals(deps)
 			opts := installOptionsFromGlobals()
 			opts.inexact = inexact
+			opts.forceGenerate = forceGenerate
 			if generate {
 				return runInstallGenerate(StdInstallDeps{}, opts)
 			}
@@ -146,6 +159,7 @@ unknown JSON keys are preserved.`,
 		},
 	}
 	cmd.Flags().BoolVar(&generate, "generate", false, "Create .agentsrc.json from current ~/.agents/ state")
+	cmd.Flags().BoolVar(&forceGenerate, "force-generate", false, "With --generate: let the fresh scan REPLACE an explicit hooks/mcp/settings declaration instead of only filling an absent one")
 	cmd.Flags().BoolVar(&strict, "strict", false, "Fail if any declared resource is not found")
 	cmd.Flags().BoolVar(&inexact, "inexact", false, "Keep additive behavior: write the resolved set but do NOT prune managed outputs no longer in it (install otherwise converges the tree to exactly what the lock declares)")
 	return cmd
@@ -181,7 +195,13 @@ func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	if err != nil {
 		return err
 	}
-	resolvedSources, err := resolveInstallSources(rc.Sources, strict, deps)
+	// ProjectOwnedSources, not rc.Sources: the bare default-home `local` entry
+	// (synthesized by LoadAgentsRC for a manifest that declares none, or
+	// committed by a pre-fix generate pass) names the user's own ~/.agents home,
+	// which linkInstallResources already appends as the canonical store. Passing
+	// it here would resolve that home a second time as if the project declared
+	// it. Authored roots — git/http/oci, or a path-bearing local — are kept.
+	resolvedSources, err := resolveInstallSources(rc.ProjectOwnedSources(), strict, deps)
 	if err != nil {
 		return err
 	}
@@ -571,7 +591,7 @@ func runInstallGenerate(deps InstallDeps, opts installOptions) error {
 		if loadErr != nil {
 			return fmt.Errorf("loading existing %s: %w", config.AgentsRCFile, loadErr)
 		}
-		rc = config.MergeGenerateAgentsRC(existing, rc)
+		rc = config.MergeGenerateAgentsRC(existing, rc, config.MergeGenerateOptions{Force: opts.forceGenerate})
 	} else if !os.IsNotExist(statErr) {
 		return fmt.Errorf("accessing %s: %w", config.AgentsRCFile, statErr)
 	}

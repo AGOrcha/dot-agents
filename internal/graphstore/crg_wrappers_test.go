@@ -54,6 +54,12 @@ func initRepoGit(t *testing.T, repo string) {
 	run("init", "--quiet")
 	run("config", "user.email", "t@x")
 	run("config", "user.name", "t")
+	// Keep `git commit` below from spawning a detached
+	// `git maintenance run --auto --detach`, which keeps creating and
+	// unlinking transient .git paths after the commit returns and races this
+	// repo's t.TempDir teardown.
+	run("config", "maintenance.auto", "false")
+	run("config", "gc.auto", "0")
 	if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package a\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

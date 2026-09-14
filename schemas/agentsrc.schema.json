@@ -56,6 +56,7 @@
     },
     "sources": {
       "type": "array",
+      "description": "Where to materialize declared resources from. OPTIONAL: omitting the key resolves to the implicit local source, and da keeps it omitted across load/save rather than writing the default back in. Sources merge as an ordered replace, so a present key REPLACES the list a lower layer supplies — declare it only when this repo really owns the list.",
       "minItems": 1,
       "items": {
         "$ref": "#/$defs/source"

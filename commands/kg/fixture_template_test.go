@@ -67,6 +67,14 @@ func kgRepoTemplate() (string, error) {
 			{"init"},
 			{"config", "user.name", "test"},
 			{"config", "user.email", "test@example.com"},
+			// A `git commit` in any COPY of this template would otherwise
+			// spawn a detached `git maintenance run --auto --detach` that
+			// keeps creating and unlinking transient .git paths after the
+			// commit returns, racing the copy's own t.TempDir teardown.
+			// Copies inherit this local config, so setting it here covers
+			// every repo cloned from the template.
+			{"config", "maintenance.auto", "false"},
+			{"config", "gc.auto", "0"},
 		} {
 			if err := run(args...); err != nil {
 				kgRepoTemplateErr = err
