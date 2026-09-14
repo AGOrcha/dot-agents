@@ -126,6 +126,26 @@ func gitDebt(file, fn string, sites int, replacement string) record {
 		"in-process replacement: "+replacement)
 }
 
+// Files carrying three or more sanctioned sites are named once here. A single
+// spelling per file means the ledger's records for that file cannot drift
+// apart, and a rename shows up as one edit instead of several.
+const (
+	fileLifecycleInstall = "commands/internal/lifecycle/install.go"
+	filePlanTask         = "commands/workflow/plan_task.go"
+	fileSyncHelpers      = "commands/sync/helpers.go"
+	fileSyncInit         = "commands/sync/init.go"
+	fileSyncPush         = "commands/sync/push.go"
+	fileFsopsWindows     = "internal/fsops/fsops_windows.go"
+	fileGraphstoreCRG    = "internal/graphstore/crg.go"
+	filePlatformCLIProbe = "internal/platform/cliprobe.go"
+)
+
+// genericGitWrapper is the replacement note for a catch-all `git` helper: a
+// function that takes arbitrary git arguments has no single in-process
+// equivalent, so naming one would misdescribe the migration.
+const genericGitWrapper = "generic git wrapper: it has to be decomposed " +
+	"per operation, not wrapped again"
+
 // ledger is the sanctioned-site list, sorted by file then function so a review
 // diff reads as one line per boundary.
 var ledger = []record{
@@ -136,7 +156,7 @@ var ledger = []record{
 	// function directly would share this process's cobra/global state.
 	boundary("commands/workflow/graph.go", "runWorkflowGraphQueryViaKGBridge", exeDynamic, 1,
 		"re-exec of this da binary (os.Executable) to run `kg bridge query` with its own cwd/env"),
-	boundary("commands/workflow/plan_task.go", "deriveScopeKGBridgeQuery", exeDynamic, 1,
+	boundary(filePlanTask, "deriveScopeKGBridgeQuery", exeDynamic, 1,
 		"re-exec of this da binary (os.Executable) to derive a task write-scope from `kg bridge query`"),
 
 	// ── GitHub CLI ───────────────────────────────────────────────────────────
@@ -154,11 +174,11 @@ var ledger = []record{
 		"git.PlainClone"),
 	gitDebt("commands/internal/lifecycle/init_from.go", "untrackStagedMachineLocal", 1,
 		"Worktree.Remove with Cached"),
-	gitDebt("commands/internal/lifecycle/install.go", "fetchGitSource", 1,
+	gitDebt(fileLifecycleInstall, "fetchGitSource", 1,
 		"go-git needs no binary probe, so the LookPath disappears with the clone/pull migration"),
-	gitDebt("commands/internal/lifecycle/install.go", "updateCachedGitSource", 1,
+	gitDebt(fileLifecycleInstall, "updateCachedGitSource", 1,
 		"Worktree.Pull"),
-	gitDebt("commands/internal/lifecycle/install.go", "CloneGitSource", 1,
+	gitDebt(fileLifecycleInstall, "CloneGitSource", 1,
 		"git.PlainClone with Depth/ReferenceName"),
 	gitDebt("commands/internal/lifecycle/status.go", "probeAgentsHomeGit", 1,
 		"Repository.Head with reference-name shortening"),
@@ -166,46 +186,46 @@ var ledger = []record{
 		"Worktree.Pull / Repository.Push (credential parity is the migration's real work)"),
 	gitDebt("commands/sync/commit.go", "runSyncCommit", 2,
 		"Worktree.AddWithOptions(All) then Worktree.Commit"),
-	gitDebt("commands/sync/helpers.go", "countPorcelainStatus", 1,
+	gitDebt(fileSyncHelpers, "countPorcelainStatus", 1,
 		"Worktree.Status"),
-	gitDebt("commands/sync/helpers.go", "printAheadBehind", 1,
+	gitDebt(fileSyncHelpers, "printAheadBehind", 1,
 		"Repository.Log from each side of the merge base"),
-	gitDebt("commands/sync/helpers.go", "printBranchStatus", 1,
+	gitDebt(fileSyncHelpers, "printBranchStatus", 1,
 		"Repository.Head with reference-name shortening"),
-	gitDebt("commands/sync/init.go", "initSyncRepo", 3,
+	gitDebt(fileSyncInit, "initSyncRepo", 3,
 		"git.PlainInit then Worktree.Add / Worktree.Commit"),
-	gitDebt("commands/sync/init.go", "reportExistingSyncRepo", 1,
+	gitDebt(fileSyncInit, "reportExistingSyncRepo", 1,
 		"Repository.Remotes"),
-	gitDebt("commands/sync/init.go", "untrackMachineLocalState", 1,
+	gitDebt(fileSyncInit, "untrackMachineLocalState", 1,
 		"Worktree.Remove with Cached"),
 	gitDebt("commands/sync/log.go", "newLogCmd", 1,
 		"Repository.Log plus reference decoration"),
 	gitDebt("commands/sync/pull.go", "newPullCmd", 1,
 		"Worktree.Pull"),
-	gitDebt("commands/sync/push.go", "printPendingPushCommits", 1,
+	gitDebt(fileSyncPush, "printPendingPushCommits", 1,
 		"Repository.Log bounded by the upstream reference"),
-	gitDebt("commands/sync/push.go", "runSyncPush", 1,
+	gitDebt(fileSyncPush, "runSyncPush", 1,
 		"Repository.Push"),
-	gitDebt("commands/sync/push.go", "stageAndCommit", 2,
+	gitDebt(fileSyncPush, "stageAndCommit", 2,
 		"Worktree.AddWithOptions(All) then Worktree.Commit"),
 	gitDebt("commands/workflow/delegation.go", "gitDiffChangedFiles", 1,
 		"Worktree.Status, or a HEAD-tree to worktree diff"),
 	gitDebt("commands/workflow/iter_log.go", "gitIterDiffStat", 1,
 		"Repository.ResolveRevision(HEAD~1)"),
-	gitDebt("commands/workflow/plan_task.go", "checkScopeGitDiffFiles", 2,
+	gitDebt(filePlanTask, "checkScopeGitDiffFiles", 2,
 		"Worktree.Status, classifying staged and unstaged explicitly"),
-	gitDebt("commands/workflow/plan_task.go", "gitStateExec", 1,
-		"generic git wrapper: it has to be decomposed per operation, not wrapped again"),
-	gitDebt("commands/workflow/plan_task.go", "readFileFromCanonicalRef", 1,
+	gitDebt(filePlanTask, "gitStateExec", 1,
+		genericGitWrapper),
+	gitDebt(filePlanTask, "readFileFromCanonicalRef", 1,
 		"ResolveRevision then CommitObject.File contents"),
 	gitDebt("commands/workflow/state.go", "gitOutput", 1,
-		"generic git wrapper: it has to be decomposed per operation, not wrapped again"),
+		genericGitWrapper),
 	gitDebt("commands/workflow/state.go", "isGitRepo", 1,
 		"git.PlainOpenWithOptions with DetectDotGit"),
 	gitDebt("internal/scoring/signal_backfill.go", "commitTime", 1,
 		"CommitObject(hash).Committer.When"),
 	gitDebt("internal/scoring/signal_git.go", "runGit", 1,
-		"generic git wrapper: it has to be decomposed per operation, not wrapped again"),
+		genericGitWrapper),
 
 	// ── OCI credential helpers ───────────────────────────────────────────────
 	boundary("internal/config/oci_auth.go", "runOCICredentialHelper", exeDynamic, 1,
@@ -238,12 +258,12 @@ var ledger = []record{
 	// ── Windows filesystem fallback ──────────────────────────────────────────
 	// Build-tagged windows-only. The records are judged only on the runs that
 	// compile the file (see unmatchedRecords).
-	boundary("internal/fsops/fsops_windows.go", "RemoveAll", exeDynamic, 1,
+	boundary(fileFsopsWindows, "RemoveAll", exeDynamic, 1,
 		"PowerShell fallback for a Windows path the Go syscall cannot handle (long paths, "+
 			"locked handles) — the reason internal/fsops exists"),
-	boundary("internal/fsops/fsops_windows.go", "Remove", exeDynamic, 1,
+	boundary(fileFsopsWindows, "Remove", exeDynamic, 1,
 		"PowerShell fallback for a Windows path the Go syscall cannot handle"),
-	boundary("internal/fsops/fsops_windows.go", "WriteFile", exeDynamic, 1,
+	boundary(fileFsopsWindows, "WriteFile", exeDynamic, 1,
 		"PowerShell fallback for a Windows path the Go syscall cannot handle"),
 
 	// ── code-review-graph Python bridge ──────────────────────────────────────
@@ -253,26 +273,26 @@ var ledger = []record{
 	// by being rewritten in Go here. They are emphatically NOT git: the Git
 	// reads this package needs are already in process (gitnative.go), and
 	// internal/graphstore is cutover-locked so they cannot come back.
-	boundary("internal/graphstore/crg.go", "CRGBridge.commandWithSQLiteAutocommit", exeDynamic, 2,
+	boundary(fileGraphstoreCRG, "CRGBridge.commandWithSQLiteAutocommit", exeDynamic, 2,
 		"code-review-graph entrypoint, optionally wrapped in its own python interpreter "+
 			"to force SQLite autocommit"),
-	boundary("internal/graphstore/crg.go", "CRGBridge.run", exeDynamic, 1,
+	boundary(fileGraphstoreCRG, "CRGBridge.run", exeDynamic, 1,
 		"code-review-graph CLI invocation (captured stdout/stderr)"),
-	boundary("internal/graphstore/crg.go", "CRGBridge.runPyQuery", exeDynamic, 1,
+	boundary(fileGraphstoreCRG, "CRGBridge.runPyQuery", exeDynamic, 1,
 		"python -c query against the CRG library for data its CLI does not expose"),
-	boundary("internal/graphstore/crg.go", "CRGBridge.runStreamed", exeDynamic, 1,
+	boundary(fileGraphstoreCRG, "CRGBridge.runStreamed", exeDynamic, 1,
 		"code-review-graph CLI invocation with streamed output for long builds"),
-	boundary("internal/graphstore/crg.go", "DiscoverCRGBin", "code-review-graph", 1,
+	boundary(fileGraphstoreCRG, "DiscoverCRGBin", "code-review-graph", 1,
 		"locating the CRG entrypoint on PATH, applying the platform's PATHEXT rules"),
 
 	// ── target CLI probes ────────────────────────────────────────────────────
 	// Reporting whether another vendor's CLI is installed, and at what
 	// version, is inherently a question about an external process.
-	boundary("internal/platform/cliprobe.go", "probeInstalled", exeDynamic, 1,
+	boundary(filePlatformCLIProbe, "probeInstalled", exeDynamic, 1,
 		"presence probe for a target platform's CLI"),
-	boundary("internal/platform/cliprobe.go", "probeVersion", exeDynamic, 1,
+	boundary(filePlatformCLIProbe, "probeVersion", exeDynamic, 1,
 		"resolving a target platform's CLI on PATH before probing its version"),
-	boundary("internal/platform/cliprobe.go", "probeVersionAtPath", exeDynamic, 1,
+	boundary(filePlatformCLIProbe, "probeVersionAtPath", exeDynamic, 1,
 		"reading a target platform's CLI version from `<bin> --version`"),
 	boundary("internal/platform/cursor.go", "firstCLIPeekVersion", exeDynamic, 1,
 		"resolving the Cursor CLI (`agent`, then `cursor`) on PATH"),

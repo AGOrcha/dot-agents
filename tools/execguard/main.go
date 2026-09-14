@@ -328,24 +328,42 @@ func scanFile(p *packages.Package, file *ast.File, names map[string]bool) []site
 			out = append(out, collectSites(p, d, names, funcName(d),
 				consts, lookPathVars(d, names), paramNames(d.Type))...)
 		case *ast.GenDecl:
-			// `var ghJSON = func(...) {...}` is a function for attribution
-			// purposes: it is the seam that owns the spawn.
-			for _, spec := range d.Specs {
-				vs, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for i, nameIdent := range vs.Names {
-					if i >= len(vs.Values) {
-						continue
-					}
-					out = append(out, collectSites(p, vs.Values[i], names,
-						nameIdent.Name, consts, nil, funcLitParams(vs.Values[i]))...)
-				}
-			}
+			out = append(out, funcValueSites(p, d, names, consts)...)
 		}
 	}
 	return out
+}
+
+// funcValueSites attributes the policed sites inside a declaration such as
+// `var ghJSON = func(...) {...}` to the variable's own name: that variable is
+// the seam that owns the spawn, so it is what a ledger record has to name.
+func funcValueSites(p *packages.Package, gen *ast.GenDecl,
+	names map[string]bool, consts map[string]string) []site {
+	var out []site
+	eachValueSpecPair(gen, func(name *ast.Ident, value ast.Expr) {
+		out = append(out, collectSites(p, value, names,
+			name.Name, consts, nil, funcLitParams(value))...)
+	})
+	return out
+}
+
+// eachValueSpecPair calls yield for every (name, value) pair a GenDecl's
+// ValueSpecs bind. A name with no value at its position is skipped: `var a, b
+// int` binds none, and a const block's implicit-repetition form carries the
+// value only on its first spec.
+func eachValueSpecPair(gen *ast.GenDecl, yield func(*ast.Ident, ast.Expr)) {
+	for _, spec := range gen.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		for i, name := range vs.Names {
+			if i >= len(vs.Values) {
+				continue
+			}
+			yield(name, vs.Values[i])
+		}
+	}
 }
 
 // collectSites walks one declaration and returns every policed selector in it.
@@ -460,19 +478,7 @@ func propagateParams(sites []site, params map[string][]string, calls []resolvedC
 	if len(sites) == 0 {
 		return sites
 	}
-	// callee -> argument positions observed carrying git.
-	gitAt := map[string]map[int]bool{}
-	for _, c := range calls {
-		for i, a := range c.args {
-			if a != gitExe {
-				continue
-			}
-			if gitAt[c.callee] == nil {
-				gitAt[c.callee] = map[int]bool{}
-			}
-			gitAt[c.callee][i] = true
-		}
-	}
+	gitAt := gitArgPositions(calls)
 	for i := range sites {
 		s := &sites[i]
 		if s.param == "" {
@@ -484,6 +490,25 @@ func propagateParams(sites []site, params map[string][]string, calls []resolvedC
 		}
 	}
 	return sites
+}
+
+// gitArgPositions maps each intra-package callee to the argument positions
+// observed carrying the git executable, which is the lookup propagateParams
+// matches a site's parameter position against.
+func gitArgPositions(calls []resolvedCall) map[string]map[int]bool {
+	out := map[string]map[int]bool{}
+	for _, c := range calls {
+		for i, a := range c.args {
+			if a != gitExe {
+				continue
+			}
+			if out[c.callee] == nil {
+				out[c.callee] = map[int]bool{}
+			}
+			out[c.callee][i] = true
+		}
+	}
+	return out
 }
 
 // indexOf returns the position of name in names, or -1.
@@ -646,20 +671,11 @@ func literalConsts(file *ast.File) map[string]string {
 		if !ok || gen.Tok.String() != "const" {
 			continue
 		}
-		for _, spec := range gen.Specs {
-			vs, ok := spec.(*ast.ValueSpec)
-			if !ok {
-				continue
+		eachValueSpecPair(gen, func(name *ast.Ident, value ast.Expr) {
+			if lit := stringLit(value); lit != "" {
+				out[name.Name] = lit
 			}
-			for i, nameIdent := range vs.Names {
-				if i >= len(vs.Values) {
-					continue
-				}
-				if lit := stringLit(vs.Values[i]); lit != "" {
-					out[nameIdent.Name] = lit
-				}
-			}
-		}
+		})
 	}
 	return out
 }
