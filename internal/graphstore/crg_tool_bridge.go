@@ -58,10 +58,16 @@ func NewCRGToolBridge(repoRoot string) *CRGToolBridge {
 		return bridge
 	}
 	base := &CRGBridge{Bin: crgBin, RepoRoot: repoRoot}
-	python := base.pythonBin()
-	if python == "" {
+	// pythonBin falls back to a BARE interpreter name when the virtualenv
+	// beside the executable has none, so it never reports absence itself.
+	// Resolving that name here is what makes Available() truthful: without
+	// it a discovered shim with no interpreter would claim the bridge is
+	// usable and then fail on the first call with a raw exec error instead
+	// of this actionable one.
+	python, err := execabs.LookPath(base.pythonBin())
+	if err != nil {
 		bridge.discoverErr = fmt.Errorf(
-			"found %s but no Python interpreter beside it", crgBin)
+			"found %s but no usable Python interpreter beside it: %w", crgBin, err)
 		return bridge
 	}
 	bridge.python = python

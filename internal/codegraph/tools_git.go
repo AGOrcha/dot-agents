@@ -271,11 +271,7 @@ func releaseKeepDiffering(
 			changed = append(changed, path)
 			continue
 		}
-		same, err := releaseBlobEquals(repo, baseEntry.Hash, workContent)
-		if err != nil {
-			return nil, err
-		}
-		if !same {
+		if !releaseBlobEquals(repo, baseEntry.Hash, workContent) {
 			changed = append(changed, path)
 		}
 	}
@@ -453,24 +449,24 @@ func releaseWorktreeBlob(root, path string) (filemode.FileMode, []byte, bool, er
 // one object header read instead of a full decode. A blob that cannot be read
 // counts as DIFFERENT: git would fail the diff, and claiming the two sides
 // are equal would silently drop a real change.
-func releaseBlobEquals(repo *git.Repository, hash plumbing.Hash, content []byte) (bool, error) {
+func releaseBlobEquals(repo *git.Repository, hash plumbing.Hash, content []byte) bool {
 	blob, err := repo.BlobObject(hash)
 	if err != nil {
-		return false, nil
+		return false
 	}
 	if blob.Size != int64(len(content)) {
-		return false, nil
+		return false
 	}
 	reader, err := blob.Reader()
 	if err != nil {
-		return false, nil
+		return false
 	}
 	defer reader.Close()
 	stored, err := io.ReadAll(reader)
 	if err != nil {
-		return false, nil
+		return false
 	}
-	return bytes.Equal(stored, content), nil
+	return bytes.Equal(stored, content)
 }
 
 // releaseTracksFileMode reports whether this repository records the

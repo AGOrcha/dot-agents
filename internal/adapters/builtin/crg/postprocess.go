@@ -726,10 +726,9 @@ func containsAnyKeyword(nameLower, qnLower string, keywords []string) bool {
 // equivalent route. These values are compared field for field against
 // upstream's, so "close enough" is not enough.
 func roundTo4(x float64) float64 {
-	rounded, err := strconv.ParseFloat(strconv.FormatFloat(x, 'f', 4, 64), 64)
-	if err != nil {
-		return x
-	}
+	// FormatFloat's own output always parses back — including "NaN", "+Inf"
+	// and "-Inf" — so the error is structurally impossible here.
+	rounded, _ := strconv.ParseFloat(strconv.FormatFloat(x, 'f', 4, 64), 64)
 	return rounded
 }
 

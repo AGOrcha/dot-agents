@@ -317,7 +317,7 @@ func writePyJSON(b *strings.Builder, value any) {
 		// still spells as an int; a round-trip through encoding/json would
 		// flatten every number to a float and re-spell it as "3.0".
 		writePyObject(b, pyStructEntries(rv))
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		b.WriteString(strconv.FormatInt(rv.Int(), 10))
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		b.WriteString(strconv.FormatUint(rv.Uint(), 10))
@@ -1264,10 +1264,9 @@ func sortedNames(set map[string]bool) []string {
 // from zero while Python rounds the exact binary value half-to-even, which is
 // what strconv's correctly-rounded decimal formatting does.
 func round4(f float64) float64 {
-	rounded, err := strconv.ParseFloat(strconv.FormatFloat(f, 'f', 4, 64), 64)
-	if err != nil {
-		return f
-	}
+	// FormatFloat's own output always parses back — including "NaN", "+Inf"
+	// and "-Inf" — so the error is structurally impossible here.
+	rounded, _ := strconv.ParseFloat(strconv.FormatFloat(f, 'f', 4, 64), 64)
 	return rounded
 }
 

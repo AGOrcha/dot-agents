@@ -203,14 +203,11 @@ func getFlowTool(e *Engine, args crgrelease.Args) (any, error) {
 	if err != nil {
 		return flowToolError(err), nil
 	}
-	flow, err := flowRowToMap(*selected)
+	flow, path, err := flowRowToMap(*selected)
 	if err != nil {
 		return flowToolError(err), nil
 	}
-	allSteps, err := flowSteps(*selected, nodes)
-	if err != nil {
-		return flowToolError(err), nil
-	}
+	allSteps := flowSteps(path, nodes)
 
 	steps, totalSteps, truncated := Bounded(allSteps, maxSteps, maxFlowSteps)
 	flow["steps"] = steps
@@ -333,7 +330,7 @@ func releaseFlows(rows []graphstore.FlowRow, sortBy string, limit int) ([]map[st
 	}
 	flows := make([]map[string]any, 0, len(ordered))
 	for _, row := range ordered {
-		flow, err := flowRowToMap(row)
+		flow, _, err := flowRowToMap(row)
 		if err != nil {
 			return nil, err
 		}
@@ -365,10 +362,13 @@ func sortFlowRows(rows []graphstore.FlowRow, sortBy string) {
 
 // flowRowToMap is the flow dict flows.get_flows and flows.get_flow_by_id
 // share, minus the steps get_flow_by_id adds.
-func flowRowToMap(row graphstore.FlowRow) (map[string]any, error) {
+//
+// The decoded node-id path is returned alongside it so a caller that also
+// needs the steps decodes the stored blob once rather than twice.
+func flowRowToMap(row graphstore.FlowRow) (map[string]any, []int64, error) {
 	path, err := decodeFlowPath(row.PathJSON)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return map[string]any{
 		"id":             row.ID,
@@ -381,7 +381,7 @@ func flowRowToMap(row graphstore.FlowRow) (map[string]any, error) {
 		"path":           path,
 		"created_at":     row.CreatedAt,
 		"updated_at":     row.UpdatedAt,
-	}, nil
+	}, path, nil
 }
 
 // decodeFlowPath reads the stored node-id path. A malformed path is an error
@@ -406,12 +406,8 @@ func decodeFlowPath(pathJSON string) ([]int64, error) {
 // `if node:` does — a flow can outlive a node the last incremental update
 // removed.
 func flowSteps(
-	row graphstore.FlowRow, nodes map[int64]graphstore.GraphNode,
-) ([]map[string]any, error) {
-	path, err := decodeFlowPath(row.PathJSON)
-	if err != nil {
-		return nil, err
-	}
+	path []int64, nodes map[int64]graphstore.GraphNode,
+) []map[string]any {
 	steps := make([]map[string]any, 0, len(path))
 	for _, id := range path {
 		node, ok := nodes[id]
@@ -428,7 +424,7 @@ func flowSteps(
 			"qualified_name": SanitizeName(node.QualifiedName),
 		})
 	}
-	return steps, nil
+	return steps
 }
 
 // projectFlows keeps only the named fields on each flow, dropping keys a flow
@@ -550,15 +546,11 @@ func flowsAffectedByFiles(
 		if !ok {
 			continue
 		}
-		flow, err := flowRowToMap(row)
+		flow, path, err := flowRowToMap(row)
 		if err != nil {
 			return nil, err
 		}
-		steps, err := flowSteps(row, nodeIndex)
-		if err != nil {
-			return nil, err
-		}
-		flow["steps"] = steps
+		flow["steps"] = flowSteps(path, nodeIndex)
 		affected = append(affected, flow)
 	}
 	sort.SliceStable(affected, func(i, j int) bool {
