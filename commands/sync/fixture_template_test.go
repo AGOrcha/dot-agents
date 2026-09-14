@@ -77,6 +77,16 @@ func syncRepoTemplate() (string, error) {
 			{"init"},
 			{"config", "user.name", "Test"},
 			{"config", "user.email", "test@example.com"},
+			// `git commit` otherwise spawns a DETACHED
+			// `git maintenance run --auto --detach` that keeps creating and
+			// unlinking transient paths under .git (objects/maintenance.lock,
+			// multi-pack-index, bitmap-ref-tips_*) after the commit returns.
+			// That races copyGitTemplate's WalkDir over this shared template —
+			// an enumerated entry vanishes before it can be lstat'd — and a
+			// copy's own t.TempDir teardown. Set before the first commit;
+			// copies inherit it from the template's local config.
+			{"config", "maintenance.auto", "false"},
+			{"config", "gc.auto", "0"},
 			{"commit", "--allow-empty", "-m", "seed"},
 		} {
 			if err := run(args...); err != nil {
