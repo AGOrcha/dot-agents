@@ -1529,7 +1529,7 @@ func TestEnsureManagedGitignoreForRefresh_DryRunAndError(t *testing.T) {
 	// Dry-run: previews without touching the file and reports no failure.
 	Flags.DryRun = true
 	dir := t.TempDir()
-	if ensureManagedGitignoreForRefresh(dir, nil) {
+	if ensureManagedGitignoreForRefresh(dir, nil, nil) {
 		t.Error("dry-run must not report a write failure")
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {
@@ -1543,7 +1543,7 @@ func TestEnsureManagedGitignoreForRefresh_DryRunAndError(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(errDir, ".gitignore"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if !ensureManagedGitignoreForRefresh(errDir, nil) {
+	if !ensureManagedGitignoreForRefresh(errDir, nil, nil) {
 		t.Error("expected failure when .gitignore cannot be read (it is a directory)")
 	}
 }

@@ -437,7 +437,7 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 	if recreatePlatformLinks(name, path, enabledPlatforms) {
 		projectFailed = true
 	}
-	if ensureManagedGitignoreForRefresh(path, enabledPlatforms) {
+	if ensureManagedGitignoreForRefresh(path, enabledPlatforms, ensureRes) {
 		projectFailed = true
 	}
 	return projectFailed
@@ -459,13 +459,22 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 //
 // The knob check and write/remove decision are shared with `da install` via
 // lifecycle.MaintainManagedGitignore, so the two commands cannot leave different
-// blocks behind on the same repo.
-func ensureManagedGitignoreForRefresh(path string, enabledPlatforms []platform.Platform) bool {
+// blocks behind on the same repo. ensureRes is pass-1's already-resolved
+// snapshot: the knob is read from the LAYERED effective config, so an org/team
+// layer that sets `gitignore_projections: false` retracts the block on a repo
+// that never mentions the key. A nil ensureRes (pass-1 could not resolve) makes
+// MaintainManagedGitignore fall back to a read-only Frozen resolve rather than
+// to the flat manifest — see EffectiveGitignoreProjections.
+func ensureManagedGitignoreForRefresh(path string, enabledPlatforms []platform.Platform, ensureRes *config.EnsureResult) bool {
 	if Flags.DryRun {
 		ui.DryRun("Update dot-agents managed .gitignore block")
 		return false
 	}
-	line, err := lifecycle.MaintainManagedGitignore(path, enabledPlatforms)
+	var snap *config.Snapshot
+	if ensureRes != nil {
+		snap = ensureRes.Snapshot
+	}
+	line, err := lifecycle.MaintainManagedGitignore(path, enabledPlatforms, snap)
 	if err != nil {
 		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: %v", err))
 		return true
