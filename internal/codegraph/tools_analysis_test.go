@@ -85,62 +85,78 @@ func TestNativeAnalysisToolsMatchReleaseCallFixtures(t *testing.T) {
 	for _, fixture := range fixtures {
 		seen[fixture.tool] = true
 		t.Run(fixture.tool+"__"+fixture.caseName, func(t *testing.T) {
-			if reason, bridgeOnly := analysisBridgeOnlyTools[fixture.tool]; bridgeOnly {
-				if _, native := toolHandlers[fixture.tool]; native {
-					t.Fatalf("%s must stay on the bridge: %s", fixture.tool, reason)
-				}
-				return
-			}
-			handler, native := toolHandlers[fixture.tool]
-			if !native {
-				t.Fatalf("%s has no native handler", fixture.tool)
-			}
-			tool, published := crgrelease.Lookup(fixture.tool)
-			if !published {
-				t.Fatalf("%s is not published by the pinned release", fixture.tool)
-			}
-			args, bindErr := tool.Bind(fixture.arguments)
-			if bindErr != nil {
-				t.Fatalf("bind %s: %v", fixture.tool, bindErr)
-			}
-
-			engine, root := analysisFixtureEngine(t)
-			result, err := handler(engine, args)
-
-			if fixture.isError {
-				// A bound violation escapes upstream's try block, so the
-				// release answers with a transport error and NO payload. The
-				// handler owns only the message; the "Error calling tool
-				// '<tool>': " prefix is the server envelope's.
-				if err == nil {
-					t.Fatalf("expected an error result, got payload %v", result)
-				}
-				if fixture.hasStructured {
-					t.Fatal("fixture records structured content for an error result")
-				}
-				if !strings.HasSuffix(fixture.contentText, err.Error()) {
-					t.Fatalf("error message\n got: %s\nwant suffix of: %s",
-						err.Error(), fixture.contentText)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("%s: %v", fixture.tool, err)
-			}
-			if !fixture.hasStructured {
-				t.Fatal("fixture records no structured content for a success result")
-			}
-			want := fixture.wantPayload(t, root)
-			got := analysisJSONValue(t, result)
-			if diff, ok := analysisDiffJSON("", want, got); !ok {
-				t.Fatalf("payload differs at %s%s", diff, analysisTraverseHint(fixture.tool))
-			}
+			runAnalysisCallFixture(t, fixture)
 		})
 	}
 	for _, tool := range analysisTools {
 		if !seen[tool] {
 			t.Errorf("no call fixture covers %s", tool)
 		}
+	}
+}
+
+// runAnalysisCallFixture replays one recorded release call against the native
+// handler: a bridge-only tool must have no native handler at all, and any other
+// tool must be published, bind its recorded arguments, and answer exactly what
+// the release recorded.
+func runAnalysisCallFixture(t *testing.T, fixture analysisCallFixture) {
+	t.Helper()
+
+	if reason, bridgeOnly := analysisBridgeOnlyTools[fixture.tool]; bridgeOnly {
+		if _, native := toolHandlers[fixture.tool]; native {
+			t.Fatalf("%s must stay on the bridge: %s", fixture.tool, reason)
+		}
+		return
+	}
+	handler, native := toolHandlers[fixture.tool]
+	if !native {
+		t.Fatalf("%s has no native handler", fixture.tool)
+	}
+	tool, published := crgrelease.Lookup(fixture.tool)
+	if !published {
+		t.Fatalf("%s is not published by the pinned release", fixture.tool)
+	}
+	args, bindErr := tool.Bind(fixture.arguments)
+	if bindErr != nil {
+		t.Fatalf("bind %s: %v", fixture.tool, bindErr)
+	}
+
+	engine, root := analysisFixtureEngine(t)
+	result, err := handler(engine, args)
+
+	if fixture.isError {
+		assertAnalysisFixtureError(t, fixture, result, err)
+		return
+	}
+	if err != nil {
+		t.Fatalf("%s: %v", fixture.tool, err)
+	}
+	if !fixture.hasStructured {
+		t.Fatal("fixture records no structured content for a success result")
+	}
+	want := fixture.wantPayload(t, root)
+	got := analysisJSONValue(t, result)
+	if diff, ok := analysisDiffJSON("", want, got); !ok {
+		t.Fatalf("payload differs at %s%s", diff, analysisTraverseHint(fixture.tool))
+	}
+}
+
+// assertAnalysisFixtureError checks the arm of a recorded call that failed. A
+// bound violation escapes upstream's try block, so the release answers with a
+// transport error and NO payload. The handler owns only the message; the
+// "Error calling tool '<tool>': " prefix is the server envelope's.
+func assertAnalysisFixtureError(t *testing.T, fixture analysisCallFixture, result any, err error) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatalf("expected an error result, got payload %v", result)
+	}
+	if fixture.hasStructured {
+		t.Fatal("fixture records structured content for an error result")
+	}
+	if !strings.HasSuffix(fixture.contentText, err.Error()) {
+		t.Fatalf("error message\n got: %s\nwant suffix of: %s",
+			err.Error(), fixture.contentText)
 	}
 }
 
@@ -796,48 +812,62 @@ func analysisDiffJSON(path string, want, got any) (string, bool) {
 	}
 	switch expected := want.(type) {
 	case map[string]any:
-		actual, ok := got.(map[string]any)
-		if !ok {
-			return fmt.Sprintf("%s: want object, got %T (%v)", analysisPath(path), got, got), false
-		}
-		for _, key := range analysisSortedKeys(expected) {
-			value, present := actual[key]
-			if !present {
-				return fmt.Sprintf("%s: key missing from result", analysisPath(path+"."+key)), false
-			}
-			if diff, ok := analysisDiffJSON(path+"."+key, expected[key], value); !ok {
-				return diff, false
-			}
-		}
-		for _, key := range analysisSortedKeys(actual) {
-			if _, present := expected[key]; !present {
-				return fmt.Sprintf("%s: unexpected key in result (%v)",
-					analysisPath(path+"."+key), actual[key]), false
-			}
-		}
-		return "", true
+		return analysisDiffJSONObject(path, expected, got)
 	case []any:
-		actual, ok := got.([]any)
-		if !ok {
-			return fmt.Sprintf("%s: want array, got %T (%v)", analysisPath(path), got, got), false
-		}
-		if len(expected) != len(actual) {
-			return fmt.Sprintf("%s: want %d items, got %d",
-				analysisPath(path), len(expected), len(actual)), false
-		}
-		for i := range expected {
-			if diff, ok := analysisDiffJSON(fmt.Sprintf("%s[%d]", path, i),
-				expected[i], actual[i]); !ok {
-				return diff, false
-			}
-		}
-		return "", true
+		return analysisDiffJSONArray(path, expected, got)
 	default:
 		if want != got {
 			return fmt.Sprintf("%s: want %#v, got %#v", analysisPath(path), want, got), false
 		}
 		return "", true
 	}
+}
+
+// analysisDiffJSONObject reports the first structural difference inside a JSON
+// object: a wrong result kind, a key the result is missing, a differing value,
+// or a key the result carries that the expectation does not.
+func analysisDiffJSONObject(path string, expected map[string]any, got any) (string, bool) {
+	actual, ok := got.(map[string]any)
+	if !ok {
+		return fmt.Sprintf("%s: want object, got %T (%v)", analysisPath(path), got, got), false
+	}
+	for _, key := range analysisSortedKeys(expected) {
+		value, present := actual[key]
+		if !present {
+			return fmt.Sprintf("%s: key missing from result", analysisPath(path+"."+key)), false
+		}
+		if diff, ok := analysisDiffJSON(path+"."+key, expected[key], value); !ok {
+			return diff, false
+		}
+	}
+	for _, key := range analysisSortedKeys(actual) {
+		if _, present := expected[key]; !present {
+			return fmt.Sprintf("%s: unexpected key in result (%v)",
+				analysisPath(path+"."+key), actual[key]), false
+		}
+	}
+	return "", true
+}
+
+// analysisDiffJSONArray reports the first structural difference inside a JSON
+// array: a wrong result kind, a differing length, or the first element that
+// differs. Order is significant, exactly as it is in the recorded payloads.
+func analysisDiffJSONArray(path string, expected []any, got any) (string, bool) {
+	actual, ok := got.([]any)
+	if !ok {
+		return fmt.Sprintf("%s: want array, got %T (%v)", analysisPath(path), got, got), false
+	}
+	if len(expected) != len(actual) {
+		return fmt.Sprintf("%s: want %d items, got %d",
+			analysisPath(path), len(expected), len(actual)), false
+	}
+	for i := range expected {
+		if diff, ok := analysisDiffJSON(fmt.Sprintf("%s[%d]", path, i),
+			expected[i], actual[i]); !ok {
+			return diff, false
+		}
+	}
+	return "", true
 }
 
 func analysisPath(path string) string {

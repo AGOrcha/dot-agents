@@ -547,7 +547,19 @@ CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 func assertSchemaMatchesRelease(t *testing.T, dbPath string, want releaseSchema) {
 	t.Helper()
 	gotTables, gotIndexes, gotViews := readSchemaObjects(t, dbPath)
+	assertReleaseTablesPresent(t, dbPath, want, gotTables)
+	assertReleaseIndexesPresent(t, want, gotIndexes)
+	assertSchemaDeclaresNoViews(t, want, gotViews)
+	assertNoUnrecordedSchemaObjects(t, want, gotTables, gotIndexes)
+}
 
+// assertReleaseTablesPresent checks every table the release records exists,
+// comparing normalized DDL where we author it and columns where the native
+// schema hardens upstream's definition.
+func assertReleaseTablesPresent(
+	t *testing.T, dbPath string, want releaseSchema, gotTables map[string]string,
+) {
+	t.Helper()
 	for name, wantSQL := range want.Objects.Tables {
 		gotSQL, present := gotTables[name]
 		if !present {
@@ -566,7 +578,14 @@ func assertSchemaMatchesRelease(t *testing.T, dbPath string, want releaseSchema)
 			}
 		}
 	}
+}
 
+// assertReleaseIndexesPresent checks every index the release records exists
+// with matching normalized DDL.
+func assertReleaseIndexesPresent(
+	t *testing.T, want releaseSchema, gotIndexes map[string]string,
+) {
+	t.Helper()
 	for name, wantSQL := range want.Objects.Indexes {
 		gotSQL, present := gotIndexes[name]
 		if !present {
@@ -578,16 +597,30 @@ func assertSchemaMatchesRelease(t *testing.T, dbPath string, want releaseSchema)
 				name, gotSQL, normalizeDDL(wantSQL))
 		}
 	}
+}
 
-	// Upstream declares no views, and neither may we: a SQL view would be an
-	// adapter-authored query surface the contract deliberately excludes.
+// assertSchemaDeclaresNoViews pins that upstream declares no views, and
+// neither may we: a SQL view would be an adapter-authored query surface the
+// contract deliberately excludes.
+func assertSchemaDeclaresNoViews(
+	t *testing.T, want releaseSchema, gotViews map[string]string,
+) {
+	t.Helper()
 	if len(want.Objects.Views) != 0 {
 		t.Fatalf("the release fixture unexpectedly records views: %v", want.Objects.Views)
 	}
 	if len(gotViews) != 0 {
 		t.Errorf("the native schema must declare no views, got %v", gotViews)
 	}
+}
 
+// assertNoUnrecordedSchemaObjects checks every table and index the native
+// schema carries is either recorded by the release or enumerated in
+// nativeOnlyObjects with a reason.
+func assertNoUnrecordedSchemaObjects(
+	t *testing.T, want releaseSchema, gotTables, gotIndexes map[string]string,
+) {
+	t.Helper()
 	for name := range gotTables {
 		if _, upstream := want.Objects.Tables[name]; !upstream && !nativeOnlyObjects[name] {
 			t.Errorf("unexpected extra table %q — add it to nativeOnlyObjects "+

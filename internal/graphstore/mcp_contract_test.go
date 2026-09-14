@@ -120,7 +120,7 @@ func TestInitializeAdvertisesReleaseIdentity(t *testing.T) {
 	if got := info["name"]; got != crgrelease.ServerName {
 		t.Errorf("serverInfo.name = %v, want %v", got, crgrelease.ServerName)
 	}
-	if got := result["instructions"]; got != crgrelease.Instructions {
+	if result["instructions"] != crgrelease.Instructions {
 		t.Errorf("instructions differ from the release")
 	}
 	capabilities, _ := result["capabilities"].(map[string]any)
@@ -339,73 +339,110 @@ func TestRoutingHonoursCapabilityAndSourceCoverage(t *testing.T) {
 	}
 
 	t.Run("native tool on a fully covered repository stays native", func(t *testing.T) {
-		native := &stubNative{fullyNative: true, result: map[string]any{"from": "native"}}
-		bridge := &stubBridge{available: true, result: bridgeResult}
-		srv := newTestServer(t, native, bridge)
-		callTool(t, srv, "list_graph_stats_tool", `{}`)
-		if len(native.calls) != 1 || len(bridge.calls) != 0 {
-			t.Fatalf("native=%v bridge=%v", native.calls, bridge.calls)
-		}
+		assertCoveredRepositoryStaysNative(t, bridgeResult)
 	})
 
 	t.Run("native tool on a partly unsupported repository routes to the bridge", func(t *testing.T) {
-		native := &stubNative{fullyNative: false, nonNative: []string{"python", "typescript"}}
-		bridge := &stubBridge{available: true, result: bridgeResult}
-		srv := newTestServer(t, native, bridge)
-		callTool(t, srv, "list_graph_stats_tool", `{}`)
-		if len(native.calls) != 0 {
-			t.Fatalf("a repository with unextracted sources was answered natively: %v", native.calls)
-		}
-		if len(bridge.calls) != 1 {
-			t.Fatalf("bridge calls = %v", bridge.calls)
-		}
+		assertPartlyCoveredRepositoryRoutesToBridge(t, bridgeResult)
 	})
 
 	t.Run("bridge-only tool never goes native", func(t *testing.T) {
-		native := &stubNative{fullyNative: true, result: map[string]any{"from": "native"}}
-		bridge := &stubBridge{available: true, result: bridgeResult}
-		srv := newTestServer(t, native, bridge)
-		callTool(t, srv, "embed_graph_tool", `{}`)
-		if len(native.calls) != 0 {
-			t.Fatalf("bridge-only tool answered natively: %v", native.calls)
-		}
-		if len(bridge.calls) != 1 {
-			t.Fatalf("bridge calls = %v", bridge.calls)
-		}
+		assertBridgeOnlyToolNeverGoesNative(t, bridgeResult)
 	})
 
 	t.Run("an unknown source-coverage verdict routes to the bridge", func(t *testing.T) {
-		native := &stubNative{coverageErr: errors.New("walk failed")}
-		bridge := &stubBridge{available: true, result: bridgeResult}
-		srv := newTestServer(t, native, bridge)
-		callTool(t, srv, "list_graph_stats_tool", `{}`)
-		if len(native.calls) != 0 {
-			t.Fatalf("unknown coverage was answered natively: %v", native.calls)
-		}
-		if len(bridge.calls) != 1 {
-			t.Fatalf("bridge calls = %v", bridge.calls)
-		}
+		assertUnknownCoverageRoutesToBridge(t, bridgeResult)
 	})
 
 	t.Run("bridge-routed calls receive the defaulted argument set", func(t *testing.T) {
-		native := &stubNative{fullyNative: false, nonNative: []string{"python"}}
-		bridge := &stubBridge{available: true, result: bridgeResult}
-		srv := newTestServer(t, native, bridge)
-		callTool(t, srv, "list_flows_tool", `{"limit":3}`)
-		if len(bridge.args) != 1 {
-			t.Fatalf("bridge args = %v", bridge.args)
-		}
-		forwarded := bridge.args[0]
-		if forwarded["sort_by"] != "criticality" {
-			t.Errorf("published default not forwarded: %#v", forwarded)
-		}
-		if forwarded["detail_level"] != "standard" {
-			t.Errorf("published default not forwarded: %#v", forwarded)
-		}
-		if forwarded["limit"] != int64(3) {
-			t.Errorf("caller value not forwarded: %#v", forwarded)
-		}
+		assertBridgeCallCarriesDefaultedArguments(t, bridgeResult)
 	})
+}
+
+// assertCoveredRepositoryStaysNative pins that a native tool on a repository
+// whose sources are fully extracted is answered in-process.
+func assertCoveredRepositoryStaysNative(t *testing.T, bridgeResult crgrelease.CallResult) {
+	t.Helper()
+	native := &stubNative{fullyNative: true, result: map[string]any{"from": "native"}}
+	bridge := &stubBridge{available: true, result: bridgeResult}
+	srv := newTestServer(t, native, bridge)
+	callTool(t, srv, "list_graph_stats_tool", `{}`)
+	if len(native.calls) != 1 || len(bridge.calls) != 0 {
+		t.Fatalf("native=%v bridge=%v", native.calls, bridge.calls)
+	}
+}
+
+// assertPartlyCoveredRepositoryRoutesToBridge pins that unextracted sources
+// send even a native tool to the bridge: a native answer there would be
+// wrong in a way that looks right.
+func assertPartlyCoveredRepositoryRoutesToBridge(t *testing.T, bridgeResult crgrelease.CallResult) {
+	t.Helper()
+	native := &stubNative{fullyNative: false, nonNative: []string{"python", "typescript"}}
+	bridge := &stubBridge{available: true, result: bridgeResult}
+	srv := newTestServer(t, native, bridge)
+	callTool(t, srv, "list_graph_stats_tool", `{}`)
+	if len(native.calls) != 0 {
+		t.Fatalf("a repository with unextracted sources was answered natively: %v", native.calls)
+	}
+	if len(bridge.calls) != 1 {
+		t.Fatalf("bridge calls = %v", bridge.calls)
+	}
+}
+
+// assertBridgeOnlyToolNeverGoesNative pins that a tool the release marks
+// bridge-only stays bridged even on a fully covered repository.
+func assertBridgeOnlyToolNeverGoesNative(t *testing.T, bridgeResult crgrelease.CallResult) {
+	t.Helper()
+	native := &stubNative{fullyNative: true, result: map[string]any{"from": "native"}}
+	bridge := &stubBridge{available: true, result: bridgeResult}
+	srv := newTestServer(t, native, bridge)
+	callTool(t, srv, "embed_graph_tool", `{}`)
+	if len(native.calls) != 0 {
+		t.Fatalf("bridge-only tool answered natively: %v", native.calls)
+	}
+	if len(bridge.calls) != 1 {
+		t.Fatalf("bridge calls = %v", bridge.calls)
+	}
+}
+
+// assertUnknownCoverageRoutesToBridge pins that a failed coverage probe is
+// treated as "not known to be covered" rather than as coverage.
+func assertUnknownCoverageRoutesToBridge(t *testing.T, bridgeResult crgrelease.CallResult) {
+	t.Helper()
+	native := &stubNative{coverageErr: errors.New("walk failed")}
+	bridge := &stubBridge{available: true, result: bridgeResult}
+	srv := newTestServer(t, native, bridge)
+	callTool(t, srv, "list_graph_stats_tool", `{}`)
+	if len(native.calls) != 0 {
+		t.Fatalf("unknown coverage was answered natively: %v", native.calls)
+	}
+	if len(bridge.calls) != 1 {
+		t.Fatalf("bridge calls = %v", bridge.calls)
+	}
+}
+
+// assertBridgeCallCarriesDefaultedArguments pins that a bridged call is
+// forwarded with the release's published defaults applied and the caller's
+// own values preserved.
+func assertBridgeCallCarriesDefaultedArguments(t *testing.T, bridgeResult crgrelease.CallResult) {
+	t.Helper()
+	native := &stubNative{fullyNative: false, nonNative: []string{"python"}}
+	bridge := &stubBridge{available: true, result: bridgeResult}
+	srv := newTestServer(t, native, bridge)
+	callTool(t, srv, "list_flows_tool", `{"limit":3}`)
+	if len(bridge.args) != 1 {
+		t.Fatalf("bridge args = %v", bridge.args)
+	}
+	forwarded := bridge.args[0]
+	if forwarded["sort_by"] != "criticality" {
+		t.Errorf("published default not forwarded: %#v", forwarded)
+	}
+	if forwarded["detail_level"] != "standard" {
+		t.Errorf("published default not forwarded: %#v", forwarded)
+	}
+	if forwarded["limit"] != int64(3) {
+		t.Errorf("caller value not forwarded: %#v", forwarded)
+	}
 }
 
 // An absent bridge must produce an explicit capability error naming what is

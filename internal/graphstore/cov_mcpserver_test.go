@@ -198,53 +198,81 @@ func TestCovMCPDispatchAnswersEveryAcceptedMethod(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.method, func(t *testing.T) {
-			result, err := covMCPDispatch(t, srv, tc.method, tc.params)
-			if err != nil {
-				t.Fatalf("%s: %v", tc.method, err)
-			}
-			var decoded map[string]json.RawMessage
-			if err := json.Unmarshal(result, &decoded); err != nil {
-				t.Fatalf("%s: result is not an object: %v", tc.method, err)
-			}
-			if len(decoded[tc.key]) == 0 {
-				t.Errorf("%s: result carries no %q: %s", tc.method, tc.key, result)
-			}
+			covMCPAssertMethodAnswers(t, srv, tc)
 		})
 	}
 
 	t.Run("notifications", func(t *testing.T) {
-		for _, method := range []string{"notifications/initialized", "notifications/cancelled"} {
-			result, err := covMCPDispatch(t, srv, method, `{}`)
-			if err != nil || result != nil {
-				t.Errorf("%s: result=%s err=%v, want no payload and no error",
-					method, result, err)
-			}
-		}
+		covMCPAssertNotificationsAreSilent(t, srv)
 	})
 
 	t.Run("ping", func(t *testing.T) {
-		result, err := covMCPDispatch(t, srv, "ping", "")
-		if err != nil {
-			t.Fatalf("ping: %v", err)
-		}
-		if string(result) != "{}" {
-			t.Errorf("ping result = %s, want an empty object", result)
-		}
+		covMCPAssertPingIsEmptyObject(t, srv)
 	})
 
 	t.Run("unknown method", func(t *testing.T) {
-		result, err := covMCPDispatch(t, srv, "resources/list", "")
-		if result != nil {
-			t.Errorf("an unsupported method returned a payload: %s", result)
-		}
-		typed := covMCPRPCError(t, err, -32601)
-		if typed.Message != "method not found" {
-			t.Errorf("message = %q", typed.Message)
-		}
-		if typed.Data != "resources/list" {
-			t.Errorf("data = %v, want the rejected method name", typed.Data)
-		}
+		covMCPAssertUnknownMethodIsRejected(t, srv)
 	})
+}
+
+// covMCPAssertMethodAnswers dispatches one accepted method and checks the
+// result is an object carrying the key that method's clients read.
+func covMCPAssertMethodAnswers(t *testing.T, srv *MCPServer, tc covMCPMethodCase) {
+	t.Helper()
+	result, err := covMCPDispatch(t, srv, tc.method, tc.params)
+	if err != nil {
+		t.Fatalf("%s: %v", tc.method, err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		t.Fatalf("%s: result is not an object: %v", tc.method, err)
+	}
+	if len(decoded[tc.key]) == 0 {
+		t.Errorf("%s: result carries no %q: %s", tc.method, tc.key, result)
+	}
+}
+
+// covMCPAssertNotificationsAreSilent checks the accepted notifications are
+// answered with neither a payload nor an error, as JSON-RPC requires.
+func covMCPAssertNotificationsAreSilent(t *testing.T, srv *MCPServer) {
+	t.Helper()
+	for _, method := range []string{"notifications/initialized", "notifications/cancelled"} {
+		result, err := covMCPDispatch(t, srv, method, `{}`)
+		if err != nil || result != nil {
+			t.Errorf("%s: result=%s err=%v, want no payload and no error",
+				method, result, err)
+		}
+	}
+}
+
+// covMCPAssertPingIsEmptyObject checks ping answers with the empty object
+// the protocol specifies rather than a null result.
+func covMCPAssertPingIsEmptyObject(t *testing.T, srv *MCPServer) {
+	t.Helper()
+	result, err := covMCPDispatch(t, srv, "ping", "")
+	if err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	if string(result) != "{}" {
+		t.Errorf("ping result = %s, want an empty object", result)
+	}
+}
+
+// covMCPAssertUnknownMethodIsRejected checks an unsupported method is a
+// method-not-found error naming the rejected method, not a silent success.
+func covMCPAssertUnknownMethodIsRejected(t *testing.T, srv *MCPServer) {
+	t.Helper()
+	result, err := covMCPDispatch(t, srv, "resources/list", "")
+	if result != nil {
+		t.Errorf("an unsupported method returned a payload: %s", result)
+	}
+	typed := covMCPRPCError(t, err, -32601)
+	if typed.Message != "method not found" {
+		t.Errorf("message = %q", typed.Message)
+	}
+	if typed.Data != "resources/list" {
+		t.Errorf("data = %v, want the rejected method name", typed.Data)
+	}
 }
 
 // prompts/get is a request the client can get wrong in two ways, and both must
@@ -489,6 +517,24 @@ func TestCovMCPRoutingPlanWithoutANativeBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("routing plan: %v", err)
 	}
+	covMCPAssertPlanIsWhollyBridged(t, plan)
+
+	// An unavailable bridge is reported as such, so the diagnostic
+	// distinguishes "held on the bridge" from "held on a bridge that cannot
+	// run" — the second is unanswerable, the first is merely slow.
+	srv.WithToolBridge(&stubBridge{})
+	degraded, err := srv.RoutingPlan()
+	if err != nil {
+		t.Fatalf("routing plan: %v", err)
+	}
+	covMCPAssertPlanReportsNoBridge(t, degraded)
+}
+
+// covMCPAssertPlanIsWhollyBridged checks the plan covers the whole published
+// surface on an available bridge, and that each reason names either the
+// tool's bridge-only cause or the absent native backend.
+func covMCPAssertPlanIsWhollyBridged(t *testing.T, plan []ToolRouting) {
+	t.Helper()
 	if len(plan) != len(crgrelease.Surface()) {
 		t.Fatalf("plan covers %d tools, the release publishes %d",
 			len(plan), len(crgrelease.Surface()))
@@ -500,28 +546,32 @@ func TestCovMCPRoutingPlanWithoutANativeBackend(t *testing.T) {
 		if !routing.BridgeAvailable {
 			t.Errorf("%s reported an unavailable bridge", routing.Tool)
 		}
-		want, bridgeOnly := covMCPBridgeOnlyReasons[routing.Tool]
-		if bridgeOnly {
-			if !strings.Contains(routing.Reason, want) {
-				t.Errorf("%s reason does not name %q: %s", routing.Tool, want, routing.Reason)
-			}
-			continue
-		}
-		if !strings.Contains(routing.Reason, "is not the selected backend") {
-			t.Errorf("%s reason does not name the absent native backend: %s",
-				routing.Tool, routing.Reason)
-		}
+		covMCPAssertBridgeReason(t, routing)
 	}
+}
 
-	// An unavailable bridge is reported as such, so the diagnostic
-	// distinguishes "held on the bridge" from "held on a bridge that cannot
-	// run" — the second is unanswerable, the first is merely slow.
-	srv.WithToolBridge(&stubBridge{})
-	degraded, err := srv.RoutingPlan()
-	if err != nil {
-		t.Fatalf("routing plan: %v", err)
+// covMCPAssertBridgeReason checks one bridged routing's reason: a
+// bridge-only tool must name its published cause, and every other tool must
+// name the native backend that was not selected.
+func covMCPAssertBridgeReason(t *testing.T, routing ToolRouting) {
+	t.Helper()
+	if want, bridgeOnly := covMCPBridgeOnlyReasons[routing.Tool]; bridgeOnly {
+		if !strings.Contains(routing.Reason, want) {
+			t.Errorf("%s reason does not name %q: %s", routing.Tool, want, routing.Reason)
+		}
+		return
 	}
-	for _, routing := range degraded {
+	if !strings.Contains(routing.Reason, "is not the selected backend") {
+		t.Errorf("%s reason does not name the absent native backend: %s",
+			routing.Tool, routing.Reason)
+	}
+}
+
+// covMCPAssertPlanReportsNoBridge checks every entry of a plan taken with an
+// unavailable bridge says so.
+func covMCPAssertPlanReportsNoBridge(t *testing.T, plan []ToolRouting) {
+	t.Helper()
+	for _, routing := range plan {
 		if routing.BridgeAvailable {
 			t.Fatalf("%s reported an available bridge", routing.Tool)
 		}

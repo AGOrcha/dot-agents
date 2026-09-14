@@ -875,37 +875,51 @@ func commDiff(path string, got, want any) string {
 		if !ok {
 			return fmt.Sprintf("%s: got %T, want an object", commRoot(path), got)
 		}
-		for _, key := range commKeyUnion(gotMap, wanted) {
-			gotValue, inGot := gotMap[key]
-			wantValue, inWant := wanted[key]
-			switch {
-			case !inGot:
-				return fmt.Sprintf("%s.%s: missing, want %v", commRoot(path), key, wantValue)
-			case !inWant:
-				return fmt.Sprintf("%s.%s: unexpected %v", commRoot(path), key, gotValue)
-			}
-			if diff := commDiff(path+"."+key, gotValue, wantValue); diff != "" {
-				return diff
-			}
-		}
-		return ""
+		return commDiffObject(path, gotMap, wanted)
 	case []any:
 		gotList, ok := got.([]any)
 		if !ok {
 			return fmt.Sprintf("%s: got %T, want an array", commRoot(path), got)
 		}
-		if len(gotList) != len(wanted) {
-			return fmt.Sprintf("%s: length %d, want %d", commRoot(path), len(gotList), len(wanted))
-		}
-		for i := range wanted {
-			if diff := commDiff(fmt.Sprintf("%s[%d]", path, i), gotList[i], wanted[i]); diff != "" {
-				return diff
-			}
-		}
-		return ""
+		return commDiffArray(path, gotList, wanted)
 	}
 	if got != want {
 		return fmt.Sprintf("%s: %#v, want %#v", commRoot(path), got, want)
+	}
+	return ""
+}
+
+// commDiffObject compares two objects over the UNION of their keys, so a field
+// only one side carries is reported as missing or unexpected rather than
+// skipped.
+func commDiffObject(path string, got, want map[string]any) string {
+	for _, key := range commKeyUnion(got, want) {
+		gotValue, inGot := got[key]
+		wantValue, inWant := want[key]
+		switch {
+		case !inGot:
+			return fmt.Sprintf("%s.%s: missing, want %v", commRoot(path), key, wantValue)
+		case !inWant:
+			return fmt.Sprintf("%s.%s: unexpected %v", commRoot(path), key, gotValue)
+		}
+		if diff := commDiff(path+"."+key, gotValue, wantValue); diff != "" {
+			return diff
+		}
+	}
+	return ""
+}
+
+// commDiffArray compares two arrays by length first, then element by element,
+// so a bound that dropped or duplicated an entry is named as a length rather
+// than as a mismatch on whichever element happened to shift.
+func commDiffArray(path string, got, want []any) string {
+	if len(got) != len(want) {
+		return fmt.Sprintf("%s: length %d, want %d", commRoot(path), len(got), len(want))
+	}
+	for i := range want {
+		if diff := commDiff(fmt.Sprintf("%s[%d]", path, i), got[i], want[i]); diff != "" {
+			return diff
+		}
 	}
 	return ""
 }

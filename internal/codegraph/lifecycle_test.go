@@ -542,31 +542,41 @@ func TestPostprocessTimingKeysMatchLevel(t *testing.T) {
 		{graphstore.PostprocessNone, nil},
 	} {
 		t.Run(tc.level, func(t *testing.T) {
-			fix := newLifecycleFixture(t)
-			report, err := fix.engine.BuildReport(graphstore.BuildOptions{Postprocess: tc.level})
-			if err != nil {
-				t.Fatalf("BuildReport(%s): %v", tc.level, err)
-			}
-			timing, present := reportJSON(t, report)["postprocess_timing"]
-			if tc.want == nil {
-				if present {
-					t.Fatalf("postprocess=%s reported timing %v, want the key absent", tc.level, timing)
-				}
-				return
-			}
-			if !present {
-				t.Fatalf("postprocess=%s reported no timing, want keys %v", tc.level, tc.want)
-			}
-			got := slices.Sorted(maps.Keys(timing.(map[string]any)))
-			if !slices.Equal(got, tc.want) {
-				t.Fatalf("postprocess=%s timing keys = %v, want %v", tc.level, got, tc.want)
-			}
-			for key, value := range timing.(map[string]any) {
-				if seconds, ok := value.(float64); !ok || seconds < 0 {
-					t.Errorf("timing.%s = %#v, want a non-negative number of seconds", key, value)
-				}
-			}
+			assertPostprocessTimingKeys(t, tc.level, tc.want)
 		})
+	}
+}
+
+// assertPostprocessTimingKeys builds a fresh fixture at the given post-process
+// level and checks the reported timing block: a nil want means the key must be
+// absent entirely, otherwise the block must carry exactly those keys and every
+// value must be a non-negative number of seconds.
+func assertPostprocessTimingKeys(t *testing.T, level string, want []string) {
+	t.Helper()
+
+	fix := newLifecycleFixture(t)
+	report, err := fix.engine.BuildReport(graphstore.BuildOptions{Postprocess: level})
+	if err != nil {
+		t.Fatalf("BuildReport(%s): %v", level, err)
+	}
+	timing, present := reportJSON(t, report)["postprocess_timing"]
+	if want == nil {
+		if present {
+			t.Fatalf("postprocess=%s reported timing %v, want the key absent", level, timing)
+		}
+		return
+	}
+	if !present {
+		t.Fatalf("postprocess=%s reported no timing, want keys %v", level, want)
+	}
+	got := slices.Sorted(maps.Keys(timing.(map[string]any)))
+	if !slices.Equal(got, want) {
+		t.Fatalf("postprocess=%s timing keys = %v, want %v", level, got, want)
+	}
+	for key, value := range timing.(map[string]any) {
+		if seconds, ok := value.(float64); !ok || seconds < 0 {
+			t.Errorf("timing.%s = %#v, want a non-negative number of seconds", key, value)
+		}
 	}
 }
 

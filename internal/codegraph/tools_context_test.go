@@ -416,16 +416,31 @@ func TestEstimateTokensMatchesPythonJSONLength(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := pyJSON(tc.value); got != tc.json {
-				t.Fatalf("rendering =\n%s\nwant\n%s", got, tc.json)
-			}
-			want := (len(tc.json) + 3) / 4
-			if got := EstimateTokens(tc.value); got != want {
-				t.Fatalf("EstimateTokens = %d, want %d (%d bytes)", got, want, len(tc.json))
-			}
+			ctxAssertPythonJSONLength(t, tc.value, tc.json)
 		})
 	}
+	ctxAssertEstimateTokensStringHandling(t)
+}
 
+// ctxAssertPythonJSONLength pins one value's Python rendering and the token
+// count derived from that rendering's byte length, which is the only thing
+// EstimateTokens is allowed to depend on.
+func ctxAssertPythonJSONLength(t *testing.T, value any, wantJSON string) {
+	t.Helper()
+	if got := pyJSON(value); got != wantJSON {
+		t.Fatalf("rendering =\n%s\nwant\n%s", got, wantJSON)
+	}
+	want := (len(wantJSON) + 3) / 4
+	if got := EstimateTokens(value); got != want {
+		t.Fatalf("EstimateTokens = %d, want %d (%d bytes)", got, want, len(wantJSON))
+	}
+}
+
+// ctxAssertEstimateTokensStringHandling covers the inputs that never reach the
+// encoder: a bare string is measured directly, so its non-ASCII counts
+// unescaped, and an empty or nil value costs nothing at all.
+func ctxAssertEstimateTokensStringHandling(t *testing.T) {
+	t.Helper()
 	// A string is measured directly rather than re-encoded, and non-ASCII is
 	// counted in the escaped form only when it goes through the encoder.
 	if got, want := EstimateTokens("café 😀"), (len("café 😀")+3)/4; got != want {
@@ -672,14 +687,25 @@ func TestImpactRadiusTraversesByEdgeDirection(t *testing.T) {
 
 	caller := filepath.ToSlash(filepath.Join(root, "caller.go"))
 	callee := filepath.ToSlash(filepath.Join(root, "callee.go"))
-	test := filepath.ToSlash(filepath.Join(root, "callee_probe.go"))
+	probe := filepath.ToSlash(filepath.Join(root, "callee_probe.go"))
+	ctxSeedDirectionGraph(t, store, caller, callee, probe)
+	ctxAssertImpactOneHop(t, store, caller, callee, probe)
+	ctxAssertImpactBounds(t, store, callee)
+}
+
+// ctxSeedDirectionGraph writes the smallest graph whose cross-file call target
+// RESOLVES to a node row: two files with a function each plus a test file, one
+// CONTAINS edge per file, one CALLS edge from caller to callee and one
+// TESTED_BY edge from callee to its probe.
+func ctxSeedDirectionGraph(t *testing.T, store graphstore.Store, caller, callee, probe string) {
+	t.Helper()
 	for _, node := range []graphstore.NodeInfo{
 		{Kind: "File", Name: caller, FilePath: caller, LineStart: 1, LineEnd: 9, Language: "go"},
 		{Kind: "Function", Name: "callerFn", FilePath: caller, LineStart: 3, LineEnd: 5, Language: "go"},
 		{Kind: "File", Name: callee, FilePath: callee, LineStart: 1, LineEnd: 9, Language: "go"},
 		{Kind: "Function", Name: "calleeFn", FilePath: callee, LineStart: 3, LineEnd: 5, Language: "go"},
-		{Kind: "File", Name: test, FilePath: test, LineStart: 1, LineEnd: 9, Language: "go"},
-		{Kind: "Test", Name: "ProbeCallee", FilePath: test, LineStart: 3, LineEnd: 5, Language: "go", IsTest: true},
+		{Kind: "File", Name: probe, FilePath: probe, LineStart: 1, LineEnd: 9, Language: "go"},
+		{Kind: "Test", Name: "ProbeCallee", FilePath: probe, LineStart: 3, LineEnd: 5, Language: "go", IsTest: true},
 	} {
 		if _, err := store.UpsertNode(node, ""); err != nil {
 			t.Fatalf("upsert node %s: %v", node.Name, err)
@@ -688,9 +714,9 @@ func TestImpactRadiusTraversesByEdgeDirection(t *testing.T) {
 	for _, edge := range []graphstore.EdgeInfo{
 		{Kind: "CONTAINS", Source: caller, Target: caller + "::callerFn", FilePath: caller, Line: 3},
 		{Kind: "CONTAINS", Source: callee, Target: callee + "::calleeFn", FilePath: callee, Line: 3},
-		{Kind: "CONTAINS", Source: test, Target: test + "::ProbeCallee", FilePath: test, Line: 3},
+		{Kind: "CONTAINS", Source: probe, Target: probe + "::ProbeCallee", FilePath: probe, Line: 3},
 		{Kind: "CALLS", Source: caller + "::callerFn", Target: callee + "::calleeFn", FilePath: caller, Line: 4},
-		{Kind: "TESTED_BY", Source: callee + "::calleeFn", Target: test + "::ProbeCallee", FilePath: test, Line: 4},
+		{Kind: "TESTED_BY", Source: callee + "::calleeFn", Target: probe + "::ProbeCallee", FilePath: probe, Line: 4},
 	} {
 		if _, err := store.UpsertEdge(edge); err != nil {
 			t.Fatalf("upsert edge %s: %v", edge.Kind, err)
@@ -699,10 +725,14 @@ func TestImpactRadiusTraversesByEdgeDirection(t *testing.T) {
 	if err := store.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
+}
 
-	// One hop from the callee: its caller (CALLS backwards) and its test
-	// (TESTED_BY forwards). The callee's own File node is a seed, and CONTAINS
-	// would otherwise drag in the caller's File node too.
+// ctxAssertImpactOneHop pins the membership, scores and ranking one hop out
+// from the callee: its caller (CALLS backwards) and its test (TESTED_BY
+// forwards). The callee's own File node is a seed, and CONTAINS would
+// otherwise drag in the caller's File node too.
+func ctxAssertImpactOneHop(t *testing.T, store graphstore.Store, caller, callee, probe string) {
+	t.Helper()
 	impact, err := ImpactRadius(store, []string{callee}, 1, impactMaxNodes)
 	if err != nil {
 		t.Fatalf("ImpactRadius: %v", err)
@@ -711,7 +741,7 @@ func TestImpactRadiusTraversesByEdgeDirection(t *testing.T) {
 	for _, node := range impact.ImpactedNodes {
 		gotNames = append(gotNames, node.QualifiedName)
 	}
-	wantNames := []string{caller + "::callerFn", test + "::ProbeCallee"}
+	wantNames := []string{caller + "::callerFn", probe + "::ProbeCallee"}
 	sort.Strings(gotNames)
 	sort.Strings(wantNames)
 	if strings.Join(gotNames, ",") != strings.Join(wantNames, ",") {
@@ -724,7 +754,7 @@ func TestImpactRadiusTraversesByEdgeDirection(t *testing.T) {
 	if got, want := impact.ImpactScores[caller+"::callerFn"], 0.6; got != want {
 		t.Fatalf("caller score = %v, want %v", got, want)
 	}
-	if got, want := impact.ImpactScores[test+"::ProbeCallee"], 0.42; got != want {
+	if got, want := impact.ImpactScores[probe+"::ProbeCallee"], 0.42; got != want {
 		t.Fatalf("test score = %v, want %v", got, want)
 	}
 	// Score order first, then qualified name — the caller outranks the test.
@@ -732,9 +762,14 @@ func TestImpactRadiusTraversesByEdgeDirection(t *testing.T) {
 		t.Fatalf("ranking puts %s first, want the higher-scored caller",
 			impact.ImpactedNodes[0].QualifiedName)
 	}
+}
 
-	// The node ceiling reports the untruncated total, which is the whole
-	// point of returning it.
+// ctxAssertImpactBounds pins the three traversals that return less than the
+// full radius: the node ceiling still reports the untruncated total, zero
+// depth seeds without propagating, and a file with no rows seeds nothing at
+// all — the case the confidence marker exists to name.
+func ctxAssertImpactBounds(t *testing.T, store graphstore.Store, callee string) {
+	t.Helper()
 	bounded, err := ImpactRadius(store, []string{callee}, 1, 1)
 	if err != nil {
 		t.Fatalf("ImpactRadius bounded: %v", err)
@@ -743,9 +778,6 @@ func TestImpactRadiusTraversesByEdgeDirection(t *testing.T) {
 		t.Fatalf("bounded: %d shown, total %d, truncated %v, want 1 / 2 / true",
 			len(bounded.ImpactedNodes), bounded.TotalImpacted, bounded.Truncated)
 	}
-
-	// Zero depth seeds without propagating; a file with no rows seeds nothing
-	// at all, which is the case the confidence marker exists to name.
 	if zero, err := ImpactRadius(store, []string{callee}, 0, impactMaxNodes); err != nil {
 		t.Fatalf("ImpactRadius depth 0: %v", err)
 	} else if len(zero.ImpactedNodes) != 0 || len(zero.ChangedNodes) != 2 {
@@ -922,10 +954,10 @@ func TestConfidenceNotesStayWithinBudget(t *testing.T) {
 	if got := LanguageGapNote("go", ImpactGapPattern); got != "" {
 		t.Fatalf("go has no impact-radius gap, got %q", got)
 	}
-	if got := LanguageGapNote("PHP ", ImpactGapPattern); got == "" {
+	if LanguageGapNote("PHP ", ImpactGapPattern) == "" {
 		t.Fatalf("php's import gap applies to the impact radius, got no note")
 	}
-	if got := LanguageGapNote("go", "inheritors_of"); got == "" {
+	if LanguageGapNote("go", "inheritors_of") == "" {
 		t.Fatalf("go's structural-interface gap applies to inheritors_of, got no note")
 	}
 }

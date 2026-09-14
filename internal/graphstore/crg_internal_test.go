@@ -469,36 +469,45 @@ func TestCRGBridge_BuildReport_ForwardsUpstreamFlags(t *testing.T) {
 		{PostprocessFull, ""},
 	} {
 		t.Run(tc.level, func(t *testing.T) {
-			dir := t.TempDir()
-			bin := filepath.Join(dir, "echo-args")
-			// Echoing argv lets the report's summary carry it: an
-			// unrecognised transcript becomes the summary verbatim.
-			if err := os.WriteFile(bin, []byte("#!/bin/sh\necho \"$@\"\nexit 0\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			b := &CRGBridge{RepoRoot: dir, Bin: bin}
-			report, err := b.BuildReport(BuildOptions{
-				Postprocess:       tc.level,
-				EmbeddingProvider: "local",
-				EmbeddingModel:    "all-MiniLM-L6-v2",
-			})
-			if err != nil {
-				t.Fatalf("BuildReport: %v", err)
-			}
-			if tc.want != "" && !strings.Contains(report.Summary, tc.want) {
-				t.Errorf("argv %q missing %q", report.Summary, tc.want)
-			}
-			if tc.want == "" && strings.Contains(report.Summary, "--skip-") {
-				t.Errorf("argv %q carries a skip flag at the full level", report.Summary)
-			}
-			if !strings.Contains(report.Summary, "--embedding-provider local") ||
-				!strings.Contains(report.Summary, "--embedding-model all-MiniLM-L6-v2") {
-				t.Errorf("argv %q does not forward the embedding pair", report.Summary)
-			}
-			if len(report.Warnings) != 0 {
-				t.Errorf("warnings = %v, want none for a complete pair", report.Warnings)
-			}
+			assertBuildReportForwardsUpstreamFlags(t, tc.level, tc.want)
 		})
+	}
+}
+
+// assertBuildReportForwardsUpstreamFlags runs one postprocess level against
+// an argv-echoing binary and checks the transcript: level becomes want (or
+// no skip flag at all when want is empty), the embedding pair is forwarded
+// verbatim, and a complete pair raises no warning.
+func assertBuildReportForwardsUpstreamFlags(t *testing.T, level, want string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "echo-args")
+	// Echoing argv lets the report's summary carry it: an
+	// unrecognised transcript becomes the summary verbatim.
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho \"$@\"\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := &CRGBridge{RepoRoot: dir, Bin: bin}
+	report, err := b.BuildReport(BuildOptions{
+		Postprocess:       level,
+		EmbeddingProvider: "local",
+		EmbeddingModel:    "all-MiniLM-L6-v2",
+	})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if want != "" && !strings.Contains(report.Summary, want) {
+		t.Errorf("argv %q missing %q", report.Summary, want)
+	}
+	if want == "" && strings.Contains(report.Summary, "--skip-") {
+		t.Errorf("argv %q carries a skip flag at the full level", report.Summary)
+	}
+	if !strings.Contains(report.Summary, "--embedding-provider local") ||
+		!strings.Contains(report.Summary, "--embedding-model all-MiniLM-L6-v2") {
+		t.Errorf("argv %q does not forward the embedding pair", report.Summary)
+	}
+	if len(report.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none for a complete pair", report.Warnings)
 	}
 }
 

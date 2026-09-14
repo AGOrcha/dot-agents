@@ -68,6 +68,78 @@ func languageRows(report CapabilityReport) map[string]SourceCapability {
 	return out
 }
 
+// assertMixedRepositoryLanguages checks the per-language rows ScanCapability
+// reports for the mixed fixture: every expected row must be present with the
+// expected counts and flags, no extra rows may appear, the rows must be sorted
+// by language name, and the case-folded TypeScript extension must collapse to a
+// single entry.
+func assertMixedRepositoryLanguages(t *testing.T, report CapabilityReport) {
+	t.Helper()
+
+	rows := languageRows(report)
+	// Declared in the order ScanCapability must return them: sorted by
+	// language name, which puts the LanguageUnindexed bucket last.
+	want := []SourceCapability{
+		{Language: "go", Files: 2, Native: true, UpstreamSupported: true},
+		{Language: "python", Files: 1, Native: false, UpstreamSupported: true},
+		{Language: "rust", Files: 1, Native: false, UpstreamSupported: true},
+		{Language: "typescript", Files: 2, Native: false, UpstreamSupported: true},
+		{Language: LanguageUnindexed, Files: 1, Native: false, UpstreamSupported: false},
+	}
+	for _, w := range want {
+		assertMixedRepositoryRow(t, rows, w, report.Languages)
+	}
+	if len(report.Languages) != len(want) {
+		t.Fatalf("languages = %+v, want exactly %d rows", report.Languages, len(want))
+	}
+	for i, w := range want {
+		if report.Languages[i].Language != w.Language {
+			t.Fatalf("languages not sorted by name: %+v", report.Languages)
+		}
+	}
+	if exts := rows["typescript"].Extensions; len(exts) != 1 || exts[0] != ".ts" {
+		t.Fatalf("typescript extensions = %v, want the case-folded [.ts]", exts)
+	}
+}
+
+// assertMixedRepositoryRow checks one expected per-language row: it must be
+// present at all, and its file count, native flag and upstream-support flag
+// must match. The full row set is passed only to report it on failure.
+func assertMixedRepositoryRow(t *testing.T, rows map[string]SourceCapability, want SourceCapability, all []SourceCapability) {
+	t.Helper()
+
+	got, ok := rows[want.Language]
+	if !ok {
+		t.Fatalf("no %s row in %+v", want.Language, all)
+	}
+	if got.Files != want.Files || got.Native != want.Native || got.UpstreamSupported != want.UpstreamSupported {
+		t.Fatalf("%s row = %+v, want files=%d native=%v upstream=%v",
+			want.Language, got, want.Files, want.Native, want.UpstreamSupported)
+	}
+}
+
+// assertMixedRepositoryRouting checks the repository-wide verdict for the mixed
+// fixture: the native/bridge/unsupported totals, the FullyNative flag, the
+// routing decision derived from it, and the bridged language list.
+func assertMixedRepositoryRouting(t *testing.T, report CapabilityReport) {
+	t.Helper()
+
+	if report.NativeFiles != 2 || report.BridgeFiles != 4 || report.UnsupportedFiles != 1 {
+		t.Fatalf("totals = native %d bridge %d unsupported %d, want 2/4/1",
+			report.NativeFiles, report.BridgeFiles, report.UnsupportedFiles)
+	}
+	if report.FullyNative {
+		t.Fatalf("FullyNative = true for a repository with %d bridge files", report.BridgeFiles)
+	}
+	if report.Routing() != RoutingBridge {
+		t.Fatalf("Routing = %q, want %q", report.Routing(), RoutingBridge)
+	}
+	bridged := report.BridgeLanguages()
+	if strings.Join(bridged, ",") != "python,rust,typescript" {
+		t.Fatalf("BridgeLanguages = %v, want [python rust typescript]", bridged)
+	}
+}
+
 func TestScanCapabilityClassifiesMixedRepository(t *testing.T) {
 	root := capabilityRepo(t,
 		"main.go",
@@ -87,52 +159,8 @@ func TestScanCapabilityClassifiesMixedRepository(t *testing.T) {
 		t.Fatalf("Root = %q, want %q", report.Root, root)
 	}
 
-	rows := languageRows(report)
-	// Declared in the order ScanCapability must return them: sorted by
-	// language name, which puts the LanguageUnindexed bucket last.
-	want := []SourceCapability{
-		{Language: "go", Files: 2, Native: true, UpstreamSupported: true},
-		{Language: "python", Files: 1, Native: false, UpstreamSupported: true},
-		{Language: "rust", Files: 1, Native: false, UpstreamSupported: true},
-		{Language: "typescript", Files: 2, Native: false, UpstreamSupported: true},
-		{Language: LanguageUnindexed, Files: 1, Native: false, UpstreamSupported: false},
-	}
-	for _, w := range want {
-		got, ok := rows[w.Language]
-		if !ok {
-			t.Fatalf("no %s row in %+v", w.Language, report.Languages)
-		}
-		if got.Files != w.Files || got.Native != w.Native || got.UpstreamSupported != w.UpstreamSupported {
-			t.Fatalf("%s row = %+v, want files=%d native=%v upstream=%v",
-				w.Language, got, w.Files, w.Native, w.UpstreamSupported)
-		}
-	}
-	if len(report.Languages) != len(want) {
-		t.Fatalf("languages = %+v, want exactly %d rows", report.Languages, len(want))
-	}
-	for i, w := range want {
-		if report.Languages[i].Language != w.Language {
-			t.Fatalf("languages not sorted by name: %+v", report.Languages)
-		}
-	}
-	if exts := rows["typescript"].Extensions; len(exts) != 1 || exts[0] != ".ts" {
-		t.Fatalf("typescript extensions = %v, want the case-folded [.ts]", exts)
-	}
-
-	if report.NativeFiles != 2 || report.BridgeFiles != 4 || report.UnsupportedFiles != 1 {
-		t.Fatalf("totals = native %d bridge %d unsupported %d, want 2/4/1",
-			report.NativeFiles, report.BridgeFiles, report.UnsupportedFiles)
-	}
-	if report.FullyNative {
-		t.Fatalf("FullyNative = true for a repository with %d bridge files", report.BridgeFiles)
-	}
-	if report.Routing() != RoutingBridge {
-		t.Fatalf("Routing = %q, want %q", report.Routing(), RoutingBridge)
-	}
-	bridged := report.BridgeLanguages()
-	if strings.Join(bridged, ",") != "python,rust,typescript" {
-		t.Fatalf("BridgeLanguages = %v, want [python rust typescript]", bridged)
-	}
+	assertMixedRepositoryLanguages(t, report)
+	assertMixedRepositoryRouting(t, report)
 }
 
 func TestScanCapabilityGoOnlyRepositoryIsFullyNative(t *testing.T) {

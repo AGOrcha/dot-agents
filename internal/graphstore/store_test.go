@@ -154,7 +154,7 @@ func (f *fakeStore) SetNodeSignature(id int64, signature string) error {
 	f.derived.signatures[id] = signature
 	return nil
 }
-func (f *fakeStore) SetNodeCommunity(id int64, communityID int64) error {
+func (f *fakeStore) SetNodeCommunity(id, communityID int64) error {
 	if f.derived.nodeCommunities == nil {
 		f.derived.nodeCommunities = map[int64]int64{}
 	}

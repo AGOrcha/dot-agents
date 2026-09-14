@@ -322,35 +322,49 @@ func flowDiff(path string, want, got any) string {
 		if !ok {
 			return fmt.Sprintf("%s: want an object, got %T (%v)", path, got, got)
 		}
-		if missing, extra := flowKeyDelta(expected, actual); len(missing)+len(extra) > 0 {
-			return fmt.Sprintf("%s: key set mismatch; missing %v, unexpected %v", path, missing, extra)
-		}
-		for _, key := range slices.Sorted(maps.Keys(expected)) {
-			if msg := flowDiff(path+"."+key, expected[key], actual[key]); msg != "" {
-				return msg
-			}
-		}
-		return ""
+		return flowDiffObject(path, expected, actual)
 	case []any:
 		actual, ok := got.([]any)
 		if !ok {
 			return fmt.Sprintf("%s: want an array, got %T (%v)", path, got, got)
 		}
-		if len(expected) != len(actual) {
-			return fmt.Sprintf("%s: want %d elements, got %d", path, len(expected), len(actual))
-		}
-		for i := range expected {
-			if msg := flowDiff(fmt.Sprintf("%s[%d]", path, i), expected[i], actual[i]); msg != "" {
-				return msg
-			}
-		}
-		return ""
+		return flowDiffArray(path, expected, actual)
 	default:
 		if !reflect.DeepEqual(want, got) {
 			return fmt.Sprintf("%s: want %#v, got %#v", path, want, got)
 		}
 		return ""
 	}
+}
+
+// flowDiffObject checks the KEY SET before descending into any value, so a
+// payload that emitted a field the release omits (or dropped one it publishes)
+// is reported as the shape mismatch it is rather than as a value difference.
+func flowDiffObject(path string, want, got map[string]any) string {
+	if missing, extra := flowKeyDelta(want, got); len(missing)+len(extra) > 0 {
+		return fmt.Sprintf("%s: key set mismatch; missing %v, unexpected %v", path, missing, extra)
+	}
+	for _, key := range slices.Sorted(maps.Keys(want)) {
+		if msg := flowDiff(path+"."+key, want[key], got[key]); msg != "" {
+			return msg
+		}
+	}
+	return ""
+}
+
+// flowDiffArray compares element counts before elements, so a flow or step the
+// handler added or dropped is named as a count rather than as a mismatch on
+// whichever entry shifted into its place.
+func flowDiffArray(path string, want, got []any) string {
+	if len(want) != len(got) {
+		return fmt.Sprintf("%s: want %d elements, got %d", path, len(want), len(got))
+	}
+	for i := range want {
+		if msg := flowDiff(fmt.Sprintf("%s[%d]", path, i), want[i], got[i]); msg != "" {
+			return msg
+		}
+	}
+	return ""
 }
 
 // flowTokenDiff checks a value the generator normalized away. A normalized

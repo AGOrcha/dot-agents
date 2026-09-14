@@ -139,35 +139,92 @@ func TestBindAppliesPublishedDefaults(t *testing.T) {
 	}
 }
 
+// coercionCase is one lax-coercion scenario: a tool call's raw arguments plus
+// either the validator diagnostic the call must produce or an assertion on
+// the values it binds.
+type coercionCase struct {
+	name    string
+	tool    string
+	args    string
+	wantErr string
+	check   func(t *testing.T, args Args)
+}
+
+// wantIntArg asserts a coerced integer parameter's effective value.
+func wantIntArg(name string, want int) func(*testing.T, Args) {
+	return func(t *testing.T, args Args) {
+		t.Helper()
+		if got := args.Int(name); got != want {
+			t.Errorf("%s = %d, want %d", name, got, want)
+		}
+	}
+}
+
+// wantUnsetString asserts an optional string parameter stayed unset.
+func wantUnsetString(name string) func(*testing.T, Args) {
+	return func(t *testing.T, args Args) {
+		t.Helper()
+		if _, ok := args.OptString(name); ok {
+			t.Errorf("%s should be unset", name)
+		}
+	}
+}
+
+// wantEmptyStringSlice asserts a list parameter was set and is empty, which
+// is not the same state as an unset list.
+func wantEmptyStringSlice(name string) func(*testing.T, Args) {
+	return func(t *testing.T, args Args) {
+		t.Helper()
+		values, ok := args.StringSlice(name)
+		if !ok {
+			t.Fatalf("%s should be set", name)
+		}
+		if len(values) != 0 {
+			t.Errorf("%s = %v, want empty", name, values)
+		}
+	}
+}
+
+// runCoercionCase binds one scenario's arguments and asserts its outcome:
+// either the release's diagnostic contains the expected fragment, or the
+// call succeeds and the case's value assertion holds.
+func runCoercionCase(t *testing.T, test coercionCase) {
+	t.Helper()
+	tool, ok := Lookup(test.tool)
+	if !ok {
+		t.Fatalf("tool %s not published", test.tool)
+	}
+	args, toolErr := tool.Bind(json.RawMessage(test.args))
+	if test.wantErr != "" {
+		if toolErr == nil {
+			t.Fatalf("expected an error containing %q", test.wantErr)
+		}
+		if !strings.Contains(toolErr.Message, test.wantErr) {
+			t.Fatalf("error %q does not contain %q", toolErr.Message, test.wantErr)
+		}
+		return
+	}
+	if toolErr != nil {
+		t.Fatalf("unexpected error: %v", toolErr)
+	}
+	test.check(t, args)
+}
+
 // Lax coercion is part of the release's accepted-input contract: rejecting a
 // numeric string that the release accepts would break working clients.
 func TestBindCoercionMatchesRelease(t *testing.T) {
-	tests := []struct {
-		name    string
-		tool    string
-		args    string
-		wantErr string
-		check   func(t *testing.T, args Args)
-	}{
+	tests := []coercionCase{
 		{
-			name: "numeric string becomes an integer",
-			tool: "semantic_search_nodes_tool",
-			args: `{"query":"x","limit":"5"}`,
-			check: func(t *testing.T, args Args) {
-				if got := args.Int("limit"); got != 5 {
-					t.Errorf("limit = %d, want 5", got)
-				}
-			},
+			name:  "numeric string becomes an integer",
+			tool:  "semantic_search_nodes_tool",
+			args:  `{"query":"x","limit":"5"}`,
+			check: wantIntArg("limit", 5),
 		},
 		{
-			name: "integral float becomes an integer",
-			tool: "semantic_search_nodes_tool",
-			args: `{"query":"x","limit":5.0}`,
-			check: func(t *testing.T, args Args) {
-				if got := args.Int("limit"); got != 5 {
-					t.Errorf("limit = %d, want 5", got)
-				}
-			},
+			name:  "integral float becomes an integer",
+			tool:  "semantic_search_nodes_tool",
+			args:  `{"query":"x","limit":5.0}`,
+			check: wantIntArg("limit", 5),
 		},
 		{
 			name:    "fractional float is rejected",
@@ -176,14 +233,10 @@ func TestBindCoercionMatchesRelease(t *testing.T) {
 			wantErr: "got a number with a fractional part [type=int_from_float",
 		},
 		{
-			name: "bool counts as an integer",
-			tool: "semantic_search_nodes_tool",
-			args: `{"query":"x","limit":true}`,
-			check: func(t *testing.T, args Args) {
-				if got := args.Int("limit"); got != 1 {
-					t.Errorf("limit = %d, want 1", got)
-				}
-			},
+			name:  "bool counts as an integer",
+			tool:  "semantic_search_nodes_tool",
+			args:  `{"query":"x","limit":true}`,
+			check: wantIntArg("limit", 1),
 		},
 		{
 			name:    "a number is not a string",
@@ -198,14 +251,10 @@ func TestBindCoercionMatchesRelease(t *testing.T) {
 			wantErr: "Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]",
 		},
 		{
-			name: "null on an optional parameter means unset",
-			tool: "semantic_search_nodes_tool",
-			args: `{"query":"x","kind":null}`,
-			check: func(t *testing.T, args Args) {
-				if _, ok := args.OptString("kind"); ok {
-					t.Error("kind should be unset")
-				}
-			},
+			name:  "null on an optional parameter means unset",
+			tool:  "semantic_search_nodes_tool",
+			args:  `{"query":"x","kind":null}`,
+			check: wantUnsetString("kind"),
 		},
 		{
 			name:    "a string is not a list",
@@ -226,40 +275,15 @@ func TestBindCoercionMatchesRelease(t *testing.T) {
 			wantErr: "Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]",
 		},
 		{
-			name: "an explicitly empty list is not an unset list",
-			tool: "get_impact_radius_tool",
-			args: `{"changed_files":[]}`,
-			check: func(t *testing.T, args Args) {
-				files, ok := args.StringSlice("changed_files")
-				if !ok {
-					t.Fatal("changed_files should be set")
-				}
-				if len(files) != 0 {
-					t.Errorf("changed_files = %v, want empty", files)
-				}
-			},
+			name:  "an explicitly empty list is not an unset list",
+			tool:  "get_impact_radius_tool",
+			args:  `{"changed_files":[]}`,
+			check: wantEmptyStringSlice("changed_files"),
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tool, ok := Lookup(test.tool)
-			if !ok {
-				t.Fatalf("tool %s not published", test.tool)
-			}
-			args, toolErr := tool.Bind(json.RawMessage(test.args))
-			if test.wantErr != "" {
-				if toolErr == nil {
-					t.Fatalf("expected an error containing %q", test.wantErr)
-				}
-				if !strings.Contains(toolErr.Message, test.wantErr) {
-					t.Fatalf("error %q does not contain %q", toolErr.Message, test.wantErr)
-				}
-				return
-			}
-			if toolErr != nil {
-				t.Fatalf("unexpected error: %v", toolErr)
-			}
-			test.check(t, args)
+			runCoercionCase(t, test)
 		})
 	}
 }

@@ -70,7 +70,7 @@ type realCorpusSource struct {
 // The sample is capped (not all ~47 specs) so the doc lane stays fast under
 // -race; the cap is documented in the test and the assertions only require a
 // representative subset, not the full corpus.
-func collectRealSpecs(t *testing.T, repoRoot string, max int) []realCorpusSource {
+func collectRealSpecs(t *testing.T, repoRoot string, maxSources int) []realCorpusSource {
 	t.Helper()
 	specsDir := filepath.Join(repoRoot, ".agents", "workflow", "specs")
 	entries, err := os.ReadDir(specsDir)
@@ -87,8 +87,8 @@ func collectRealSpecs(t *testing.T, repoRoot string, max int) []realCorpusSource
 		t.Fatalf("no spec design.md files found under %s", specsDir)
 	}
 	sort.Strings(names) // deterministic sample
-	if max > 0 && len(names) > max {
-		names = names[:max]
+	if maxSources > 0 && len(names) > maxSources {
+		names = names[:maxSources]
 	}
 	out := make([]realCorpusSource, 0, len(names))
 	for _, name := range names {
@@ -113,7 +113,7 @@ func specHasDesign(specsDir string, e os.DirEntry) bool {
 
 // collectRealResearch gathers a few real research markdown docs. These already
 // have unique filenames, so no renaming is needed.
-func collectRealResearch(t *testing.T, repoRoot string, max int) []realCorpusSource {
+func collectRealResearch(t *testing.T, repoRoot string, maxSources int) []realCorpusSource {
 	t.Helper()
 	researchDir := filepath.Join(repoRoot, "research")
 	entries, err := os.ReadDir(researchDir)
@@ -131,8 +131,8 @@ func collectRealResearch(t *testing.T, repoRoot string, max int) []realCorpusSou
 		t.Fatalf("no research *.md files found under %s", researchDir)
 	}
 	sort.Strings(names)
-	if max > 0 && len(names) > max {
-		names = names[:max]
+	if maxSources > 0 && len(names) > maxSources {
+		names = names[:maxSources]
 	}
 	out := make([]realCorpusSource, 0, len(names))
 	for _, name := range names {

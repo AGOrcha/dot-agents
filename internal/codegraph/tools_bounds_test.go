@@ -91,67 +91,77 @@ type boundsFixture struct {
 func TestBoundViolationsAreTransportErrors(t *testing.T) {
 	for _, name := range boundsExpectedFixtures(t) {
 		t.Run(name, func(t *testing.T) {
-			fixture := readBoundsFixture(t, name)
-
-			// The fixture is only a valid oracle for this test if the
-			// release really did fail the call as a transport error. If a
-			// case is ever added for an argument the release does not guard,
-			// this fails here rather than blaming the handler for answering.
-			if !fixture.IsError {
-				t.Fatalf("fixture %s records is_error=false: %s is not a "+
-					"bound-guarded argument, so this case does not belong in "+
-					"the bound_ family", name, fixture.Case)
-			}
-			if fixture.StructuredContent != nil {
-				t.Fatalf("fixture %s carries structured content %s; the "+
-					"release returns none for an escaped exception",
-					name, string(*fixture.StructuredContent))
-			}
-			want := boundsHandlerMessage(t, fixture)
-
-			tool, ok := crgrelease.Lookup(fixture.Tool)
-			if !ok {
-				t.Fatalf("%s is not published by code-review-graph %s",
-					fixture.Tool, crgrelease.Version)
-			}
-			args, bindErr := tool.Bind(fixture.Arguments)
-			if bindErr != nil {
-				// Binding must NOT reject the value: the bound is the
-				// handler's to enforce, and a schema that rejected 0 would
-				// move the failure to a different envelope.
-				t.Fatalf("binding %s rejected the release's own arguments %s: %v",
-					fixture.Tool, string(fixture.Arguments), bindErr)
-			}
-
-			handler, native := toolHandlers[fixture.Tool]
-			if !native {
-				t.Skipf("%s has no native handler yet; the call routes to the "+
-					"retained bridge, which reproduces this envelope by "+
-					"construction", fixture.Tool)
-			}
-
-			// A bare engine on an empty directory: the bound check runs
-			// before the graph is read, so the rejection must not depend on
-			// a built graph.
-			result, err := handler(Open(t.TempDir()), args)
-
-			if err == nil {
-				t.Fatalf("handler returned (%#v, nil); the release raises here, "+
-					"so the handler must return a Go error. %s",
-					result, boundsErrorPayloadHint(result))
-			}
-			if result != nil {
-				t.Errorf("handler returned a payload %#v alongside its error; "+
-					"the release's result has no content but the error text",
-					result)
-			}
-			if got := err.Error(); got != want {
-				t.Errorf("error message\n got: %q\nwant: %q\n(want is the "+
-					"fixture's content text minus FastMCP's uniform %q prefix, "+
-					"which MCPServer.route adds)",
-					got, want, boundsPrefix(fixture.Tool))
-			}
+			assertBoundViolationIsTransportError(t, name)
 		})
+	}
+}
+
+// assertBoundViolationIsTransportError drives one recorded bound violation
+// through the native handler: the fixture must really record a transport
+// failure, the arguments must still bind, and the handler must answer with a
+// bare Go error carrying the release's message and no payload.
+func assertBoundViolationIsTransportError(t *testing.T, name string) {
+	t.Helper()
+
+	fixture := readBoundsFixture(t, name)
+
+	// The fixture is only a valid oracle for this test if the release
+	// really did fail the call as a transport error. If a case is ever
+	// added for an argument the release does not guard, this fails here
+	// rather than blaming the handler for answering.
+	if !fixture.IsError {
+		t.Fatalf("fixture %s records is_error=false: %s is not a "+
+			"bound-guarded argument, so this case does not belong in "+
+			"the bound_ family", name, fixture.Case)
+	}
+	if fixture.StructuredContent != nil {
+		t.Fatalf("fixture %s carries structured content %s; the "+
+			"release returns none for an escaped exception",
+			name, string(*fixture.StructuredContent))
+	}
+	want := boundsHandlerMessage(t, fixture)
+
+	tool, ok := crgrelease.Lookup(fixture.Tool)
+	if !ok {
+		t.Fatalf("%s is not published by code-review-graph %s",
+			fixture.Tool, crgrelease.Version)
+	}
+	args, bindErr := tool.Bind(fixture.Arguments)
+	if bindErr != nil {
+		// Binding must NOT reject the value: the bound is the handler's
+		// to enforce, and a schema that rejected 0 would move the
+		// failure to a different envelope.
+		t.Fatalf("binding %s rejected the release's own arguments %s: %v",
+			fixture.Tool, string(fixture.Arguments), bindErr)
+	}
+
+	handler, native := toolHandlers[fixture.Tool]
+	if !native {
+		t.Skipf("%s has no native handler yet; the call routes to the "+
+			"retained bridge, which reproduces this envelope by "+
+			"construction", fixture.Tool)
+	}
+
+	// A bare engine on an empty directory: the bound check runs before
+	// the graph is read, so the rejection must not depend on a built
+	// graph.
+	result, err := handler(Open(t.TempDir()), args)
+
+	if err == nil {
+		t.Fatalf("handler returned (%#v, nil); the release raises here, "+
+			"so the handler must return a Go error. %s",
+			result, boundsErrorPayloadHint(result))
+	}
+	if result != nil {
+		t.Errorf("handler returned a payload %#v alongside its error; "+
+			"the release's result has no content but the error text",
+			result)
+	}
+	if got := err.Error(); got != want {
+		t.Errorf("error message\n got: %q\nwant: %q\n(want is the "+
+			"fixture's content text minus FastMCP's uniform %q prefix, "+
+			"which MCPServer.route adds)",
+			got, want, boundsPrefix(fixture.Tool))
 	}
 }
 
