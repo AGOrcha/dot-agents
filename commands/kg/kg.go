@@ -711,9 +711,13 @@ func runKGServe(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	// `da kg serve` exposes the same eight MCP tools it always has; the backend
-	// behind them is now the configured one (kg-native by default, the Python
-	// bridge only when kg.graph_backend selects the crg-bridge family).
+	// `da kg serve` exposes the pinned code-review-graph release's FULL tool
+	// surface (see internal/crgrelease), whichever backend is configured.
+	// Each call is validated against the release's published schema and then
+	// routed: answered in-process by the kg-native engine when that engine
+	// reproduces the release's response for this repository's sources, and by
+	// the retained Python bridge otherwise. `da kg code-capabilities` reports
+	// the routing decision per tool.
 	provider, release, perr := codeGraphProvider(workDir)
 	defer release()
 	srv := graphstore.NewMCPServerWithProvider(workDir, provider, perr)

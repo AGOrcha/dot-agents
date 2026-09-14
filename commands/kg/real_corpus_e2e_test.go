@@ -395,19 +395,21 @@ func setupRealCodeGraph(t *testing.T, repoRoot, crgBin string) (string, int) {
 	if err != nil {
 		t.Fatalf("NewCRGBridge over staged tree: %v", err)
 	}
+	// postprocess="none" is upstream's way to skip flows and community
+	// detection; the old SkipFlows/SkipPostprocess flags do not exist in the
+	// release's option surface.
 	report, err := bridge.BuildReport(graphstore.BuildOptions{
-		SkipFlows:       true,
-		SkipPostprocess: true,
+		Postprocess: graphstore.PostprocessNone,
 	})
 	if err != nil {
 		skipOrFailRealCRGBuild(t, report, err)
 	}
-	if report.Outcome != graphstore.CRGReadinessReady {
-		t.Fatalf("expected build outcome=%q over real source, got %q; summary: %s",
-			graphstore.CRGReadinessReady, report.Outcome, report.Summary)
+	if report.Status != "ok" || report.BuildType != "full" {
+		t.Fatalf("expected a successful full build over real source, got status=%q build_type=%q; summary: %s",
+			report.Status, report.BuildType, report.Summary)
 	}
-	if report.Status == nil || report.Status.Nodes == 0 {
-		t.Fatalf("expected non-zero nodes from real source build, got status=%+v", report.Status)
+	if report.TotalNodes == nil || *report.TotalNodes == 0 {
+		t.Fatalf("expected non-zero nodes from real source build, got report=%+v", report)
 	}
 	// The produced graph.db must contain real Go symbol nodes.
 	return buildRoot, assertRealGraphDBNonEmpty(t, buildRoot)

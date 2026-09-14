@@ -182,7 +182,7 @@ func TestRunKGBuild_JSONOutput(t *testing.T) {
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
 	})
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("repo", repo, "")
@@ -199,8 +199,9 @@ func TestRunKGBuild_JSONOutput(t *testing.T) {
 	if err := json.Unmarshal(out, &report); err != nil {
 		t.Fatalf("invalid JSON: %v\nraw: %s", err, string(out))
 	}
-	if report.Operation != "build" {
-		t.Errorf("operation: got %q want build", report.Operation)
+	// Upstream reports the operation as build_type, not a separate field.
+	if report.BuildType != "full" {
+		t.Errorf("build_type: got %q want full", report.BuildType)
 	}
 }
 
@@ -210,7 +211,7 @@ func TestRunKGBuild_TextOutput(t *testing.T) {
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
 	})
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("repo", repo, "")
@@ -230,10 +231,14 @@ func TestRunKGBuild_TextOutput(t *testing.T) {
 
 // TestRunKGUpdate_NoDiff verifies the "no_diff" outcome through the text path.
 func TestRunKGUpdate_NoDiff(t *testing.T) {
+	// These exercise the RETAINED Python bridge, which is no longer the
+	// default backend; without selecting it they run against the kg-native
+	// engine and assert bridge-shaped output it never produces.
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	initGitRepo(t, repo)
 	commitFile(t, repo, "a.txt", "one\n", "init")
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("repo", repo, "")
@@ -254,10 +259,14 @@ func TestRunKGUpdate_NoDiff(t *testing.T) {
 
 // TestRunKGUpdate_JSONOutput verifies the JSON branch.
 func TestRunKGUpdate_JSONOutput(t *testing.T) {
+	// These exercise the RETAINED Python bridge, which is no longer the
+	// default backend; without selecting it they run against the kg-native
+	// engine and assert bridge-shaped output it never produces.
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	initGitRepo(t, repo)
 	commitFile(t, repo, "a.txt", "one\n", "init")
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("repo", repo, "")
@@ -275,8 +284,8 @@ func TestRunKGUpdate_JSONOutput(t *testing.T) {
 	if err := json.Unmarshal(out, &report); err != nil {
 		t.Fatalf("invalid JSON: %v\nraw: %s", err, string(out))
 	}
-	if report.Operation != "update" {
-		t.Errorf("operation: got %q want update", report.Operation)
+	if report.BuildType != "incremental" {
+		t.Errorf("build_type: got %q want incremental", report.BuildType)
 	}
 }
 
@@ -544,6 +553,10 @@ func TestRunKGWarmStats_OutputContent(t *testing.T) {
 // binary on PATH and an unbuilt graph, runKGImpact returns an error from
 // NewCRGBridge.
 func TestRunKGImpact_BridgeUnavailable(t *testing.T) {
+	// These exercise the RETAINED Python bridge, which is no longer the
+	// default backend; without selecting it they run against the kg-native
+	// engine and assert bridge-shaped output it never produces.
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	// require-graph=false to skip the readiness guard; bridge.GetImpactRadius
 	// then fails because CRG isn't installed in the tempdir.
@@ -1294,7 +1307,7 @@ func TestRunKGSync_PullNoRemote(t *testing.T) {
 
 func TestRunKGWarmCodeImport_WithCRGNodes(t *testing.T) {
 	repo := t.TempDir()
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
@@ -1478,8 +1491,12 @@ func TestRunKGSync_PullSuccessRunsLint(t *testing.T) {
 }
 
 func TestRunKGImpact_FakePythonReturnsError(t *testing.T) {
+	// These exercise the RETAINED Python bridge, which is no longer the
+	// default backend; without selecting it they run against the kg-native
+	// engine and assert bridge-shaped output it never produces.
+	useBridgeBackend(t)
 	repo := t.TempDir()
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	if err := os.WriteFile(filepath.Join(repo, ".venv", "bin", "python3"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
 		t.Fatal(err)
@@ -1517,7 +1534,7 @@ func TestRunKGUpdate_UpdatedOutcome(t *testing.T) {
 	if out, err := runGit(t, repo, "commit", "-m", "edit"); err != nil {
 		t.Fatalf("git commit: %v\n%s", err, out)
 	}
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.txt", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
 	})
@@ -1540,7 +1557,7 @@ func TestRunKGBuild_BusyOutcome(t *testing.T) {
 	repo := t.TempDir()
 
 	writeCRGStatusFixture(t, repo, nil)
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("repo", repo, "")
@@ -1626,8 +1643,12 @@ func TestRunKGCodeStatus_TextWithMessage(t *testing.T) {
 }
 
 func TestRunKGBuild_ReadyOutcome(t *testing.T) {
+	// These exercise the RETAINED Python bridge, which is no longer the
+	// default backend; without selecting it they run against the kg-native
+	// engine and assert bridge-shaped output it never produces.
+	useBridgeBackend(t)
 	repo := t.TempDir()
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
 	})
@@ -1644,8 +1665,9 @@ func TestRunKGBuild_ReadyOutcome(t *testing.T) {
 		}
 	})
 	output := string(out)
-	if !strings.Contains(output, "Build complete") && !strings.Contains(output, "build status") {
-		t.Errorf("expected build outcome, got:\n%s", output)
+	// The command prints the release's own summary sentence verbatim.
+	if !strings.Contains(output, "Full build complete: parsed 1 files") {
+		t.Errorf("expected the release's build summary, got:\n%s", output)
 	}
 }
 
@@ -1693,7 +1715,7 @@ func TestRunKGCommunities_TextEmpty(t *testing.T) {
 
 func TestRunKGPostprocess_FakeCRG(t *testing.T) {
 	repo := t.TempDir()
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("repo", repo, "")
@@ -1711,7 +1733,7 @@ func TestRunKGPostprocess_FakeCRG(t *testing.T) {
 
 func TestRunKGImpact_DefaultRepoFromCwd(t *testing.T) {
 	repo := t.TempDir()
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 	if err := os.WriteFile(filepath.Join(repo, ".venv", "bin", "python3"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1769,7 +1791,7 @@ func TestRunKGImpact_JSONOutputEmpty(t *testing.T) {
 // DB — ReadNodes returns nil with no error, then ReadEdges does the same.
 func TestRunKGWarmCodeImport_EmptyDB(t *testing.T) {
 	repo := t.TempDir()
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	home := newTempKG(t)
 	if err := runKGSetup(testIO()); err != nil {
@@ -1793,7 +1815,7 @@ func TestRunKGWarmCodeImport_EmptyDB(t *testing.T) {
 // no nodes, but still hits the SetMetadata + summary branch.
 func TestWarmCodeLane_EmptyDB(t *testing.T) {
 	repo := t.TempDir()
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 	t.Chdir(repo)
 
 	home := newTempKG(t)
@@ -2064,10 +2086,14 @@ esac`)
 // runKGUpdate outcome switch (lines 184-185). Two commits give a non-empty
 // diff; the fake CRG's update summary parses as 0 nodes / 0 edges changed.
 func TestRunKGUpdate_NoMutationOutcome(t *testing.T) {
+	// These exercise the RETAINED Python bridge, which is no longer the
+	// default backend; without selecting it they run against the kg-native
+	// engine and assert bridge-shaped output it never produces.
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	initGitRepo(t, repo)
 	writeFakeCRGBinary(t, repo, `case "$1" in
-update) echo "2 files updated, 0 nodes, 0 edges" ;;
+update) printf '%s\n' "Incremental: 2 files updated, 0 nodes, 0 edges (postprocess=full)" ;;
 *) exit 0 ;;
 esac`)
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
@@ -2087,8 +2113,10 @@ esac`)
 			t.Fatalf("runKGUpdate: %v", err)
 		}
 	})
-	if !strings.Contains(string(out), "no graph mutations") {
-		t.Errorf("expected no-mutation summary, got:\n%s", out)
+	// Upstream has no "no mutation" outcome: an update that re-parsed files
+	// reports its own incremental line, whatever the row counts were.
+	if !strings.Contains(string(out), "2 files updated, 0 nodes, 0 edges") {
+		t.Errorf("expected the release's incremental summary, got:\n%s", out)
 	}
 }
 
@@ -2097,7 +2125,7 @@ esac`)
 // table is missing the columns ReadEdges selects.
 func TestRunKGWarmCodeImport_ReadEdgesError(t *testing.T) {
 	repo := t.TempDir()
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 	dbPath := graphstore.CRGDBPath(repo)
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		t.Fatal(err)

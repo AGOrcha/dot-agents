@@ -133,8 +133,6 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	if root == "" {
 		root = crgRepoRoot()
 	}
-	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
-	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
 
 	// KG decision event: record the build outcome + resulting graph counts
 	// (KGDecisionObserved), never node/edge bodies (D4). repoPath is the graphed
@@ -153,33 +151,71 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 		ui.Info(fmt.Sprintf("Building code graph for %s ...", root))
 	}
 	report, err := provider.BuildReport(graphstore.BuildOptions{
-		SkipFlows:       skipFlows,
-		SkipPostprocess: skipPost,
+		Postprocess: postprocessLevelFromFlags(cmd),
 	})
 	if err != nil {
 		return err
 	}
-	observed.Outcome = report.Outcome
-	setDecisionGraphCounts(observed, report.Status)
+	observed.Outcome = report.BuildType
+	status := recordGraphCounts(provider, observed)
 	ok = true
 	if commandJSON(cmd) {
-		data, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(data))
+		return printJSON(report)
+	}
+	reportGraphOperation("Code graph build status", report.Summary, status)
+	return nil
+}
+
+// postprocessLevelFromFlags maps the CLI's two skip flags onto upstream's
+// post-processing level, exactly as upstream's own `build`/`update` commands
+// do: --skip-postprocess wins over --skip-flows.
+func postprocessLevelFromFlags(cmd *cobra.Command) string {
+	if skip, _ := cmd.Flags().GetBool("skip-postprocess"); skip {
+		return graphstore.PostprocessNone
+	}
+	if skip, _ := cmd.Flags().GetBool("skip-flows"); skip {
+		return graphstore.PostprocessMinimal
+	}
+	return graphstore.PostprocessFull
+}
+
+// recordGraphCounts reads the resulting graph status onto the decision event
+// and returns it for display. Upstream's operation result carries no status
+// block, so the counts come from a follow-up read; it is best-effort, because
+// the operation itself already landed.
+func recordGraphCounts(provider graphstore.CodeGraphProvider, observed *journal.KGDecisionObserved) *graphstore.CRGStatus {
+	status, err := provider.Status()
+	if err != nil {
 		return nil
 	}
-	switch report.Outcome {
-	case string(graphstore.CRGReadinessReady):
-		ui.SuccessBox(report.Summary)
-	case string(graphstore.CRGReadinessUnbuilt):
-		ui.InfoBox("Code graph remains unbuilt", report.Summary)
-	case string(graphstore.CRGReadinessBusyOrLocked):
-		ui.WarnBox("Code graph is busy or locked", report.Summary)
+	setDecisionGraphCounts(observed, status)
+	return status
+}
+
+// reportGraphOperation prints a build/update result, escalating the box when
+// the resulting graph is not actually usable.
+func reportGraphOperation(title, summary string, status *graphstore.CRGStatus) {
+	switch {
+	case status == nil:
+		ui.InfoBox(title, summary)
+	case status.Ready:
+		ui.SuccessBox(summary)
+	case status.State == graphstore.CRGReadinessBusyOrLocked:
+		ui.WarnBox("Code graph is busy or locked", summary)
+	case status.State == graphstore.CRGReadinessUnbuilt:
+		ui.InfoBox("Code graph remains unbuilt", summary)
 	default:
-		ui.InfoBox("Code graph build status", report.Summary)
+		ui.InfoBox(title, summary)
 	}
+}
+
+// printJSON writes one indented JSON document to stdout.
+func printJSON(value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
 	return nil
 }
 
@@ -219,8 +255,6 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	defer release()
 
 	base, _ := cmd.Flags().GetString("base")
-	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
-	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
 
 	// Journal only once we know the backend is usable (the graceful no-op above
 	// mutates nothing). Decision event: outcome + graph counts, never bodies (D4).
@@ -232,35 +266,27 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	if !commandJSON(cmd) {
 		ui.Info(fmt.Sprintf("Updating code graph for %s ...", root))
 	}
+	// An empty base means "resolve automatically" — the commit the graph was
+	// last built at — which is what reconciles a multi-commit pull in one
+	// update. BaseSet stays false so that remains the meaning.
 	report, err := provider.UpdateReport(graphstore.UpdateOptions{
-		Base:            base,
-		SkipFlows:       skipFlows,
-		SkipPostprocess: skipPost,
+		Base:        base,
+		Postprocess: postprocessLevelFromFlags(cmd),
 	})
 	if err != nil {
 		return err
 	}
-	observed.Outcome = report.Outcome
-	setDecisionGraphCounts(observed, report.Status)
+	observed.Outcome = report.BuildType
+	status := recordGraphCounts(provider, observed)
 	ok = true
 	if commandJSON(cmd) {
-		data, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(data))
+		return printJSON(report)
+	}
+	if report.FilesUpdated != nil && *report.FilesUpdated == 0 {
+		ui.InfoBox("No code diff to update", report.Summary)
 		return nil
 	}
-	switch report.Outcome {
-	case "no_diff":
-		ui.InfoBox("No code diff to update", report.Summary)
-	case "no_mutation":
-		ui.SuccessBox(report.Summary)
-	case "updated":
-		ui.SuccessBox(report.Summary)
-	default:
-		ui.InfoBox("Code graph update status", report.Summary)
-	}
+	reportGraphOperation("Code graph update status", report.Summary, status)
 	return nil
 }
 
@@ -282,8 +308,16 @@ func runKGCodeStatus(deps Deps, cmd *cobra.Command, _ []string) error {
 	ui.Info(fmt.Sprintf("  Nodes:        %d", status.Nodes))
 	ui.Info(fmt.Sprintf("  Edges:        %d", status.Edges))
 	ui.Info(fmt.Sprintf("  Files:        %d", status.Files))
-	ui.Info(fmt.Sprintf("  Languages:    %s", status.Languages))
-	ui.Info(fmt.Sprintf("  Last updated: %s", status.LastUpdated))
+	ui.Info(fmt.Sprintf("  Languages:    %s", strings.Join(status.Languages, ", ")))
+	ui.Info(fmt.Sprintf("  Last updated: %s", status.LastUpdatedOrNever()))
+	if status.BuiltOnBranch != nil {
+		ui.Info(fmt.Sprintf("  Built on:     %s", *status.BuiltOnBranch))
+	}
+	if status.BuiltAtCommit != nil && status.CurrentBranch != nil &&
+		status.BuiltOnBranch != nil && *status.BuiltOnBranch != *status.CurrentBranch {
+		ui.Warn(fmt.Sprintf("  Graph was built on %q but the working copy is on %q; rebuild it.",
+			*status.BuiltOnBranch, *status.CurrentBranch))
+	}
 	if status.Message != "" {
 		ui.Info(fmt.Sprintf("  State:        %s", status.Message))
 	}
@@ -314,9 +348,10 @@ var crgBridgeStatus = func(root string) (*graphstore.CRGStatus, error) {
 			// Backend tooling absent is a readiness fact, not a fault: report it
 			// the way the bridge's missing-database branch did.
 			return &graphstore.CRGStatus{
-				LastUpdated: "never",
-				State:       graphstore.CRGReadinessUnbuilt,
-				Message:     err.Error(),
+				Languages: []string{},
+				State:     graphstore.CRGReadinessUnbuilt,
+				VCS:       graphstore.DetectVCS(root),
+				Message:   err.Error(),
 			}, nil
 		}
 		return nil, err
@@ -538,21 +573,36 @@ func runKGPostprocess(cmd *cobra.Command, _ []string) error {
 	}
 	defer release()
 	ui.Info(fmt.Sprintf("Running post-processing on %s ...", root))
-	if err := provider.Postprocess(graphstore.PostprocessOptions{
-		NoFlows:       noFlows,
-		NoCommunities: noCommunities,
-		NoFTS:         noFTS,
-	}); err != nil {
+	// The step flags are tri-states because each one defaults to ON; the CLI
+	// only ever turns a step OFF, so an unset flag stays nil rather than
+	// being forced to false.
+	report, err := provider.PostprocessReport(graphstore.PostprocessOptions{
+		Flows:       disabledIfSet(noFlows),
+		Communities: disabledIfSet(noCommunities),
+		FTS:         disabledIfSet(noFTS),
+	})
+	if err != nil {
 		return err
 	}
-	// Postprocess returns no report, so read the resulting graph status to record
-	// the same node/edge/file counts build/update journal (the KGDecisionObserved
-	// contract). Status is best-effort: if it fails the postprocess still landed,
-	// so we keep Outcome and just omit the counts rather than fail the command.
-	if status, serr := provider.Status(); serr == nil {
-		setDecisionGraphCounts(observed, status)
-	}
+	// Upstream's post-process result carries no status block, so the counts
+	// the decision event records come from a follow-up read. It is
+	// best-effort: the post-process already landed, so a failed status read
+	// omits the counts rather than failing the command.
+	recordGraphCounts(provider, observed)
 	ok = true
+	if commandJSON(cmd) {
+		return printJSON(report)
+	}
+	ui.Success(report.Summary)
+	return nil
+}
+
+// disabledIfSet turns a `--no-<step>` flag into the tri-state the option
+// struct takes: set means "off", unset means "upstream's default".
+func disabledIfSet(off bool) *bool {
+	if off {
+		return new(false)
+	}
 	return nil
 }
 
