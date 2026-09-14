@@ -2,6 +2,7 @@ package graphstore
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -78,7 +79,7 @@ func TestDiscoverSubmodules_NestedSubmodule(t *testing.T) {
 	super := initRepo(t, filepath.Join(base, "super"), map[string]string{"main.go": "package main\n"})
 	addSubmodule(t, super, mid, "vendor/mid")
 	// `submodule add` clones without recursing, so initialize the nested one.
-	git(t, super, "submodule", "update", "--init", "--recursive")
+	runGitFixture(t, super, "submodule", "update", "--init", "--recursive")
 
 	subs, err := DiscoverSubmodules(super)
 	if err != nil {
@@ -172,7 +173,7 @@ func TestPlanWorkspace_UninitializedSubmoduleIsSkippedWithReason(t *testing.T) {
 	super := superprojectFixture(t)
 	base := t.TempDir()
 	clone := filepath.Join(base, "clone")
-	git(t, base, "clone", "--quiet", filepath.ToSlash(super), clone)
+	runGitFixture(t, base, "clone", "--quiet", filepath.ToSlash(super), clone)
 
 	subs, err := DiscoverSubmodules(clone)
 	if err != nil {
@@ -260,31 +261,83 @@ func breakSubmoduleCheckout(t *testing.T) string {
 	return super
 }
 
-// TestParseStageEntry pins the `ls-files --stage -z` record parser, including
-// the malformed records a truncated or empty read produces.
-func TestParseStageEntry(t *testing.T) {
-	cases := []struct {
-		name       string
-		entry      string
-		mode, path string
-		ok         bool
-	}{
-		{"gitlink", "160000 abc123 0\tvendor/lib", gitlinkMode, "vendor/lib", true},
-		{"blob", "100644 def456 0\tmain.go", "100644", "main.go", true},
-		{"path with spaces", "100644 def456 0\tdir/a b.go", "100644", "dir/a b.go", true},
-		{"no tab", "160000 abc123 0 vendor/lib", "", "", false},
-		{"no space in meta", "160000abc\tvendor/lib", "", "", false},
-		{"empty path", "100644 def456 0\t", "", "", false},
-		{"empty", "", "", "", false},
+// TestDiscoverSubmodules_StagedGitlinkIsFound is why the index — not HEAD's
+// tree and not .gitmodules — is the ground truth. A gitlink that is STAGED but
+// not yet committed, and one whose .gitmodules entry was lost, are both real
+// states after a partial merge, and both are roots whose files a plain
+// enumeration silently skips.
+func TestDiscoverSubmodules_StagedGitlinkIsFound(t *testing.T) {
+	requireGit(t)
+	base := t.TempDir()
+	child := initRepo(t, filepath.Join(base, "child"), map[string]string{"c.go": "package c\n"})
+	super := initRepo(t, filepath.Join(base, "super"), map[string]string{"main.go": "package main\n"})
+	// `submodule add` stages the gitlink and .gitmodules; deliberately do NOT
+	// commit, and drop .gitmodules so only the index knows this is a submodule.
+	runGitFixture(t, super, "submodule", "add", "--quiet", filepath.ToSlash(child), "vendor/child")
+	runGitFixture(t, super, "rm", "--quiet", "--cached", ".gitmodules")
+
+	subs, err := DiscoverSubmodules(super)
+	if err != nil {
+		t.Fatalf("DiscoverSubmodules: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			mode, path, ok := parseStageEntry(tc.entry)
-			if ok != tc.ok || mode != tc.mode || path != tc.path {
-				t.Errorf("parseStageEntry(%q) = (%q, %q, %v), want (%q, %q, %v)",
-					tc.entry, mode, path, ok, tc.mode, tc.path, tc.ok)
-			}
-		})
+	if len(subs) != 1 || subs[0].Path != "vendor/child" || !subs[0].Initialized {
+		t.Fatalf("a staged, .gitmodules-less gitlink must still be discovered, got %+v", subs)
+	}
+
+	files, err := EnumerateTrackedFiles(super, true)
+	if err != nil {
+		t.Fatalf("recursive enumeration: %v", err)
+	}
+	if !contains(files, "vendor/child/c.go") {
+		t.Errorf("recursive enumeration missed the staged submodule's file, got %v", files)
+	}
+}
+
+// TestEnumerateTrackedFiles_IsLexicallySorted pins the output order. Callers
+// diff root-only against recursive counts and render the result to operators,
+// so a stable order is part of the contract, not an accident of index layout.
+func TestEnumerateTrackedFiles_IsLexicallySorted(t *testing.T) {
+	super := superprojectFixture(t)
+	for _, recurse := range []bool{false, true} {
+		files, err := EnumerateTrackedFiles(super, recurse)
+		if err != nil {
+			t.Fatalf("enumeration (recurse=%v): %v", recurse, err)
+		}
+		if !sort.StringsAreSorted(files) {
+			t.Errorf("enumeration (recurse=%v) is not sorted: %v", recurse, files)
+		}
+	}
+}
+
+// TestEnumerateTrackedFiles_UninitializedSubmoduleKeepsItsGitlink: there is no
+// checkout to read, so the recursive walk reports the gitlink entry itself
+// rather than dropping it and understating what the repository tracks.
+func TestEnumerateTrackedFiles_UninitializedSubmoduleKeepsItsGitlink(t *testing.T) {
+	super := superprojectFixture(t)
+	base := t.TempDir()
+	clone := filepath.Join(base, "clone")
+	runGitFixture(t, base, "clone", "--quiet", filepath.ToSlash(super), clone)
+
+	files, err := EnumerateTrackedFiles(clone, true)
+	if err != nil {
+		t.Fatalf("recursive enumeration of an uninitialized clone: %v", err)
+	}
+	if !contains(files, "vendor/lib") {
+		t.Errorf("the uninitialized gitlink must still be listed, got %v", files)
+	}
+	if contains(files, "vendor/lib/lib.go") {
+		t.Errorf("an uninitialized submodule has no files to list, got %v", files)
+	}
+}
+
+// TestEnumerateTrackedFiles_UnreadableSubmoduleFails: an initialized submodule
+// whose repository cannot be opened is an error, never a silent zero — the
+// whole point of this file is that a build must not claim coverage it lacks.
+func TestEnumerateTrackedFiles_UnreadableSubmoduleFails(t *testing.T) {
+	super := breakSubmoduleCheckout(t)
+	_, err := EnumerateTrackedFiles(super, true)
+	if err == nil || !strings.Contains(err.Error(), "vendor/lib") {
+		t.Fatalf("expected an error naming the unreadable submodule, got %v", err)
 	}
 }
 
@@ -329,7 +382,12 @@ func TestContainedIn(t *testing.T) {
 		// Slash-rooted is how a git index would spell an escaping path. On
 		// Windows it is rooted rather than absolute, which IsAbs alone misses.
 		{"slash rooted", "/etc/passwd", false},
-		{"self", ".", true},
+		// The repository itself is not a submodule OF itself: walking `.` (or
+		// the empty path Clean reports as `.`) would build and merge the
+		// superproject a second time under a scope.
+		{"self", ".", false},
+		{"empty", "", false},
+		{"self via traversal", "vendor/..", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

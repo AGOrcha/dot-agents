@@ -344,7 +344,7 @@ func TestBuildReport_UninitializedSubmoduleIsNamed(t *testing.T) {
 	super := superprojectFixture(t)
 	base := t.TempDir()
 	clone := filepath.Join(base, "clone")
-	git(t, base, "clone", "--quiet", filepath.ToSlash(super), clone)
+	runGitFixture(t, base, "clone", "--quiet", filepath.ToSlash(super), clone)
 	bridge, runner := workspaceBridge(t, clone)
 
 	report, err := bridge.BuildReport(BuildOptions{})

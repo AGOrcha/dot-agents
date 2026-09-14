@@ -1,3 +1,12 @@
+// Package graphstore — submodule graph merge.
+//
+// Every statement this file executes is a FIXED string literal. Nothing —
+// table name, schema alias, column list, repository scope, source database
+// path — is ever interpolated into SQL text; the only variable inputs are bound
+// parameters. That is why there is no scanner suppression for this file: there
+// is no assembled SQL left to suppress. The cost of the fixed statements is
+// that the merge now names the graph columns it carries, which is the same
+// column contract CRGBridge.ReadNodes / ReadEdges already pin.
 package graphstore
 
 import (
@@ -15,57 +24,96 @@ type MergeStats struct {
 	Edges int `json:"edges"`
 }
 
-// srcSchema is the alias the source graph is attached under for the duration
-// of a merge, with the two statements that manage it. The source path is
+// The two statements that manage the source attachment. The source path is
 // bound, never interpolated.
 const (
-	srcSchema       = "src"
 	attachSourceSQL = `ATTACH DATABASE ? AS src`
 	detachSourceSQL = `DETACH DATABASE src`
 )
 
-// idColumn is the autoincrement primary key every CRG graph table carries. It
-// is never copied: the destination assigns its own ids, so two graphs merge
+// Table names, for error text only. They never reach a statement: each
+// statement below spells its own table.
+const (
+	tableNodes = "nodes"
+	tableEdges = "edges"
+)
+
+// nodeColumns / edgeColumns are the graph base-table columns the merge copies,
+// and therefore the columns BOTH databases must have. They are exactly the
+// CRG base schema CRGBridge.ReadNodes / ReadEdges read, minus the `id`
+// autoincrement key — the destination assigns its own ids so two graphs merge
 // without primary-key collisions.
-const idColumn = "id"
-
-// mergeTarget binds one base graph table to the stats counter it feeds.
 //
-// Only base tables are merged. Derived tables (FTS index, flows, communities)
-// are deliberately NOT copied: they are rebuilt from the merged base rows by
-// the postprocess pass, which is the only way derived state can be correct for
-// the combined graph.
-type mergeTarget struct {
-	table string
-	count *int
-}
+// A source carrying EXTRA columns (a graph written by a newer CRG) still
+// merges: the statements select only the columns named here. A source or
+// destination MISSING one of them fails loudly and names the column, because
+// copying a partial row would silently drop a repository's symbol metadata.
+var (
+	nodeColumns = []string{
+		"kind", "name", "qualified_name", "file_path", "line_start", "line_end",
+		"language", "parent_name", "params", "return_type", "is_test",
+		"file_hash", "extra", "updated_at",
+	}
+	edgeColumns = []string{
+		"kind", "source_qualified", "target_qualified", "file_path", "line",
+		"extra", "updated_at",
+	}
+)
 
-// qualifiedNameColumns are the columns holding qualified names — the values
-// CRG resolves edge endpoints against, and therefore the values that must
-// carry a repository scope once two graphs share a database.
-var qualifiedNameColumns = map[string]bool{
-	"qualified_name":   true,
-	"source_qualified": true,
-	"target_qualified": true,
-}
+// Schema probes. `SELECT *` against an empty result set is how the merge reads
+// back each side's ACTUAL column list without a PRAGMA whose output shape
+// varies by SQLite build.
+const (
+	probeSrcNodes = `SELECT * FROM src.nodes LIMIT 0`
+	probeDstNodes = `SELECT * FROM main.nodes LIMIT 0`
+	probeSrcEdges = `SELECT * FROM src.edges LIMIT 0`
+	probeDstEdges = `SELECT * FROM main.edges LIMIT 0`
+)
 
-// filePathColumn holds a source file location, rebased for relative values.
-const filePathColumn = "file_path"
+// Scope-clearing deletes. A row belongs to the scope when a qualified name
+// STARTS with the scope prefix, which is what `instr(col, ?) = 1` tests.
+const (
+	clearNodesSQL = `DELETE FROM main.nodes WHERE instr(qualified_name, ?) = 1`
+	clearEdgesSQL = `DELETE FROM main.edges
+	                 WHERE instr(source_qualified, ?) = 1
+	                    OR instr(target_qualified, ?) = 1`
+)
 
-// mergeScope carries the per-repository namespace applied to rows copied out
-// of a submodule graph.
+// Scoped copies. The two rewrites they apply are both load-bearing:
 //
-// Two rewrites happen, and both are load-bearing:
-//
-//   - qualified names gain a `<scope>::` prefix. CRG resolves edge endpoints
-//     by qualified name, so without a discriminator a merged graph links
-//     `Button` in one repository to `Button` in another and impact radius
-//     reports edges that no build could ever produce. Prefixing the node names
-//     and both edge endpoints keeps every intra-repo edge intact while making
-//     a cross-repo name match impossible.
-//   - relative file paths gain the submodule's path prefix, so a merged row
-//     still points at a file that exists relative to the superproject. CRG
-//     writes absolute paths today; absolute values are left untouched.
+//   - qualified names gain a `<scope>::` prefix. CRG resolves edge endpoints by
+//     qualified name, so without a discriminator a merged graph links `Button`
+//     in one repository to `Button` in another and impact radius reports edges
+//     no build could ever produce. Prefixing the node names and both edge
+//     endpoints keeps every intra-repo edge intact while making a cross-repo
+//     name match impossible.
+//   - RELATIVE file paths gain the submodule's path prefix, so a merged row
+//     still points at a file that exists relative to the superproject. The
+//     CASE recognises the three absolute shapes CRG can store — POSIX roots
+//     (/x), Windows drive letters (C:\x) and UNC paths (\\host\share) — and
+//     leaves those untouched.
+const (
+	mergeNodesSQL = `INSERT OR IGNORE INTO main.nodes
+	    (kind, name, qualified_name, file_path, line_start, line_end, language,
+	     parent_name, params, return_type, is_test, file_hash, extra, updated_at)
+	SELECT kind, name, ? || qualified_name,
+	       CASE WHEN substr(file_path, 1, 1) IN ('/', '\') OR substr(file_path, 2, 1) = ':'
+	            THEN file_path ELSE ? || file_path END,
+	       line_start, line_end, language, parent_name, params, return_type,
+	       is_test, file_hash, extra, updated_at
+	  FROM src.nodes`
+
+	mergeEdgesSQL = `INSERT OR IGNORE INTO main.edges
+	    (kind, source_qualified, target_qualified, file_path, line, extra, updated_at)
+	SELECT kind, ? || source_qualified, ? || target_qualified,
+	       CASE WHEN substr(file_path, 1, 1) IN ('/', '\') OR substr(file_path, 2, 1) = ':'
+	            THEN file_path ELSE ? || file_path END,
+	       line, extra, updated_at
+	  FROM src.edges`
+)
+
+// mergeScope carries the per-repository namespace applied to rows copied out of
+// a submodule graph. Both fields are bound values, never statement text.
 type mergeScope struct {
 	prefix  string // "<scope>::"
 	relBase string // "<scope>/"
@@ -73,27 +121,6 @@ type mergeScope struct {
 
 func newMergeScope(scope string) mergeScope {
 	return mergeScope{prefix: scope + scopeSeparator, relBase: scope + "/"}
-}
-
-// absolutePathTest is the SQL predicate for "this file path is already
-// absolute". It covers POSIX roots (/x), Windows drive letters (C:\x) and UNC
-// paths (\\host\share) — the three shapes CRG can store.
-const absolutePathTest = `substr(%[1]s, 1, 1) IN ('/', '\') OR substr(%[1]s, 2, 1) = ':'`
-
-// selectExpr returns the SELECT expression that reads col out of the source
-// graph with this scope applied, plus the bind argument it needs (nil when the
-// column is copied verbatim).
-func (s mergeScope) selectExpr(col string) (expr string, arg any) {
-	quoted := quoteIdent(col)
-	switch {
-	case qualifiedNameColumns[col]:
-		return "? || " + quoted, s.prefix
-	case col == filePathColumn:
-		test := fmt.Sprintf(absolutePathTest, quoted)
-		return "CASE WHEN " + test + " THEN " + quoted + " ELSE ? || " + quoted + " END", s.relBase
-	default:
-		return quoted, nil
-	}
 }
 
 // MergeGraphDB folds the submodule graph at srcPath into the already-open
@@ -106,9 +133,10 @@ func (s mergeScope) selectExpr(col string) (expr string, arg any) {
 // duplicate every edge — and it is also what lets a re-merge drop symbols the
 // submodule deleted instead of leaving them behind forever.
 //
-// The merge is transactional and schema-drift tolerant: only columns present
-// in BOTH databases are copied, so a source produced by a different CRG
-// version merges instead of failing outright.
+// Only base tables are merged. Derived tables (FTS index, flows, communities)
+// are deliberately NOT copied: they are rebuilt from the merged base rows by
+// the postprocess pass, which is the only way derived state can be correct for
+// the combined graph.
 //
 // Callers MUST run postprocess on the destination afterwards. Merging writes
 // base rows only, which leaves the FTS index, flows, and communities stale —
@@ -139,20 +167,22 @@ func MergeGraphDB(db *sql.DB, srcPath, scope string) (MergeStats, error) {
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return MergeStats{}, fmt.Errorf("begin merge: %w", err)
 	}
-	stats := MergeStats{}
-	for _, target := range []mergeTarget{{"nodes", &stats.Nodes}, {"edges", &stats.Edges}} {
-		n, mergeErr := mergeTable(ctx, conn, target.table, newMergeScope(scope))
-		if mergeErr != nil {
-			rollback(ctx, conn)
-			return MergeStats{}, mergeErr
-		}
-		*target.count = n
+	scoped := newMergeScope(scope)
+	nodes, err := mergeNodes(ctx, conn, scoped)
+	if err != nil {
+		rollback(ctx, conn)
+		return MergeStats{}, err
+	}
+	edges, err := mergeEdges(ctx, conn, scoped)
+	if err != nil {
+		rollback(ctx, conn)
+		return MergeStats{}, err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		rollback(ctx, conn)
 		return MergeStats{}, fmt.Errorf("commit merge: %w", err)
 	}
-	return stats, nil
+	return MergeStats{Nodes: nodes, Edges: edges}, nil
 }
 
 // rollback abandons a failed merge. Its own failure is not actionable — the
@@ -161,42 +191,33 @@ func rollback(ctx context.Context, conn *sql.Conn) {
 	_, _ = conn.ExecContext(ctx, `ROLLBACK`)
 }
 
-// mergeTable copies one table's rows from the attached source into the
-// destination, applying scope, and returns the number of rows inserted.
-func mergeTable(ctx context.Context, conn *sql.Conn, table string, scope mergeScope) (int, error) {
-	srcCols, err := tableColumns(ctx, conn, srcSchema, table)
-	if err != nil {
-		return 0, fmt.Errorf("read source %s schema: %w", table, err)
-	}
-	dstCols, err := tableColumns(ctx, conn, "main", table)
-	if err != nil {
-		return 0, fmt.Errorf("read destination %s schema: %w", table, err)
-	}
-	// No shared columns means the two schemas have nothing in common. Copying
-	// zero columns would look like success while losing a whole repository.
-	cols := intersectColumns(srcCols, dstCols)
-	if len(cols) == 0 {
-		return 0, fmt.Errorf("source and destination %s tables share no columns", table)
-	}
-
-	// Clear this scope's previous rows first: the merge owns everything under
-	// its namespace, so a re-merge replaces rather than accumulates.
-	if err := clearScope(ctx, conn, table, cols, scope); err != nil {
+// mergeNodes clears the scope's existing node rows and copies the source's in,
+// returning the number inserted.
+func mergeNodes(ctx context.Context, conn *sql.Conn, scope mergeScope) (int, error) {
+	if err := requireColumns(ctx, conn, tableNodes, probeSrcNodes, probeDstNodes, nodeColumns); err != nil {
 		return 0, err
 	}
-
-	exprs := make([]string, len(cols))
-	var args []any
-	for i, col := range cols {
-		expr, arg := scope.selectExpr(col)
-		exprs[i] = expr
-		if arg != nil {
-			args = append(args, arg)
-		}
+	if _, err := conn.ExecContext(ctx, clearNodesSQL, scope.prefix); err != nil {
+		return 0, fmt.Errorf("clear previous %s rows for scope: %w", tableNodes, err)
 	}
-	insert := "INSERT OR IGNORE INTO main." + table + " (" + strings.Join(quoteIdents(cols), ", ") +
-		") SELECT " + strings.Join(exprs, ", ") + " FROM " + srcSchema + "." + table
-	res, err := conn.ExecContext(ctx, insert, args...)
+	return copyRows(ctx, conn, tableNodes, mergeNodesSQL, scope.prefix, scope.relBase)
+}
+
+// mergeEdges is mergeNodes for the edge table: both endpoints carry the scope,
+// so either one matching clears the row.
+func mergeEdges(ctx context.Context, conn *sql.Conn, scope mergeScope) (int, error) {
+	if err := requireColumns(ctx, conn, tableEdges, probeSrcEdges, probeDstEdges, edgeColumns); err != nil {
+		return 0, err
+	}
+	if _, err := conn.ExecContext(ctx, clearEdgesSQL, scope.prefix, scope.prefix); err != nil {
+		return 0, fmt.Errorf("clear previous %s rows for scope: %w", tableEdges, err)
+	}
+	return copyRows(ctx, conn, tableEdges, mergeEdgesSQL, scope.prefix, scope.prefix, scope.relBase)
+}
+
+// copyRows runs one merge copy and reports the rows it inserted.
+func copyRows(ctx context.Context, conn *sql.Conn, table, stmt string, args ...any) (int, error) {
+	res, err := conn.ExecContext(ctx, stmt, args...)
 	if err != nil {
 		return 0, fmt.Errorf("merge %s rows: %w", table, err)
 	}
@@ -205,73 +226,56 @@ func mergeTable(ctx context.Context, conn *sql.Conn, table string, scope mergeSc
 	return int(inserted), nil
 }
 
-// clearScope deletes the destination rows that already belong to this scope,
-// matching on whichever qualified-name columns the table actually has. A table
-// with no qualified-name column carries no scope and is left alone.
-func clearScope(ctx context.Context, conn *sql.Conn, table string, cols []string, scope mergeScope) error {
-	var predicates []string
-	var args []any
-	for _, col := range cols {
-		if qualifiedNameColumns[col] {
-			predicates = append(predicates, "instr("+quoteIdent(col)+", ?) = 1")
-			args = append(args, scope.prefix)
-		}
+// requireColumns verifies that both sides of the merge carry every column the
+// fixed statements name, and says which column is missing when one does not.
+//
+// A probe that fails outright (no such table) is reported the same way, so an
+// absent `nodes` table and a `nodes` table missing `qualified_name` both point
+// the operator at the same side of the merge.
+func requireColumns(ctx context.Context, conn *sql.Conn, table, srcProbe, dstProbe string, required []string) error {
+	srcCols, err := probeColumns(ctx, conn, srcProbe)
+	if err != nil {
+		return fmt.Errorf("read source %s schema: %w", table, err)
 	}
-	if len(predicates) == 0 {
-		return nil
+	if missing := missingColumns(required, srcCols); len(missing) > 0 {
+		return fmt.Errorf("source %s schema is missing required column(s): %s",
+			table, strings.Join(missing, ", "))
 	}
-	del := "DELETE FROM main." + table + " WHERE " + strings.Join(predicates, " OR ")
-	if _, err := conn.ExecContext(ctx, del, args...); err != nil {
-		return fmt.Errorf("clear previous %s rows for scope: %w", table, err)
+	dstCols, err := probeColumns(ctx, conn, dstProbe)
+	if err != nil {
+		return fmt.Errorf("read destination %s schema: %w", table, err)
+	}
+	if missing := missingColumns(required, dstCols); len(missing) > 0 {
+		return fmt.Errorf("destination %s schema is missing required column(s): %s",
+			table, strings.Join(missing, ", "))
 	}
 	return nil
 }
 
-// tableColumns returns the copyable columns of schema.table — everything but
-// the primary key, which the destination assigns itself.
-func tableColumns(ctx context.Context, conn *sql.Conn, schema, table string) ([]string, error) {
-	rows, err := conn.QueryContext(ctx, `SELECT * FROM `+schema+`.`+table+` LIMIT 0`)
+// probeColumns returns the column names a probe statement reports.
+func probeColumns(ctx context.Context, conn *sql.Conn, probe string) ([]string, error) {
+	rows, err := conn.QueryContext(ctx, probe)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	// Columns only fails on an already-closed Rows; this one was opened above.
 	names, _ := rows.Columns()
-	out := make([]string, 0, len(names))
-	for _, name := range names {
-		if name != idColumn {
-			out = append(out, name)
+	return names, nil
+}
+
+// missingColumns returns the required columns absent from have, in required
+// order so the error text is deterministic.
+func missingColumns(required, have []string) []string {
+	present := make(map[string]bool, len(have))
+	for _, c := range have {
+		present[c] = true
+	}
+	var missing []string
+	for _, c := range required {
+		if !present[c] {
+			missing = append(missing, c)
 		}
 	}
-	return out, nil
-}
-
-// intersectColumns returns the columns present in both schemas, in src order.
-func intersectColumns(src, dst []string) []string {
-	inDst := make(map[string]bool, len(dst))
-	for _, c := range dst {
-		inDst[c] = true
-	}
-	var out []string
-	for _, c := range src {
-		if inDst[c] {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-// quoteIdent double-quotes a SQLite identifier so a column named after a
-// keyword still parses.
-func quoteIdent(col string) string {
-	return `"` + strings.ReplaceAll(col, `"`, `""`) + `"`
-}
-
-// quoteIdents applies quoteIdent to each column.
-func quoteIdents(cols []string) []string {
-	out := make([]string, len(cols))
-	for i, c := range cols {
-		out[i] = quoteIdent(c)
-	}
-	return out
+	return missing
 }

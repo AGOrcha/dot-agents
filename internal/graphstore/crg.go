@@ -23,7 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sys/execabs"
 	// _ "modernc.org/sqlite": side-effect registers SQLite driver in database/sql
 	_ "modernc.org/sqlite"
 )
@@ -860,24 +859,21 @@ func isPythonEntrypoint(path string) bool {
 	return strings.HasPrefix(firstLine, "#!") && strings.Contains(firstLine, "python")
 }
 
+// defaultDiffBase is the revision `update` diffs against when the caller does
+// not name one.
+const defaultDiffBase = "HEAD~1"
+
+// gitChangedFiles reports the files changed between merge-base(base, HEAD) and
+// HEAD, read in-process through go-git (see changedFilesAgainst). The error
+// text keeps the `base...HEAD` spelling so an operator can still see which
+// three-dot range was evaluated.
 func (b *CRGBridge) gitChangedFiles(base string) ([]string, error) {
 	if base == "" {
-		base = "HEAD~1"
+		base = defaultDiffBase
 	}
-	cmd := execabs.Command("git", "-C", b.RepoRoot, "diff", "--name-only", "--diff-filter=ACMRTUXB", base+"...HEAD")
-	out, err := cmd.CombinedOutput()
+	files, err := changedFilesAgainst(b.RepoRoot, base)
 	if err != nil {
-		if msg := strings.TrimSpace(string(out)); msg != "" {
-			return nil, fmt.Errorf("git diff %s...HEAD: %s", base, msg)
-		}
 		return nil, fmt.Errorf("git diff %s...HEAD: %w", base, err)
-	}
-	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			files = append(files, line)
-		}
 	}
 	return files, nil
 }

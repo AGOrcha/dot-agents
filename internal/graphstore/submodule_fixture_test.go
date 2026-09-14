@@ -22,8 +22,10 @@ func requireGit(t *testing.T) {
 	}
 }
 
-// git runs a git command in dir and fails the test on error.
-func git(t *testing.T, dir string, args ...string) string {
+// runGitFixture runs a git command in dir and fails the test on error. Fixtures
+// build REAL repositories with the git CLI on purpose (see the file comment);
+// shipping graphstore code reads git in process instead (gitnative.go).
+func runGitFixture(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	// protocol.file.allow=always is required for `submodule add` from a local
 	// path (git blocks the file transport for submodules by default).
@@ -56,13 +58,13 @@ func initRepo(t *testing.T, dir string, files map[string]string) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	git(t, dir, "init", "--quiet", "--initial-branch=main")
-	git(t, dir, "config", "user.email", "fixture@example.test")
-	git(t, dir, "config", "user.name", "Fixture")
-	git(t, dir, "config", "commit.gpgsign", "false")
+	runGitFixture(t, dir, "init", "--quiet", "--initial-branch=main")
+	runGitFixture(t, dir, "config", "user.email", "fixture@example.test")
+	runGitFixture(t, dir, "config", "user.name", "Fixture")
+	runGitFixture(t, dir, "config", "commit.gpgsign", "false")
 	writeFiles(t, dir, files)
-	git(t, dir, "add", "-A")
-	git(t, dir, "commit", "--quiet", "-m", "fixture")
+	runGitFixture(t, dir, "add", "-A")
+	runGitFixture(t, dir, "commit", "--quiet", "-m", "fixture")
 	return dir
 }
 
@@ -70,8 +72,8 @@ func initRepo(t *testing.T, dir string, files map[string]string) string {
 // commits the gitlink.
 func addSubmodule(t *testing.T, super, subRepo, at string) {
 	t.Helper()
-	git(t, super, "submodule", "add", "--quiet", filepath.ToSlash(subRepo), at)
-	git(t, super, "commit", "--quiet", "-m", "add submodule "+at)
+	runGitFixture(t, super, "submodule", "add", "--quiet", filepath.ToSlash(subRepo), at)
+	runGitFixture(t, super, "commit", "--quiet", "-m", "add submodule "+at)
 }
 
 // superprojectFixture builds the canonical fixture for these tests: a

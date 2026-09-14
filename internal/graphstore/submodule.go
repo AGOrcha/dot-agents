@@ -1,13 +1,16 @@
 // Package graphstore — submodule-aware workspace enumeration.
 //
-// `git ls-files` reports a submodule as a single gitlink entry, never the
-// files inside it. A code-graph build that enumerates with plain `ls-files`
-// therefore indexes 0 of a submodule's files while still reporting success —
-// the failure mode recorded in the kg-code-graph-submodule-blindness proposal
-// (47 nodes / 2 files indexed where reality was 5946 nodes / 885 files, status
-// READY). This file owns the enumeration side of the fix: discover the gitlink
-// roots, enumerate each one, and report what was (and was not) covered so a
-// build can never claim completeness it does not have.
+// A submodule appears in its superproject's index as a single gitlink entry,
+// never as the files inside it. A code-graph build that enumerates the index
+// without descending therefore indexes 0 of a submodule's files while still
+// reporting success — the failure mode recorded in the
+// kg-code-graph-submodule-blindness proposal (47 nodes / 2 files indexed where
+// reality was 5946 nodes / 885 files, status READY). This file owns the
+// enumeration side of the fix: discover the gitlink roots, enumerate each one,
+// and report what was (and was not) covered so a build can never claim
+// completeness it does not have.
+//
+// All Git access is in-process (gitnative.go); no `git` subprocess is spawned.
 package graphstore
 
 import (
@@ -16,17 +19,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"golang.org/x/sys/execabs"
 )
-
-// gitlinkMode is the git index mode of a submodule entry (a commit object
-// embedded in a tree). `git ls-files --stage` prints it verbatim.
-const gitlinkMode = "160000"
 
 // maxSubmoduleDepth bounds nested-submodule recursion. Real superprojects nest
 // one or two levels; the bound exists so a pathological (or hand-crafted)
-// checkout cannot drive unbounded git invocations.
+// checkout cannot drive an unbounded walk.
 const maxSubmoduleDepth = 8
 
 // scopeSeparator joins a submodule scope to a qualified name when merging a
@@ -57,10 +54,11 @@ func (s Submodule) Scope() string { return s.Path }
 // DiscoverSubmodules returns every gitlink under repoRoot, including nested
 // ones (paths relative to repoRoot), sorted by path.
 //
-// It reads the git index rather than .gitmodules: the index is the ground
-// truth for what is actually a submodule in this checkout, and a gitlink with
-// no .gitmodules entry (a real state after a partial merge) is still a root
-// whose files a plain enumeration would miss.
+// It reads the git index rather than .gitmodules or HEAD's tree: the index is
+// the ground truth for what is actually a submodule in this checkout. A
+// STAGED gitlink, and a gitlink with no .gitmodules entry (both real states
+// after a partial merge), are still roots whose files a plain enumeration
+// would miss.
 func DiscoverSubmodules(repoRoot string) ([]Submodule, error) {
 	subs, err := discoverSubmodules(repoRoot, "", 0)
 	if err != nil {
@@ -94,9 +92,9 @@ func discoverSubmodules(dir, prefix string, depth int) ([]Submodule, error) {
 		}
 		nested, nestedErr := discoverSubmodules(filepath.Join(dir, filepath.FromSlash(p)), full, depth+1)
 		if nestedErr != nil {
-			// A nested checkout that git cannot read is reported as a root with
-			// no children rather than failing the whole discovery: the parent
-			// still needs to know the gitlink exists.
+			// A nested checkout whose index cannot be read is reported as a
+			// root with no children rather than failing the whole discovery:
+			// the parent still needs to know the gitlink exists.
 			continue
 		}
 		out = append(out, nested...)
@@ -104,32 +102,20 @@ func discoverSubmodules(dir, prefix string, depth int) ([]Submodule, error) {
 	return out, nil
 }
 
-// gitlinkPaths returns the slash-separated paths of the direct gitlink entries
-// in dir's index.
-func gitlinkPaths(dir string) ([]string, error) {
-	out, err := runGit(dir, "ls-files", "--stage", "-z")
-	if err != nil {
-		return nil, err
-	}
-	var paths []string
-	for _, entry := range strings.Split(out, "\x00") {
-		mode, path, ok := parseStageEntry(entry)
-		if ok && mode == gitlinkMode && containedIn(path) {
-			paths = append(paths, path)
-		}
-	}
-	return paths, nil
-}
-
-// containedIn reports whether an index-supplied submodule path stays inside
-// the repository it came from.
+// containedIn reports whether an index-supplied submodule path names a real
+// location STRICTLY INSIDE the repository it came from.
 //
 // A gitlink path is untrusted input when the superproject was cloned from
-// elsewhere, and it becomes a subprocess working directory, a `--repo`
-// argument, and a database ATTACH target. An escaping path (`../`, absolute)
-// is dropped rather than walked.
+// elsewhere, and it becomes a build root, a CRG `--repo` argument, and a
+// database ATTACH target. An escaping path (`../`, absolute) is dropped rather
+// than walked, and so are the paths that resolve to the repository ITSELF
+// (empty, `.`): a submodule rooted at its own superproject would be walked,
+// built, and merged as if it were a separate repository.
 func containedIn(path string) bool {
 	clean := filepath.Clean(filepath.FromSlash(path))
+	if clean == "." {
+		return false // also covers the empty path, which Clean reports as "."
+	}
 	// Absolute, rooted, and volume-qualified paths all leave the checkout.
 	// Windows needs all three tests: `\etc\passwd` is rooted but not absolute
 	// there, and `C:evil` is drive-relative with no separator at all.
@@ -137,21 +123,6 @@ func containedIn(path string) bool {
 		return false
 	}
 	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
-}
-
-// parseStageEntry splits one `git ls-files --stage -z` record
-// ("<mode> <sha> <stage>\t<path>") into its mode and path.
-func parseStageEntry(entry string) (mode, path string, ok bool) {
-	tab := strings.IndexByte(entry, '\t')
-	if tab < 0 {
-		return "", "", false
-	}
-	meta, path := entry[:tab], entry[tab+1:]
-	sp := strings.IndexByte(meta, ' ')
-	if sp <= 0 || path == "" {
-		return "", "", false
-	}
-	return meta[:sp], path, true
 }
 
 // submoduleInitialized reports whether a submodule working tree is checked
@@ -162,43 +133,6 @@ func submoduleInitialized(abs string) bool {
 		return true
 	}
 	return false
-}
-
-// EnumerateTrackedFiles lists the tracked files of repoRoot as slash-separated
-// repo-relative paths.
-//
-// recurseSubmodules is the whole point of this helper: with it false the
-// result is what plain `git ls-files` sees (submodule contents invisible, one
-// gitlink entry per submodule); with it true git walks into each initialized
-// submodule and the files inside it appear. Callers use the difference to
-// report how much a non-recursive enumeration would have missed.
-func EnumerateTrackedFiles(repoRoot string, recurseSubmodules bool) ([]string, error) {
-	args := []string{"ls-files", "-z"}
-	if recurseSubmodules {
-		args = append(args, "--recurse-submodules")
-	}
-	out, err := runGit(repoRoot, args...)
-	if err != nil {
-		return nil, err
-	}
-	var files []string
-	for _, f := range strings.Split(out, "\x00") {
-		if f != "" {
-			files = append(files, f)
-		}
-	}
-	return files, nil
-}
-
-// runGit runs a git command in dir and returns its stdout.
-func runGit(dir string, args ...string) (string, error) {
-	full := append([]string{"-C", dir}, args...)
-	cmd := execabs.Command("git", full...)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return string(out), nil
 }
 
 // WorkspaceRoot is one repository a build indexes: the superproject itself or
