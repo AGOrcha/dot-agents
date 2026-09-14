@@ -117,6 +117,10 @@ type rpcError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+// msgInvalidParams is the JSON-RPC -32602 message text. The release spells it
+// exactly this way, so every -32602 this server raises must reuse it verbatim.
+const msgInvalidParams = "invalid params"
+
 func (e *rpcError) Error() string {
 	if e == nil {
 		return ""
@@ -310,7 +314,7 @@ func (s *MCPServer) handlePromptsGet(params json.RawMessage) (json.RawMessage, e
 	var call mcpPromptCall
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &call); err != nil {
-			return nil, &rpcError{Code: -32602, Message: "invalid params", Data: err.Error()}
+			return nil, &rpcError{Code: -32602, Message: msgInvalidParams, Data: err.Error()}
 		}
 	}
 	prompt, ok, err := crgrelease.LookupPrompt(call.Name)
@@ -320,7 +324,7 @@ func (s *MCPServer) handlePromptsGet(params json.RawMessage) (json.RawMessage, e
 	if !ok {
 		return nil, &rpcError{
 			Code:    -32602,
-			Message: "invalid params",
+			Message: msgInvalidParams,
 			Data:    fmt.Sprintf("Unknown prompt: %q", call.Name),
 		}
 	}
@@ -335,7 +339,7 @@ func (s *MCPServer) handleToolsCall(params json.RawMessage) (json.RawMessage, er
 	var call mcpToolCall
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &call); err != nil {
-			return nil, &rpcError{Code: -32602, Message: "invalid params", Data: err.Error()}
+			return nil, &rpcError{Code: -32602, Message: msgInvalidParams, Data: err.Error()}
 		}
 	}
 	tool, ok := crgrelease.Lookup(call.Name)

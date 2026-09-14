@@ -248,7 +248,7 @@ type CodeGraphDerived interface {
 	// SetNodeSignature writes the rendered signature of one node.
 	SetNodeSignature(id int64, signature string) error
 	// SetNodeCommunity points one node at a community.
-	SetNodeCommunity(id int64, communityID int64) error
+	SetNodeCommunity(id, communityID int64) error
 	// NodesWithoutSignature returns the nodes whose signature is still
 	// NULL — the backfill worklist.
 	NodesWithoutSignature() ([]GraphNode, error)

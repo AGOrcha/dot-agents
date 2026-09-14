@@ -385,7 +385,7 @@ func (l *lazyStore) SetNodeSignature(id int64, signature string) error {
 	return s.SetNodeSignature(id, signature)
 }
 
-func (l *lazyStore) SetNodeCommunity(id int64, communityID int64) error {
+func (l *lazyStore) SetNodeCommunity(id, communityID int64) error {
 	s, err := l.resolve()
 	if err != nil {
 		return err

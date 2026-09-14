@@ -26,6 +26,9 @@ const (
 	VCSNone = "none"
 )
 
+// gitRevParseCmd is the git subcommand every ref/SHA probe below drives.
+const gitRevParseCmd = "rev-parse"
+
 // gitTimeout bounds every probe below. Upstream reads CRG_GIT_TIMEOUT with a
 // 30 second default; a probe that hangs must not wedge a build.
 var gitTimeout = gitTimeoutFromEnv()
@@ -80,8 +83,8 @@ func DetectVCS(root string) string {
 // empty when git cannot answer; the probes only label a graph, so a failure
 // is never fatal.
 func GitBranchInfo(root string) (branch, sha string) {
-	return gitOutput(root, "rev-parse", "--abbrev-ref", "HEAD"),
-		gitOutput(root, "rev-parse", "HEAD")
+	return gitOutput(root, gitRevParseCmd, "--abbrev-ref", "HEAD"),
+		gitOutput(root, gitRevParseCmd, "HEAD")
 }
 
 // SVNInfo returns root's SVN branch path and revision string, mirroring
@@ -125,7 +128,7 @@ func GitCommitExists(root, ref string) bool {
 	if ref == "" || strings.HasPrefix(ref, "-") || !safeGitRef.MatchString(ref) {
 		return false
 	}
-	_, err := runVCS(root, "git", "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	_, err := runVCS(root, "git", gitRevParseCmd, "--verify", "--quiet", ref+"^{commit}")
 	return err == nil
 }
 

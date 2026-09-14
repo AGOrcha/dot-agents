@@ -1203,37 +1203,53 @@ func (s *PostgresStore) RebuildFTS() (int, error) {
 	return 0, ErrFTSUnsupported
 }
 
+// pgTruncateFlowGeneration clears the previous flow generation. Memberships go
+// first because they reference flows.
+func pgTruncateFlowGeneration(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM flow_memberships"); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, "DELETE FROM flows")
+	return err
+}
+
+// pgInsertFlow writes one flow and the membership row for every node on its
+// path, in path order so `position` matches the caller's ordering.
+func pgInsertFlow(ctx context.Context, tx pgx.Tx, f FlowRow, path []int64) error {
+	var flowID int64
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO flows
+		   (name, entry_point_id, depth, node_count, file_count,
+		    criticality, path_json)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+		f.Name, f.EntryPointID, f.Depth, f.NodeCount, f.FileCount,
+		f.Criticality, encodeIDPath(path),
+	).Scan(&flowID); err != nil {
+		return err
+	}
+	for position, nodeID := range path {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO flow_memberships (flow_id, node_id, position)
+			 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+			flowID, nodeID, position); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *PostgresStore) ReplaceFlows(flows []FlowRow, paths [][]int64) (int, error) {
 	if len(paths) != len(flows) {
 		return 0, fmt.Errorf("graphstore: ReplaceFlows got %d flows but %d paths", len(flows), len(paths))
 	}
 	count := 0
 	err := s.pgDerivedTx(func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "DELETE FROM flow_memberships"); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, "DELETE FROM flows"); err != nil {
+		if err := pgTruncateFlowGeneration(ctx, tx); err != nil {
 			return err
 		}
 		for i, f := range flows {
-			var flowID int64
-			if err := tx.QueryRow(ctx,
-				`INSERT INTO flows
-				   (name, entry_point_id, depth, node_count, file_count,
-				    criticality, path_json)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-				f.Name, f.EntryPointID, f.Depth, f.NodeCount, f.FileCount,
-				f.Criticality, encodeIDPath(paths[i]),
-			).Scan(&flowID); err != nil {
+			if err := pgInsertFlow(ctx, tx, f, paths[i]); err != nil {
 				return err
-			}
-			for position, nodeID := range paths[i] {
-				if _, err := tx.Exec(ctx,
-					`INSERT INTO flow_memberships (flow_id, node_id, position)
-					 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-					flowID, nodeID, position); err != nil {
-					return err
-				}
 			}
 			count++
 		}
@@ -1373,7 +1389,7 @@ func (s *PostgresStore) SetNodeSignature(id int64, signature string) error {
 	return err
 }
 
-func (s *PostgresStore) SetNodeCommunity(id int64, communityID int64) error {
+func (s *PostgresStore) SetNodeCommunity(id, communityID int64) error {
 	ctx, cancel := requestContext(nil)
 	defer cancel()
 	_, err := s.pool.Exec(ctx, "UPDATE nodes SET community_id = $1 WHERE id = $2", communityID, id)

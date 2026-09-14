@@ -1473,7 +1473,10 @@ func assignCommunity(tx *sql.Tx, communityID int64, memberQNs []string) error {
 }
 
 func (s *SQLiteStore) ReplaceCommunitySummaries(rows []CommunitySummaryRow) (int, error) {
-	return s.replaceRows("community_summaries", len(rows), func(tx *sql.Tx) error {
+	return s.replaceRows(len(rows), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM community_summaries`); err != nil {
+			return err
+		}
 		for _, r := range rows {
 			if _, err := tx.Exec(
 				`INSERT OR REPLACE INTO community_summaries
@@ -1489,7 +1492,10 @@ func (s *SQLiteStore) ReplaceCommunitySummaries(rows []CommunitySummaryRow) (int
 }
 
 func (s *SQLiteStore) ReplaceFlowSnapshots(rows []FlowSnapshotRow) (int, error) {
-	return s.replaceRows("flow_snapshots", len(rows), func(tx *sql.Tx) error {
+	return s.replaceRows(len(rows), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM flow_snapshots`); err != nil {
+			return err
+		}
 		for _, r := range rows {
 			if _, err := tx.Exec(
 				`INSERT OR REPLACE INTO flow_snapshots
@@ -1507,7 +1513,10 @@ func (s *SQLiteStore) ReplaceFlowSnapshots(rows []FlowSnapshotRow) (int, error) 
 }
 
 func (s *SQLiteStore) ReplaceRiskIndex(rows []RiskIndexRow) (int, error) {
-	return s.replaceRows("risk_index", len(rows), func(tx *sql.Tx) error {
+	return s.replaceRows(len(rows), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM risk_index`); err != nil {
+			return err
+		}
 		for _, r := range rows {
 			if _, err := tx.Exec(
 				`INSERT OR REPLACE INTO risk_index
@@ -1527,14 +1536,14 @@ func (s *SQLiteStore) ReplaceRiskIndex(rows []RiskIndexRow) (int, error) {
 // replaceRows is the DELETE-then-insert transaction shared by the three
 // summary-table writers: one atomic generation swap, returning the row count
 // the caller handed in.
-func (s *SQLiteStore) replaceRows(table string, n int, insert func(*sql.Tx) error) (int, error) {
-	err := s.derivedTx(func(tx *sql.Tx) error {
-		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
-			return err
-		}
-		return insert(tx)
-	})
-	if err != nil {
+//
+// The truncation is written by each caller rather than assembled here from a
+// table name. A table name cannot be a bound parameter, so a shared helper
+// could only build its DELETE by concatenation — and the set of tables this
+// path may truncate is closed, so there is nothing to gain from making it
+// expressible at runtime.
+func (s *SQLiteStore) replaceRows(n int, replace func(*sql.Tx) error) (int, error) {
+	if err := s.derivedTx(replace); err != nil {
 		return 0, err
 	}
 	return n, nil
@@ -1600,7 +1609,7 @@ func (s *SQLiteStore) SetNodeSignature(id int64, signature string) error {
 	return err
 }
 
-func (s *SQLiteStore) SetNodeCommunity(id int64, communityID int64) error {
+func (s *SQLiteStore) SetNodeCommunity(id, communityID int64) error {
 	_, err := s.db.Exec("UPDATE nodes SET community_id = ? WHERE id = ?", communityID, id)
 	return err
 }

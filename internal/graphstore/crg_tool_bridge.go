@@ -3,6 +3,8 @@ package graphstore
 import (
 	"bytes"
 	"context"
+	// Blank: the //go:embed directive below needs the embed package linked
+	// in, but this file references no identifier from it.
 	_ "embed"
 	"encoding/json"
 	"fmt"
