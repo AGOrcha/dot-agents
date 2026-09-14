@@ -138,8 +138,6 @@ homebrew_casks:
       signing:
         enabled: true
         key: "{{ .Env.HOMEBREW_TAP_GPG_KEY_ID }}"
-    url: &cask_url
-      verified: "github.com/AGOrcha/dot-agents/"
     repository: &cask_repository
       owner: AGOrcha
       name: homebrew-tap
@@ -158,7 +156,6 @@ homebrew_casks:
     binaries: *cask_binaries
     generate_completions_from_executable: *cask_completions
     commit_author: *cask_commit_author
-    url: *cask_url
     repository: *cask_repository
     description: "Manage AI agent configurations across projects (v{{ .Version }} pinned)"
     homepage: *cask_homepage
