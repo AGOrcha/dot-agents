@@ -18,7 +18,8 @@ reference for that methodology.
 The model has four planes, and they compose into one pipeline:
 
 1. **Mechanical CI gates** — the GitHub Actions checks that block a merge on the PR (coverage,
-   Sonar new-issues, fsguard, multi-OS test matrix). No human, no model, no partial credit.
+   Sonar new-issues, fsguard, execguard, multi-OS test matrix). No human, no model, no partial
+   credit.
 2. **Agent verification gates** — a verifier dispatched per **app_type** runs an ordered sequence
    of verifier kinds (unit, cli-runner, schema-check, …), each emitting a schema-validated result.
 3. **Adversarial review lenses** — a multi-lens reviewer dispatched per **app_type** reviews the
@@ -50,6 +51,7 @@ fail-open path. See the limitation note under Plane 1.
 | CI | Per-file coverage | every non-exempt file ≥ 95% Go statement coverage | `scripts/coverage-gate.sh` | CI job log |
 | CI | Sonar new-issues | `new_violations == 0` in the new-code period | `scripts/sonar-new-issues-gate.sh` | SonarCloud + CI log |
 | CI | fsguard | zero raw `os.*` fs-mutators outside the allowlist | `tools/fsguard` | CI log |
+| CI | execguard | zero unrecorded `os/exec`/`execabs` spawns; no git in the locked packages | `tools/execguard` | CI log |
 | CI | Multi-OS tests | `go test` green on ubuntu **and** macos **and** windows | `.github/workflows/test.yml` matrix | CI log |
 | Agent | Verifier sequence | each verifier kind for the app_type returns `pass` | `da workflow verify record` | `…/verification/<task>/<kind>.result.yaml` |
 | Agent | Review lenses | each lens returns `pass` (any BLOCKER/HIGH → `fail`) | `da workflow verify record --kind review` | `…/verification/<task>/review-decision.yaml` |
@@ -75,6 +77,7 @@ flowchart TD
       cov["per-file coverage ≥ 95%"]
       sonar["sonar new_violations == 0"]
       fsg["fsguard: no raw os.* mutators"]
+      xg["execguard: no unrecorded spawns, no git"]
       matrix["go test green on ubuntu + macos + windows"]
     end
 
@@ -115,11 +118,11 @@ issues introduced in the PR's new-code period and fails if the count is **not ze
 (`new_violations must be 0`). This is a true zero-tolerance gate on *new* debt — it does not
 require paying down the entire backlog, only that the change introduces none.
 
-> **Honest limitation for auditors.** The Sonar gate is the only one of the four with a
+> **Honest limitation for auditors.** The Sonar gate is the only one of the five with a
 > *fail-open* path: if the API query or response parse fails it treats the result as zero new
 > issues and passes. In CI the `SONAR_TOKEN` secret is present so the gate runs for real, but a
-> SonarCloud outage degrades it to a pass rather than a block. The coverage, fsguard, and
-> multi-OS gates have **no** fail-open path in CI. If your control framework requires the static-
+> SonarCloud outage degrades it to a pass rather than a block. The coverage, fsguard, execguard,
+> and multi-OS gates have **no** fail-open path in CI. If your control framework requires the static-
 > analysis gate to fail-closed, that is the one to harden.
 
 **fsguard (`tools/fsguard`).** A purpose-built AST checker that fails CI if any production Go code
@@ -129,6 +132,28 @@ allowlisted. Reads (`os.Open`, `os.Stat`, `os.ReadFile`) are not policed; only m
 allowlist is two-tier: precise `file:line` entries and whole-package *grandfathered* entries (each
 with a reason), and it only ever tightens — a new raw mutator in a non-grandfathered package fails
 the build. fsguard runs inside the test matrix on **every** OS.
+
+**execguard (`tools/execguard`).** The same ratchet shape applied to process execution, with the
+default inverted: every `os/exec` and `golang.org/x/sys/execabs` `Command` / `CommandContext` /
+`LookPath` site in shipping Go is **denied** unless `tools/execguard/ledger.go` records that exact
+(file, function, executable) with the number of sites and the reason no in-process API exists. It
+is import-aware (an aliased import cannot hide a call), indirection-aware (a bare
+`exec.Command` *reference* taken as a function value is policed too), and executable-aware — it
+resolves the binary through literals, string constants, `LookPath("git")` results, and parameters
+passed within a package, so `gitBin, _ := exec.LookPath("git"); clone(gitBin, …)` is recognised as
+git inside `clone`.
+
+Records come in two kinds, and the distinction is the point. `KindBoundary` is a permanent
+native-unavailable boundary (another runtime's entry point, an OS helper ABI, a platform tool, a
+re-exec of `da` itself). `KindDebt` means an in-process alternative exists and this site has not
+migrated yet; it requires a named follow-up record and is tracked debt, not an approval. **Git is
+categorically unallowable as a boundary** — go-git v6 is vendored and already carries this module's
+worktree, remote, and code-graph reads — so a git `KindBoundary` record is rejected by the ledger's
+own validation, and a git site inside a cutover-locked package (`internal/graphstore`,
+`internal/gitwt`, `internal/gitremote`) fails even **with** a record. A
+record that matches nothing is reported as stale, judged only against the files the current build
+actually compiled so a `_windows.go` boundary keeps its record on every OS. execguard runs inside
+the test matrix on **every** OS.
 
 **Multi-OS test matrix.** The `test` job runs `go test` on `windows-latest`, `macos-latest`, and
 `ubuntu-latest` with `fail-fast: false`, so a POSIX/Windows divergence cannot slip through on the
@@ -342,7 +367,8 @@ change against the spec's done criterion, not just "tests green." The consolidat
 
 **5. CI confirms mechanically.** On the PR, the merged-profile coverage gate confirms the new files
 are ≥ 95%, the Sonar gate confirms zero new issues, fsguard confirms no raw `os.*` mutators crept
-in, and `go test` is green on all three OSes. Any red here still blocks the merge.
+in, execguard confirms no unrecorded process spawn (and no git) crept in, and `go test` is green on
+all three OSes. Any red here still blocks the merge.
 
 **6. The merge produces ground truth, and the score reads it.** Once the commit is reachable from
 `master`, `da score run` computes the iteration's score: `landed = 1.0`, `verifier = 1.0`,
@@ -362,6 +388,7 @@ at the gates that ran and what each decided — every step binary, every decisio
 | Per-file coverage gate (≥95%, ratcheted allowlist) | **Shipped**, CI-enforced |
 | Sonar new-issues gate (`new_violations == 0`) | **Shipped**, CI-enforced (fail-open on API error) |
 | fsguard (raw `os.*` mutator guard) | **Shipped**, CI-enforced on every OS |
+| execguard (process-spawn guard; git never approvable) | **Shipped**, CI-enforced on every OS |
 | Multi-OS test matrix (ubuntu/macos/windows) | **Shipped**, CI-enforced |
 | Verifier routing (`execution_profile` + `stage_profiles`) | **Shipped** |
 | Verifier kinds `unit`, `cli-runner`, `schema-check`, `citation-check`, `task-schedule` | **Shipped & wired** here |

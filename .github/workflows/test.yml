@@ -287,6 +287,21 @@ jobs:
       - name: FS-helpers guard (raw os.* fs-mutators outside fsops)
         run: go run ./tools/fsguard ./...
 
+      # Mechanically enforces the process-execution policy: every os/exec +
+      # execabs Command/CommandContext/LookPath site in shipping Go needs an
+      # exact record in tools/execguard/ledger.go naming the file, function,
+      # executable, and why no in-process API exists. Git is categorically
+      # unallowable — go-git v6 is vendored and already carries the worktree,
+      # remote, and code-graph Git reads — and is rejected outright inside the
+      # cutover-locked packages (internal/graphstore, internal/codegraph,
+      # internal/gitwt, internal/gitremote), so a re-added `git ls-files` /
+      # `git diff` shell-out there cannot be allowlisted. Runs before the
+      # coverage gate so the regression can't ride a green test suite into
+      # master. See tools/execguard/main.go for the policy and main_test.go for
+      # the decision table.
+      - name: Exec guard (os/exec + execabs spawn policy; git is never approvable)
+        run: go run ./tools/execguard ./...
+
       - name: Go test
         run: go test $GO_TEST_FLAGS -covermode=atomic -coverprofile="coverage-${{ matrix.os }}.out" ./...
 
