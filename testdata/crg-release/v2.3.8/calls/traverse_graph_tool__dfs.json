@@ -1,0 +1,79 @@
+{
+  "arguments": {
+    "depth": 2,
+    "mode": "dfs",
+    "query": "Login"
+  },
+  "case": "dfs",
+  "content": [
+    {
+      "text": "{\"start_node\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"mode\":\"dfs\",\"max_depth\":2,\"nodes_visited\":6,\"traversal\":[{\"name\":\"Login\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"depth\":0},{\"name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"kind\":\"File\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"depth\":1},{\"name\":\"revoked\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::revoked\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"depth\":2},{\"name\":\"ValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"depth\":2},{\"name\":\"hashPassword\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"depth\":2},{\"name\":\"Session\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"kind\":\"Class\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"depth\":2}],\"truncated\":false,\"next_tool_suggestions\":[\"query_graph callers_of -- focused relationship query\",\"get_impact_radius -- blast radius analysis\"],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "max_depth": 2,
+    "mode": "dfs",
+    "next_tool_suggestions": [
+      "query_graph callers_of -- focused relationship query",
+      "get_impact_radius -- blast radius analysis"
+    ],
+    "nodes_visited": 6,
+    "start_node": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+    "traversal": [
+      {
+        "depth": 0,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Function",
+        "name": "Login",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+      },
+      {
+        "depth": 1,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "File",
+        "name": "${REPO_ROOT}/pkg/auth/auth.go",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go"
+      },
+      {
+        "depth": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Function",
+        "name": "revoked",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked"
+      },
+      {
+        "depth": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Function",
+        "name": "ValidateToken",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken"
+      },
+      {
+        "depth": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Function",
+        "name": "hashPassword",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+      },
+      {
+        "depth": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Class",
+        "name": "Session",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+      }
+    ],
+    "truncated": false
+  },
+  "tool": "traverse_graph_tool"
+}

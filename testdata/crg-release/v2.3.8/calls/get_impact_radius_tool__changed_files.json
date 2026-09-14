@@ -1,0 +1,211 @@
+{
+  "arguments": {
+    "changed_files": [
+      "pkg/auth/auth.go"
+    ],
+    "max_depth": 3
+  },
+  "case": "changed_files",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Blast radius for 1 changed file(s):\\n  - 7 nodes directly changed\\n  - 0 nodes impacted (within 3 hops)\\n  - 0 additional files affected\",\"changed_files\":[\"pkg/auth/auth.go\"],\"changed_nodes\":[{\"id\":5,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":1,\"line_end\":31,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":8,\"kind\":\"Function\",\"name\":\"Login\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":6,\"kind\":\"Class\",\"name\":\"Session\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":4,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":7,\"kind\":\"Function\",\"name\":\"Expired\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session.Expired\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":10,\"line_end\":12,\"language\":\"go\",\"parent_name\":\"Session\",\"is_test\":false},{\"id\":10,\"kind\":\"Function\",\"name\":\"ValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":24,\"line_end\":26,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":9,\"kind\":\"Function\",\"name\":\"hashPassword\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":19,\"line_end\":21,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":11,\"kind\":\"Function\",\"name\":\"revoked\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::revoked\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":28,\"line_end\":30,\"language\":\"go\",\"parent_name\":null,\"is_test\":false}],\"impacted_nodes\":[],\"impacted_files\":[],\"edges\":[{\"id\":9,\"kind\":\"CONTAINS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line\":4,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":11,\"kind\":\"CONTAINS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line\":15,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":14,\"kind\":\"CONTAINS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line\":19,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":15,\"kind\":\"CONTAINS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line\":24,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":17,\"kind\":\"CONTAINS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::revoked\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line\":28,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":13,\"kind\":\"CALLS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line\":16,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":10,\"kind\":\"CONTAINS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::Session.Expired\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line\":10,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":16,\"kind\":\"CALLS\",\"source\":\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::revoked\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line\":25,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"}],\"truncated\":false,\"total_impacted\":0,\"nodes_omitted\":0,\"confidence\":\"changed files are indexed and the graph is current, so this 0 is a real absence\",\"context_savings\":{\"estimated\":true,\"saved_tokens\":\"${SAVED_TOKENS}\",\"saved_percent\":\"${SAVED_PERCENT}\"},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "changed_files": [
+      "pkg/auth/auth.go"
+    ],
+    "changed_nodes": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 5,
+        "is_test": false,
+        "kind": "File",
+        "language": "go",
+        "line_end": 31,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/auth.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 8,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 17,
+        "line_start": 15,
+        "name": "Login",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 6,
+        "is_test": false,
+        "kind": "Class",
+        "language": "go",
+        "line_end": 7,
+        "line_start": 4,
+        "name": "Session",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 7,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 12,
+        "line_start": 10,
+        "name": "Expired",
+        "parent_name": "Session",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 10,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 26,
+        "line_start": 24,
+        "name": "ValidateToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 9,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 21,
+        "line_start": 19,
+        "name": "hashPassword",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 11,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 30,
+        "line_start": 28,
+        "name": "revoked",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked"
+      }
+    ],
+    "confidence": "changed files are indexed and the graph is current, so this 0 is a real absence",
+    "context_savings": {
+      "estimated": true,
+      "saved_percent": "${SAVED_PERCENT}",
+      "saved_tokens": "${SAVED_TOKENS}"
+    },
+    "edges": [
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 9,
+        "kind": "CONTAINS",
+        "line": 4,
+        "source": "${REPO_ROOT}/pkg/auth/auth.go",
+        "target": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 11,
+        "kind": "CONTAINS",
+        "line": 15,
+        "source": "${REPO_ROOT}/pkg/auth/auth.go",
+        "target": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 14,
+        "kind": "CONTAINS",
+        "line": 19,
+        "source": "${REPO_ROOT}/pkg/auth/auth.go",
+        "target": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 15,
+        "kind": "CONTAINS",
+        "line": 24,
+        "source": "${REPO_ROOT}/pkg/auth/auth.go",
+        "target": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 17,
+        "kind": "CONTAINS",
+        "line": 28,
+        "source": "${REPO_ROOT}/pkg/auth/auth.go",
+        "target": "${REPO_ROOT}/pkg/auth/auth.go::revoked"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 13,
+        "kind": "CALLS",
+        "line": 16,
+        "source": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+        "target": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 10,
+        "kind": "CONTAINS",
+        "line": 10,
+        "source": "${REPO_ROOT}/pkg/auth/auth.go::Session",
+        "target": "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 16,
+        "kind": "CALLS",
+        "line": 25,
+        "source": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken",
+        "target": "${REPO_ROOT}/pkg/auth/auth.go::revoked"
+      }
+    ],
+    "impacted_files": [],
+    "impacted_nodes": [],
+    "nodes_omitted": 0,
+    "status": "ok",
+    "summary": "Blast radius for 1 changed file(s):\n  - 7 nodes directly changed\n  - 0 nodes impacted (within 3 hops)\n  - 0 additional files affected",
+    "total_impacted": 0,
+    "truncated": false
+  },
+  "tool": "get_impact_radius_tool"
+}

@@ -1,0 +1,40 @@
+{
+  "arguments": {
+    "changed_files": [
+      "pkg/auth/auth.go"
+    ],
+    "detail_level": "minimal"
+  },
+  "case": "minimal",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Blast radius for 1 changed file(s):\\n  - 7 nodes directly changed\\n  - 0 nodes impacted (within 2 hops)\\n  - 0 additional files affected\",\"risk\":\"low\",\"impacted_file_count\":0,\"key_entities\":[],\"truncated\":false,\"nodes_omitted\":0,\"confidence\":\"changed files are indexed and the graph is current, so this 0 is a real absence\",\"context_savings\":{\"estimated\":true,\"saved_tokens\":\"${SAVED_TOKENS}\",\"saved_percent\":\"${SAVED_PERCENT}\"},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "confidence": "changed files are indexed and the graph is current, so this 0 is a real absence",
+    "context_savings": {
+      "estimated": true,
+      "saved_percent": "${SAVED_PERCENT}",
+      "saved_tokens": "${SAVED_TOKENS}"
+    },
+    "impacted_file_count": 0,
+    "key_entities": [],
+    "nodes_omitted": 0,
+    "risk": "low",
+    "status": "ok",
+    "summary": "Blast radius for 1 changed file(s):\n  - 7 nodes directly changed\n  - 0 nodes impacted (within 2 hops)\n  - 0 additional files affected",
+    "truncated": false
+  },
+  "tool": "get_impact_radius_tool"
+}

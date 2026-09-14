@@ -1,0 +1,34 @@
+{
+  "arguments": {
+    "pattern": "callers_of",
+    "target": "map"
+  },
+  "case": "builtin_target",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"pattern\":\"callers_of\",\"target\":\"map\",\"description\":\"Find all functions that call a given function\",\"summary\":\"'map' is a common builtin \u2014 callers_of skipped to avoid noise.\",\"result_count\":0,\"results_omitted\":0,\"results\":[],\"edges\":[],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "description": "Find all functions that call a given function",
+    "edges": [],
+    "pattern": "callers_of",
+    "result_count": 0,
+    "results": [],
+    "results_omitted": 0,
+    "status": "ok",
+    "summary": "'map' is a common builtin \u2014 callers_of skipped to avoid noise.",
+    "target": "map"
+  },
+  "tool": "query_graph_tool"
+}

@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -145,9 +147,18 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 	return s, nil
 }
 
+// initSchema creates the idempotent base schema, then brings the code-graph
+// layer forward to SchemaVersion and records that version. Running it on an
+// already-current database executes no DDL, so it is safe on every open.
 func (s *SQLiteStore) initSchema() error {
 	if _, err := dbExec(s.db, schemaSQL); err != nil {
 		return fmt.Errorf("graphstore: init schema: %w", err)
+	}
+	if err := s.migrateCodeGraphSchema(); err != nil {
+		return err
+	}
+	if err := s.SetMetadata(metadataSchemaVersion, strconv.Itoa(SchemaVersion)); err != nil {
+		return fmt.Errorf("graphstore: record schema version: %w", err)
 	}
 	return nil
 }
@@ -329,22 +340,36 @@ func (s *SQLiteStore) UpsertEdge(edge EdgeInfo) (int64, error) {
 	return res.LastInsertId()
 }
 
+// RemoveFileData drops one file's nodes and edges.
+//
+// It runs through derivedTx because deleting a node row is exactly the write
+// upstream's inert foreign keys permit and an enforcing one does not:
+// risk_index.node_id references nodes(id), so a rebuild over a graph that
+// still carries summary rows would fail the constraint instead of replacing
+// the file. The transaction also makes the node and edge deletes atomic.
 func (s *SQLiteStore) RemoveFileData(filePath string) error {
-	if _, err := s.db.Exec("DELETE FROM nodes WHERE file_path=?", filePath); err != nil {
+	return s.derivedTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec("DELETE FROM nodes WHERE file_path=?", filePath); err != nil {
+			return err
+		}
+		_, err := tx.Exec("DELETE FROM edges WHERE file_path=?", filePath)
 		return err
-	}
-	_, err := s.db.Exec("DELETE FROM edges WHERE file_path=?", filePath)
-	return err
+	})
 }
 
 // StoreFileNodesEdges atomically replaces all nodes and edges for a file.
+//
+// Like RemoveFileData it runs through derivedTx: replacing a file deletes its
+// node rows, which risk_index references, and upstream's foreign keys are
+// inert for exactly that reason.
 func (s *SQLiteStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, edges []EdgeInfo, fileHash string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("graphstore: begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
+	return s.derivedTx(func(tx *sql.Tx) error {
+		return storeFileNodesEdgesTx(tx, filePath, nodes, edges, fileHash)
+	})
+}
 
+// storeFileNodesEdgesTx is the replace itself, inside a caller's transaction.
+func storeFileNodesEdgesTx(tx *sql.Tx, filePath string, nodes []NodeInfo, edges []EdgeInfo, fileHash string) error {
 	if _, err := tx.Exec("DELETE FROM nodes WHERE file_path=?", filePath); err != nil {
 		return err
 	}
@@ -405,7 +430,7 @@ func (s *SQLiteStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, edg
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -875,9 +900,25 @@ func (g *guardedRows) Close() error {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+// makeQualified builds a node's graph identity, matching upstream
+// GraphStore._make_qualified (graph.py) exactly:
+//
+//	File node        -> "<file_path>"
+//	nested in parent -> "<file_path>::<parent_name>.<name>"
+//	otherwise        -> "<file_path>::<name>"
+//
+// The file path is part of every identity, including the nested case: two
+// receivers named Session in different files are different types, and a
+// bare "Session.Expired" would collide them and silently merge their
+// edges, community membership and impact radius. A File node's identity is
+// the bare path because that is what every IMPORTS_FROM / CONTAINS edge
+// sourced at a file refers to.
 func makeQualified(node NodeInfo) string {
+	if node.Kind == NodeKindFile {
+		return node.FilePath
+	}
 	if node.ParentName != "" {
-		return node.ParentName + "." + node.Name
+		return node.FilePath + "::" + node.ParentName + "." + node.Name
 	}
 	return node.FilePath + "::" + node.Name
 }
@@ -915,21 +956,49 @@ type nodeScanner interface {
 	Scan(dest ...any) error
 }
 
+// scanNode scans a `SELECT *` nodes row positionally. The column order is the
+// schema's declaration order, which is why migrations.go appends
+// signature/community_id via ALTER TABLE (upstream's own column order) instead
+// of inserting them mid-table: those two trailing destinations depend on it.
+//
+// Every column upstream leaves nullable is scanned through a sql.Null* and
+// flattened to the Go zero value. That is not defensive padding — it is what
+// lets the native store READ AN UPSTREAM-WRITTEN DATABASE, which the
+// schema-parity contract and the Python-bridge rollback path both require.
+// Upstream really does store NULL there (see the release fixture's nodes:
+// parent_name, params, return_type and modifiers are null for most rows),
+// whereas the native writers always pass "" — so scanning straight into a
+// string works on our own rows and fails on theirs.
 func scanNode(row nodeScanner) (*GraphNode, error) {
 	var n GraphNode
-	var isTest int
-	var extraStr, modifiers string
+	var isTest sql.NullInt64
+	var lineStart, lineEnd, communityID sql.NullInt64
+	var language, parentName, params, returnType sql.NullString
+	var modifiers, fileHash, extraStr, signature sql.NullString
 	err := row.Scan(
 		&n.ID, &n.Kind, &n.Name, &n.QualifiedName, &n.FilePath,
-		&n.LineStart, &n.LineEnd, &n.Language, &n.ParentName,
-		&n.Params, &n.ReturnType, &modifiers, &isTest,
-		&n.FileHash, &extraStr, &n.UpdatedAt,
+		&lineStart, &lineEnd, &language, &parentName,
+		&params, &returnType, &modifiers, &isTest,
+		&fileHash, &extraStr, &n.UpdatedAt,
+		&signature, &communityID,
 	)
 	if err != nil {
 		return nil, err
 	}
-	n.IsTest = isTest != 0
-	n.Extra = decodeExtra(extraStr)
+	n.LineStart = int(lineStart.Int64)
+	n.LineEnd = int(lineEnd.Int64)
+	n.Language = language.String
+	n.ParentName = parentName.String
+	n.Params = params.String
+	n.ReturnType = returnType.String
+	n.IsTest = isTest.Int64 != 0
+	n.FileHash = fileHash.String
+	n.Extra = decodeExtra(extraStr.String)
+	n.Signature = signature.String
+	n.CommunityID = communityID.Int64
+	// modifiers is read and discarded: the column exists for upstream schema
+	// parity but GraphNode exposes no field for it, and `SELECT *` still has
+	// to supply a destination for every column.
 	return &n, nil
 }
 
@@ -945,19 +1014,31 @@ func collectNodes(rows *sql.Rows) ([]GraphNode, error) {
 	return result, rows.Err()
 }
 
+// collectEdges scans `SELECT *` edges rows positionally. confidence and
+// confidence_tier are the trailing columns migrations.go appends (upstream
+// schema v9); like the nullable columns before them they are scanned through
+// sql.Null* so a row written before the migration — or by upstream, which
+// leaves line/extra nullable — reads back as the Go zero value instead of
+// failing the scan. See scanNode for why that matters.
 func collectEdges(rows *sql.Rows) ([]GraphEdge, error) {
 	var result []GraphEdge
 	for rows.Next() {
 		var e GraphEdge
-		var extraStr string
+		var line sql.NullInt64
+		var extraStr, tier sql.NullString
+		var confidence sql.NullFloat64
 		err := rows.Scan(
 			&e.ID, &e.Kind, &e.SourceQualified, &e.TargetQualified,
-			&e.FilePath, &e.Line, &extraStr, &e.UpdatedAt,
+			&e.FilePath, &line, &extraStr, &e.UpdatedAt,
+			&confidence, &tier,
 		)
 		if err != nil {
 			return nil, err
 		}
-		e.Extra = decodeExtra(extraStr)
+		e.Line = int(line.Int64)
+		e.Extra = decodeExtra(extraStr.String)
+		e.Confidence = confidence.Float64
+		e.ConfidenceTier = tier.String
 		result = append(result, e)
 	}
 	return result, rows.Err()
@@ -1000,4 +1081,666 @@ func (s *SQLiteStore) CountKGNotes() int {
 	var n int
 	_ = s.db.QueryRow("SELECT COUNT(*) FROM kg_notes").Scan(&n)
 	return n
+}
+
+// ---------------------------------------------------------------------------
+// Code graph — derived views (CodeGraphDerived)
+// ---------------------------------------------------------------------------
+
+// derivedTx runs fn inside one immediate transaction with SQLite's foreign-key
+// enforcement disabled for the duration.
+//
+// Both halves matter, and both callers matter.
+//
+// The transaction is what makes a Replace* atomic: DELETE + the INSERT loop
+// either all land or none do, so an interrupted recompute leaves the previous
+// generation of the table intact instead of an empty or half-filled one. This
+// mirrors the explicit `BEGIN IMMEDIATE` upstream wraps store_flows,
+// store_communities and each _compute_summaries block in.
+//
+// The foreign-key suspension is upstream behaviour made explicit. Upstream's
+// code-graph tables DECLARE foreign keys (community_summaries -> communities,
+// flow_snapshots -> flows, risk_index -> nodes) but Python's sqlite3 leaves
+// `PRAGMA foreign_keys` OFF, so those declarations never constrain anything —
+// and upstream DEPENDS on that. A standalone postprocess replaces
+// `communities` while `community_summaries` still references the old ids, and
+// upstream carries the stale summary rows forward; that tolerated staleness IS
+// the documented lifecycle split (see CodeGraphDerived). OpenSQLite turns
+// foreign keys ON for the KG layer, which does want referential integrity, so
+// scoping the pragma to one dedicated connection for the duration of the write
+// keeps the KG layer intact while reproducing upstream exactly. The pragma is
+// a no-op inside a transaction, hence it is set on the conn BEFORE Begin and
+// restored after Commit.
+//
+// The INGESTION path runs through here too, not just the derived writers:
+// StoreFileNodesEdges and RemoveFileData both begin with
+// `DELETE FROM nodes WHERE file_path=?`, and risk_index references nodes(id),
+// so a second build over a graph that already carries summary rows would be
+// refused outright. CONTRACT.md states the rule for anyone adding another
+// node-referencing table.
+func (s *SQLiteStore) derivedTx(fn func(tx *sql.Tx) error) error {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		return err
+	}
+	// Restore on the way out so the conn cannot return to the pool with FK
+	// enforcement silently disabled for an unrelated later caller.
+	defer func() {
+		if _, rerr := conn.ExecContext(ctx, "PRAGMA foreign_keys=ON"); rerr != nil {
+			slog.Warn("graphstore: restoring foreign_keys on derived conn failed", "error", rerr)
+		}
+	}()
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := fn(tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) ReadFlows() ([]FlowRow, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, entry_point_id, depth, node_count, file_count,
+		        criticality, path_json, created_at, updated_at
+		 FROM flows ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FlowRow
+	for rows.Next() {
+		var f FlowRow
+		if err := rows.Scan(&f.ID, &f.Name, &f.EntryPointID, &f.Depth,
+			&f.NodeCount, &f.FileCount, &f.Criticality, &f.PathJSON,
+			&f.CreatedAt, &f.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) ReadFlowMemberships() ([]FlowMembershipRow, error) {
+	rows, err := s.db.Query(
+		"SELECT flow_id, node_id, position FROM flow_memberships ORDER BY flow_id, node_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FlowMembershipRow
+	for rows.Next() {
+		var m FlowMembershipRow
+		if err := rows.Scan(&m.FlowID, &m.NodeID, &m.Position); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) ReadCommunities() ([]CommunityRow, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, level, parent_id, cohesion, size,
+		        dominant_language, description
+		 FROM communities ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CommunityRow
+	for rows.Next() {
+		var c CommunityRow
+		var parent sql.NullInt64
+		var lang, desc sql.NullString
+		if err := rows.Scan(&c.ID, &c.Name, &c.Level, &parent, &c.Cohesion,
+			&c.Size, &lang, &desc); err != nil {
+			return nil, err
+		}
+		if parent.Valid {
+			id := parent.Int64
+			c.ParentID = &id
+		}
+		c.DominantLanguage = lang.String
+		c.Description = desc.String
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) ReadCommunitySummaries() ([]CommunitySummaryRow, error) {
+	rows, err := s.db.Query(
+		`SELECT community_id, name, purpose, key_symbols, risk, size,
+		        dominant_language
+		 FROM community_summaries ORDER BY community_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CommunitySummaryRow
+	for rows.Next() {
+		var c CommunitySummaryRow
+		if err := rows.Scan(&c.CommunityID, &c.Name, &c.Purpose, &c.KeySymbols,
+			&c.Risk, &c.Size, &c.DominantLanguage); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) ReadFlowSnapshots() ([]FlowSnapshotRow, error) {
+	rows, err := s.db.Query(
+		`SELECT flow_id, name, entry_point, critical_path, criticality,
+		        node_count, file_count
+		 FROM flow_snapshots ORDER BY flow_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FlowSnapshotRow
+	for rows.Next() {
+		var f FlowSnapshotRow
+		if err := rows.Scan(&f.FlowID, &f.Name, &f.EntryPoint, &f.CriticalPath,
+			&f.Criticality, &f.NodeCount, &f.FileCount); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) ReadRiskIndex() ([]RiskIndexRow, error) {
+	rows, err := s.db.Query(
+		`SELECT node_id, qualified_name, risk_score, caller_count,
+		        test_coverage, security_relevant, last_computed
+		 FROM risk_index ORDER BY node_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RiskIndexRow
+	for rows.Next() {
+		var r RiskIndexRow
+		var sec int
+		if err := rows.Scan(&r.NodeID, &r.QualifiedName, &r.RiskScore,
+			&r.CallerCount, &r.TestCoverage, &sec, &r.LastComputed); err != nil {
+			return nil, err
+		}
+		r.SecurityRelevant = sec != 0
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SearchNodesFTS runs upstream's _fts_search query (search.py): the term is
+// wrapped in double quotes (with embedded quotes doubled) so an FTS5 operator
+// in a user query is matched as a literal instead of changing the query's
+// meaning, and results come back ordered by FTS5 `rank`, which is negative
+// BM25 — ascending rank is best-first.
+func (s *SQLiteStore) SearchNodesFTS(query string, limit int) ([]int64, error) {
+	limit = normalizeSearchLimit(limit)
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	safe := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
+	rows, err := s.queryContextGuarded(ctx,
+		"SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?",
+		safe, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Rows.Next() {
+		var id int64
+		if err := rows.Rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Rows.Err()
+}
+
+// SearchNodesFTSWords and CountNodesFTSWords share ftsWordsMatch and both
+// JOIN nodes: an external-content FTS5 table can still hold rowids for rows
+// deleted since the last rebuild, and upstream's JOIN silently drops them
+// rather than reporting ids that no longer resolve to a node.
+func (s *SQLiteStore) SearchNodesFTSWords(words []string, limit int) ([]int64, error) {
+	if len(words) == 0 {
+		return nil, nil
+	}
+	limit = normalizeSearchLimit(limit)
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	rows, err := s.queryContextGuarded(ctx,
+		"SELECT n.id FROM nodes_fts f JOIN nodes n ON f.rowid = n.id "+
+			"WHERE nodes_fts MATCH ? LIMIT ?",
+		ftsWordsMatch(words), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Rows.Next() {
+		var id int64
+		if err := rows.Rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Rows.Err()
+}
+
+func (s *SQLiteStore) CountNodesFTSWords(words []string) (int, error) {
+	if len(words) == 0 {
+		return 0, nil
+	}
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM nodes_fts f JOIN nodes n ON f.rowid = n.id "+
+			"WHERE nodes_fts MATCH ?",
+		ftsWordsMatch(words)).Scan(&n)
+	return n, err
+}
+
+// ftsWordsMatch builds upstream's multi-word MATCH expression: each word
+// becomes its own double-quoted phrase (embedded quotes doubled, so an FTS5
+// operator in user input is matched literally) and the phrases are ANDed.
+func ftsWordsMatch(words []string) string {
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = `"` + strings.ReplaceAll(w, `"`, `""`) + `"`
+	}
+	return strings.Join(quoted, " AND ")
+}
+
+func (s *SQLiteStore) ReplaceFlows(flows []FlowRow, paths [][]int64) (int, error) {
+	if len(paths) != len(flows) {
+		return 0, fmt.Errorf("graphstore: ReplaceFlows got %d flows but %d paths", len(flows), len(paths))
+	}
+	count := 0
+	err := s.derivedTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec("DELETE FROM flow_memberships"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("DELETE FROM flows"); err != nil {
+			return err
+		}
+		for i, f := range flows {
+			res, err := tx.Exec(
+				`INSERT INTO flows
+				   (name, entry_point_id, depth, node_count, file_count,
+				    criticality, path_json)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				f.Name, f.EntryPointID, f.Depth, f.NodeCount, f.FileCount,
+				f.Criticality, encodeIDPath(paths[i]))
+			if err != nil {
+				return err
+			}
+			flowID, err := res.LastInsertId()
+			if err != nil {
+				return err
+			}
+			for position, nodeID := range paths[i] {
+				if _, err := tx.Exec(
+					"INSERT OR IGNORE INTO flow_memberships (flow_id, node_id, position) VALUES (?, ?, ?)",
+					flowID, nodeID, position); err != nil {
+					return err
+				}
+			}
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *SQLiteStore) ReplaceCommunities(communities []CommunityRow, members [][]string) (int, error) {
+	if len(members) != len(communities) {
+		return 0, fmt.Errorf("graphstore: ReplaceCommunities got %d communities but %d member sets",
+			len(communities), len(members))
+	}
+	count := 0
+	err := s.derivedTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec("DELETE FROM communities"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE nodes SET community_id = NULL"); err != nil {
+			return err
+		}
+		for i, c := range communities {
+			res, err := tx.Exec(
+				`INSERT INTO communities
+				   (name, level, cohesion, size, dominant_language, description)
+				 VALUES (?, ?, ?, ?, ?, ?)`,
+				c.Name, c.Level, c.Cohesion, c.Size, c.DominantLanguage, c.Description)
+			if err != nil {
+				return err
+			}
+			communityID, err := res.LastInsertId()
+			if err != nil {
+				return err
+			}
+			if err := assignCommunity(tx, communityID, members[i]); err != nil {
+				return err
+			}
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// assignCommunity points every node whose qualified name is in memberQNs at
+// communityID, batching the IN clause to stay under SQLite's default
+// 999-variable statement limit.
+func assignCommunity(tx *sql.Tx, communityID int64, memberQNs []string) error {
+	const batchSize = 450
+	for start := 0; start < len(memberQNs); start += batchSize {
+		batch := memberQNs[start:min(start+batchSize, len(memberQNs))]
+		args := make([]any, 0, len(batch)+1)
+		args = append(args, communityID)
+		for _, qn := range batch {
+			args = append(args, qn)
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		if _, err := tx.Exec(
+			"UPDATE nodes SET community_id = ? WHERE qualified_name IN ("+placeholders+")",
+			args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ReplaceCommunitySummaries(rows []CommunitySummaryRow) (int, error) {
+	return s.replaceRows(len(rows), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM community_summaries`); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			if _, err := tx.Exec(
+				`INSERT OR REPLACE INTO community_summaries
+				   (community_id, name, purpose, key_symbols, size, dominant_language)
+				 VALUES (?, ?, ?, ?, ?, ?)`,
+				r.CommunityID, r.Name, r.Purpose, r.KeySymbols, r.Size, r.DominantLanguage,
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *SQLiteStore) ReplaceFlowSnapshots(rows []FlowSnapshotRow) (int, error) {
+	return s.replaceRows(len(rows), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM flow_snapshots`); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			if _, err := tx.Exec(
+				`INSERT OR REPLACE INTO flow_snapshots
+				   (flow_id, name, entry_point, critical_path, criticality,
+				    node_count, file_count)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				r.FlowID, r.Name, r.EntryPoint, r.CriticalPath, r.Criticality,
+				r.NodeCount, r.FileCount,
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *SQLiteStore) ReplaceRiskIndex(rows []RiskIndexRow) (int, error) {
+	return s.replaceRows(len(rows), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM risk_index`); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			if _, err := tx.Exec(
+				`INSERT OR REPLACE INTO risk_index
+				   (node_id, qualified_name, risk_score, caller_count,
+				    test_coverage, security_relevant, last_computed)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				r.NodeID, r.QualifiedName, r.RiskScore, r.CallerCount,
+				r.TestCoverage, boolToInt(r.SecurityRelevant), r.LastComputed,
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// replaceRows is the DELETE-then-insert transaction shared by the three
+// summary-table writers: one atomic generation swap, returning the row count
+// the caller handed in.
+//
+// The truncation is written by each caller rather than assembled here from a
+// table name. A table name cannot be a bound parameter, so a shared helper
+// could only build its DELETE by concatenation — and the set of tables this
+// path may truncate is closed, so there is nothing to gain from making it
+// expressible at runtime.
+func (s *SQLiteStore) replaceRows(n int, replace func(*sql.Tx) error) (int, error) {
+	if err := s.derivedTx(replace); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// ApplyEdgeRewrites writes the recomputed endpoints and extra for each edge
+// inside one transaction, so a resolution pass computed over the whole edge
+// set cannot land half-applied and leave the graph in a state no pass would
+// ever produce.
+func (s *SQLiteStore) ApplyEdgeRewrites(rewrites []EdgeRewrite) (int, error) {
+	if len(rewrites) == 0 {
+		return 0, nil
+	}
+	err := s.derivedTx(func(tx *sql.Tx) error {
+		for _, r := range rewrites {
+			extra, err := encodeExtra(r.Extra)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(
+				`UPDATE edges SET source_qualified = ?, target_qualified = ?, extra = ?
+				 WHERE id = ?`,
+				r.SourceQualified, r.TargetQualified, extra, r.EdgeID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return len(rewrites), nil
+}
+
+// RebuildFTS reproduces upstream's rebuild_fts_index (search.py): drop the
+// virtual table, re-declare it identically, then let FTS5's own 'rebuild'
+// command repopulate it from the external content table in one pass. Dropping
+// and re-creating rather than deleting rows is what makes the rebuild recover a
+// nodes_fts whose declaration has drifted from the nodes columns it projects.
+func (s *SQLiteStore) RebuildFTS() (int, error) {
+	err := s.derivedTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec("DROP TABLE IF EXISTS nodes_fts"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ftsSchemaSQL); err != nil {
+			return err
+		}
+		_, err := tx.Exec("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')")
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	if err := s.db.QueryRow("SELECT count(*) FROM nodes_fts").Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *SQLiteStore) SetNodeSignature(id int64, signature string) error {
+	_, err := s.db.Exec("UPDATE nodes SET signature = ? WHERE id = ?", signature, id)
+	return err
+}
+
+func (s *SQLiteStore) SetNodeCommunity(id, communityID int64) error {
+	_, err := s.db.Exec("UPDATE nodes SET community_id = ? WHERE id = ?", communityID, id)
+	return err
+}
+
+func (s *SQLiteStore) NodesWithoutSignature() ([]GraphNode, error) {
+	rows, err := s.db.Query("SELECT * FROM nodes WHERE signature IS NULL ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return collectNodes(rows)
+}
+
+// ReadNodesByKind orders by (kind, id) because that is the order upstream's
+// get_nodes_by_kind observably returns: its `kind IN (...)` predicate is served
+// by idx_nodes_kind, so SQLite walks the index key-first and rowid-second. Entry
+// point detection iterates this list and flows are sorted by criticality with a
+// STABLE sort, so the order decides which of two equally critical flows comes
+// first — it is part of the contract, not an incidental detail.
+func (s *SQLiteStore) ReadNodesByKind(kinds []string) ([]GraphNode, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	args := make([]any, len(kinds))
+	for i, k := range kinds {
+		args[i] = k
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(kinds)), ",")
+	rows, err := s.db.Query(
+		"SELECT * FROM nodes WHERE kind IN ("+placeholders+") ORDER BY kind, id", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return collectNodes(rows)
+}
+
+// ReadNodesByID resolves a set of node ids in ONE batched query per 450 ids,
+// which is the point of the method: the FTS readers hand back a handful of
+// ids, and resolving them by scanning the whole nodes table is the exact
+// cost upstream's batched `WHERE id IN (...)` fetch avoids. Rows come back in
+// ascending id order (NOT the caller's input order) and ids with no row are
+// silently skipped.
+func (s *SQLiteStore) ReadNodesByID(ids []int64) ([]GraphNode, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	const batchSize = 450
+	var out []GraphNode
+	for start := 0; start < len(ids); start += batchSize {
+		batch := ids[start:min(start+batchSize, len(ids))]
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			args[i] = id
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		nodes, err := s.queryNodesIn(placeholders, args)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, nodes...)
+	}
+	if len(out) > 1 {
+		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	}
+	return out, nil
+}
+
+// queryNodesIn runs one batch of ReadNodesByID's IN query.
+func (s *SQLiteStore) queryNodesIn(placeholders string, args []any) ([]GraphNode, error) {
+	rows, err := s.db.Query(
+		"SELECT * FROM nodes WHERE id IN ("+placeholders+") ORDER BY id", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return collectNodes(rows)
+}
+
+func (s *SQLiteStore) ReadNodesByCommunity(communityID int64) ([]GraphNode, error) {
+	rows, err := s.db.Query("SELECT * FROM nodes WHERE community_id = ? ORDER BY id", communityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return collectNodes(rows)
+}
+
+func (s *SQLiteStore) ReadAllNodes() ([]GraphNode, error) {
+	rows, err := s.db.Query("SELECT * FROM nodes ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return collectNodes(rows)
+}
+
+func (s *SQLiteStore) ReadAllEdges() ([]GraphEdge, error) {
+	rows, err := s.db.Query("SELECT * FROM edges ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return collectEdges(rows)
+}
+
+// encodeIDPath renders a flow's node-id path for flows.path_json the way
+// Python's json.dumps does: "[8, 9]", with a space after each comma, and "[]"
+// for an empty path rather than "null".
+//
+// encoding/json emits "[8,9]" instead. That matters because path_json is a
+// stored TEXT column compared byte for byte against upstream's rows in the
+// release-contract parity test — a missing space is a real divergence, not a
+// formatting preference.
+func encodeIDPath(path []int64) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, id := range path {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(strconv.FormatInt(id, 10))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// boolToInt renders a Go bool as SQLite's 0/1 integer boolean.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

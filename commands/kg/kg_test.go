@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -59,7 +60,13 @@ func writeCRGStatusFixture(t *testing.T, repo string, nodes []crgNodeFixture) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	defer db.Close()
+	// The status query derives its file count from `kind = 'File'`, the way
+	// the release does, so the fixture must carry a File node per file
+	// rather than one untyped row.
 	if _, err := db.Exec(`CREATE TABLE nodes (
+		kind TEXT,
+		name TEXT,
+		qualified_name TEXT,
 		file_path TEXT,
 		language TEXT,
 		updated_at TEXT
@@ -71,9 +78,29 @@ func writeCRGStatusFixture(t *testing.T, repo string, nodes []crgNodeFixture) {
 	)`); err != nil {
 		t.Fatalf("create edges table: %v", err)
 	}
+	// Readiness is derived from the graph's own build metadata, exactly as
+	// the release reports it, so a fixture without a `metadata` row reads as
+	// never-built no matter how many nodes it holds.
+	if _, err := db.Exec(
+		`CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+	); err != nil {
+		t.Fatalf("create metadata table: %v", err)
+	}
 	for _, node := range nodes {
-		if _, err := db.Exec(`INSERT INTO nodes (file_path, language, updated_at) VALUES (?, ?, ?)`, node.FilePath, node.Language, node.UpdatedAt); err != nil {
-			t.Fatalf("insert node: %v", err)
+		if _, err := db.Exec(
+			`INSERT INTO nodes (kind, name, qualified_name, file_path, language, updated_at)
+			 VALUES ('File', ?, ?, ?, ?, ?)`,
+			node.FilePath, node.FilePath, node.FilePath, node.Language, node.UpdatedAt,
+		); err != nil {
+			t.Fatalf("insert file node: %v", err)
+		}
+	}
+	if len(nodes) > 0 {
+		if _, err := db.Exec(
+			`INSERT INTO metadata (key, value) VALUES ('last_updated', ?)`,
+			nodes[0].UpdatedAt,
+		); err != nil {
+			t.Fatalf("insert metadata: %v", err)
 		}
 	}
 }
@@ -91,6 +118,32 @@ func crgShellShimSkip(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake POSIX shell CRG shim is non-executable on Windows; Windows CRG path covered by internal/graphstore crg_venv_windows.go discovery tests")
 	}
+}
+
+// crgBuildLine / crgUpdateLine are the exact summary lines the release's CLI
+// prints for a build and an incremental update. The bridge parses its report
+// out of them, so a fake binary that prints nothing is not a realistic stand
+// in for the release — it makes the bridge report a zero-count full build.
+func crgBuildLine(files, nodes, edges int) string {
+	return fmt.Sprintf("Full build: %d files, %d nodes, %d edges (postprocess=full)",
+		files, nodes, edges)
+}
+
+func crgUpdateLine(files, nodes, edges int) string {
+	return fmt.Sprintf("Incremental: %d files updated, %d nodes, %d edges (postprocess=full)",
+		files, nodes, edges)
+}
+
+// fakeCRGScript is a shell body that answers `build` and `update` with the
+// release's own summary lines and ignores every other subcommand.
+func fakeCRGScript(buildFiles, buildNodes, buildEdges, updateFiles, updateNodes, updateEdges int) string {
+	return fmt.Sprintf(`case "$1" in
+build) printf '%%s\n' %q ;;
+update) printf '%%s\n' %q ;;
+*) exit 0 ;;
+esac`,
+		crgBuildLine(buildFiles, buildNodes, buildEdges),
+		crgUpdateLine(updateFiles, updateNodes, updateEdges))
 }
 
 func writeFakeCRGBinary(t *testing.T, repo, body string) string {
@@ -683,8 +736,13 @@ func TestCRGStatus_ReadinessStates(t *testing.T) {
 	if status.State != string(graphstore.CRGReadinessUnbuilt) {
 		t.Fatalf("state = %q, want %q", status.State, graphstore.CRGReadinessUnbuilt)
 	}
-	if status.LastUpdated != "never" {
-		t.Fatalf("last_updated = %q, want never", status.LastUpdated)
+	// An unbuilt graph has no timestamp at all: upstream reports JSON null,
+	// which CRGStatus models as a nil pointer and renders as "never".
+	if status.LastUpdated != nil {
+		t.Fatalf("last_updated = %q, want unset", *status.LastUpdated)
+	}
+	if got := status.LastUpdatedOrNever(); got != "never" {
+		t.Fatalf("last_updated rendering = %q, want never", got)
 	}
 
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
@@ -704,12 +762,14 @@ func TestCRGStatus_ReadinessStates(t *testing.T) {
 	if status.Nodes != 2 || status.Files != 2 {
 		t.Fatalf("counts = nodes:%d files:%d", status.Nodes, status.Files)
 	}
-	if !strings.Contains(status.Languages, "go") || !strings.Contains(status.Languages, "python") {
-		t.Fatalf("languages = %q", status.Languages)
+	// Upstream reports languages as a sorted JSON array, not a joined string.
+	if want := []string{"go", "python"}; !slices.Equal(status.Languages, want) {
+		t.Fatalf("languages = %v, want %v", status.Languages, want)
 	}
 }
 
 func TestRunKGCodeStatus_JSONOutput(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
@@ -719,23 +779,12 @@ func TestRunKGCodeStatus_JSONOutput(t *testing.T) {
 	cmd.Flags().String("repo", repo, "")
 	cmd.Flags().Bool("json", true, "")
 
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-
-	if err := runKGCodeStatus(testDeps(), cmd, nil); err != nil {
-		t.Fatalf("runKGCodeStatus: %v", err)
-	}
-	_ = w.Close()
-	os.Stdout = oldStdout
-
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
+	writeDiscoverableCRGStub(t, repo)
+	out := captureStdout(t, func() {
+		if err := runKGCodeStatus(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGCodeStatus: %v", err)
+		}
+	})
 	var status graphstore.CRGStatus
 	if err := json.Unmarshal(out, &status); err != nil {
 		t.Fatalf("json output invalid: %v\n%s", err, string(out))
@@ -751,18 +800,21 @@ func TestCRGBuildReport_UsesPersistedStatus(t *testing.T) {
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
 		{FilePath: "b.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
 	})
-	bin := writeFakeCRGBinary(t, repo, "exit 0")
+	bin := writeFakeCRGBinary(t, repo, fakeCRGScript(2, 2, 0, 0, 0, 0))
 	bridge := &graphstore.CRGBridge{RepoRoot: repo, Bin: bin}
 
 	report, err := bridge.BuildReport(graphstore.BuildOptions{})
 	if err != nil {
 		t.Fatalf("BuildReport: %v", err)
 	}
-	if report.Outcome != string(graphstore.CRGReadinessReady) {
-		t.Fatalf("outcome = %q, want ready", report.Outcome)
+	// Upstream's report vocabulary: status/build_type/summary. There is no
+	// separate readiness "outcome" field — a full build always reports
+	// build_type "full", and the counts live in the summary sentence.
+	if report.Status != "ok" {
+		t.Fatalf("status = %q, want ok", report.Status)
 	}
-	if report.Status == nil || !report.Status.Ready {
-		t.Fatalf("expected ready status in report: %#v", report)
+	if report.BuildType != "full" {
+		t.Fatalf("build_type = %q, want full", report.BuildType)
 	}
 	if !strings.Contains(report.Summary, "2 nodes") || !strings.Contains(report.Summary, "2 files") {
 		t.Fatalf("summary = %q", report.Summary)
@@ -775,10 +827,13 @@ func TestCRGBuildReport_UsesSQLiteAutocommitWrapper(t *testing.T) {
 		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
 	})
 	symlinkPythonIntoFakeVenv(t, repo)
+	// The shim asserts the autocommit wrapper is in effect and then prints
+	// the release's own build line, which is what the report is parsed from.
 	bin := writeFakeCRGPythonEntrypoint(t, repo, `
 import sqlite3
 conn = sqlite3.connect(":memory:")
 assert conn.isolation_level is None, conn.isolation_level
+print("`+crgBuildLine(1, 1, 0)+`")
 `)
 	bridge := &graphstore.CRGBridge{RepoRoot: repo, Bin: bin}
 
@@ -786,35 +841,46 @@ assert conn.isolation_level is None, conn.isolation_level
 	if err != nil {
 		t.Fatalf("BuildReport with sqlite autocommit wrapper: %v", err)
 	}
-	if report.Outcome != string(graphstore.CRGReadinessReady) {
-		t.Fatalf("outcome = %q, want ready", report.Outcome)
+	if report.Status != "ok" || report.BuildType != "full" {
+		t.Fatalf("report = status:%q build_type:%q, want ok/full", report.Status, report.BuildType)
 	}
 }
 
-func TestCRGUpdateReport_ClassifiesNoDiffAndNoMutation(t *testing.T) {
+// Upstream has one "nothing happened" outcome, not two: an incremental update
+// whose files_updated is 0 returns early with the same summary whether the
+// diff was empty or the changed files produced no rows. The distinction the
+// old bridge drew between "no diff" and "no mutation" survives only as
+// whether changed_files is populated.
+func TestCRGUpdateReport_NoChangesEarlyReturn(t *testing.T) {
 	t.Run("no diff", func(t *testing.T) {
 		repo := t.TempDir()
 		initGitRepo(t, repo)
 		commitFile(t, repo, "a.txt", "one\n", "initial")
-		bin := writeFakeCRGBinary(t, repo, "exit 0")
+		bin := writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 		bridge := &graphstore.CRGBridge{RepoRoot: repo, Bin: bin}
 
 		report, err := bridge.UpdateReport(graphstore.UpdateOptions{Base: "HEAD"})
 		if err != nil {
 			t.Fatalf("UpdateReport: %v", err)
 		}
-		if report.Outcome != "no_diff" {
-			t.Fatalf("outcome = %q, want no_diff", report.Outcome)
+		if report.BuildType != "incremental" {
+			t.Fatalf("build_type = %q, want incremental", report.BuildType)
+		}
+		if report.Summary != "No changes detected. Graph is up to date." {
+			t.Fatalf("summary = %q", report.Summary)
+		}
+		if report.ChangedFiles != nil && len(*report.ChangedFiles) != 0 {
+			t.Fatalf("expected no changed files, got %v", *report.ChangedFiles)
 		}
 	})
 
-	t.Run("no mutation", func(t *testing.T) {
+	t.Run("files re-parsed", func(t *testing.T) {
 		repo := t.TempDir()
 		initGitRepo(t, repo)
 		commitFile(t, repo, "a.txt", "one\n", "initial")
 		commitFile(t, repo, "a.txt", "two\n", "second")
 		bin := writeFakeCRGBinary(t, repo, `case "$1" in
-update) printf '%s\n' "Incremental: 1 files updated, 0 nodes, 0 edges" ;;
+update) printf '%s\n' "Incremental: 1 files updated, 0 nodes, 0 edges (postprocess=full)" ;;
 *) exit 0 ;;
 esac`)
 		bridge := &graphstore.CRGBridge{RepoRoot: repo, Bin: bin}
@@ -823,11 +889,18 @@ esac`)
 		if err != nil {
 			t.Fatalf("UpdateReport: %v", err)
 		}
-		if report.Outcome != "no_mutation" {
-			t.Fatalf("outcome = %q, want no_mutation", report.Outcome)
+		// An update that re-parsed files is NOT the early return: upstream
+		// reports its own incremental line and files_updated, and the CLI
+		// never prints the changed-file list, so the bridge leaves it absent
+		// rather than inventing one.
+		if report.BuildType != "incremental" {
+			t.Fatalf("build_type = %q, want incremental", report.BuildType)
 		}
-		if len(report.ChangedFiles) == 0 {
-			t.Fatalf("expected changed files, got %#v", report.ChangedFiles)
+		if report.FilesUpdated == nil || *report.FilesUpdated != 1 {
+			t.Fatalf("files_updated = %#v, want 1", report.FilesUpdated)
+		}
+		if report.Summary == "No changes detected. Graph is up to date." {
+			t.Fatalf("an update that re-parsed a file must not report the no-changes summary")
 		}
 	})
 }
@@ -836,27 +909,48 @@ esac`)
 
 // captureStdout redirects os.Stdout for the duration of fn, then restores it.
 // Returns the bytes written to stdout during fn.
-func captureStdout(t *testing.T, fn func()) []byte {
+//
+// The reader runs CONCURRENTLY and the restore is deferred, because neither is
+// optional:
+//
+//   - Draining after fn returns deadlocks fn the moment it writes more than
+//     one pipe buffer, and the kg reports printed here are not bounded.
+//   - fn is test code, so it can t.Skip, t.Fatal or panic — each unwinds
+//     through this frame. Restoring inline would leave os.Stdout pointing at
+//     an abandoned pipe for the REST OF THE PACKAGE, and the next print
+//     anywhere would block forever once that pipe filled.
+func captureStdout(t *testing.T, fn func()) (captured []byte) {
 	t.Helper()
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
+	var buf bytes.Buffer
+	copied := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(&buf, r)
+		copied <- err
+	}()
+
 	os.Stdout = w
+	defer func() {
+		os.Stdout = oldStdout
+		_ = w.Close()
+		if err := <-copied; err != nil {
+			t.Errorf("drain captured stdout: %v", err)
+		}
+		_ = r.Close()
+		captured = buf.Bytes()
+	}()
 	fn()
-	_ = w.Close()
-	os.Stdout = oldStdout
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
+	return nil
 }
 
 // TestRunKGChanges_WarnOnUnbuiltGraph: without --require-graph, an unbuilt graph
 // emits a WarnBox but still calls the CRG binary and returns no error.
 func TestRunKGChanges_WarnOnUnbuiltGraph(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	// No CRG DB → Status() returns unbuilt.
 	// Fake CRG binary that returns valid JSON for detect-changes.
@@ -911,6 +1005,7 @@ func TestRunKGChanges_RequireGraphFailsOnUnbuilt(t *testing.T) {
 
 // TestRunKGChanges_JSONOutputHasGraphState: --json output must include graph_state.
 func TestRunKGChanges_JSONOutputHasGraphState(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	// Write a ready CRG DB fixture.
 	writeCRGStatusFixture(t, repo, []crgNodeFixture{
@@ -952,7 +1047,7 @@ func TestRunKGImpact_WarnOnUnbuiltGraph(t *testing.T) {
 	// We expect an error from the Python call but the warn should appear first.
 	// Since NewCRGBridge will succeed (fake bin exists), we get the warn then CRG error.
 	// Use a fake bin that exits 0 but python is absent — the warn is what we check.
-	writeFakeCRGBinary(t, repo, "exit 0")
+	writeFakeCRGBinary(t, repo, fakeCRGScript(1, 1, 0, 0, 0, 0))
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("repo", repo, "")
@@ -2570,6 +2665,7 @@ func TestRunKGSync_NoSourceDir(t *testing.T) {
 }
 
 func TestRunKGPostprocess_NoGraph(t *testing.T) {
+	useBridgeBackend(t)
 	// postprocess requires a CRG binary; with no .venv or CRG on PATH,
 	// NewCRGBridge should fail gracefully. Neutralize CRG discovery so the
 	// no-binary error path is exercised deterministically regardless of what
@@ -2594,6 +2690,7 @@ func TestRunKGPostprocess_NoGraph(t *testing.T) {
 }
 
 func TestRunKGFlows_NoGraph(t *testing.T) {
+	useBridgeBackend(t)
 	// flows requires CRG — without the binary or graph it should fail.
 	repo := t.TempDir()
 
@@ -2611,6 +2708,7 @@ func TestRunKGFlows_NoGraph(t *testing.T) {
 }
 
 func TestRunKGCommunities_NoGraph(t *testing.T) {
+	useBridgeBackend(t)
 	// communities requires CRG — without the binary or graph it should fail.
 	repo := t.TempDir()
 

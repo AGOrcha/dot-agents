@@ -1,0 +1,44 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Graph statistics for repo:\\n  Files: 4\\n  Total nodes: 16\\n  Total edges: 29\\n  Languages: go\\n  Last updated: ${TIMESTAMP}\\n\\nNodes by kind:\\n  Class: 1\\n  File: 4\\n  Function: 9\\n  Test: 2\\n\\nEdges by kind:\\n  CALLS: 11\\n  CONTAINS: 12\\n  IMPORTS_FROM: 2\\n  TESTED_BY: 4\\n\\nEmbeddings: 0 nodes embedded\\n  (install sentence-transformers for semantic search)\",\"total_nodes\":16,\"total_edges\":29,\"nodes_by_kind\":{\"Class\":1,\"File\":4,\"Function\":9,\"Test\":2},\"edges_by_kind\":{\"CALLS\":11,\"CONTAINS\":12,\"IMPORTS_FROM\":2,\"TESTED_BY\":4},\"languages\":[\"go\"],\"files_count\":4,\"last_updated\":\"${TIMESTAMP}\",\"embeddings_count\":0,\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "edges_by_kind": {
+      "CALLS": 11,
+      "CONTAINS": 12,
+      "IMPORTS_FROM": 2,
+      "TESTED_BY": 4
+    },
+    "embeddings_count": 0,
+    "files_count": 4,
+    "languages": [
+      "go"
+    ],
+    "last_updated": "${TIMESTAMP}",
+    "nodes_by_kind": {
+      "Class": 1,
+      "File": 4,
+      "Function": 9,
+      "Test": 2
+    },
+    "status": "ok",
+    "summary": "Graph statistics for repo:\n  Files: 4\n  Total nodes: 16\n  Total edges: 29\n  Languages: go\n  Last updated: ${TIMESTAMP}\n\nNodes by kind:\n  Class: 1\n  File: 4\n  Function: 9\n  Test: 2\n\nEdges by kind:\n  CALLS: 11\n  CONTAINS: 12\n  IMPORTS_FROM: 2\n  TESTED_BY: 4\n\nEmbeddings: 0 nodes embedded\n  (install sentence-transformers for semantic search)",
+    "total_edges": 29,
+    "total_nodes": 16
+  },
+  "tool": "list_graph_stats_tool"
+}

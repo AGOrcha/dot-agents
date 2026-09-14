@@ -1,0 +1,60 @@
+{
+  "arguments": {
+    "max_results": 2,
+    "pattern": "children_of",
+    "target": "pkg/auth/auth.go"
+  },
+  "case": "max_results",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"pattern\":\"children_of\",\"target\":\"pkg/auth/auth.go\",\"description\":\"Find all nodes contained in a file or class\",\"summary\":\"Found 5 result(s) for children_of('pkg/auth/auth.go') \u2014 showing 2, 3 omitted\",\"result_count\":5,\"results_omitted\":3,\"results\":[{\"id\":6,\"kind\":\"Class\",\"name\":\"Session\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":4,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":8,\"kind\":\"Function\",\"name\":\"Login\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false}],\"edges\":[],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "description": "Find all nodes contained in a file or class",
+    "edges": [],
+    "pattern": "children_of",
+    "result_count": 5,
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 6,
+        "is_test": false,
+        "kind": "Class",
+        "language": "go",
+        "line_end": 7,
+        "line_start": 4,
+        "name": "Session",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 8,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 17,
+        "line_start": 15,
+        "name": "Login",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+      }
+    ],
+    "results_omitted": 3,
+    "status": "ok",
+    "summary": "Found 5 result(s) for children_of('pkg/auth/auth.go') \u2014 showing 2, 3 omitted",
+    "target": "pkg/auth/auth.go"
+  },
+  "tool": "query_graph_tool"
+}

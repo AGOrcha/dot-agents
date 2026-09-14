@@ -1,0 +1,35 @@
+{
+  "arguments": {
+    "pattern": "inheritors_of",
+    "target": "Session"
+  },
+  "case": "inheritors_of",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"pattern\":\"inheritors_of\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"description\":\"Find all classes that inherit from a given class\",\"summary\":\"Found 0 result(s) for inheritors_of('${REPO_ROOT}/pkg/auth/auth.go::Session')\",\"result_count\":0,\"results_omitted\":0,\"results\":[],\"edges\":[],\"confidence\":\"go interface satisfaction is structural, never declared, so implementers can be missing from inheritors_of\",\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "confidence": "go interface satisfaction is structural, never declared, so implementers can be missing from inheritors_of",
+    "description": "Find all classes that inherit from a given class",
+    "edges": [],
+    "pattern": "inheritors_of",
+    "result_count": 0,
+    "results": [],
+    "results_omitted": 0,
+    "status": "ok",
+    "summary": "Found 0 result(s) for inheritors_of('${REPO_ROOT}/pkg/auth/auth.go::Session')",
+    "target": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+  },
+  "tool": "query_graph_tool"
+}

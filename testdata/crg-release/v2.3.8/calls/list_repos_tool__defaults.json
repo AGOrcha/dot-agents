@@ -1,0 +1,17 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"0 registered repository(ies)\",\"repos\":[]}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "repos": [],
+    "status": "ok",
+    "summary": "0 registered repository(ies)"
+  },
+  "tool": "list_repos_tool"
+}

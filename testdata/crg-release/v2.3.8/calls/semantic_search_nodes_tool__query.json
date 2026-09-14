@@ -1,0 +1,100 @@
+{
+  "arguments": {
+    "query": "token"
+  },
+  "case": "query",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"query\":\"token\",\"search_mode\":\"fts\",\"summary\":\"Found 4 node(s) matching 'token'\",\"results\":[{\"name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"kind\":\"File\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":1,\"line_end\":7,\"language\":\"go\",\"params\":null,\"return_type\":null,\"signature\":\"${REPO_ROOT}/pkg/auth/token.go\",\"score\":0.016393},{\"name\":\"mintToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"kind\":\"Function\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":4,\"line_end\":6,\"language\":\"go\",\"params\":\"(user, digest string)\",\"return_type\":null,\"signature\":\"def mintToken((user, digest string))\",\"score\":0.016129},{\"name\":\"ValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\",\"kind\":\"Function\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":24,\"line_end\":26,\"language\":\"go\",\"params\":\"(token string)\",\"return_type\":null,\"signature\":\"def ValidateToken((token string))\",\"score\":0.015873},{\"name\":\"revoked\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::revoked\",\"kind\":\"Function\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":28,\"line_end\":30,\"language\":\"go\",\"params\":\"(token string)\",\"return_type\":null,\"signature\":\"def revoked((token string))\",\"score\":0.015625}],\"_hints\":{\"next_steps\":[{\"tool\":\"query_graph\",\"suggestion\":\"Inspect callers/callees of a search result\"},{\"tool\":\"get_flow\",\"suggestion\":\"See the execution flow through a matched node\"},{\"tool\":\"get_impact_radius\",\"suggestion\":\"Check the blast radius from matched nodes\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Inspect callers/callees of a search result",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "See the execution flow through a matched node",
+          "tool": "get_flow"
+        },
+        {
+          "suggestion": "Check the blast radius from matched nodes",
+          "tool": "get_impact_radius"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "query": "token",
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "kind": "File",
+        "language": "go",
+        "line_end": 7,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/token.go",
+        "params": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go",
+        "return_type": null,
+        "score": 0.016393,
+        "signature": "${REPO_ROOT}/pkg/auth/token.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "kind": "Function",
+        "language": "go",
+        "line_end": 6,
+        "line_start": 4,
+        "name": "mintToken",
+        "params": "(user, digest string)",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken",
+        "return_type": null,
+        "score": 0.016129,
+        "signature": "def mintToken((user, digest string))"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Function",
+        "language": "go",
+        "line_end": 26,
+        "line_start": 24,
+        "name": "ValidateToken",
+        "params": "(token string)",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken",
+        "return_type": null,
+        "score": 0.015873,
+        "signature": "def ValidateToken((token string))"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Function",
+        "language": "go",
+        "line_end": 30,
+        "line_start": 28,
+        "name": "revoked",
+        "params": "(token string)",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked",
+        "return_type": null,
+        "score": 0.015625,
+        "signature": "def revoked((token string))"
+      }
+    ],
+    "search_mode": "fts",
+    "status": "ok",
+    "summary": "Found 4 node(s) matching 'token'"
+  },
+  "tool": "semantic_search_nodes_tool"
+}

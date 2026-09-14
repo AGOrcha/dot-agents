@@ -1,0 +1,61 @@
+{
+  "arguments": {
+    "query": "andle"
+  },
+  "case": "keyword_fallback",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"query\":\"andle\",\"search_mode\":\"keyword\",\"summary\":\"Found 1 node(s) matching 'andle'\",\"results\":[{\"name\":\"handleLogin\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"kind\":\"Function\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":9,\"line_end\":13,\"language\":\"go\",\"params\":\"()\",\"return_type\":null,\"signature\":\"def handleLogin(())\",\"score\":1.0}],\"_hints\":{\"next_steps\":[{\"tool\":\"query_graph\",\"suggestion\":\"Inspect callers/callees of a search result\"},{\"tool\":\"get_flow\",\"suggestion\":\"See the execution flow through a matched node\"},{\"tool\":\"get_impact_radius\",\"suggestion\":\"Check the blast radius from matched nodes\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Inspect callers/callees of a search result",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "See the execution flow through a matched node",
+          "tool": "get_flow"
+        },
+        {
+          "suggestion": "Check the blast radius from matched nodes",
+          "tool": "get_impact_radius"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "query": "andle",
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "kind": "Function",
+        "language": "go",
+        "line_end": 13,
+        "line_start": 9,
+        "name": "handleLogin",
+        "params": "()",
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin",
+        "return_type": null,
+        "score": 1.0,
+        "signature": "def handleLogin(())"
+      }
+    ],
+    "search_mode": "keyword",
+    "status": "ok",
+    "summary": "Found 1 node(s) matching 'andle'"
+  },
+  "tool": "semantic_search_nodes_tool"
+}

@@ -83,6 +83,13 @@ func (f *fakeMCPBridge) Postprocess(opts PostprocessOptions) error {
 	return f.postErr
 }
 
+func (f *fakeMCPBridge) PostprocessReport(opts PostprocessOptions) (*CRGOperationReport, error) {
+	if err := f.Postprocess(opts); err != nil {
+		return nil, err
+	}
+	return &CRGOperationReport{Status: statusOK, Summary: PostprocessSummary()}, nil
+}
+
 func (f *fakeMCPBridge) DetectChanges(opts DetectChangesOptions) (*CRGChangeReport, error) {
 	if f.detectErr != nil {
 		return nil, f.detectErr
@@ -151,197 +158,6 @@ func decodeResultMap(t *testing.T, resp rpcResponse) map[string]any {
 	return p
 }
 
-func TestKGServeToolsList(t *testing.T) {
-	srv := &MCPServer{}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-	var payload struct {
-		Tools []struct {
-			Name string `json:"name"`
-		} `json:"tools"`
-	}
-	resultBytes, err := json.Marshal(resp.Result)
-	if err != nil {
-		t.Fatalf("marshal tools/list result: %v", err)
-	}
-	if err := json.Unmarshal(resultBytes, &payload); err != nil {
-		t.Fatalf("unmarshal tools/list payload: %v", err)
-	}
-	want := []string{
-		"build_or_update_graph_tool",
-		"embed_graph_tool",
-		"list_graph_stats_tool",
-		"get_impact_radius_tool",
-		"semantic_search_nodes_tool",
-		"query_graph_tool",
-		"get_review_context_tool",
-		"get_docs_section_tool",
-	}
-	got := map[string]bool{}
-	for _, tool := range payload.Tools {
-		got[tool.Name] = true
-	}
-	for _, name := range want {
-		if !got[name] {
-			t.Fatalf("missing tool %q in list response: %+v", name, payload.Tools)
-		}
-	}
-}
-
-func TestKGServeBuildOrUpdateGraph(t *testing.T) {
-	bridge := &fakeMCPBridge{
-		statusSeq: []*CRGStatus{
-			{},
-			{Nodes: 12, Edges: 34, Files: 5, Languages: "go, python", LastUpdated: "2026-04-12T00:00:00Z"},
-		},
-	}
-	srv := &MCPServer{bridge: bridge}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"build_or_update_graph_tool","arguments":{}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-	var payload struct {
-		Nodes      int `json:"nodes"`
-		Edges      int `json:"edges"`
-		Files      int `json:"files"`
-		DurationMS int `json:"duration_ms"`
-	}
-	resultBytes, err := json.Marshal(resp.Result)
-	if err != nil {
-		t.Fatalf("marshal build/update result: %v", err)
-	}
-	if err := json.Unmarshal(resultBytes, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if payload.Nodes != 12 || payload.Edges != 34 || payload.Files != 5 {
-		t.Fatalf("unexpected payload: %+v", payload)
-	}
-	if payload.DurationMS < 0 {
-		t.Fatalf("duration must be non-negative: %+v", payload)
-	}
-	if bridge.buildCalls != 1 || bridge.updateCalls != 0 {
-		t.Fatalf("unexpected bridge calls: build=%d update=%d", bridge.buildCalls, bridge.updateCalls)
-	}
-}
-
-func TestKGServeGetImpactRadius(t *testing.T) {
-	bridge := &fakeMCPBridge{
-		impact: &CRGImpactResult{
-			ChangedNodes: []ImpactNode{
-				{Name: "main.run", Kind: "Function", FilePath: "main.go"},
-			},
-			ImpactedNodes: []ImpactNode{
-				{Name: "main.helper", Kind: "Function", FilePath: "helper.go"},
-			},
-		},
-	}
-	srv := &MCPServer{bridge: bridge}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_impact_radius_tool","arguments":{"symbol":"main.run","depth":1}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-	var payload struct {
-		Nodes []map[string]any `json:"nodes"`
-	}
-	resultBytes, err := json.Marshal(resp.Result)
-	if err != nil {
-		t.Fatalf("marshal impact result: %v", err)
-	}
-	if err := json.Unmarshal(resultBytes, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if len(payload.Nodes) == 0 {
-		t.Fatalf("expected nodes in impact radius payload: %+v", payload)
-	}
-}
-
-func TestKGServeUnknownTool(t *testing.T) {
-	srv := &MCPServer{}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"does_not_exist","arguments":{}}}`)
-	if resp.Error == nil || resp.Error.Code != -32601 {
-		t.Fatalf("expected -32601, got %+v", resp.Error)
-	}
-	if !strings.Contains(resp.Error.Message, "method not found") {
-		t.Fatalf("unexpected error message: %+v", resp.Error)
-	}
-}
-
-// runReadinessErrorTest exercises a tool RPC that should produce a
-// structured JSON error envelope (not an RPC error) when the graph is
-// in the supplied non-ready state. Asserts the payload's state matches.
-// requireHint=true also asserts payload["error"] and payload["hint"].
-func runReadinessErrorTest(t *testing.T, state, message, toolName, argumentsJSON string, requireHint bool) {
-	t.Helper()
-	bridge := &fakeMCPBridge{
-		statusSeq: []*CRGStatus{
-			{State: state, Message: message},
-		},
-	}
-	srv := &MCPServer{bridge: bridge}
-	requestJSON := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + toolName + `","arguments":` + argumentsJSON + `}}`
-	resp := runMCPServeOnce(t, srv, requestJSON)
-	if resp.Error != nil {
-		t.Fatalf("expected structured result, got RPC error: %+v", resp.Error)
-	}
-	resultBytes, err := json.Marshal(resp.Result)
-	if err != nil {
-		t.Fatalf("marshal result: %v", err)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(resultBytes, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if payload["state"] != state {
-		t.Fatalf("expected state=%q, got: %v", state, payload["state"])
-	}
-	if requireHint {
-		if payload["error"] == nil {
-			t.Fatalf("expected 'error' field in payload, got: %v", payload)
-		}
-		if payload["hint"] == nil {
-			t.Fatalf("expected 'hint' field in payload, got: %v", payload)
-		}
-	}
-}
-
-// TestHandleGetReviewContext_UnbuiltGraphReturnsError verifies that
-// handleGetReviewContext returns a structured JSON error (not a Go/RPC error)
-// when the graph is in the unbuilt state.
-func TestHandleGetReviewContext_UnbuiltGraphReturnsError(t *testing.T) {
-	runReadinessErrorTest(t,
-		string(CRGReadinessUnbuilt), "code graph has not been built yet",
-		"get_review_context_tool", `{"files":["main.go"]}`,
-		true)
-}
-
-// TestHandleGetImpactRadius_UnbuiltGraphReturnsError verifies that
-// handleGetImpactRadius returns a structured JSON error (not a Go/RPC error)
-// when the graph is in the unbuilt state.
-func TestHandleGetImpactRadius_UnbuiltGraphReturnsError(t *testing.T) {
-	runReadinessErrorTest(t,
-		string(CRGReadinessUnbuilt), "code graph has not been built yet",
-		"get_impact_radius_tool", `{"symbol":"main.run","depth":2}`,
-		true)
-}
-
-// TestHandleGetReviewContext_BusyGraphReturnsError verifies the busy_or_locked
-// state is handled by handleGetReviewContext.
-func TestHandleGetReviewContext_BusyGraphReturnsError(t *testing.T) {
-	runReadinessErrorTest(t,
-		string(CRGReadinessBusyOrLocked), "database is locked",
-		"get_review_context_tool", `{"files":["cmd/main.go"]}`,
-		false)
-}
-
-// TestKGServeUnknownMethod verifies that unknown JSON-RPC methods produce a
-// -32601 method-not-found error.
-func TestKGServeUnknownMethod(t *testing.T) {
-	srv := &MCPServer{}
-	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"foo/bar","params":{}}`, -32601)
-}
-
 // TestKGServeParseError verifies that malformed JSON returns a -32700 parse
 // error response.
 func TestKGServeParseError(t *testing.T) {
@@ -379,195 +195,6 @@ func TestKGServeNotificationNoResponse(t *testing.T) {
 	<-done
 	if strings.TrimSpace(out.String()) != "" {
 		t.Errorf("expected no response for notification, got %q", out.String())
-	}
-}
-
-// TestKGServeInvalidToolsCallParams verifies a malformed tools/call params
-// returns a -32602 invalid params error.
-func TestKGServeInvalidToolsCallParams(t *testing.T) {
-	srv := &MCPServer{}
-	// params is a string instead of a tool-call object
-	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":"oops"}`, -32602)
-}
-
-// TestKGServeBuildOrUpdateGraph_ChoosesUpdateWhenReady verifies the dispatcher
-// calls Update (not Build) when status reports a populated graph.
-func TestKGServeBuildOrUpdateGraph_ChoosesUpdateWhenReady(t *testing.T) {
-	bridge := &fakeMCPBridge{
-		statusSeq: []*CRGStatus{
-			{Nodes: 1, Files: 1, Ready: true},
-			{Nodes: 1, Edges: 0, Files: 1, Ready: true},
-		},
-	}
-	srv := &MCPServer{bridge: bridge}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"build_or_update_graph_tool","arguments":{}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-	if bridge.updateCalls != 1 || bridge.buildCalls != 0 {
-		t.Fatalf("expected update path; build=%d update=%d", bridge.buildCalls, bridge.updateCalls)
-	}
-}
-
-// TestKGServeBuildOrUpdateGraph_NoBridge verifies the missing-bridge error path.
-func TestKGServeBuildOrUpdateGraph_NoBridge(t *testing.T) {
-	srv := &MCPServer{bridgeErr: io.EOF}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"build_or_update_graph_tool","arguments":{}}}`)
-	if resp.Error == nil {
-		t.Fatal("expected error when bridge is unavailable")
-	}
-}
-
-// TestKGServeEmbedGraph_OK verifies the embed_graph_tool happy path.
-func TestKGServeEmbedGraph_OK(t *testing.T) {
-	bridge := &fakeMCPBridge{}
-	srv := &MCPServer{bridge: bridge}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"embed_graph_tool","arguments":{}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-	if bridge.postCalls != 1 {
-		t.Errorf("expected 1 postprocess call, got %d", bridge.postCalls)
-	}
-}
-
-// TestKGServeEmbedGraph_Error verifies the embed_graph_tool returns status:error
-// when Postprocess fails.
-func TestKGServeEmbedGraph_Error(t *testing.T) {
-	bridge := &fakeMCPBridge{postErr: io.EOF}
-	srv := &MCPServer{bridge: bridge}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"embed_graph_tool","arguments":{}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected RPC error: %+v", resp.Error)
-	}
-	p := decodeResultMap(t, resp)
-	if p["status"] != "error" {
-		t.Errorf("expected status=error, got %v", p)
-	}
-}
-
-// TestKGServeSemanticSearch_MissingQuery verifies the invalid-params error
-// path for empty query.
-func TestKGServeSemanticSearch_MissingQuery(t *testing.T) {
-	srv := &MCPServer{}
-	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"semantic_search_nodes_tool","arguments":{"query":""}}}`, -32602)
-}
-
-// TestKGServeSemanticSearch_DefaultLimit verifies that limit<=0 falls back to
-// the default of 20.
-func TestKGServeSemanticSearch_DefaultLimit(t *testing.T) {
-	srv := &MCPServer{}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"semantic_search_nodes_tool","arguments":{"query":"foo"}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-}
-
-// TestKGServeGetImpactRadius_MissingSymbol verifies invalid-params error
-// for empty symbol.
-func TestKGServeGetImpactRadius_MissingSymbol(t *testing.T) {
-	srv := &MCPServer{bridge: &fakeMCPBridge{}}
-	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_impact_radius_tool","arguments":{"symbol":""}}}`, -32602)
-}
-
-// TestKGServeGetImpactRadius_DepthDefault verifies depth<=0 falls back to 2.
-func TestKGServeGetImpactRadius_DepthDefault(t *testing.T) {
-	bridge := &fakeMCPBridge{
-		statusSeq: []*CRGStatus{{State: string(CRGReadinessReady), Ready: true}},
-		impact:    &CRGImpactResult{ChangedNodes: []ImpactNode{{Name: "x"}}},
-	}
-	srv := &MCPServer{bridge: bridge}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_impact_radius_tool","arguments":{"symbol":"x"}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-}
-
-// TestKGServeGetReviewContext_MissingFiles verifies invalid-params error
-// for empty files list.
-func TestKGServeGetReviewContext_MissingFiles(t *testing.T) {
-	srv := &MCPServer{bridge: &fakeMCPBridge{}}
-	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_review_context_tool","arguments":{"files":[]}}}`, -32602)
-}
-
-// TestKGServeGetDocsSection_MissingSection verifies invalid-params error
-// for empty section.
-func TestKGServeGetDocsSection_MissingSection(t *testing.T) {
-	srv := &MCPServer{}
-	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_docs_section_tool","arguments":{"section":""}}}`, -32602)
-}
-
-// TestKGServeGetDocsSection_NotFound verifies empty payload when section is
-// not in any candidate doc.
-func TestKGServeGetDocsSection_NotFound(t *testing.T) {
-	srv := &MCPServer{workDir: t.TempDir()}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_docs_section_tool","arguments":{"section":"nonexistent"}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-	p := decodeResultMap(t, resp)
-	if p["content"] != "" || p["source"] != "" {
-		t.Errorf("expected empty content/source, got %v", p)
-	}
-}
-
-// TestKGServeGetDocsSection_Found verifies the section is extracted from a
-// markdown file under <workDir>/.agents/workflow/specs.
-func TestKGServeGetDocsSection_Found(t *testing.T) {
-	dir := t.TempDir()
-	specDir := filepath.Join(dir, ".agents", "workflow", "specs", "scoped-knowledge-graphs")
-	_ = os.MkdirAll(specDir, 0o755)
-	mdPath := filepath.Join(specDir, "design.md")
-	_ = os.WriteFile(mdPath, []byte("# Top\n\n## Target Section\n\nContent here.\n\n## Next\n"), 0o644)
-
-	srv := &MCPServer{workDir: dir}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_docs_section_tool","arguments":{"section":"Target Section"}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-	p := decodeResultMap(t, resp)
-	if !strings.Contains(p["content"].(string), "Target Section") {
-		t.Errorf("expected section to contain heading, got %v", p)
-	}
-}
-
-// TestKGServeQueryGraph_SemanticIntent routes to semantic search.
-func TestKGServeQueryGraph_SemanticIntent(t *testing.T) {
-	srv := &MCPServer{}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_graph_tool","arguments":{"intent":"semantic_search","query":"foo"}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-}
-
-// TestKGServeQueryGraph_UnknownIntent yields warnings and an empty result.
-func TestKGServeQueryGraph_UnknownIntent(t *testing.T) {
-	srv := &MCPServer{}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_graph_tool","arguments":{"intent":"banana","query":"x"}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-	p := decodeResultMap(t, resp)
-	if p["warnings"] == nil {
-		t.Errorf("expected warnings field for unsupported intent, got %v", p)
-	}
-}
-
-// TestKGServeQueryGraph_DocsIntent routes to get_docs_section_tool.
-func TestKGServeQueryGraph_DocsIntent(t *testing.T) {
-	srv := &MCPServer{workDir: t.TempDir()}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_graph_tool","arguments":{"intent":"docs_section","query":"foo"}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %+v", resp.Error)
-	}
-}
-
-// TestKGServeListGraphStats_NoStore returns an error when the store is absent.
-func TestKGServeListGraphStats_NoStore(t *testing.T) {
-	srv := &MCPServer{storeErr: io.EOF}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_graph_stats_tool","arguments":{}}}`)
-	if resp.Error == nil {
-		t.Fatal("expected error when store is unavailable")
 	}
 }
 
@@ -611,112 +238,6 @@ func TestRPCError_Error(t *testing.T) {
 	e := &rpcError{Message: "boom"}
 	if e.Error() != "boom" {
 		t.Errorf("got %q", e.Error())
-	}
-}
-
-// TestDedupImpactNodes_RemovesDuplicates verifies dedup by qualified name (or
-// fallback name) keeps the first occurrence only.
-func TestDedupImpactNodes_RemovesDuplicates(t *testing.T) {
-	changed := []ImpactNode{{QualifiedName: "a", Name: "a"}, {QualifiedName: "b", Name: "b"}}
-	impacted := []ImpactNode{{QualifiedName: "b", Name: "b"}, {QualifiedName: "c", Name: "c"}}
-	nodes := dedupImpactNodes(changed, impacted)
-	if len(nodes) != 3 {
-		t.Errorf("expected 3 unique nodes, got %d", len(nodes))
-	}
-}
-
-// TestDedupImpactNodes_FallbackToName uses Name when QualifiedName is empty.
-func TestDedupImpactNodes_FallbackToName(t *testing.T) {
-	changed := []ImpactNode{{Name: "a"}}
-	impacted := []ImpactNode{{Name: "a"}, {Name: "b"}}
-	nodes := dedupImpactNodes(changed, impacted)
-	if len(nodes) != 2 {
-		t.Errorf("expected 2 unique nodes (a from changed, b from impacted), got %d", len(nodes))
-	}
-}
-
-// TestImpactNodeToMCP and TestGraphNodeToMCP cover the small projectors.
-func TestImpactNodeToMCP(t *testing.T) {
-	got := impactNodeToMCP(ImpactNode{Name: "n", Kind: "Function", FilePath: "f.go"})
-	if got["name"] != "n" || got["type"] != "Function" || got["file"] != "f.go" {
-		t.Errorf("unexpected projection: %v", got)
-	}
-}
-
-func TestGraphNodeToMCP(t *testing.T) {
-	got := graphNodeToMCP(GraphNode{Name: "n", Kind: "Class", FilePath: "f.go"})
-	if got["type"] != "Class" {
-		t.Errorf("unexpected projection: %v", got)
-	}
-}
-
-// TestParseHeading covers heading-detection edge cases.
-func TestParseHeading(t *testing.T) {
-	cases := []struct {
-		line    string
-		level   int
-		heading string
-		ok      bool
-	}{
-		{"# Top", 1, "Top", true},
-		{"## Section", 2, "Section", true},
-		{"### Sub", 3, "Sub", true},
-		{"not a heading", 0, "", false},
-		{"#nospace", 0, "", false},
-		{"#", 0, "", false},
-		{"#### Deep heading  ", 4, "Deep heading", true},
-	}
-	for _, c := range cases {
-		level, heading, ok := parseHeading(c.line)
-		if ok != c.ok || level != c.level || heading != c.heading {
-			t.Errorf("parseHeading(%q) = (%d,%q,%v), want (%d,%q,%v)",
-				c.line, level, heading, ok, c.level, c.heading, c.ok)
-		}
-	}
-}
-
-// TestNormalizeHeading covers casefold + underscore→space + whitespace collapse.
-func TestNormalizeHeading(t *testing.T) {
-	if got := normalizeHeading("  Foo_Bar   Baz "); got != "foo bar baz" {
-		t.Errorf("got %q", got)
-	}
-}
-
-// TestExtractMarkdownSection_TopLevel finds top-level section and trims.
-func TestExtractMarkdownSection_TopLevel(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "doc.md")
-	_ = os.WriteFile(p, []byte("# A\nhello\n\n# B\nworld\n"), 0o644)
-	got, ok := extractMarkdownSection(p, "B")
-	if !ok || !strings.Contains(got, "world") {
-		t.Errorf("got=%q ok=%v", got, ok)
-	}
-}
-
-// TestExtractMarkdownSection_NotFound returns false when heading absent.
-func TestExtractMarkdownSection_NotFound(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "doc.md")
-	_ = os.WriteFile(p, []byte("# A\nhello\n"), 0o644)
-	_, ok := extractMarkdownSection(p, "missing")
-	if ok {
-		t.Error("expected not found")
-	}
-}
-
-// TestExtractMarkdownSection_FileMissing returns false when file does not exist.
-func TestExtractMarkdownSection_FileMissing(t *testing.T) {
-	_, ok := extractMarkdownSection("/no/such/file.md", "x")
-	if ok {
-		t.Error("expected false when file missing")
-	}
-}
-
-// TestMustMarshal covers the tiny encoder helper.
-func TestMustMarshal(t *testing.T) {
-	out := mustMarshal(map[string]any{"a": 1})
-	if !bytes.Contains(out, []byte("\"a\"")) {
-		t.Errorf("unexpected: %s", out)
 	}
 }
 
@@ -812,175 +333,41 @@ func TestDefaultGraphstoreDBPath(t *testing.T) {
 	}
 }
 
-// TestNewMCPServer constructs and verifies fields are populated (or errors
-// recorded) without panicking.
-func TestNewMCPServer(t *testing.T) {
-	srv := NewMCPServer(t.TempDir())
-	if srv == nil {
-		t.Fatal("nil server")
-	}
-	// bridge may be nil if CRG not on PATH — that's fine; bridgeErr should
-	// then be non-nil.
-	if srv.bridge == nil && srv.bridgeErr == nil {
-		t.Error("either bridge or bridgeErr must be set")
-	}
-}
-
-// TestGraphReadinessGuardJSON covers each readiness branch.
-func TestGraphReadinessGuardJSON_Unbuilt(t *testing.T) {
-	bridge := &fakeMCPBridge{statusSeq: []*CRGStatus{{State: string(CRGReadinessUnbuilt)}}}
-	out, err := graphReadinessGuardJSON(bridge)
-	if err != nil || out == nil {
-		t.Errorf("unbuilt: got out=%s err=%v", out, err)
-	}
-}
-
-func TestGraphReadinessGuardJSON_BusyLocked(t *testing.T) {
-	bridge := &fakeMCPBridge{statusSeq: []*CRGStatus{{State: string(CRGReadinessBusyOrLocked)}}}
-	out, err := graphReadinessGuardJSON(bridge)
-	if err != nil || out == nil {
-		t.Errorf("busy: got out=%s err=%v", out, err)
-	}
-}
-
-func TestGraphReadinessGuardJSON_Ready(t *testing.T) {
-	bridge := &fakeMCPBridge{statusSeq: []*CRGStatus{{State: string(CRGReadinessReady), Ready: true}}}
-	out, err := graphReadinessGuardJSON(bridge)
-	if err != nil || out != nil {
-		t.Errorf("ready: should pass through, got out=%s err=%v", out, err)
-	}
-}
-
-func TestGraphReadinessGuardJSON_StatusErr(t *testing.T) {
-	bridge := &fakeMCPBridge{statusErr: io.EOF}
-	out, err := graphReadinessGuardJSON(bridge)
-	if err != nil || out != nil {
-		t.Errorf("status error: should pass through, got out=%s err=%v", out, err)
-	}
-}
-
-// TestCollectStatsLanguages_BridgeFallback covers the bridge-fallback path
-// when the warm store has no languages.
-func TestCollectStatsLanguages_BridgeFallback(t *testing.T) {
-	bridge := &fakeMCPBridge{statusSeq: []*CRGStatus{{Languages: "go, python"}}}
-	srv := &MCPServer{bridge: bridge}
-	got := srv.collectStatsLanguages(GraphStats{})
-	if got["go"] != 1 || got["python"] != 1 {
-		t.Errorf("expected go+python from bridge, got %v", got)
-	}
-}
-
-// TestCollectStatsLanguages_StoreWins prefers stats.Languages.
-func TestCollectStatsLanguages_StoreWins(t *testing.T) {
-	srv := &MCPServer{}
-	got := srv.collectStatsLanguages(GraphStats{Languages: []string{"go", "rust"}})
-	if got["go"] != 1 || got["rust"] != 1 {
-		t.Errorf("expected go+rust, got %v", got)
-	}
-}
-
-// TestCollectStatsLanguages_BridgeStatusError yields empty map.
-func TestCollectStatsLanguages_BridgeStatusError(t *testing.T) {
-	bridge := &fakeMCPBridge{statusErr: io.EOF}
-	srv := &MCPServer{bridge: bridge}
-	got := srv.collectStatsLanguages(GraphStats{})
-	if len(got) != 0 {
-		t.Errorf("expected empty map on bridge status error, got %v", got)
-	}
-}
-
-// TestCollectStatsLanguages_NoBridge yields empty map.
-func TestCollectStatsLanguages_NoBridge(t *testing.T) {
-	srv := &MCPServer{}
-	got := srv.collectStatsLanguages(GraphStats{})
-	if len(got) != 0 {
-		t.Errorf("expected empty map without bridge, got %v", got)
-	}
-}
-
-// TestCountStatsCommunities_NoBridge returns 0.
-func TestCountStatsCommunities_NoBridge(t *testing.T) {
-	srv := &MCPServer{}
-	if c := srv.countStatsCommunities(); c != 0 {
-		t.Errorf("got %d", c)
-	}
-}
-
-// TestCountStatsCommunities_WithBridge returns the slice length.
-func TestCountStatsCommunities_WithBridge(t *testing.T) {
-	bridge := &fakeMCPBridge{communities: &CommunitiesResult{Communities: []CommunityInfo{{Name: "x"}, {Name: "y"}}}}
-	srv := &MCPServer{bridge: bridge}
-	if c := srv.countStatsCommunities(); c != 2 {
-		t.Errorf("got %d", c)
-	}
-}
-
-// TestReviewChangedSymbols projects CRGChangedNode list into MCP payloads.
-func TestReviewChangedSymbols(t *testing.T) {
-	out := reviewChangedSymbols([]CRGChangedNode{{QualifiedName: "pkg.f", FilePath: "f.go", RiskScore: 0.5}})
-	if len(out) != 1 || out[0]["name"] != "pkg.f" {
-		t.Errorf("unexpected: %v", out)
-	}
-}
-
-// TestReviewImpactNodes_NoStore returns an empty slice when no store.
-func TestReviewImpactNodes_NoStore(t *testing.T) {
-	srv := &MCPServer{}
-	out := srv.reviewImpactNodes([]string{"a.go"})
-	if len(out) != 0 {
-		t.Errorf("expected empty, got %v", out)
-	}
-}
-
-// TestRequireBridge_OK returns the bridge.
-func TestRequireBridge_OK(t *testing.T) {
-	bridge := &fakeMCPBridge{}
-	srv := &MCPServer{bridge: bridge}
-	got, err := srv.requireBridge()
-	if err != nil || got == nil {
-		t.Errorf("got err=%v", err)
-	}
-}
-
-// TestRequireBridge_StoredErr returns the stored bridgeErr.
-func TestRequireBridge_StoredErr(t *testing.T) {
-	srv := &MCPServer{bridgeErr: io.EOF}
-	if _, err := srv.requireBridge(); err == nil {
-		t.Error("expected error")
-	}
-}
-
-// TestRequireBridge_NoBridgeNoErr returns a synthetic error.
-func TestRequireBridge_NoBridgeNoErr(t *testing.T) {
-	srv := &MCPServer{}
-	if _, err := srv.requireBridge(); err == nil {
-		t.Error("expected error")
-	}
-}
-
 // ── CRG internal helpers ─────────────────────────────────────────────────────
 
-func TestParseCRGMutationSummary_typical(t *testing.T) {
-	out := []byte("3 files updated, 12 nodes changed, 7 edges changed\n")
-	files, nodes, edges, ok := parseCRGMutationSummary(out)
-	if !ok || files != 3 || nodes != 12 || edges != 7 {
-		t.Errorf("got files=%d nodes=%d edges=%d ok=%v", files, nodes, edges, ok)
+func TestParseCRGBuildOutput_FullBuildLine(t *testing.T) {
+	out := []byte("INFO: starting\nFull build: 4 files, 16 nodes, 29 edges (postprocess=full)\n")
+	rep := parseCRGBuildOutput(out)
+	if rep.BuildType != crgBuildTypeFull {
+		t.Fatalf("build_type = %q, want %q", rep.BuildType, crgBuildTypeFull)
+	}
+	if rep.FilesParsed == nil || *rep.FilesParsed != 4 ||
+		rep.TotalNodes == nil || *rep.TotalNodes != 16 ||
+		rep.TotalEdges == nil || *rep.TotalEdges != 29 {
+		t.Fatalf("counters = %+v, want 4/16/29", rep)
+	}
+	if rep.Summary != FullBuildSummary(4, 16, 29) {
+		t.Errorf("summary = %q, want upstream's sentence", rep.Summary)
 	}
 }
 
-func TestParseCRGMutationSummary_skipsInfoLines(t *testing.T) {
-	out := []byte("INFO: starting\n5 files, 10 nodes, 2 edges\n")
-	files, nodes, edges, ok := parseCRGMutationSummary(out)
-	if !ok || files != 5 || nodes != 10 || edges != 2 {
-		t.Errorf("got files=%d nodes=%d edges=%d ok=%v", files, nodes, edges, ok)
+func TestParseCRGBuildOutput_CountsErrors(t *testing.T) {
+	rep := parseCRGBuildOutput([]byte("Full build: 1 files, 1 nodes, 0 edges (postprocess=none)\nErrors: 2\n"))
+	if rep.Errors == nil || len(*rep.Errors) != 2 {
+		t.Fatalf("errors = %v, want two entries", rep.Errors)
 	}
 }
 
-func TestParseCRGMutationSummary_noMatch(t *testing.T) {
-	out := []byte("nothing here\n")
-	_, _, _, ok := parseCRGMutationSummary(out)
-	if ok {
-		t.Error("expected no match")
+// TestParseCRGBuildOutput_UnrecognisedOutput pins the fail-loud behaviour: an
+// output the parser does not recognise yields NO counters, so a future CLI
+// format change is visible rather than silently producing wrong numbers.
+func TestParseCRGBuildOutput_UnrecognisedOutput(t *testing.T) {
+	rep := parseCRGBuildOutput([]byte("nothing here\n"))
+	if rep.TotalNodes != nil || rep.FilesParsed != nil || rep.FilesUpdated != nil {
+		t.Fatalf("unrecognised output produced counters: %+v", rep)
+	}
+	if rep.Summary != "nothing here" {
+		t.Errorf("summary = %q, want the raw transcript", rep.Summary)
 	}
 }
 
@@ -1036,8 +423,8 @@ func TestClassifyCRGRunError_EmptyOutput(t *testing.T) {
 }
 
 func TestNormalizeCRGUpdatedAt(t *testing.T) {
-	if got := normalizeCRGUpdatedAt(""); got != "never" {
-		t.Errorf("empty: got %q", got)
+	if got := normalizeCRGUpdatedAt("  "); got != "" {
+		t.Errorf("blank input must normalize to the empty (JSON null) value: got %q", got)
 	}
 	if got := normalizeCRGUpdatedAt("2026-04-11T00:49:52"); got != "2026-04-11T00:49:52" {
 		t.Errorf("rfc3339-ish passthrough: got %q", got)
@@ -1169,9 +556,12 @@ func TestDecodeExtra_Populated(t *testing.T) {
 	}
 }
 
+// TestMakeQualified_WithParent pins the nested identity on upstream's shape:
+// the file path stays in the identity, so two receivers of the same name in
+// different files never collapse into one node.
 func TestMakeQualified_WithParent(t *testing.T) {
-	got := makeQualified(NodeInfo{Name: "Bar", ParentName: "Foo"})
-	if got != "Foo.Bar" {
+	got := makeQualified(NodeInfo{Name: "Bar", ParentName: "Foo", FilePath: "f.go"})
+	if got != "f.go::Foo.Bar" {
 		t.Errorf("got %q", got)
 	}
 }
@@ -1179,6 +569,16 @@ func TestMakeQualified_WithParent(t *testing.T) {
 func TestMakeQualified_FilePath(t *testing.T) {
 	got := makeQualified(NodeInfo{Name: "Bar", FilePath: "f.go"})
 	if got != "f.go::Bar" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// TestMakeQualified_FileNodeIsBarePath pins the File arm: every IMPORTS_FROM
+// and file-sourced CONTAINS edge names a file by its bare path, so the File
+// node's identity must be that path and not "<path>::<path>".
+func TestMakeQualified_FileNodeIsBarePath(t *testing.T) {
+	got := makeQualified(NodeInfo{Kind: NodeKindFile, Name: "f.go", FilePath: "dir/f.go"})
+	if got != "dir/f.go" {
 		t.Errorf("got %q", got)
 	}
 }
@@ -1267,37 +667,4 @@ func TestAppendUnvisited_SkipsVisited(t *testing.T) {
 // errFmt is a tiny helper to construct an error from a literal string.
 func errFmt(msg string) error {
 	return fmt.Errorf("%s", msg)
-}
-
-// TestHandleGetReviewContext_ReadyGraphProceedsNormally verifies that when the
-// graph is ready, handleGetReviewContext proceeds to call DetectChanges.
-func TestHandleGetReviewContext_ReadyGraphProceedsNormally(t *testing.T) {
-	bridge := &fakeMCPBridge{
-		statusSeq: []*CRGStatus{
-			{State: string(CRGReadinessReady), Ready: true, Nodes: 100, Edges: 200, Files: 10},
-		},
-		detect: &CRGChangeReport{
-			Summary:          "1 changed function",
-			ChangedFunctions: []CRGChangedNode{{Name: "foo", QualifiedName: "pkg.foo", FilePath: "pkg/foo.go"}},
-		},
-	}
-	srv := &MCPServer{bridge: bridge}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_review_context_tool","arguments":{"files":["pkg/foo.go"]}}}`)
-	if resp.Error != nil {
-		t.Fatalf("unexpected RPC error: %+v", resp.Error)
-	}
-	resultBytes, err := json.Marshal(resp.Result)
-	if err != nil {
-		t.Fatalf("marshal result: %v", err)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(resultBytes, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if payload["error"] != nil {
-		t.Fatalf("unexpected error field in ready-graph response: %v", payload)
-	}
-	if payload["changed_symbols"] == nil {
-		t.Fatalf("expected 'changed_symbols' in ready-graph response, got: %v", payload)
-	}
 }

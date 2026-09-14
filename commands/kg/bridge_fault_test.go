@@ -667,6 +667,7 @@ func TestRunKGWarmCodeImport_HappyPath(t *testing.T) {
 // TestWarmCodeLane_Success drives the warmCodeLane success path inside
 // runKGWarm via direct invocation, exercising the metadata-update branch.
 func TestWarmCodeLane_Success(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	writeFakeCRGBinary(t, repo, "exit 0")
 	writeCRGFullSchema(t, repo,
@@ -761,6 +762,7 @@ func withFakeCRGRepo(t *testing.T, body string) string {
 // DetectChanges-error return (~444-446) using a fake CRG that fails on the
 // detect-changes subcommand.
 func TestCollectChangeAnalysisResults_DetectChangesError(t *testing.T) {
+	useBridgeBackend(t)
 	withFakeCRGRepo(t, `case "$1" in
 detect-changes) echo "boom" >&2; exit 1 ;;
 *) exit 0 ;;
@@ -774,6 +776,7 @@ esac`)
 // TestCollectChangeAnalysisResults_LimitTerminationAtChangedFunctions drives
 // the changed-function limit-early-return path (~448-450).
 func TestCollectChangeAnalysisResults_LimitTerminationAtChangedFunctions(t *testing.T) {
+	useBridgeBackend(t)
 	json := `{"summary":"2","risk_score":0.5,"changed_functions":[{"name":"A","qualified_name":"a","file_path":"a.go","risk_score":0.4},{"name":"B","qualified_name":"b","file_path":"b.go","risk_score":0.5}],"affected_flows":[],"test_gaps":[],"review_priorities":[]}`
 	body := "case \"$1\" in\ndetect-changes) printf '%s\\n' '" + json + "' ;;\n*) exit 0 ;;\nesac"
 	withFakeCRGRepo(t, body)
@@ -789,6 +792,7 @@ func TestCollectChangeAnalysisResults_LimitTerminationAtChangedFunctions(t *test
 // TestCollectChangeAnalysisResults_LimitTerminationAtTestGaps drives the
 // test-gap limit-early-return (~451-453).
 func TestCollectChangeAnalysisResults_LimitTerminationAtTestGaps(t *testing.T) {
+	useBridgeBackend(t)
 	json := `{"summary":"x","risk_score":0,"changed_functions":[],"affected_flows":[],"test_gaps":[{"qualified_name":"a","file_path":"a.go"},{"qualified_name":"b","file_path":"b.go"}],"review_priorities":[]}`
 	body := "case \"$1\" in\ndetect-changes) printf '%s\\n' '" + json + "' ;;\n*) exit 0 ;;\nesac"
 	withFakeCRGRepo(t, body)
@@ -804,6 +808,7 @@ func TestCollectChangeAnalysisResults_LimitTerminationAtTestGaps(t *testing.T) {
 // TestCollectChangeAnalysisResults_LimitTerminationAtReviewPriorities drives
 // the review-priority limit-early-return (~454-456).
 func TestCollectChangeAnalysisResults_LimitTerminationAtReviewPriorities(t *testing.T) {
+	useBridgeBackend(t)
 	json := `{"summary":"x","risk_score":0,"changed_functions":[],"affected_flows":[],"test_gaps":[],"review_priorities":[{"qualified_name":"a","reason":"r1","risk_score":0.4},{"qualified_name":"b","reason":"r2","risk_score":0.5}]}`
 	body := "case \"$1\" in\ndetect-changes) printf '%s\\n' '" + json + "' ;;\n*) exit 0 ;;\nesac"
 	withFakeCRGRepo(t, body)
@@ -820,6 +825,7 @@ func TestCollectChangeAnalysisResults_LimitTerminationAtReviewPriorities(t *test
 // ListCommunities-error return (~564-566). ListCommunities is implemented via
 // `python3 -c`, so we install a fake python that exits non-zero.
 func TestCollectCommunityContextResults_ListCommunitiesError(t *testing.T) {
+	useBridgeBackend(t)
 	repo := t.TempDir()
 	initGitRepo(t, repo)
 	binDir := filepath.Join(repo, ".venv", "bin")

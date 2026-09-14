@@ -1,0 +1,52 @@
+{
+  "arguments": {
+    "detail_level": "minimal",
+    "top_n": 3
+  },
+  "case": "minimal",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"5 bridge node(s) ranked by betweenness, showing 3 of 5\",\"bridge_nodes\":[{\"name\":\"handleLogin\",\"kind\":\"Function\",\"betweenness\":0.02619},{\"name\":\"TestLogin\",\"kind\":\"Test\",\"betweenness\":0.021429},{\"name\":\"TestValidateToken\",\"kind\":\"Test\",\"betweenness\":0.021429}],\"count\":3,\"total\":5,\"truncated\":true,\"next_tool_suggestions\":[\"get_hub_nodes -- find most connected nodes\",\"get_impact_radius -- check blast radius\",\"detect_changes -- see if bridges are affected\"],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "bridge_nodes": [
+      {
+        "betweenness": 0.02619,
+        "kind": "Function",
+        "name": "handleLogin"
+      },
+      {
+        "betweenness": 0.021429,
+        "kind": "Test",
+        "name": "TestLogin"
+      },
+      {
+        "betweenness": 0.021429,
+        "kind": "Test",
+        "name": "TestValidateToken"
+      }
+    ],
+    "count": 3,
+    "next_tool_suggestions": [
+      "get_hub_nodes -- find most connected nodes",
+      "get_impact_radius -- check blast radius",
+      "detect_changes -- see if bridges are affected"
+    ],
+    "status": "ok",
+    "summary": "5 bridge node(s) ranked by betweenness, showing 3 of 5",
+    "total": 5,
+    "truncated": true
+  },
+  "tool": "get_bridge_nodes_tool"
+}

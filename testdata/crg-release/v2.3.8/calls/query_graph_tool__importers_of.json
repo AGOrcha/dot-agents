@@ -1,0 +1,35 @@
+{
+  "arguments": {
+    "pattern": "importers_of",
+    "target": "pkg/auth/auth.go"
+  },
+  "case": "importers_of",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"pattern\":\"importers_of\",\"target\":\"pkg/auth/auth.go\",\"description\":\"Find all files that import a given file or module\",\"summary\":\"Found 0 result(s) for importers_of('pkg/auth/auth.go')\",\"result_count\":0,\"results_omitted\":0,\"results\":[],\"edges\":[],\"confidence\":\"'pkg/auth/auth.go' is indexed and the graph is current, so this 0 is a real absence\",\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "confidence": "'pkg/auth/auth.go' is indexed and the graph is current, so this 0 is a real absence",
+    "description": "Find all files that import a given file or module",
+    "edges": [],
+    "pattern": "importers_of",
+    "result_count": 0,
+    "results": [],
+    "results_omitted": 0,
+    "status": "ok",
+    "summary": "Found 0 result(s) for importers_of('pkg/auth/auth.go')",
+    "target": "pkg/auth/auth.go"
+  },
+  "tool": "query_graph_tool"
+}

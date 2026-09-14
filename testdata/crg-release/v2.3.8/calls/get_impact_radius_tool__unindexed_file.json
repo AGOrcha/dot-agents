@@ -1,0 +1,39 @@
+{
+  "arguments": {
+    "changed_files": [
+      "docs/not-indexed.md"
+    ]
+  },
+  "case": "unindexed_file",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Blast radius for 1 changed file(s):\\n  - 0 nodes directly changed\\n  - 0 nodes impacted (within 2 hops)\\n  - 0 additional files affected\",\"changed_files\":[\"docs/not-indexed.md\"],\"changed_nodes\":[],\"impacted_nodes\":[],\"impacted_files\":[],\"edges\":[],\"truncated\":false,\"total_impacted\":0,\"nodes_omitted\":0,\"confidence\":\"target not indexed: no node matching 'not-indexed.md', so this 0 is not evidence that none exist\",\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "changed_files": [
+      "docs/not-indexed.md"
+    ],
+    "changed_nodes": [],
+    "confidence": "target not indexed: no node matching 'not-indexed.md', so this 0 is not evidence that none exist",
+    "edges": [],
+    "impacted_files": [],
+    "impacted_nodes": [],
+    "nodes_omitted": 0,
+    "status": "ok",
+    "summary": "Blast radius for 1 changed file(s):\n  - 0 nodes directly changed\n  - 0 nodes impacted (within 2 hops)\n  - 0 additional files affected",
+    "total_impacted": 0,
+    "truncated": false
+  },
+  "tool": "get_impact_radius_tool"
+}

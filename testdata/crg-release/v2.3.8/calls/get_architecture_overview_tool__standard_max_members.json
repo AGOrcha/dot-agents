@@ -1,0 +1,79 @@
+{
+  "arguments": {
+    "detail_level": "standard",
+    "max_members": 1
+  },
+  "case": "standard_max_members",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Architecture: 2 communities, 0 cross-community edges, 0 warning(s)\",\"communities\":[{\"id\":2,\"name\":\"auth-token\",\"level\":0,\"cohesion\":0.15,\"size\":9,\"dominant_language\":\"go\",\"description\":\"Directory-based community: pkg/auth\",\"members\":[\"${REPO_ROOT}/pkg/auth/auth.go::Session\"],\"members_total\":9,\"members_truncated\":true},{\"id\":1,\"name\":\"cmd-handle\",\"level\":0,\"cohesion\":0.2857,\"size\":3,\"dominant_language\":\"go\",\"description\":\"Directory-based community: cmd\",\"members\":[\"${REPO_ROOT}/cmd/main.go::main\"],\"members_total\":3,\"members_truncated\":true}],\"cross_community_edges\":[],\"warnings\":[],\"cross_community_edges_total\":0,\"truncated\":false,\"_hints\":{\"next_steps\":[{\"tool\":\"list_communities\",\"suggestion\":\"Drill into individual communities\"},{\"tool\":\"detect_changes\",\"suggestion\":\"See how recent changes affect the architecture\"},{\"tool\":\"list_flows\",\"suggestion\":\"Explore execution flows\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Drill into individual communities",
+          "tool": "list_communities"
+        },
+        {
+          "suggestion": "See how recent changes affect the architecture",
+          "tool": "detect_changes"
+        },
+        {
+          "suggestion": "Explore execution flows",
+          "tool": "list_flows"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "communities": [
+      {
+        "cohesion": 0.15,
+        "description": "Directory-based community: pkg/auth",
+        "dominant_language": "go",
+        "id": 2,
+        "level": 0,
+        "members": [
+          "${REPO_ROOT}/pkg/auth/auth.go::Session"
+        ],
+        "members_total": 9,
+        "members_truncated": true,
+        "name": "auth-token",
+        "size": 9
+      },
+      {
+        "cohesion": 0.2857,
+        "description": "Directory-based community: cmd",
+        "dominant_language": "go",
+        "id": 1,
+        "level": 0,
+        "members": [
+          "${REPO_ROOT}/cmd/main.go::main"
+        ],
+        "members_total": 3,
+        "members_truncated": true,
+        "name": "cmd-handle",
+        "size": 3
+      }
+    ],
+    "cross_community_edges": [],
+    "cross_community_edges_total": 0,
+    "status": "ok",
+    "summary": "Architecture: 2 communities, 0 cross-community edges, 0 warning(s)",
+    "truncated": false,
+    "warnings": []
+  },
+  "tool": "get_architecture_overview_tool"
+}

@@ -1,0 +1,28 @@
+{
+  "arguments": {
+    "pattern": "callers_of",
+    "target": "nosuchsymbol"
+  },
+  "case": "unresolved_target",
+  "content": [
+    {
+      "text": "{\"status\":\"not_found\",\"summary\":\"No node found matching 'nosuchsymbol'.\",\"confidence\":\"target not indexed: no node matching 'nosuchsymbol', so this 0 is not evidence that none exist\",\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "confidence": "target not indexed: no node matching 'nosuchsymbol', so this 0 is not evidence that none exist",
+    "status": "not_found",
+    "summary": "No node found matching 'nosuchsymbol'."
+  },
+  "tool": "query_graph_tool"
+}

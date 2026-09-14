@@ -1,0 +1,142 @@
+{
+  "arguments": {
+    "detail_level": "standard",
+    "max_results": 1
+  },
+  "case": "coupling_standard_one_result",
+  "is_error": false,
+  "structured_content": {
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Drill into individual communities",
+          "tool": "list_communities"
+        },
+        {
+          "suggestion": "See how recent changes affect the architecture",
+          "tool": "detect_changes"
+        },
+        {
+          "suggestion": "Explore execution flows",
+          "tool": "list_flows"
+        }
+      ],
+      "related": [],
+      "warnings": [
+        "High coupling (13 edges) between 'alpha' and 'beta'"
+      ]
+    },
+    "communities": [
+      {
+        "cohesion": 0.625,
+        "description": "Directory-based community: e",
+        "dominant_language": "go",
+        "id": 5,
+        "level": 0,
+        "members": [
+          "${REPO_ROOT}/e.go::E1",
+          "${REPO_ROOT}/e.go::E2",
+          "${REPO_ROOT}/e.go::E3",
+          "${REPO_ROOT}/e.go::E4",
+          "${REPO_ROOT}/e.go::E5",
+          "${REPO_ROOT}/e.go::E6",
+          "${REPO_ROOT}/e.go::E7",
+          "${REPO_ROOT}/e.go::E8",
+          "${REPO_ROOT}/e.go::E9",
+          "${REPO_ROOT}/e.go::E10"
+        ],
+        "members_total": 30,
+        "members_truncated": true,
+        "name": "epsilon",
+        "size": 30
+      },
+      {
+        "cohesion": 0.75,
+        "description": "Directory-based community: c",
+        "dominant_language": "go",
+        "id": 3,
+        "level": 0,
+        "members": [
+          "${REPO_ROOT}/c_test.go::T1",
+          "${REPO_ROOT}/c_test.go::T2",
+          "${REPO_ROOT}/c_test.go::T3",
+          "${REPO_ROOT}/c_test.go::T4",
+          "${REPO_ROOT}/c_test.go::T5"
+        ],
+        "name": "c-test",
+        "size": 5
+      },
+      {
+        "cohesion": 0.5,
+        "description": "Directory-based community: a",
+        "dominant_language": "go",
+        "id": 1,
+        "level": 0,
+        "members": [
+          "${REPO_ROOT}/a.go::A1",
+          "${REPO_ROOT}/a.go::A2",
+          "${REPO_ROOT}/a.go::A3",
+          "${REPO_ROOT}/a.go::A4"
+        ],
+        "name": "alpha",
+        "size": 4
+      },
+      {
+        "cohesion": 0.25,
+        "description": "Directory-based community: b",
+        "dominant_language": "go",
+        "id": 2,
+        "level": 0,
+        "members": [
+          "${REPO_ROOT}/b.go::B1",
+          "${REPO_ROOT}/b.go::B2",
+          "${REPO_ROOT}/b.go::B3"
+        ],
+        "name": "beta",
+        "size": 3
+      },
+      {
+        "cohesion": 0.125,
+        "description": "Directory-based community: d",
+        "dominant_language": "go",
+        "id": 4,
+        "level": 0,
+        "members": [
+          "${REPO_ROOT}/d.go::D1",
+          "${REPO_ROOT}/d.go::D2"
+        ],
+        "name": "delta",
+        "size": 2
+      },
+      {
+        "cohesion": 1.0,
+        "description": "Directory-based community: z",
+        "dominant_language": "go",
+        "id": 6,
+        "level": 0,
+        "members": [
+          "${REPO_ROOT}/z.go::Zero"
+        ],
+        "name": "zetaevil",
+        "size": 1
+      }
+    ],
+    "cross_community_edges": [
+      {
+        "edge_kind": "CALLS",
+        "source": "${REPO_ROOT}/e.go::E1",
+        "source_community": 5,
+        "target": "${REPO_ROOT}/b.go::B1",
+        "target_community": 2
+      }
+    ],
+    "cross_community_edges_total": 46,
+    "status": "ok",
+    "summary": "Architecture: 6 communities, 46 cross-community edges, showing 1 of 46, 2 warning(s)",
+    "truncated": true,
+    "warnings": [
+      "High coupling (13 edges) between 'alpha' and 'beta'"
+    ]
+  },
+  "tool": "get_architecture_overview_tool"
+}

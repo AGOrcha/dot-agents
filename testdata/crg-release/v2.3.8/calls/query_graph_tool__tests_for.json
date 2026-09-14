@@ -1,0 +1,49 @@
+{
+  "arguments": {
+    "pattern": "tests_for",
+    "target": "Login"
+  },
+  "case": "tests_for",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"pattern\":\"tests_for\",\"target\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"description\":\"Find all tests for a given function or class\",\"summary\":\"Found 1 result(s) for tests_for('${REPO_ROOT}/pkg/auth/auth.go::Login')\",\"result_count\":1,\"results_omitted\":0,\"results\":[{\"id\":13,\"kind\":\"Test\",\"name\":\"TestLogin\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line_start\":5,\"line_end\":9,\"language\":\"go\",\"parent_name\":null,\"is_test\":true,\"indirect\":false,\"inferred_by\":\"naming_convention\"}],\"edges\":[],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "description": "Find all tests for a given function or class",
+    "edges": [],
+    "pattern": "tests_for",
+    "result_count": 1,
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 13,
+        "indirect": false,
+        "inferred_by": "naming_convention",
+        "is_test": true,
+        "kind": "Test",
+        "language": "go",
+        "line_end": 9,
+        "line_start": 5,
+        "name": "TestLogin",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin"
+      }
+    ],
+    "results_omitted": 0,
+    "status": "ok",
+    "summary": "Found 1 result(s) for tests_for('${REPO_ROOT}/pkg/auth/auth.go::Login')",
+    "target": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+  },
+  "tool": "query_graph_tool"
+}

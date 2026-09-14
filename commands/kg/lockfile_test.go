@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/none"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/kg/lockfile"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
@@ -44,14 +45,35 @@ func TestLockfilePath(t *testing.T) {
 	}
 }
 
-func TestBuiltinRegistryHasNone(t *testing.T) {
+func TestBuiltinRegistryHasNoneAndCRGFamily(t *testing.T) {
 	reg, err := builtinRegistry()
 	if err != nil {
 		t.Fatalf("builtinRegistry: %v", err)
 	}
-	names := reg.Names()
-	if len(names) != 1 || names[0] != "none" {
-		t.Fatalf("builtinRegistry names = %v, want [none]", names)
+	want := map[string]bool{"none": true, "crg": true, "crg-bridge": true}
+	got := map[string]bool{}
+	for _, n := range reg.Names() {
+		got[n] = true
+	}
+	for name := range want {
+		if !got[name] {
+			t.Fatalf("builtinRegistry names = %v, want %s registered", reg.Names(), name)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("builtinRegistry names = %v, want exactly %v", reg.Names(), want)
+	}
+}
+
+// TestRegisterBuiltinsRejectsDuplicateNone covers the first registration arm:
+// `none` failing before the CRG family is ever reached.
+func TestRegisterBuiltinsRejectsDuplicateNone(t *testing.T) {
+	reg := registry.New()
+	if err := none.Register(reg); err != nil {
+		t.Fatalf("register fixture: %v", err)
+	}
+	if err := registerBuiltins(reg); err == nil {
+		t.Fatal("expected duplicate none registration to fail")
 	}
 }
 

@@ -1,0 +1,19 @@
+{
+  "arguments": {
+    "query": "Login"
+  },
+  "case": "query",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"No repositories registered. Use 'register' to add repos.\",\"results\":[]}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "results": [],
+    "status": "ok",
+    "summary": "No repositories registered. Use 'register' to add repos."
+  },
+  "tool": "cross_repo_search_tool"
+}

@@ -1,0 +1,1496 @@
+{
+  "nodes": [
+    {
+      "id": 1,
+      "kind": "File",
+      "name": "${REPO_ROOT}/a.go",
+      "qualified_name": "${REPO_ROOT}/a.go",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line_start": 1,
+      "line_end": 25,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 2,
+      "kind": "Function",
+      "name": "A1",
+      "qualified_name": "${REPO_ROOT}/a.go::A1",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line_start": 5,
+      "line_end": 8,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 3,
+      "kind": "Function",
+      "name": "A2",
+      "qualified_name": "${REPO_ROOT}/a.go::A2",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line_start": 10,
+      "line_end": 13,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 4,
+      "kind": "Function",
+      "name": "A3",
+      "qualified_name": "${REPO_ROOT}/a.go::A3",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line_start": 15,
+      "line_end": 18,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 5,
+      "kind": "Function",
+      "name": "A4",
+      "qualified_name": "${REPO_ROOT}/a.go::A4",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line_start": 20,
+      "line_end": 23,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 6,
+      "kind": "File",
+      "name": "${REPO_ROOT}/b.go",
+      "qualified_name": "${REPO_ROOT}/b.go",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line_start": 1,
+      "line_end": 20,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 7,
+      "kind": "Function",
+      "name": "B1",
+      "qualified_name": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line_start": 5,
+      "line_end": 8,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 8,
+      "kind": "Function",
+      "name": "B2",
+      "qualified_name": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line_start": 10,
+      "line_end": 13,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 9,
+      "kind": "Function",
+      "name": "B3",
+      "qualified_name": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line_start": 15,
+      "line_end": 18,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 10,
+      "kind": "File",
+      "name": "${REPO_ROOT}/c_test.go",
+      "qualified_name": "${REPO_ROOT}/c_test.go",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line_start": 1,
+      "line_end": 30,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 11,
+      "kind": "Test",
+      "name": "T1",
+      "qualified_name": "${REPO_ROOT}/c_test.go::T1",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line_start": 5,
+      "line_end": 8,
+      "language": "go",
+      "parent_name": null,
+      "is_test": true
+    },
+    {
+      "id": 12,
+      "kind": "Test",
+      "name": "T2",
+      "qualified_name": "${REPO_ROOT}/c_test.go::T2",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line_start": 10,
+      "line_end": 13,
+      "language": "go",
+      "parent_name": null,
+      "is_test": true
+    },
+    {
+      "id": 13,
+      "kind": "Test",
+      "name": "T3",
+      "qualified_name": "${REPO_ROOT}/c_test.go::T3",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line_start": 15,
+      "line_end": 18,
+      "language": "go",
+      "parent_name": null,
+      "is_test": true
+    },
+    {
+      "id": 14,
+      "kind": "Test",
+      "name": "T4",
+      "qualified_name": "${REPO_ROOT}/c_test.go::T4",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line_start": 20,
+      "line_end": 23,
+      "language": "go",
+      "parent_name": null,
+      "is_test": true
+    },
+    {
+      "id": 15,
+      "kind": "Test",
+      "name": "T5",
+      "qualified_name": "${REPO_ROOT}/c_test.go::T5",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line_start": 25,
+      "line_end": 28,
+      "language": "go",
+      "parent_name": null,
+      "is_test": true
+    },
+    {
+      "id": 16,
+      "kind": "File",
+      "name": "${REPO_ROOT}/d.go",
+      "qualified_name": "${REPO_ROOT}/d.go",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line_start": 1,
+      "line_end": 15,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 17,
+      "kind": "Function",
+      "name": "D1",
+      "qualified_name": "${REPO_ROOT}/d.go::D1",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line_start": 5,
+      "line_end": 8,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 18,
+      "kind": "Function",
+      "name": "D2",
+      "qualified_name": "${REPO_ROOT}/d.go::D2",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line_start": 10,
+      "line_end": 13,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 19,
+      "kind": "File",
+      "name": "${REPO_ROOT}/e.go",
+      "qualified_name": "${REPO_ROOT}/e.go",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 1,
+      "line_end": 155,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 20,
+      "kind": "Function",
+      "name": "E1",
+      "qualified_name": "${REPO_ROOT}/e.go::E1",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 5,
+      "line_end": 8,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 21,
+      "kind": "Function",
+      "name": "E2",
+      "qualified_name": "${REPO_ROOT}/e.go::E2",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 10,
+      "line_end": 13,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 22,
+      "kind": "Function",
+      "name": "E3",
+      "qualified_name": "${REPO_ROOT}/e.go::E3",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 15,
+      "line_end": 18,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 23,
+      "kind": "Function",
+      "name": "E4",
+      "qualified_name": "${REPO_ROOT}/e.go::E4",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 20,
+      "line_end": 23,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 24,
+      "kind": "Function",
+      "name": "E5",
+      "qualified_name": "${REPO_ROOT}/e.go::E5",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 25,
+      "line_end": 28,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 25,
+      "kind": "Function",
+      "name": "E6",
+      "qualified_name": "${REPO_ROOT}/e.go::E6",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 30,
+      "line_end": 33,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 26,
+      "kind": "Function",
+      "name": "E7",
+      "qualified_name": "${REPO_ROOT}/e.go::E7",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 35,
+      "line_end": 38,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 27,
+      "kind": "Function",
+      "name": "E8",
+      "qualified_name": "${REPO_ROOT}/e.go::E8",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 40,
+      "line_end": 43,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 28,
+      "kind": "Function",
+      "name": "E9",
+      "qualified_name": "${REPO_ROOT}/e.go::E9",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 45,
+      "line_end": 48,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 29,
+      "kind": "Function",
+      "name": "E10",
+      "qualified_name": "${REPO_ROOT}/e.go::E10",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 50,
+      "line_end": 53,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 30,
+      "kind": "Function",
+      "name": "E11",
+      "qualified_name": "${REPO_ROOT}/e.go::E11",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 55,
+      "line_end": 58,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 31,
+      "kind": "Function",
+      "name": "E12",
+      "qualified_name": "${REPO_ROOT}/e.go::E12",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 60,
+      "line_end": 63,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 32,
+      "kind": "Function",
+      "name": "E13",
+      "qualified_name": "${REPO_ROOT}/e.go::E13",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 65,
+      "line_end": 68,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 33,
+      "kind": "Function",
+      "name": "E14",
+      "qualified_name": "${REPO_ROOT}/e.go::E14",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 70,
+      "line_end": 73,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 34,
+      "kind": "Function",
+      "name": "E15",
+      "qualified_name": "${REPO_ROOT}/e.go::E15",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 75,
+      "line_end": 78,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 35,
+      "kind": "Function",
+      "name": "E16",
+      "qualified_name": "${REPO_ROOT}/e.go::E16",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 80,
+      "line_end": 83,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 36,
+      "kind": "Function",
+      "name": "E17",
+      "qualified_name": "${REPO_ROOT}/e.go::E17",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 85,
+      "line_end": 88,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 37,
+      "kind": "Function",
+      "name": "E18",
+      "qualified_name": "${REPO_ROOT}/e.go::E18",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 90,
+      "line_end": 93,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 38,
+      "kind": "Function",
+      "name": "E19",
+      "qualified_name": "${REPO_ROOT}/e.go::E19",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 95,
+      "line_end": 98,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 39,
+      "kind": "Function",
+      "name": "E20",
+      "qualified_name": "${REPO_ROOT}/e.go::E20",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 100,
+      "line_end": 103,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 40,
+      "kind": "Function",
+      "name": "E21",
+      "qualified_name": "${REPO_ROOT}/e.go::E21",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 105,
+      "line_end": 108,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 41,
+      "kind": "Function",
+      "name": "E22",
+      "qualified_name": "${REPO_ROOT}/e.go::E22",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 110,
+      "line_end": 113,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 42,
+      "kind": "Function",
+      "name": "E23",
+      "qualified_name": "${REPO_ROOT}/e.go::E23",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 115,
+      "line_end": 118,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 43,
+      "kind": "Function",
+      "name": "E24",
+      "qualified_name": "${REPO_ROOT}/e.go::E24",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 120,
+      "line_end": 123,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 44,
+      "kind": "Function",
+      "name": "E25",
+      "qualified_name": "${REPO_ROOT}/e.go::E25",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 125,
+      "line_end": 128,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 45,
+      "kind": "Function",
+      "name": "E26",
+      "qualified_name": "${REPO_ROOT}/e.go::E26",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 130,
+      "line_end": 133,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 46,
+      "kind": "Function",
+      "name": "E27",
+      "qualified_name": "${REPO_ROOT}/e.go::E27",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 135,
+      "line_end": 138,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 47,
+      "kind": "Function",
+      "name": "E28",
+      "qualified_name": "${REPO_ROOT}/e.go::E28",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 140,
+      "line_end": 143,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 48,
+      "kind": "Function",
+      "name": "E29",
+      "qualified_name": "${REPO_ROOT}/e.go::E29",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 145,
+      "line_end": 148,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 49,
+      "kind": "Function",
+      "name": "E30",
+      "qualified_name": "${REPO_ROOT}/e.go::E30",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line_start": 150,
+      "line_end": 153,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 50,
+      "kind": "File",
+      "name": "${REPO_ROOT}/z.go",
+      "qualified_name": "${REPO_ROOT}/z.go",
+      "file_path": "${REPO_ROOT}/z.go",
+      "line_start": 1,
+      "line_end": 10,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    },
+    {
+      "id": 51,
+      "kind": "Function",
+      "name": "Ze\u0001ro",
+      "qualified_name": "${REPO_ROOT}/z.go::Ze\u0001ro",
+      "file_path": "${REPO_ROOT}/z.go",
+      "line_start": 5,
+      "line_end": 8,
+      "language": "go",
+      "parent_name": null,
+      "is_test": false
+    }
+  ],
+  "edges": [
+    {
+      "id": 1,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/a.go",
+      "target": "${REPO_ROOT}/a.go::A1",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 5
+    },
+    {
+      "id": 2,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/a.go",
+      "target": "${REPO_ROOT}/a.go::A2",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 10
+    },
+    {
+      "id": 3,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/a.go",
+      "target": "${REPO_ROOT}/a.go::A3",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 15
+    },
+    {
+      "id": 4,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/a.go",
+      "target": "${REPO_ROOT}/a.go::A4",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 20
+    },
+    {
+      "id": 5,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/b.go",
+      "target": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line": 5
+    },
+    {
+      "id": 6,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/b.go",
+      "target": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line": 10
+    },
+    {
+      "id": 7,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/b.go",
+      "target": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line": 15
+    },
+    {
+      "id": 8,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/c_test.go",
+      "target": "${REPO_ROOT}/c_test.go::T1",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 5
+    },
+    {
+      "id": 9,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/c_test.go",
+      "target": "${REPO_ROOT}/c_test.go::T2",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 10
+    },
+    {
+      "id": 10,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/c_test.go",
+      "target": "${REPO_ROOT}/c_test.go::T3",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 15
+    },
+    {
+      "id": 11,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/c_test.go",
+      "target": "${REPO_ROOT}/c_test.go::T4",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 20
+    },
+    {
+      "id": 12,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/c_test.go",
+      "target": "${REPO_ROOT}/c_test.go::T5",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 25
+    },
+    {
+      "id": 13,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/d.go",
+      "target": "${REPO_ROOT}/d.go::D1",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 5
+    },
+    {
+      "id": 14,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/d.go",
+      "target": "${REPO_ROOT}/d.go::D2",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 10
+    },
+    {
+      "id": 15,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E1",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 5
+    },
+    {
+      "id": 16,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E2",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 10
+    },
+    {
+      "id": 17,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E3",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 15
+    },
+    {
+      "id": 18,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E4",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 20
+    },
+    {
+      "id": 19,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E5",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 25
+    },
+    {
+      "id": 20,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E6",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 30
+    },
+    {
+      "id": 21,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E7",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 35
+    },
+    {
+      "id": 22,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E8",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 40
+    },
+    {
+      "id": 23,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E9",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 45
+    },
+    {
+      "id": 24,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E10",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 50
+    },
+    {
+      "id": 25,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E11",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 55
+    },
+    {
+      "id": 26,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E12",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 60
+    },
+    {
+      "id": 27,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E13",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 65
+    },
+    {
+      "id": 28,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E14",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 70
+    },
+    {
+      "id": 29,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E15",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 75
+    },
+    {
+      "id": 30,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E16",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 80
+    },
+    {
+      "id": 31,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E17",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 85
+    },
+    {
+      "id": 32,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E18",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 90
+    },
+    {
+      "id": 33,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E19",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 95
+    },
+    {
+      "id": 34,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E20",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 100
+    },
+    {
+      "id": 35,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E21",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 105
+    },
+    {
+      "id": 36,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E22",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 110
+    },
+    {
+      "id": 37,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E23",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 115
+    },
+    {
+      "id": 38,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E24",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 120
+    },
+    {
+      "id": 39,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E25",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 125
+    },
+    {
+      "id": 40,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E26",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 130
+    },
+    {
+      "id": 41,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E27",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 135
+    },
+    {
+      "id": 42,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E28",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 140
+    },
+    {
+      "id": 43,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E29",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 145
+    },
+    {
+      "id": 44,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/e.go",
+      "target": "${REPO_ROOT}/e.go::E30",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 150
+    },
+    {
+      "id": 45,
+      "kind": "CONTAINS",
+      "source": "${REPO_ROOT}/z.go",
+      "target": "${REPO_ROOT}/z.go::Ze\u0001ro",
+      "file_path": "${REPO_ROOT}/z.go",
+      "line": 5
+    },
+    {
+      "id": 46,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A1",
+      "target": "${REPO_ROOT}/a.go::A2",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 6
+    },
+    {
+      "id": 47,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E1",
+      "target": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 401
+    },
+    {
+      "id": 48,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E1",
+      "target": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 401
+    },
+    {
+      "id": 49,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E1",
+      "target": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 401
+    },
+    {
+      "id": 50,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E2",
+      "target": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 402
+    },
+    {
+      "id": 51,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E2",
+      "target": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 402
+    },
+    {
+      "id": 52,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E2",
+      "target": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 402
+    },
+    {
+      "id": 53,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E3",
+      "target": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 403
+    },
+    {
+      "id": 54,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E3",
+      "target": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 403
+    },
+    {
+      "id": 55,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E3",
+      "target": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 403
+    },
+    {
+      "id": 56,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E4",
+      "target": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 404
+    },
+    {
+      "id": 57,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E4",
+      "target": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 404
+    },
+    {
+      "id": 58,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/e.go::E4",
+      "target": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/e.go",
+      "line": 404
+    },
+    {
+      "id": 59,
+      "kind": "IMPORTS_FROM",
+      "source": "${REPO_ROOT}/d.go::D1",
+      "target": "${REPO_ROOT}/a.go::A1",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 3
+    },
+    {
+      "id": 60,
+      "kind": "IMPORTS_FROM",
+      "source": "${REPO_ROOT}/d.go::D2",
+      "target": "${REPO_ROOT}/a.go::A2",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 3
+    },
+    {
+      "id": 61,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/d.go::D1",
+      "target": "${REPO_ROOT}/a.go::A1",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 301
+    },
+    {
+      "id": 62,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/d.go::D1",
+      "target": "${REPO_ROOT}/a.go::A2",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 301
+    },
+    {
+      "id": 63,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/d.go::D1",
+      "target": "${REPO_ROOT}/a.go::A3",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 301
+    },
+    {
+      "id": 64,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/d.go::D1",
+      "target": "${REPO_ROOT}/a.go::A4",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 301
+    },
+    {
+      "id": 65,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/d.go::D2",
+      "target": "${REPO_ROOT}/a.go::A1",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 302
+    },
+    {
+      "id": 66,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/d.go::D2",
+      "target": "${REPO_ROOT}/a.go::A2",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 302
+    },
+    {
+      "id": 67,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/d.go::D2",
+      "target": "${REPO_ROOT}/a.go::A3",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 302
+    },
+    {
+      "id": 68,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/d.go::D2",
+      "target": "${REPO_ROOT}/a.go::A4",
+      "file_path": "${REPO_ROOT}/d.go",
+      "line": 302
+    },
+    {
+      "id": 69,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A1",
+      "target": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 101
+    },
+    {
+      "id": 70,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A1",
+      "target": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 101
+    },
+    {
+      "id": 71,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A1",
+      "target": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 101
+    },
+    {
+      "id": 72,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A2",
+      "target": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 102
+    },
+    {
+      "id": 73,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A2",
+      "target": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 102
+    },
+    {
+      "id": 74,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A2",
+      "target": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 102
+    },
+    {
+      "id": 75,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A3",
+      "target": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 103
+    },
+    {
+      "id": 76,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A3",
+      "target": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 103
+    },
+    {
+      "id": 77,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A3",
+      "target": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 103
+    },
+    {
+      "id": 78,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A4",
+      "target": "${REPO_ROOT}/b.go::B1",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 104
+    },
+    {
+      "id": 79,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A4",
+      "target": "${REPO_ROOT}/b.go::B2",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 104
+    },
+    {
+      "id": 80,
+      "kind": "IMPORTS_FROM",
+      "source": "${REPO_ROOT}/a.go::A4",
+      "target": "${REPO_ROOT}/b.go::B3",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 2
+    },
+    {
+      "id": 81,
+      "kind": "IMPORTS_FROM",
+      "source": "${REPO_ROOT}/b.go::B3",
+      "target": "${REPO_ROOT}/a.go::A4",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line": 2
+    },
+    {
+      "id": 82,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T1",
+      "target": "${REPO_ROOT}/a.go::A1",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 201
+    },
+    {
+      "id": 83,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T1",
+      "target": "${REPO_ROOT}/a.go::A2",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 201
+    },
+    {
+      "id": 84,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T1",
+      "target": "${REPO_ROOT}/a.go::A3",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 201
+    },
+    {
+      "id": 85,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T1",
+      "target": "${REPO_ROOT}/a.go::A4",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 201
+    },
+    {
+      "id": 86,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T2",
+      "target": "${REPO_ROOT}/a.go::A1",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 202
+    },
+    {
+      "id": 87,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T2",
+      "target": "${REPO_ROOT}/a.go::A2",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 202
+    },
+    {
+      "id": 88,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T2",
+      "target": "${REPO_ROOT}/a.go::A3",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 202
+    },
+    {
+      "id": 89,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T2",
+      "target": "${REPO_ROOT}/a.go::A4",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 202
+    },
+    {
+      "id": 90,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T3",
+      "target": "${REPO_ROOT}/a.go::A1",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 203
+    },
+    {
+      "id": 91,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T3",
+      "target": "${REPO_ROOT}/a.go::A2",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 203
+    },
+    {
+      "id": 92,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/c_test.go::T3",
+      "target": "${REPO_ROOT}/a.go::A3",
+      "file_path": "${REPO_ROOT}/c_test.go",
+      "line": 203
+    },
+    {
+      "id": 93,
+      "kind": "TESTED_BY",
+      "source": "${REPO_ROOT}/b.go::B1",
+      "target": "${REPO_ROOT}/c_test.go::T1",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line": 5
+    },
+    {
+      "id": 94,
+      "kind": "TESTED_BY",
+      "source": "${REPO_ROOT}/b.go::B2",
+      "target": "${REPO_ROOT}/c_test.go::T2",
+      "file_path": "${REPO_ROOT}/b.go",
+      "line": 10
+    },
+    {
+      "id": 95,
+      "kind": "CALLS",
+      "source": "${REPO_ROOT}/a.go::A1",
+      "target": "someExternalHelper",
+      "file_path": "${REPO_ROOT}/a.go",
+      "line": 7
+    }
+  ],
+  "communities": [
+    {
+      "id": 1,
+      "name": "alpha",
+      "level": 0,
+      "cohesion": 0.5,
+      "size": 4,
+      "dominant_language": "go",
+      "description": "Directory-based community: a",
+      "members": [
+        "${REPO_ROOT}/a.go::A1",
+        "${REPO_ROOT}/a.go::A2",
+        "${REPO_ROOT}/a.go::A3",
+        "${REPO_ROOT}/a.go::A4"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "beta",
+      "level": 0,
+      "cohesion": 0.25,
+      "size": 3,
+      "dominant_language": "go",
+      "description": "Directory-based community: b",
+      "members": [
+        "${REPO_ROOT}/b.go::B1",
+        "${REPO_ROOT}/b.go::B2",
+        "${REPO_ROOT}/b.go::B3"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "c-test",
+      "level": 0,
+      "cohesion": 0.75,
+      "size": 5,
+      "dominant_language": "go",
+      "description": "Directory-based community: c",
+      "members": [
+        "${REPO_ROOT}/c_test.go::T1",
+        "${REPO_ROOT}/c_test.go::T2",
+        "${REPO_ROOT}/c_test.go::T3",
+        "${REPO_ROOT}/c_test.go::T4",
+        "${REPO_ROOT}/c_test.go::T5"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "delta",
+      "level": 0,
+      "cohesion": 0.125,
+      "size": 2,
+      "dominant_language": "go",
+      "description": "Directory-based community: d",
+      "members": [
+        "${REPO_ROOT}/d.go::D1",
+        "${REPO_ROOT}/d.go::D2"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "epsilon",
+      "level": 0,
+      "cohesion": 0.625,
+      "size": 30,
+      "dominant_language": "go",
+      "description": "Directory-based community: e",
+      "members": [
+        "${REPO_ROOT}/e.go::E1",
+        "${REPO_ROOT}/e.go::E2",
+        "${REPO_ROOT}/e.go::E3",
+        "${REPO_ROOT}/e.go::E4",
+        "${REPO_ROOT}/e.go::E5",
+        "${REPO_ROOT}/e.go::E6",
+        "${REPO_ROOT}/e.go::E7",
+        "${REPO_ROOT}/e.go::E8",
+        "${REPO_ROOT}/e.go::E9",
+        "${REPO_ROOT}/e.go::E10",
+        "${REPO_ROOT}/e.go::E11",
+        "${REPO_ROOT}/e.go::E12",
+        "${REPO_ROOT}/e.go::E13",
+        "${REPO_ROOT}/e.go::E14",
+        "${REPO_ROOT}/e.go::E15",
+        "${REPO_ROOT}/e.go::E16",
+        "${REPO_ROOT}/e.go::E17",
+        "${REPO_ROOT}/e.go::E18",
+        "${REPO_ROOT}/e.go::E19",
+        "${REPO_ROOT}/e.go::E20",
+        "${REPO_ROOT}/e.go::E21",
+        "${REPO_ROOT}/e.go::E22",
+        "${REPO_ROOT}/e.go::E23",
+        "${REPO_ROOT}/e.go::E24",
+        "${REPO_ROOT}/e.go::E25",
+        "${REPO_ROOT}/e.go::E26",
+        "${REPO_ROOT}/e.go::E27",
+        "${REPO_ROOT}/e.go::E28",
+        "${REPO_ROOT}/e.go::E29",
+        "${REPO_ROOT}/e.go::E30"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "zeta\u0001evil",
+      "level": 0,
+      "cohesion": 1.0,
+      "size": 1,
+      "dominant_language": "go",
+      "description": "Directory-based\u0007 community: z",
+      "members": [
+        "${REPO_ROOT}/z.go::Ze\u0001ro"
+      ]
+    }
+  ],
+  "metadata": {
+    "last_updated": "2026-01-02T03:04:05",
+    "git_head_sha": "0000000000000000000000000000000000000000",
+    "git_branch": "main"
+  }
+}

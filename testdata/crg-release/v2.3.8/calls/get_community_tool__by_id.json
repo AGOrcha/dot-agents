@@ -1,0 +1,97 @@
+{
+  "arguments": {
+    "community_id": 1,
+    "include_members": true
+  },
+  "case": "by_id",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Community 'cmd-handle': 3 nodes, cohesion 0.2857\",\"community\":{\"id\":1,\"name\":\"cmd-handle\",\"level\":0,\"cohesion\":0.2857,\"size\":3,\"dominant_language\":\"go\",\"description\":\"Directory-based community: cmd\",\"members\":[\"${REPO_ROOT}/cmd/main.go::main\",\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"${REPO_ROOT}/cmd/main.go::renderSession\"],\"member_details\":[{\"id\":2,\"kind\":\"Function\",\"name\":\"main\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::main\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":5,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":3,\"kind\":\"Function\",\"name\":\"handleLogin\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":9,\"line_end\":13,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":4,\"kind\":\"Function\",\"name\":\"renderSession\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::renderSession\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false}]},\"_hints\":{\"next_steps\":[{\"tool\":\"query_graph\",\"suggestion\":\"Explore callers/callees of community members\"},{\"tool\":\"list_communities\",\"suggestion\":\"Browse other communities\"},{\"tool\":\"get_architecture_overview\",\"suggestion\":\"See how this community fits the architecture\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Explore callers/callees of community members",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "Browse other communities",
+          "tool": "list_communities"
+        },
+        {
+          "suggestion": "See how this community fits the architecture",
+          "tool": "get_architecture_overview"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "community": {
+      "cohesion": 0.2857,
+      "description": "Directory-based community: cmd",
+      "dominant_language": "go",
+      "id": 1,
+      "level": 0,
+      "member_details": [
+        {
+          "file_path": "${REPO_ROOT}/cmd/main.go",
+          "id": 2,
+          "is_test": false,
+          "kind": "Function",
+          "language": "go",
+          "line_end": 7,
+          "line_start": 5,
+          "name": "main",
+          "parent_name": null,
+          "qualified_name": "${REPO_ROOT}/cmd/main.go::main"
+        },
+        {
+          "file_path": "${REPO_ROOT}/cmd/main.go",
+          "id": 3,
+          "is_test": false,
+          "kind": "Function",
+          "language": "go",
+          "line_end": 13,
+          "line_start": 9,
+          "name": "handleLogin",
+          "parent_name": null,
+          "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin"
+        },
+        {
+          "file_path": "${REPO_ROOT}/cmd/main.go",
+          "id": 4,
+          "is_test": false,
+          "kind": "Function",
+          "language": "go",
+          "line_end": 17,
+          "line_start": 15,
+          "name": "renderSession",
+          "parent_name": null,
+          "qualified_name": "${REPO_ROOT}/cmd/main.go::renderSession"
+        }
+      ],
+      "members": [
+        "${REPO_ROOT}/cmd/main.go::main",
+        "${REPO_ROOT}/cmd/main.go::handleLogin",
+        "${REPO_ROOT}/cmd/main.go::renderSession"
+      ],
+      "name": "cmd-handle",
+      "size": 3
+    },
+    "status": "ok",
+    "summary": "Community 'cmd-handle': 3 nodes, cohesion 0.2857"
+  },
+  "tool": "get_community_tool"
+}

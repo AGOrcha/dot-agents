@@ -284,6 +284,23 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	}
 	kgCodeStatusCmd.Flags().String("repo", "", repoRootHelpText)
 
+	kgCodeCapabilitiesCmd := &cobra.Command{
+		Use:   "code-capabilities",
+		Short: "Report whether the kg-native backend can serve this repository",
+		Long: `Report which languages the repository contains and who can index them.
+
+The kg-native backend extracts Go; the pinned code-review-graph release indexes
+a much wider language set. Any file in a language upstream indexes and the
+native scanner does not routes the whole repository through the retained Python
+bridge, so this command names those languages instead of leaving the decision
+implicit.
+
+"This repository needs the bridge" is a successful diagnostic: a non-zero exit
+means the question could not be answered, not that the answer was bridge.`,
+		RunE: runKGCodeCapabilities,
+	}
+	kgCodeCapabilitiesCmd.Flags().String("repo", "", repoRootHelpText)
+
 	kgChangesCmd := &cobra.Command{
 		Use:   "changes",
 		Short: "Detect change impact in the current diff",
@@ -366,7 +383,7 @@ manually only to repair stale derived data without rebuilding the full graph.`,
 	kgCmd.AddCommand(
 		kgSetupCmd, kgHealthCmd, kgServeCmd, kgIngestCmd, kgQueueCmd, kgQueryCmd,
 		kgLintCmd, kgMaintainCmd, kgBridgeCmd, kgSyncCmd, kgWarmCmd, kgLinkCmd,
-		kgBuildCmd, kgUpdateCmd, kgCodeStatusCmd, kgChangesCmd,
+		kgBuildCmd, kgUpdateCmd, kgCodeStatusCmd, kgCodeCapabilitiesCmd, kgChangesCmd,
 		kgImpactCmd, kgFlowsCmd, kgCommunitiesCmd, kgPostprocessCmd,
 		newLockfileCmd(deps),
 	)

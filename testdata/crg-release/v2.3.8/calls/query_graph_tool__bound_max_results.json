@@ -1,0 +1,16 @@
+{
+  "arguments": {
+    "max_results": 0,
+    "pattern": "callers_of",
+    "target": "Login"
+  },
+  "case": "bound_max_results",
+  "content": [
+    {
+      "text": "Error calling tool 'query_graph_tool': max_results must be an integer greater than or equal to 1",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "query_graph_tool"
+}

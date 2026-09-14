@@ -1,0 +1,15 @@
+{
+  "arguments": {
+    "community_id": 1,
+    "max_members": 0
+  },
+  "case": "bound_max_members",
+  "content": [
+    {
+      "text": "Error calling tool 'get_community_tool': max_members must be an integer greater than or equal to 1",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "get_community_tool"
+}

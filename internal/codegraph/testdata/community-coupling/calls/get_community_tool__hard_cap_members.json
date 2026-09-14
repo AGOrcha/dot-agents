@@ -1,0 +1,69 @@
+{
+  "arguments": {
+    "community_name": "epsilon",
+    "max_members": 5000
+  },
+  "case": "hard_cap_members",
+  "is_error": false,
+  "structured_content": {
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Explore callers/callees of community members",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "Browse other communities",
+          "tool": "list_communities"
+        },
+        {
+          "suggestion": "See how this community fits the architecture",
+          "tool": "get_architecture_overview"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "community": {
+      "cohesion": 0.625,
+      "description": "Directory-based community: e",
+      "dominant_language": "go",
+      "id": 5,
+      "level": 0,
+      "members": [
+        "${REPO_ROOT}/e.go::E1",
+        "${REPO_ROOT}/e.go::E2",
+        "${REPO_ROOT}/e.go::E3",
+        "${REPO_ROOT}/e.go::E4",
+        "${REPO_ROOT}/e.go::E5",
+        "${REPO_ROOT}/e.go::E6",
+        "${REPO_ROOT}/e.go::E7",
+        "${REPO_ROOT}/e.go::E8",
+        "${REPO_ROOT}/e.go::E9",
+        "${REPO_ROOT}/e.go::E10",
+        "${REPO_ROOT}/e.go::E11",
+        "${REPO_ROOT}/e.go::E12",
+        "${REPO_ROOT}/e.go::E13",
+        "${REPO_ROOT}/e.go::E14",
+        "${REPO_ROOT}/e.go::E15",
+        "${REPO_ROOT}/e.go::E16",
+        "${REPO_ROOT}/e.go::E17",
+        "${REPO_ROOT}/e.go::E18",
+        "${REPO_ROOT}/e.go::E19",
+        "${REPO_ROOT}/e.go::E20",
+        "${REPO_ROOT}/e.go::E21",
+        "${REPO_ROOT}/e.go::E22",
+        "${REPO_ROOT}/e.go::E23",
+        "${REPO_ROOT}/e.go::E24",
+        "${REPO_ROOT}/e.go::E25"
+      ],
+      "members_total": 30,
+      "members_truncated": true,
+      "name": "epsilon",
+      "size": 30
+    },
+    "status": "ok",
+    "summary": "Community 'epsilon': 30 nodes, cohesion 0.6250"
+  },
+  "tool": "get_community_tool"
+}

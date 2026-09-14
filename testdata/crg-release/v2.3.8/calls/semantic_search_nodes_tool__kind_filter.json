@@ -1,0 +1,63 @@
+{
+  "arguments": {
+    "kind": "Class",
+    "limit": 5,
+    "query": "session"
+  },
+  "case": "kind_filter",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"query\":\"session\",\"search_mode\":\"fts\",\"summary\":\"Found 1 node(s) matching 'session' (kind=Class)\",\"results\":[{\"name\":\"Session\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"kind\":\"Class\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":4,\"line_end\":7,\"language\":\"go\",\"params\":null,\"return_type\":null,\"signature\":\"class Session\",\"score\":0.016393}],\"_hints\":{\"next_steps\":[{\"tool\":\"query_graph\",\"suggestion\":\"Inspect callers/callees of a search result\"},{\"tool\":\"get_flow\",\"suggestion\":\"See the execution flow through a matched node\"},{\"tool\":\"get_impact_radius\",\"suggestion\":\"Check the blast radius from matched nodes\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Inspect callers/callees of a search result",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "See the execution flow through a matched node",
+          "tool": "get_flow"
+        },
+        {
+          "suggestion": "Check the blast radius from matched nodes",
+          "tool": "get_impact_radius"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "query": "session",
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Class",
+        "language": "go",
+        "line_end": 7,
+        "line_start": 4,
+        "name": "Session",
+        "params": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session",
+        "return_type": null,
+        "score": 0.016393,
+        "signature": "class Session"
+      }
+    ],
+    "search_mode": "fts",
+    "status": "ok",
+    "summary": "Found 1 node(s) matching 'session' (kind=Class)"
+  },
+  "tool": "semantic_search_nodes_tool"
+}

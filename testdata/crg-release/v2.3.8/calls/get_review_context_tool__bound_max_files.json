@@ -1,0 +1,14 @@
+{
+  "arguments": {
+    "max_files": 0
+  },
+  "case": "bound_max_files",
+  "content": [
+    {
+      "text": "Error calling tool 'get_review_context_tool': max_files must be an integer greater than or equal to 1",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "get_review_context_tool"
+}

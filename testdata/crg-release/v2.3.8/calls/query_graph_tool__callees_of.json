@@ -1,0 +1,88 @@
+{
+  "arguments": {
+    "pattern": "callees_of",
+    "target": "handleLogin"
+  },
+  "case": "callees_of",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"pattern\":\"callees_of\",\"target\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"description\":\"Find all functions called by a given function\",\"summary\":\"Found 3 result(s) for callees_of('${REPO_ROOT}/cmd/main.go::handleLogin')\",\"result_count\":3,\"results_omitted\":0,\"results\":[{\"kind\":\"Function\",\"name\":\"Login\",\"qualified_name\":\"Login\"},{\"kind\":\"Function\",\"name\":\"ValidateToken\",\"qualified_name\":\"ValidateToken\"},{\"id\":4,\"kind\":\"Function\",\"name\":\"renderSession\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::renderSession\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":15,\"line_end\":17,\"language\":\"go\",\"parent_name\":null,\"is_test\":false}],\"edges\":[{\"id\":5,\"kind\":\"CALLS\",\"source\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"target\":\"Login\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line\":10,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":6,\"kind\":\"CALLS\",\"source\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"target\":\"ValidateToken\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line\":11,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"},{\"id\":7,\"kind\":\"CALLS\",\"source\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"target\":\"${REPO_ROOT}/cmd/main.go::renderSession\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line\":12,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"}],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "description": "Find all functions called by a given function",
+    "edges": [
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 5,
+        "kind": "CALLS",
+        "line": 10,
+        "source": "${REPO_ROOT}/cmd/main.go::handleLogin",
+        "target": "Login"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 6,
+        "kind": "CALLS",
+        "line": 11,
+        "source": "${REPO_ROOT}/cmd/main.go::handleLogin",
+        "target": "ValidateToken"
+      },
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 7,
+        "kind": "CALLS",
+        "line": 12,
+        "source": "${REPO_ROOT}/cmd/main.go::handleLogin",
+        "target": "${REPO_ROOT}/cmd/main.go::renderSession"
+      }
+    ],
+    "pattern": "callees_of",
+    "result_count": 3,
+    "results": [
+      {
+        "kind": "Function",
+        "name": "Login",
+        "qualified_name": "Login"
+      },
+      {
+        "kind": "Function",
+        "name": "ValidateToken",
+        "qualified_name": "ValidateToken"
+      },
+      {
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 4,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 17,
+        "line_start": 15,
+        "name": "renderSession",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::renderSession"
+      }
+    ],
+    "results_omitted": 0,
+    "status": "ok",
+    "summary": "Found 3 result(s) for callees_of('${REPO_ROOT}/cmd/main.go::handleLogin')",
+    "target": "${REPO_ROOT}/cmd/main.go::handleLogin"
+  },
+  "tool": "query_graph_tool"
+}

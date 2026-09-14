@@ -1,0 +1,101 @@
+{
+  "arguments": {
+    "limit": 5,
+    "min_lines": 1
+  },
+  "case": "min_lines",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Found 5 node(s) with >= 1 lines:\\n    31 lines |     File | ${REPO_ROOT}/pkg/auth/auth.go (pkg/auth/auth.go:1)\\n    18 lines |     File | ${REPO_ROOT}/cmd/main.go (cmd/main.go:1)\\n    16 lines |     File | ${REPO_ROOT}/pkg/auth/auth_test.go (pkg/auth/auth_test.go:1)\\n     7 lines |     File | ${REPO_ROOT}/pkg/auth/token.go (pkg/auth/token.go:1)\\n     5 lines | Function | handleLogin (cmd/main.go:9)\",\"total_found\":5,\"min_lines\":1,\"results\":[{\"id\":5,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"line_start\":1,\"line_end\":31,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"line_count\":31,\"relative_path\":\"pkg/auth/auth.go\"},{\"id\":1,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/cmd/main.go\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":1,\"line_end\":18,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"line_count\":18,\"relative_path\":\"cmd/main.go\"},{\"id\":12,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line_start\":1,\"line_end\":16,\"language\":\"go\",\"parent_name\":null,\"is_test\":true,\"line_count\":16,\"relative_path\":\"pkg/auth/auth_test.go\"},{\"id\":15,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":1,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"line_count\":7,\"relative_path\":\"pkg/auth/token.go\"},{\"id\":3,\"kind\":\"Function\",\"name\":\"handleLogin\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"file_path\":\"${REPO_ROOT}/cmd/main.go\",\"line_start\":9,\"line_end\":13,\"language\":\"go\",\"parent_name\":null,\"is_test\":false,\"line_count\":5,\"relative_path\":\"cmd/main.go\"}],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "min_lines": 1,
+    "results": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth.go",
+        "id": 5,
+        "is_test": false,
+        "kind": "File",
+        "language": "go",
+        "line_count": 31,
+        "line_end": 31,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/auth.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go",
+        "relative_path": "pkg/auth/auth.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 1,
+        "is_test": false,
+        "kind": "File",
+        "language": "go",
+        "line_count": 18,
+        "line_end": 18,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/cmd/main.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/cmd/main.go",
+        "relative_path": "cmd/main.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 12,
+        "is_test": true,
+        "kind": "File",
+        "language": "go",
+        "line_count": 16,
+        "line_end": 16,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "relative_path": "pkg/auth/auth_test.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 15,
+        "is_test": false,
+        "kind": "File",
+        "language": "go",
+        "line_count": 7,
+        "line_end": 7,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/token.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go",
+        "relative_path": "pkg/auth/token.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/cmd/main.go",
+        "id": 3,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_count": 5,
+        "line_end": 13,
+        "line_start": 9,
+        "name": "handleLogin",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin",
+        "relative_path": "cmd/main.go"
+      }
+    ],
+    "status": "ok",
+    "summary": "Found 5 node(s) with >= 1 lines:\n    31 lines |     File | ${REPO_ROOT}/pkg/auth/auth.go (pkg/auth/auth.go:1)\n    18 lines |     File | ${REPO_ROOT}/cmd/main.go (cmd/main.go:1)\n    16 lines |     File | ${REPO_ROOT}/pkg/auth/auth_test.go (pkg/auth/auth_test.go:1)\n     7 lines |     File | ${REPO_ROOT}/pkg/auth/token.go (pkg/auth/token.go:1)\n     5 lines | Function | handleLogin (cmd/main.go:9)",
+    "total_found": 5
+  },
+  "tool": "find_large_functions_tool"
+}

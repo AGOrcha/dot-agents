@@ -25,8 +25,19 @@ func TestSchemaLoadsAndValidates(t *testing.T) {
 	if len(s.NoteTypes) != 1 || s.NoteTypes[0].Name != "symbol" {
 		t.Fatalf("expected one `symbol` note type, got %+v", s.NoteTypes)
 	}
-	if len(s.EdgeTypes) != 3 {
-		t.Fatalf("expected 3 edge types (CALLS/TESTED_BY/IMPORTS), got %d", len(s.EdgeTypes))
+	// Upstream code-review-graph v2.3.8's four edge kinds, pinned by
+	// testdata/crg-release/v2.3.8/graph.json. The declared vocabulary must
+	// match what the scanner emits: a schema that still declared the
+	// pre-parity `IMPORTS` would make the derivation partition on a term
+	// that is never written.
+	wantEdgeKinds := []string{"CONTAINS", "CALLS", "IMPORTS_FROM", "TESTED_BY"}
+	if len(s.EdgeTypes) != len(wantEdgeKinds) {
+		t.Fatalf("expected %d edge types %v, got %d", len(wantEdgeKinds), wantEdgeKinds, len(s.EdgeTypes))
+	}
+	for i, want := range wantEdgeKinds {
+		if s.EdgeTypes[i].Name != want {
+			t.Fatalf("edge type %d = %q, want %q", i, s.EdgeTypes[i].Name, want)
+		}
 	}
 	if len(s.StalenessDrivers) != 1 || s.StalenessDrivers[0] != "source_mutation" {
 		t.Fatalf("expected staleness_drivers [source_mutation] (O5), got %v", s.StalenessDrivers)

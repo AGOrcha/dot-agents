@@ -1,0 +1,28 @@
+{
+  "arguments": {
+    "changed_files": []
+  },
+  "case": "no_changes",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"No changed files detected.\",\"affected_flows\":[],\"total\":0,\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "affected_flows": [],
+    "status": "ok",
+    "summary": "No changed files detected.",
+    "total": 0
+  },
+  "tool": "get_affected_flows_tool"
+}

@@ -1,5 +1,5 @@
 name: crg-bridge
-version: 0.1.0
+version: 0.1.1
 # MIGRATION ONLY (spec §11.2). Long-term adapters must not declare reads_from
 # against this adapter — the loader rejects that at load time.
 migration_only: true
@@ -18,7 +18,11 @@ note_types:
       - name: kind
         type: enum
         required: true
-        values: [Function, Type]
+        # Mirrors the kg-native crg adapter, which is upstream
+        # code-review-graph v2.3.8's own four node kinds. The bridge reads the
+        # same graph, so the vocabularies cannot diverge without breaking the
+        # §11.2 mirror invariant the parity comparison depends on.
+        values: [File, Class, Function, Test]
       - name: language
         type: string
         required: true
@@ -32,13 +36,16 @@ note_types:
         type: string
         required: true
 edge_types:
+  - name: CONTAINS
+    from: symbol
+    to: symbol
   - name: CALLS
     from: symbol
     to: symbol
-  - name: TESTED_BY
+  - name: IMPORTS_FROM
     from: symbol
     to: symbol
-  - name: IMPORTS
+  - name: TESTED_BY
     from: symbol
     to: symbol
 # No drivers — bridge state mutation is observed externally, not tracked

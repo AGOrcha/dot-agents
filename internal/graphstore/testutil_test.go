@@ -10,6 +10,13 @@ import (
 
 // writeFakeCRGDBInternal mirrors writeFakeCRGDB (in crg_test.go) for use
 // inside package graphstore. Kept here to avoid cross-package imports.
+//
+// It writes an upstream-SHAPED database, not merely a parseable one: a File
+// node per source file — that is where `status --json` derives its file count
+// and language inventory — and a metadata table carrying `last_updated`,
+// which is where it derives the build timestamp. A fixture missing either
+// reads back as an UNBUILT graph, which is the wrong thing for a test that
+// means "a built graph" to assert against.
 func writeFakeCRGDBInternal(t *testing.T, repoRoot string, nodeCount, edgeCount int) {
 	t.Helper()
 	dir := filepath.Join(repoRoot, ".code-review-graph")
@@ -34,19 +41,29 @@ func writeFakeCRGDBInternal(t *testing.T, repoRoot string, nodeCount, edgeCount 
 		  id INTEGER PRIMARY KEY AUTOINCREMENT,
 		  kind TEXT, source_qualified TEXT, target_qualified TEXT,
 		  file_path TEXT, line INTEGER, extra TEXT, updated_at REAL
-		);`
+		);
+		CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 	if _, err := db.Exec(ddl); err != nil {
 		t.Fatalf("ddl: %v", err)
 	}
-	for i := 0; i < nodeCount; i++ {
-		name := "fn" + string(rune('a'+i))
+	insertNode := func(kind, name, qualified string) {
 		_, _ = db.Exec(
 			`INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end,language,parent_name,params,return_type,is_test,file_hash,extra,updated_at)
 			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			"Function", name, "pkg::"+name, "f.go", 1, 5, "go", "pkg", "", "", 0, "", "{}", "2026-01-01T00:00:00Z",
+			kind, name, qualified, "f.go", 1, 5, "go", "pkg", "", "", 0, "", "{}", "2026-01-01T00:00:00Z",
 		)
 	}
-	for i := 0; i < edgeCount; i++ {
+	if nodeCount > 0 {
+		insertNode("File", "f.go", "f.go")
+		if _, err := db.Exec(`INSERT INTO metadata (key,value) VALUES ('last_updated','2026-01-01T00:00:00')`); err != nil {
+			t.Fatalf("seed last_updated: %v", err)
+		}
+	}
+	for i := 1; i < nodeCount; i++ {
+		name := "fn" + string(rune('a'+i))
+		insertNode("Function", name, "pkg::"+name)
+	}
+	for range edgeCount {
 		_, _ = db.Exec(
 			`INSERT INTO edges (kind,source_qualified,target_qualified,file_path,line,extra,updated_at)
 			 VALUES (?,?,?,?,?,?,?)`,

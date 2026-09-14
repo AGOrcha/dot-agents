@@ -1,0 +1,57 @@
+{
+  "arguments": {
+    "community_name": "zeta",
+    "include_members": true
+  },
+  "case": "sanitized",
+  "is_error": false,
+  "structured_content": {
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Explore callers/callees of community members",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "Browse other communities",
+          "tool": "list_communities"
+        },
+        {
+          "suggestion": "See how this community fits the architecture",
+          "tool": "get_architecture_overview"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "community": {
+      "cohesion": 1.0,
+      "description": "Directory-based community: z",
+      "dominant_language": "go",
+      "id": 6,
+      "level": 0,
+      "member_details": [
+        {
+          "file_path": "${REPO_ROOT}/z.go",
+          "id": 51,
+          "is_test": false,
+          "kind": "Function",
+          "language": "go",
+          "line_end": 8,
+          "line_start": 5,
+          "name": "Zero",
+          "parent_name": null,
+          "qualified_name": "${REPO_ROOT}/z.go::Zero"
+        }
+      ],
+      "members": [
+        "${REPO_ROOT}/z.go::Zero"
+      ],
+      "name": "zetaevil",
+      "size": 1
+    },
+    "status": "ok",
+    "summary": "Community 'zetaevil': 1 nodes, cohesion 1.0000"
+  },
+  "tool": "get_community_tool"
+}

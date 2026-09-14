@@ -1,0 +1,94 @@
+{
+  "arguments": {
+    "kind": "Function"
+  },
+  "case": "kind_filter",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Found 3 execution flow(s)\",\"flows\":[{\"id\":1,\"name\":\"Login\",\"entry_point_id\":8,\"depth\":1,\"node_count\":2,\"file_count\":1,\"criticality\":0.45,\"path\":[8,9],\"created_at\":\"${TIMESTAMP}\",\"updated_at\":\"${TIMESTAMP}\"},{\"id\":2,\"name\":\"main\",\"entry_point_id\":2,\"depth\":2,\"node_count\":3,\"file_count\":1,\"criticality\":0.4167,\"path\":[2,3,4],\"created_at\":\"${TIMESTAMP}\",\"updated_at\":\"${TIMESTAMP}\"},{\"id\":3,\"name\":\"ValidateToken\",\"entry_point_id\":10,\"depth\":1,\"node_count\":2,\"file_count\":1,\"criticality\":0.41,\"path\":[10,11],\"created_at\":\"${TIMESTAMP}\",\"updated_at\":\"${TIMESTAMP}\"}],\"total\":3,\"truncated\":false,\"_hints\":{\"next_steps\":[{\"tool\":\"get_flow\",\"suggestion\":\"Drill into a specific flow for step-by-step details\"},{\"tool\":\"get_affected_flows\",\"suggestion\":\"Check which flows are affected by recent changes\"},{\"tool\":\"get_architecture_overview\",\"suggestion\":\"See the high-level architecture\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Drill into a specific flow for step-by-step details",
+          "tool": "get_flow"
+        },
+        {
+          "suggestion": "Check which flows are affected by recent changes",
+          "tool": "get_affected_flows"
+        },
+        {
+          "suggestion": "See the high-level architecture",
+          "tool": "get_architecture_overview"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "flows": [
+      {
+        "created_at": "${TIMESTAMP}",
+        "criticality": 0.45,
+        "depth": 1,
+        "entry_point_id": 8,
+        "file_count": 1,
+        "id": 1,
+        "name": "Login",
+        "node_count": 2,
+        "path": [
+          8,
+          9
+        ],
+        "updated_at": "${TIMESTAMP}"
+      },
+      {
+        "created_at": "${TIMESTAMP}",
+        "criticality": 0.4167,
+        "depth": 2,
+        "entry_point_id": 2,
+        "file_count": 1,
+        "id": 2,
+        "name": "main",
+        "node_count": 3,
+        "path": [
+          2,
+          3,
+          4
+        ],
+        "updated_at": "${TIMESTAMP}"
+      },
+      {
+        "created_at": "${TIMESTAMP}",
+        "criticality": 0.41,
+        "depth": 1,
+        "entry_point_id": 10,
+        "file_count": 1,
+        "id": 3,
+        "name": "ValidateToken",
+        "node_count": 2,
+        "path": [
+          10,
+          11
+        ],
+        "updated_at": "${TIMESTAMP}"
+      }
+    ],
+    "status": "ok",
+    "summary": "Found 3 execution flow(s)",
+    "total": 3,
+    "truncated": false
+  },
+  "tool": "list_flows_tool"
+}

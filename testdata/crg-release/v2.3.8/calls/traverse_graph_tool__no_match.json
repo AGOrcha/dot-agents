@@ -1,0 +1,26 @@
+{
+  "arguments": {
+    "query": "zzzznomatch"
+  },
+  "case": "no_match",
+  "content": [
+    {
+      "text": "{\"error\":\"No node matching 'zzzznomatch'\",\"nodes\":[],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "error": "No node matching 'zzzznomatch'",
+    "nodes": []
+  },
+  "tool": "traverse_graph_tool"
+}

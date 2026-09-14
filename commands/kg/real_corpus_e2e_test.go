@@ -70,7 +70,7 @@ type realCorpusSource struct {
 // The sample is capped (not all ~47 specs) so the doc lane stays fast under
 // -race; the cap is documented in the test and the assertions only require a
 // representative subset, not the full corpus.
-func collectRealSpecs(t *testing.T, repoRoot string, max int) []realCorpusSource {
+func collectRealSpecs(t *testing.T, repoRoot string, maxSources int) []realCorpusSource {
 	t.Helper()
 	specsDir := filepath.Join(repoRoot, ".agents", "workflow", "specs")
 	entries, err := os.ReadDir(specsDir)
@@ -87,8 +87,8 @@ func collectRealSpecs(t *testing.T, repoRoot string, max int) []realCorpusSource
 		t.Fatalf("no spec design.md files found under %s", specsDir)
 	}
 	sort.Strings(names) // deterministic sample
-	if max > 0 && len(names) > max {
-		names = names[:max]
+	if maxSources > 0 && len(names) > maxSources {
+		names = names[:maxSources]
 	}
 	out := make([]realCorpusSource, 0, len(names))
 	for _, name := range names {
@@ -113,7 +113,7 @@ func specHasDesign(specsDir string, e os.DirEntry) bool {
 
 // collectRealResearch gathers a few real research markdown docs. These already
 // have unique filenames, so no renaming is needed.
-func collectRealResearch(t *testing.T, repoRoot string, max int) []realCorpusSource {
+func collectRealResearch(t *testing.T, repoRoot string, maxSources int) []realCorpusSource {
 	t.Helper()
 	researchDir := filepath.Join(repoRoot, "research")
 	entries, err := os.ReadDir(researchDir)
@@ -131,8 +131,8 @@ func collectRealResearch(t *testing.T, repoRoot string, max int) []realCorpusSou
 		t.Fatalf("no research *.md files found under %s", researchDir)
 	}
 	sort.Strings(names)
-	if max > 0 && len(names) > max {
-		names = names[:max]
+	if maxSources > 0 && len(names) > maxSources {
+		names = names[:maxSources]
 	}
 	out := make([]realCorpusSource, 0, len(names))
 	for _, name := range names {
@@ -348,6 +348,7 @@ func findQueryResult(resp GraphQueryResponse, id string) *GraphQueryResult {
 // under -race in CI. The subtree still contains dozens of real Go symbols, so
 // the node-count and impact assertions remain meaningful.
 func TestKGCodeLane_RealCorpus(t *testing.T) {
+	useBridgeBackend(t)
 	if testing.Short() {
 		t.Skip("skipping real-corpus code lane in -short mode (shells out to code-review-graph)")
 	}
@@ -394,19 +395,21 @@ func setupRealCodeGraph(t *testing.T, repoRoot, crgBin string) (string, int) {
 	if err != nil {
 		t.Fatalf("NewCRGBridge over staged tree: %v", err)
 	}
+	// postprocess="none" is upstream's way to skip flows and community
+	// detection; the old SkipFlows/SkipPostprocess flags do not exist in the
+	// release's option surface.
 	report, err := bridge.BuildReport(graphstore.BuildOptions{
-		SkipFlows:       true,
-		SkipPostprocess: true,
+		Postprocess: graphstore.PostprocessNone,
 	})
 	if err != nil {
 		skipOrFailRealCRGBuild(t, report, err)
 	}
-	if report.Outcome != graphstore.CRGReadinessReady {
-		t.Fatalf("expected build outcome=%q over real source, got %q; summary: %s",
-			graphstore.CRGReadinessReady, report.Outcome, report.Summary)
+	if report.Status != "ok" || report.BuildType != "full" {
+		t.Fatalf("expected a successful full build over real source, got status=%q build_type=%q; summary: %s",
+			report.Status, report.BuildType, report.Summary)
 	}
-	if report.Status == nil || report.Status.Nodes == 0 {
-		t.Fatalf("expected non-zero nodes from real source build, got status=%+v", report.Status)
+	if report.TotalNodes == nil || *report.TotalNodes == 0 {
+		t.Fatalf("expected non-zero nodes from real source build, got report=%+v", report)
 	}
 	// The produced graph.db must contain real Go symbol nodes.
 	return buildRoot, assertRealGraphDBNonEmpty(t, buildRoot)

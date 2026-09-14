@@ -1,0 +1,36 @@
+{
+  "arguments": {
+    "detail_level": "minimal",
+    "top_n": 3
+  },
+  "case": "minimal",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"0 surprising connection(s) ranked by surprise score\",\"surprising_connections\":[],\"count\":0,\"total\":0,\"truncated\":false,\"next_tool_suggestions\":[\"get_architecture_overview -- community structure\",\"query_graph callers_of -- trace the coupling\",\"get_bridge_nodes -- find chokepoints\"],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "count": 0,
+    "next_tool_suggestions": [
+      "get_architecture_overview -- community structure",
+      "query_graph callers_of -- trace the coupling",
+      "get_bridge_nodes -- find chokepoints"
+    ],
+    "status": "ok",
+    "summary": "0 surprising connection(s) ranked by surprise score",
+    "surprising_connections": [],
+    "total": 0,
+    "truncated": false
+  },
+  "tool": "get_surprising_connections_tool"
+}

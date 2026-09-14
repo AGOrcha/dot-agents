@@ -1,0 +1,48 @@
+{
+  "arguments": {
+    "query": "zzqqxx"
+  },
+  "case": "no_match",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"query\":\"zzqqxx\",\"search_mode\":\"none\",\"summary\":\"Found 0 node(s) matching 'zzqqxx'\",\"results\":[],\"confidence\":\"no indexed node matches 'zzqqxx'; search covers names, paths and signatures, not source text\",\"_hints\":{\"next_steps\":[{\"tool\":\"query_graph\",\"suggestion\":\"Inspect callers/callees of a search result\"},{\"tool\":\"get_flow\",\"suggestion\":\"See the execution flow through a matched node\"},{\"tool\":\"get_impact_radius\",\"suggestion\":\"Check the blast radius from matched nodes\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Inspect callers/callees of a search result",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "See the execution flow through a matched node",
+          "tool": "get_flow"
+        },
+        {
+          "suggestion": "Check the blast radius from matched nodes",
+          "tool": "get_impact_radius"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "confidence": "no indexed node matches 'zzqqxx'; search covers names, paths and signatures, not source text",
+    "query": "zzqqxx",
+    "results": [],
+    "search_mode": "none",
+    "status": "ok",
+    "summary": "Found 0 node(s) matching 'zzqqxx'"
+  },
+  "tool": "semantic_search_nodes_tool"
+}

@@ -1,0 +1,14 @@
+{
+  "arguments": {
+    "max_per_category": 0
+  },
+  "case": "bound_max_per_category",
+  "content": [
+    {
+      "text": "Error calling tool 'get_knowledge_gaps_tool': max_per_category must be an integer greater than or equal to 1",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "get_knowledge_gaps_tool"
+}

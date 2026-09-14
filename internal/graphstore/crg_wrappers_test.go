@@ -256,8 +256,15 @@ exit 0
 `
 	repo, crgBin := makeFakeCRGEnv(t, crgScript, "#!/bin/sh\nexit 0\n")
 	b := &CRGBridge{RepoRoot: repo, Bin: crgBin}
-	if err := b.Postprocess(PostprocessOptions{NoFlows: true, NoCommunities: true, NoFTS: true}); err != nil {
-		t.Errorf("Postprocess: %v", err)
+	report, err := b.PostprocessReport(PostprocessOptions{
+		Flows:       new(false),
+		Communities: new(false),
+		FTS:         new(false),
+	})
+	if err != nil {
+		t.Errorf("PostprocessReport: %v", err)
+	} else if report.Summary != crgPostprocessSummary {
+		t.Errorf("summary = %q, want %q", report.Summary, crgPostprocessSummary)
 	}
 }
 
@@ -328,102 +335,102 @@ exit 1
 	}
 }
 
-// ── gitChangedFiles ──────────────────────────────────────────────────────────
+// ── shared VCS probes ────────────────────────────────────────────────────────
 
-func TestCRGBridge_gitChangedFiles_NoChangesReturnsEmpty(t *testing.T) {
-	repo, crgBin := makeFakeCRGEnv(t, "#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 0\n")
+// TestGitCommitExists covers the object-existence check the automatic
+// incremental base resolves through. It is deliberately NOT an ancestry
+// check: a commit reachable only from a branch the working copy has left is
+// still a valid diff base.
+func TestGitCommitExists(t *testing.T) {
+	repo, _ := makeFakeCRGEnv(t, "#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 0\n")
 	initRepoGit(t, repo)
-	b := &CRGBridge{RepoRoot: repo, Bin: crgBin}
-	files, err := b.gitChangedFiles("HEAD")
-	if err != nil {
-		t.Fatalf("gitChangedFiles: %v", err)
+	if !GitCommitExists(repo, "HEAD") {
+		t.Error("HEAD must resolve in a repository with a commit")
 	}
-	if len(files) != 0 {
-		t.Errorf("expected no files; got %v", files)
+	if GitCommitExists(repo, strings.Repeat("0", 40)) {
+		t.Error("an absent object must not resolve")
+	}
+	// An unsafe ref never reaches git.
+	for _, ref := range []string{"", "--upload-pack=evil", "HEAD; rm -rf /"} {
+		if GitCommitExists(repo, ref) {
+			t.Errorf("unsafe ref %q must be rejected", ref)
+		}
 	}
 }
 
-func TestCRGBridge_gitChangedFiles_DefaultBase(t *testing.T) {
-	// gitChangedFiles defaults base to HEAD~1 when empty. With one commit only,
-	// HEAD~1 does not exist → expect error.
-	repo, crgBin := makeFakeCRGEnv(t, "#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 0\n")
+// TestDetectVCSAndBranchInfo covers the probes `status --json` reports from.
+func TestDetectVCSAndBranchInfo(t *testing.T) {
+	plain := t.TempDir()
+	if got := DetectVCS(plain); got != VCSNone {
+		t.Errorf("DetectVCS(plain dir) = %q, want %q", got, VCSNone)
+	}
+	repo, _ := makeFakeCRGEnv(t, "#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 0\n")
 	initRepoGit(t, repo)
-	b := &CRGBridge{RepoRoot: repo, Bin: crgBin}
-	_, err := b.gitChangedFiles("")
-	if err == nil {
-		t.Error("expected error when HEAD~1 missing on fresh repo")
+	if got := DetectVCS(repo); got != VCSGit {
+		t.Errorf("DetectVCS(git repo) = %q, want %q", got, VCSGit)
+	}
+	branch, sha := GitBranchInfo(repo)
+	if branch == "" || len(sha) < 7 {
+		t.Errorf("GitBranchInfo = (%q, %q), want a branch and a sha", branch, sha)
+	}
+	if branch, sha := GitBranchInfo(plain); branch != "" || sha != "" {
+		t.Errorf("GitBranchInfo(plain dir) = (%q, %q), want empties", branch, sha)
 	}
 }
 
-func TestCRGBridge_gitChangedFiles_NotARepoErrors(t *testing.T) {
-	repo, crgBin := makeFakeCRGEnv(t, "#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 0\n")
-	b := &CRGBridge{RepoRoot: repo, Bin: crgBin}
-	_, err := b.gitChangedFiles("HEAD")
-	if err == nil {
-		t.Error("expected error in non-git dir")
+// TestRecurseSubmodulesTriState covers the option's three states.
+func TestRecurseSubmodulesTriState(t *testing.T) {
+	t.Setenv("CRG_RECURSE_SUBMODULES", "1")
+	if !RecurseSubmodules(nil) {
+		t.Error("nil must defer to the environment")
+	}
+	if RecurseSubmodules(new(false)) {
+		t.Error("an explicit false must override the environment")
+	}
+	t.Setenv("CRG_RECURSE_SUBMODULES", "")
+	if RecurseSubmodules(nil) {
+		t.Error("nil must default to disabled")
+	}
+	if !RecurseSubmodules(new(true)) {
+		t.Error("an explicit true must override the environment")
 	}
 }
 
 // ── UpdateReport / Update ────────────────────────────────────────────────────
 
-func TestCRGBridge_UpdateReport_NoDiffShortCircuits(t *testing.T) {
-	repo, crgBin := makeFakeCRGEnv(t, "#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 0\n")
+// TestCRGBridge_UpdateReport_DelegatesToTheCLI pins that the bridge no longer
+// pre-empts the CLI with its own git diff. Upstream resolves the base itself
+// and may fall back to a full rebuild, so a caller that short-circuited on an
+// empty HEAD~1 diff would report a stale graph as up to date.
+func TestCRGBridge_UpdateReport_DelegatesToTheCLI(t *testing.T) {
+	repo, crgBin := makeFakeCRGEnv(t,
+		"#!/bin/sh\necho 'Incremental: 0 files updated, 0 nodes, 0 edges (postprocess=full)'\nexit 0\n",
+		"#!/bin/sh\nexit 0\n")
 	initRepoGit(t, repo)
 	b := &CRGBridge{RepoRoot: repo, Bin: crgBin}
-	// HEAD base → no diff → no CRG invocation; Status() runs with missing DB.
 	rep, err := b.UpdateReport(UpdateOptions{Base: "HEAD"})
 	if err != nil {
 		t.Fatalf("UpdateReport: %v", err)
 	}
-	if rep.Outcome != "no_diff" {
-		t.Errorf("expected outcome=no_diff; got %q", rep.Outcome)
+	if rep.Summary != crgNoChangesSummary {
+		t.Errorf("summary = %q, want %q", rep.Summary, crgNoChangesSummary)
 	}
 }
 
-func TestCRGBridge_UpdateReport_PropagatesGitError(t *testing.T) {
-	repo, crgBin := makeFakeCRGEnv(t, "#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 0\n")
-	// Not a git repo → gitChangedFiles errors → UpdateReport propagates.
-	b := &CRGBridge{RepoRoot: repo, Bin: crgBin}
-	if _, err := b.UpdateReport(UpdateOptions{Base: "HEAD~1"}); err == nil {
-		t.Error("expected error from missing git repo")
-	}
-}
-
-func TestCRGBridge_UpdateReport_RunsCRGOnDiff(t *testing.T) {
-	// One commit + uncommitted change → diff against HEAD picks up nothing,
-	// but diff against HEAD~1 errors. So use two commits: c1, c2 with diff
-	// between them.
+// TestCRGBridge_UpdateReport_OutsideAGitRepoStillRuns pins that the bridge
+// does not fail before the CLI runs: change discovery is upstream's job, and
+// a non-git working copy is a valid input there.
+func TestCRGBridge_UpdateReport_OutsideAGitRepoStillRuns(t *testing.T) {
 	repo, crgBin := makeFakeCRGEnv(t,
-		"#!/bin/sh\necho 'updated: 1 files, 2 nodes, 3 edges'\nexit 0\n",
+		"#!/bin/sh\necho 'Incremental: 1 files updated, 2 nodes, 3 edges (postprocess=full)'\nexit 0\n",
 		"#!/bin/sh\nexit 0\n")
-	initRepoGit(t, repo)
-	// Add second commit so HEAD~1 exists.
-	if err := os.WriteFile(filepath.Join(repo, "b.go"), []byte("package b\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("git", "add", "b.go")
-	cmd.Dir = repo
-	_ = cmd.Run()
-	cmd = exec.Command("git", "commit", "--quiet", "-m", "c2")
-	cmd.Dir = repo
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git commit: %v\n%s", err, out)
-	}
-
 	b := &CRGBridge{RepoRoot: repo, Bin: crgBin}
-	rep, err := b.UpdateReport(UpdateOptions{Base: "HEAD~1", SkipFlows: true, SkipPostprocess: true})
+	rep, err := b.UpdateReport(UpdateOptions{Base: "HEAD~1"})
 	if err != nil {
 		t.Fatalf("UpdateReport: %v", err)
 	}
-	if rep.Outcome == "no_diff" {
-		t.Errorf("expected non-no_diff outcome; got %+v", rep)
-	}
-	if len(rep.ChangedFiles) == 0 {
-		t.Errorf("expected changed files; got %+v", rep)
+	if rep.FilesUpdated == nil || *rep.FilesUpdated != 1 {
+		t.Errorf("files_updated = %v, want 1", rep.FilesUpdated)
 	}
 }
 
@@ -456,8 +463,8 @@ func TestCRGBridge_UpdateReport_CRGRunFailureErrors(t *testing.T) {
 }
 
 func TestCRGBridge_Update_WrapperPropagatesError(t *testing.T) {
-	repo, crgBin := makeFakeCRGEnv(t, "#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 0\n")
-	// Not a git repo → UpdateReport errors → Update wraps.
+	repo, crgBin := makeFakeCRGEnv(t, "#!/bin/sh\nexit 7\n", "#!/bin/sh\nexit 0\n")
+	// The CLI fails → UpdateReport errors → Update wraps.
 	b := &CRGBridge{RepoRoot: repo, Bin: crgBin}
 	if err := b.Update(UpdateOptions{}); err == nil {
 		t.Error("expected wrapper to propagate error")

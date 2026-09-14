@@ -1,0 +1,77 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"questions\":[{\"category\":\"bridge_node\",\"question\":\"'handleLogin' is a critical connector between multiple code regions. Is it adequately tested and documented?\",\"target\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"priority\":\"high\"},{\"category\":\"bridge_node\",\"question\":\"'TestLogin' is a critical connector between multiple code regions. Is it adequately tested and documented?\",\"target\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin\",\"priority\":\"high\"},{\"category\":\"bridge_node\",\"question\":\"'TestValidateToken' is a critical connector between multiple code regions. Is it adequately tested and documented?\",\"target\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken\",\"priority\":\"high\"},{\"category\":\"hub_risk\",\"question\":\"Hub node 'handleLogin' has 5 connections but no direct test coverage. Should it be tested?\",\"target\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"priority\":\"high\"},{\"category\":\"hub_risk\",\"question\":\"Hub node 'TestLogin' has 5 connections but no direct test coverage. Should it be tested?\",\"target\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin\",\"priority\":\"high\"},{\"category\":\"hub_risk\",\"question\":\"Hub node 'TestValidateToken' has 5 connections but no direct test coverage. Should it be tested?\",\"target\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken\",\"priority\":\"high\"},{\"category\":\"untested_hotspot\",\"question\":\"'handleLogin' has 5 connections but no test coverage. Is this a risk?\",\"target\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"priority\":\"medium\"}],\"count\":7,\"by_priority\":{\"high\":6,\"medium\":1,\"low\":0},\"next_tool_suggestions\":[\"get_knowledge_gaps -- structural weaknesses\",\"detect_changes -- risk-scored review\",\"get_architecture_overview -- community map\"],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "by_priority": {
+      "high": 6,
+      "low": 0,
+      "medium": 1
+    },
+    "count": 7,
+    "next_tool_suggestions": [
+      "get_knowledge_gaps -- structural weaknesses",
+      "detect_changes -- risk-scored review",
+      "get_architecture_overview -- community map"
+    ],
+    "questions": [
+      {
+        "category": "bridge_node",
+        "priority": "high",
+        "question": "'handleLogin' is a critical connector between multiple code regions. Is it adequately tested and documented?",
+        "target": "${REPO_ROOT}/cmd/main.go::handleLogin"
+      },
+      {
+        "category": "bridge_node",
+        "priority": "high",
+        "question": "'TestLogin' is a critical connector between multiple code regions. Is it adequately tested and documented?",
+        "target": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin"
+      },
+      {
+        "category": "bridge_node",
+        "priority": "high",
+        "question": "'TestValidateToken' is a critical connector between multiple code regions. Is it adequately tested and documented?",
+        "target": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken"
+      },
+      {
+        "category": "hub_risk",
+        "priority": "high",
+        "question": "Hub node 'handleLogin' has 5 connections but no direct test coverage. Should it be tested?",
+        "target": "${REPO_ROOT}/cmd/main.go::handleLogin"
+      },
+      {
+        "category": "hub_risk",
+        "priority": "high",
+        "question": "Hub node 'TestLogin' has 5 connections but no direct test coverage. Should it be tested?",
+        "target": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin"
+      },
+      {
+        "category": "hub_risk",
+        "priority": "high",
+        "question": "Hub node 'TestValidateToken' has 5 connections but no direct test coverage. Should it be tested?",
+        "target": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken"
+      },
+      {
+        "category": "untested_hotspot",
+        "priority": "medium",
+        "question": "'handleLogin' has 5 connections but no test coverage. Is this a risk?",
+        "target": "${REPO_ROOT}/cmd/main.go::handleLogin"
+      }
+    ]
+  },
+  "tool": "get_suggested_questions_tool"
+}

@@ -711,7 +711,16 @@ func runKGServe(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	srv := graphstore.NewMCPServer(workDir)
+	// `da kg serve` exposes the pinned code-review-graph release's FULL tool
+	// surface (see internal/crgrelease), whichever backend is configured.
+	// Each call is validated against the release's published schema and then
+	// routed: answered in-process by the kg-native engine when that engine
+	// reproduces the release's response for this repository's sources, and by
+	// the retained Python bridge otherwise. `da kg code-capabilities` reports
+	// the routing decision per tool.
+	provider, release, perr := codeGraphProvider(workDir)
+	defer release()
+	srv := graphstore.NewMCPServerWithProvider(workDir, provider, perr)
 	return srv.Serve(os.Stdin, os.Stdout)
 }
 

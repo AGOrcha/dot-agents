@@ -1,0 +1,19 @@
+{
+  "arguments": {
+    "section_name": "usage"
+  },
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"section\":\"usage\",\"content\":\"Quick install: pip install code-review-graph\\nThen: code-review-graph install && code-review-graph build\\nFirst run: /code-review-graph:build-graph\\nAfter that use only delta/pr commands.\\nALWAYS start with get_minimal_context_tool(task=\\\"your task\\\") \u2014 returns ~100 tokens with risk, communities, flows, and suggested next tools.\\nUse detail_level=\\\"minimal\\\" on all subsequent calls unless you need more detail.\\nWhen present, context_savings is an estimated compact hint, not exact tokenization.\"}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "content": "Quick install: pip install code-review-graph\nThen: code-review-graph install && code-review-graph build\nFirst run: /code-review-graph:build-graph\nAfter that use only delta/pr commands.\nALWAYS start with get_minimal_context_tool(task=\"your task\") \u2014 returns ~100 tokens with risk, communities, flows, and suggested next tools.\nUse detail_level=\"minimal\" on all subsequent calls unless you need more detail.\nWhen present, context_savings is an estimated compact hint, not exact tokenization.",
+    "section": "usage",
+    "status": "ok"
+  },
+  "tool": "get_docs_section_tool"
+}

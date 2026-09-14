@@ -1,0 +1,14 @@
+{
+  "arguments": {
+    "top_n": -1
+  },
+  "case": "bound_top_n",
+  "content": [
+    {
+      "text": "Error calling tool 'get_hub_nodes_tool': top_n must be an integer greater than or equal to 1",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "get_hub_nodes_tool"
+}

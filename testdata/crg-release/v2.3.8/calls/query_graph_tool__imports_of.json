@@ -1,0 +1,49 @@
+{
+  "arguments": {
+    "pattern": "imports_of",
+    "target": "pkg/auth/auth_test.go"
+  },
+  "case": "imports_of",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"pattern\":\"imports_of\",\"target\":\"pkg/auth/auth_test.go\",\"description\":\"Find all imports of a given file or module\",\"summary\":\"Found 1 result(s) for imports_of('pkg/auth/auth_test.go')\",\"result_count\":1,\"results_omitted\":0,\"results\":[{\"import_target\":\"testing\"}],\"edges\":[{\"id\":18,\"kind\":\"IMPORTS_FROM\",\"source\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"target\":\"testing\",\"file_path\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"line\":3,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"}],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "description": "Find all imports of a given file or module",
+    "edges": [
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "id": 18,
+        "kind": "IMPORTS_FROM",
+        "line": 3,
+        "source": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "target": "testing"
+      }
+    ],
+    "pattern": "imports_of",
+    "result_count": 1,
+    "results": [
+      {
+        "import_target": "testing"
+      }
+    ],
+    "results_omitted": 0,
+    "status": "ok",
+    "summary": "Found 1 result(s) for imports_of('pkg/auth/auth_test.go')",
+    "target": "pkg/auth/auth_test.go"
+  },
+  "tool": "query_graph_tool"
+}

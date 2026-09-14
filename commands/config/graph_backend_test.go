@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/none"
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
@@ -48,6 +49,16 @@ func TestResolveGraphBackend_VersionMismatch(t *testing.T) {
 func TestResolveGraphBackend_BadRef(t *testing.T) {
 	if _, err := resolveGraphBackend(""); err == nil {
 		t.Fatal("expected error parsing an empty ref")
+	}
+}
+
+func TestRegisterBuiltinGraphBackends_DuplicateNone(t *testing.T) {
+	reg := registry.New()
+	if err := none.Register(reg); err != nil {
+		t.Fatalf("register fixture: %v", err)
+	}
+	if err := registerBuiltinGraphBackends(reg); err == nil {
+		t.Fatal("expected duplicate none registration to fail")
 	}
 }
 

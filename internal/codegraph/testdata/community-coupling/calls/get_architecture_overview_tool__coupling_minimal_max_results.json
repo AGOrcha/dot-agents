@@ -1,0 +1,97 @@
+{
+  "arguments": {
+    "max_results": 1
+  },
+  "case": "coupling_minimal_max_results",
+  "is_error": false,
+  "structured_content": {
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Drill into individual communities",
+          "tool": "list_communities"
+        },
+        {
+          "suggestion": "See how recent changes affect the architecture",
+          "tool": "detect_changes"
+        },
+        {
+          "suggestion": "Explore execution flows",
+          "tool": "list_flows"
+        }
+      ],
+      "related": [],
+      "warnings": [
+        "High coupling (13 edges) between 'alpha' and 'beta'"
+      ]
+    },
+    "communities": [
+      {
+        "cohesion": 0.625,
+        "dominant_language": "go",
+        "id": 5,
+        "name": "epsilon",
+        "size": 30
+      },
+      {
+        "cohesion": 0.75,
+        "dominant_language": "go",
+        "id": 3,
+        "name": "c-test",
+        "size": 5
+      },
+      {
+        "cohesion": 0.5,
+        "dominant_language": "go",
+        "id": 1,
+        "name": "alpha",
+        "size": 4
+      },
+      {
+        "cohesion": 0.25,
+        "dominant_language": "go",
+        "id": 2,
+        "name": "beta",
+        "size": 3
+      },
+      {
+        "cohesion": 0.125,
+        "dominant_language": "go",
+        "id": 4,
+        "name": "delta",
+        "size": 2
+      },
+      {
+        "cohesion": 1.0,
+        "dominant_language": "go",
+        "id": 6,
+        "name": "zetaevil",
+        "size": 1
+      }
+    ],
+    "context_savings": {
+      "estimated": true,
+      "saved_percent": "${SAVED_PERCENT}",
+      "saved_tokens": "${SAVED_TOKENS}"
+    },
+    "cross_community_edges": [
+      {
+        "edge_count": 13,
+        "source_community": "alpha",
+        "target_community": "beta",
+        "top_kinds": [
+          "CALLS",
+          "IMPORTS_FROM"
+        ]
+      }
+    ],
+    "cross_community_edges_total": 4,
+    "status": "ok",
+    "summary": "Architecture: 6 communities, 4 community pairs, showing 1 of 4, 2 warning(s)",
+    "truncated": true,
+    "warnings": [
+      "High coupling (13 edges) between 'alpha' and 'beta'"
+    ]
+  },
+  "tool": "get_architecture_overview_tool"
+}

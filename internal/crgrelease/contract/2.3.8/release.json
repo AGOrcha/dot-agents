@@ -1,0 +1,18 @@
+{
+  "base_sha": "136978d13a4512f7a20e493bb28d59729cd91c58",
+  "fastmcp_version": "3.4.7",
+  "head_sha": "140111e251442ccfb563138654add326d0944cc5",
+  "protocol_version": "2025-06-18",
+  "schema_version": 9,
+  "tag_commit": "2c6dae32643572ee528eb9b77dbcc17f58f3a8c9",
+  "tool_count": 30,
+  "unexercised_tools": [
+    "apply_refactor_tool",
+    "build_or_update_graph_tool",
+    "embed_graph_tool",
+    "generate_wiki_tool",
+    "get_wiki_page_tool",
+    "run_postprocess_tool"
+  ],
+  "version": "2.3.8"
+}

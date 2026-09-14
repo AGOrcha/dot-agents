@@ -1,8 +1,6 @@
 package kg
 
 import (
-	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,28 +18,10 @@ func TestConfigPath_UsesKGHome(t *testing.T) {
 // TestPreviewSingleIngest_PrintsHeaderAndCounts captures stdout and asserts
 // the dry-run preview line content.
 func TestPreviewSingleIngest_PrintsHeaderAndCounts(t *testing.T) {
-	orig := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	os.Stdout = w
-
-	done := make(chan struct{})
-	var buf strings.Builder
-	go func() {
-		_, _ = io.Copy(&buf, r)
-		close(done)
-	}()
-
 	content := []byte("# Heading\n\nThis describes Alice and Bob.\n\nDecision: pick Postgres.\n")
-	previewSingleIngest("src/123", "Sample Title", "url", content)
-
-	_ = w.Close()
-	<-done
-	os.Stdout = orig
-
-	out := buf.String()
+	out := string(captureStdout(t, func() {
+		previewSingleIngest("src/123", "Sample Title", "url", content)
+	}))
 	if !strings.Contains(out, "Source ID: src/123") {
 		t.Errorf("missing Source ID line: %q", out)
 	}

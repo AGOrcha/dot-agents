@@ -1,0 +1,76 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Blast radius for 1 changed file(s):\\n  - 2 nodes directly changed\\n  - 0 nodes impacted (within 2 hops)\\n  - 0 additional files affected\",\"changed_files\":[\"pkg/auth/token.go\"],\"changed_nodes\":[{\"id\":15,\"kind\":\"File\",\"name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":1,\"line_end\":7,\"language\":\"go\",\"parent_name\":null,\"is_test\":false},{\"id\":16,\"kind\":\"Function\",\"name\":\"mintToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line_start\":4,\"line_end\":6,\"language\":\"go\",\"parent_name\":null,\"is_test\":false}],\"impacted_nodes\":[],\"impacted_files\":[],\"edges\":[{\"id\":29,\"kind\":\"CONTAINS\",\"source\":\"${REPO_ROOT}/pkg/auth/token.go\",\"target\":\"${REPO_ROOT}/pkg/auth/token.go::mintToken\",\"file_path\":\"${REPO_ROOT}/pkg/auth/token.go\",\"line\":4,\"confidence\":1.0,\"confidence_tier\":\"EXTRACTED\"}],\"truncated\":false,\"total_impacted\":0,\"nodes_omitted\":0,\"confidence\":\"changed files are indexed and the graph is current, so this 0 is a real absence\",\"context_savings\":{\"estimated\":true,\"saved_tokens\":\"${SAVED_TOKENS}\",\"saved_percent\":\"${SAVED_PERCENT}\"},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "changed_files": [
+      "pkg/auth/token.go"
+    ],
+    "changed_nodes": [
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 15,
+        "is_test": false,
+        "kind": "File",
+        "language": "go",
+        "line_end": 7,
+        "line_start": 1,
+        "name": "${REPO_ROOT}/pkg/auth/token.go",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go"
+      },
+      {
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 16,
+        "is_test": false,
+        "kind": "Function",
+        "language": "go",
+        "line_end": 6,
+        "line_start": 4,
+        "name": "mintToken",
+        "parent_name": null,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/token.go::mintToken"
+      }
+    ],
+    "confidence": "changed files are indexed and the graph is current, so this 0 is a real absence",
+    "context_savings": {
+      "estimated": true,
+      "saved_percent": "${SAVED_PERCENT}",
+      "saved_tokens": "${SAVED_TOKENS}"
+    },
+    "edges": [
+      {
+        "confidence": 1.0,
+        "confidence_tier": "EXTRACTED",
+        "file_path": "${REPO_ROOT}/pkg/auth/token.go",
+        "id": 29,
+        "kind": "CONTAINS",
+        "line": 4,
+        "source": "${REPO_ROOT}/pkg/auth/token.go",
+        "target": "${REPO_ROOT}/pkg/auth/token.go::mintToken"
+      }
+    ],
+    "impacted_files": [],
+    "impacted_nodes": [],
+    "nodes_omitted": 0,
+    "status": "ok",
+    "summary": "Blast radius for 1 changed file(s):\n  - 2 nodes directly changed\n  - 0 nodes impacted (within 2 hops)\n  - 0 additional files affected",
+    "total_impacted": 0,
+    "truncated": false
+  },
+  "tool": "get_impact_radius_tool"
+}

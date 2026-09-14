@@ -1,0 +1,15 @@
+{
+  "arguments": {
+    "flow_id": 1,
+    "max_steps": 0
+  },
+  "case": "bound_max_steps",
+  "content": [
+    {
+      "text": "Error calling tool 'get_flow_tool': max_steps must be an integer greater than or equal to 1",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "get_flow_tool"
+}

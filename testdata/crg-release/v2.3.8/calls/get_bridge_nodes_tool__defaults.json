@@ -1,0 +1,74 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"5 bridge node(s) ranked by betweenness\",\"bridge_nodes\":[{\"name\":\"handleLogin\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/cmd/main.go\",\"betweenness\":0.02619,\"community_id\":1},{\"name\":\"TestLogin\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin\",\"kind\":\"Test\",\"file\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"betweenness\":0.021429,\"community_id\":2},{\"name\":\"TestValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken\",\"kind\":\"Test\",\"file\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"betweenness\":0.021429,\"community_id\":2},{\"name\":\"Session\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"kind\":\"Class\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"betweenness\":0.002381,\"community_id\":2},{\"name\":\"Login\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"betweenness\":0.002381,\"community_id\":2}],\"count\":5,\"total\":5,\"truncated\":false,\"next_tool_suggestions\":[\"get_hub_nodes -- find most connected nodes\",\"get_impact_radius -- check blast radius\",\"detect_changes -- see if bridges are affected\"],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "bridge_nodes": [
+      {
+        "betweenness": 0.02619,
+        "community_id": 1,
+        "file": "${REPO_ROOT}/cmd/main.go",
+        "kind": "Function",
+        "name": "handleLogin",
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin"
+      },
+      {
+        "betweenness": 0.021429,
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "kind": "Test",
+        "name": "TestLogin",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin"
+      },
+      {
+        "betweenness": 0.021429,
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "kind": "Test",
+        "name": "TestValidateToken",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken"
+      },
+      {
+        "betweenness": 0.002381,
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Class",
+        "name": "Session",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session"
+      },
+      {
+        "betweenness": 0.002381,
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "kind": "Function",
+        "name": "Login",
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login"
+      }
+    ],
+    "count": 5,
+    "next_tool_suggestions": [
+      "get_hub_nodes -- find most connected nodes",
+      "get_impact_radius -- check blast radius",
+      "detect_changes -- see if bridges are affected"
+    ],
+    "status": "ok",
+    "summary": "5 bridge node(s) ranked by betweenness",
+    "total": 5,
+    "truncated": false
+  },
+  "tool": "get_bridge_nodes_tool"
+}

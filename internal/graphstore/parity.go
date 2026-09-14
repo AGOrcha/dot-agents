@@ -33,11 +33,6 @@ import (
 // on any single anchor bucket passes; anything larger fails parity.
 const DefaultKindTolerance = 0.01
 
-// DefaultSpearmanTau is the pinned Spearman rank-correlation floor for
-// rank-ordered derived tables such as risk_index (O6 refinement C, "pin τ —
-// likely 0.85"). A correlation strictly below this fails parity.
-const DefaultSpearmanTau = 0.85
-
 // ParitySnapshot is the structured build/status oracle for one adapter at one
 // commit (O6 refinement A, replacing the under-specified §11.1 "build" row).
 // It is computed in Go from data the adapter exposes through the Store seam —
@@ -228,144 +223,23 @@ func impactIDSet(rows []ImpactRow) map[string]bool {
 	return out
 }
 
-// PartitionAgreement is the pair-agreement score between two community
-// partitions over the union of their members (O6 refinement C: partition
-// equivalence via pair-agreement, "simplest, defensible, computable"). It
-// returns the fraction of co-membership decisions the two partitions agree on,
-// in [0,1] (1.0 = identical partition up to cluster relabeling). community maps
-// node id → cluster id; cluster ids need not match between the two inputs.
+// The derived-view oracles that used to live here — PartitionAgreement
+// (community partition equivalence via pair agreement) and SpearmanTau
+// (risk_index rank correlation) — are GONE, deliberately.
 //
-// The second return is false when the two partitions do NOT cover the same node
-// set — a missing or extra node is a parity divergence, not a free pass, so the
-// score is meaningless and callers must treat ok=false as a failure. (Earlier
-// this leniently returned 1.0 for <2 ids, which masked a dropped node; that was
-// MEDIUM #5.) When ok is true and there is at most one shared node, agreement is
-// trivially 1.0 (no pair to disagree on).
-func PartitionAgreement(a, b map[string]string) (float64, bool) {
-	if !sameKeySet(a, b) {
-		return 0, false
-	}
-	ids := partitionMembers(a)
-	if len(ids) < 2 {
-		return 1.0, true
-	}
-	var agree, total int
-	for i := 0; i < len(ids); i++ {
-		for j := i + 1; j < len(ids); j++ {
-			total++
-			if (a[ids[i]] == a[ids[j]]) == (b[ids[i]] == b[ids[j]]) {
-				agree++
-			}
-		}
-	}
-	return float64(agree) / float64(total), true
-}
-
-// partitionMembers returns the sorted node ids of a partition.
-func partitionMembers(a map[string]string) []string {
-	out := make([]string, 0, len(a))
-	for k := range a {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// sameKeySet reports whether two string-keyed maps have identical key sets.
-func sameKeySet[V any](a, b map[string]V) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k := range a {
-		if _, ok := b[k]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-// SpearmanTau is the Spearman rank correlation between two rankings keyed by the
-// same ids (O6 refinement C: risk_index parity via Spearman τ). Each map is
-// id → score. The second return is false when the two rankings do NOT cover the
-// same id set — a missing or extra ranked node is a parity divergence, not a
-// free pass (MEDIUM #5: this no longer silently correlates only the shared ids
-// and passes). When ok is true the score is in [-1,1]; 1.0 is identical rank
-// order. With at most one shared id the order is trivially identical (1.0).
-func SpearmanTau(a, b map[string]float64) (float64, bool) {
-	if !sameKeySet(a, b) {
-		return 0, false
-	}
-	ids := make([]string, 0, len(a))
-	for id := range a {
-		ids = append(ids, id)
-	}
-	if len(ids) < 2 {
-		return 1.0, true
-	}
-	return pearson(ranksOf(ids, a), ranksOf(ids, b)), true
-}
-
-// scoredID pairs a node id with its score, for rank assignment.
-type scoredID struct {
-	id string
-	v  float64
-}
-
-// ranksOf returns fractional ranks (ties averaged) for the given ids by their
-// score in m, indexed parallel to ids.
-func ranksOf(ids []string, m map[string]float64) []float64 {
-	sorted := make([]scoredID, len(ids))
-	for i, id := range ids {
-		sorted[i] = scoredID{id, m[id]}
-	}
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].v < sorted[j].v })
-	rankByID := assignAveragedRanks(sorted)
-	out := make([]float64, len(ids))
-	for i, id := range ids {
-		out[i] = rankByID[id]
-	}
-	return out
-}
-
-// assignAveragedRanks assigns 1-based ranks to a value-sorted slice, averaging
-// ranks within tie groups. Returns id → rank.
-func assignAveragedRanks(sorted []scoredID) map[string]float64 {
-	rankByID := make(map[string]float64, len(sorted))
-	i := 0
-	for i < len(sorted) {
-		j := i
-		for j < len(sorted) && sorted[j].v == sorted[i].v {
-			j++
-		}
-		avg := float64(i+j+1) / 2.0 // mean of 1-based ranks i+1..j
-		for k := i; k < j; k++ {
-			rankByID[sorted[k].id] = avg
-		}
-		i = j
-	}
-	return rankByID
-}
-
-// pearson is the Pearson correlation of two equal-length slices. On a rank
-// vector this is Spearman's ρ. Zero variance in either input yields 1.0
-// (all-equal ranks — degenerate agreement).
-func pearson(x, y []float64) float64 {
-	n := float64(len(x))
-	var sx, sy float64
-	for i := range x {
-		sx += x[i]
-		sy += y[i]
-	}
-	mx, my := sx/n, sy/n
-	var cov, vx, vy float64
-	for i := range x {
-		dx, dy := x[i]-mx, y[i]-my
-		cov += dx * dy
-		vx += dx * dx
-		vy += dy * dy
-	}
-	if vx == 0 || vy == 0 {
-		return 1.0
-	}
-	return cov / math.Sqrt(vx*vy)
-}
+// They were statistical predicates comparing two NATIVE computations to each
+// other, and they could not fail on a wrong-but-self-consistent algorithm.
+// Both algorithms were in fact wrong: communities were weakly-connected
+// components over CALLS ∪ IMPORTS where upstream groups by directory, and
+// risk_index was degree centrality where upstream uses a
+// caller/coverage/security formula. A loose agreement threshold over two
+// copies of the same mistake reports perfect parity.
+//
+// The derived views are now compared field for field against upstream's own
+// recorded rows in testdata/crg-release/v2.3.8/graph.json — see
+// internal/adapters/builtin/crg/postprocess_test.go. That oracle has no
+// tolerance to tune and no way to pass on a divergent algorithm. The
+// per-kind tolerance and upsert-tuple oracles above remain: they compare the
+// native adapter to the BRIDGE, which is a genuinely independent
+// implementation, and their inputs (counts and mutation tuples) have no
+// canonical recorded form to compare against instead.

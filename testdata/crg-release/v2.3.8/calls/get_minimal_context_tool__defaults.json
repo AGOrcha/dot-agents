@@ -1,0 +1,42 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"16 nodes, 29 edges across 4 files. Risk: medium (0.50). 1 test gaps.\",\"key_entities\":[\"mintToken\"],\"risk\":\"medium\",\"communities\":[\"auth-token\",\"cmd-handle\"],\"flows_affected\":[\"Login\",\"main\",\"ValidateToken\"],\"next_tool_suggestions\":[\"detect_changes\",\"semantic_search_nodes\",\"get_architecture_overview\"],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "communities": [
+      "auth-token",
+      "cmd-handle"
+    ],
+    "flows_affected": [
+      "Login",
+      "main",
+      "ValidateToken"
+    ],
+    "key_entities": [
+      "mintToken"
+    ],
+    "next_tool_suggestions": [
+      "detect_changes",
+      "semantic_search_nodes",
+      "get_architecture_overview"
+    ],
+    "risk": "medium",
+    "status": "ok",
+    "summary": "16 nodes, 29 edges across 4 files. Risk: medium (0.50). 1 test gaps."
+  },
+  "tool": "get_minimal_context_tool"
+}

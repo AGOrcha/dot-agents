@@ -1,0 +1,56 @@
+{
+  "arguments": {
+    "mode": "suggest"
+  },
+  "case": "suggest",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"Generated 1 refactoring suggestion(s).\",\"suggestions\":[{\"type\":\"remove\",\"description\":\"Remove unused function 'Expired'\",\"symbols\":[\"${REPO_ROOT}/pkg/auth/auth.go::Session.Expired\"],\"rationale\":\"No callers, no test references, no importers, not an entry point.\"}],\"total\":1,\"truncated\":false,\"_hints\":{\"next_steps\":[{\"tool\":\"query_graph\",\"suggestion\":\"Verify call sites before applying a rename\"},{\"tool\":\"detect_changes\",\"suggestion\":\"Check risk of the refactored code\"},{\"tool\":\"semantic_search_nodes\",\"suggestion\":\"Find related symbols to also rename\"}],\"related\":[],\"warnings\":[]},\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Verify call sites before applying a rename",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "Check risk of the refactored code",
+          "tool": "detect_changes"
+        },
+        {
+          "suggestion": "Find related symbols to also rename",
+          "tool": "semantic_search_nodes"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "status": "ok",
+    "suggestions": [
+      {
+        "description": "Remove unused function 'Expired'",
+        "rationale": "No callers, no test references, no importers, not an entry point.",
+        "symbols": [
+          "${REPO_ROOT}/pkg/auth/auth.go::Session.Expired"
+        ],
+        "type": "remove"
+      }
+    ],
+    "summary": "Generated 1 refactoring suggestion(s).",
+    "total": 1,
+    "truncated": false
+  },
+  "tool": "refactor_tool"
+}

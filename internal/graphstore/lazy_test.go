@@ -110,6 +110,61 @@ func lazyMethods() []struct {
 		{"GetLinksForNote", func(s Store) error { _, e := s.GetLinksForNote("id"); return e }},
 		{"GetLinksForSymbol", func(s Store) error { _, e := s.GetLinksForSymbol("q"); return e }},
 		{"DeleteNoteSymbolLink", func(s Store) error { return s.DeleteNoteSymbolLink(1) }},
+
+		// CodeGraphDerived. The three FTS entries route through
+		// covLazyIgnoreFTSUnsupported because ErrFTSUnsupported is the fake
+		// backend's successful answer, not a delegation failure.
+		{"ReadFlows", func(s Store) error { _, e := s.ReadFlows(); return e }},
+		{"ReadFlowMemberships", func(s Store) error { _, e := s.ReadFlowMemberships(); return e }},
+		{"ReadCommunities", func(s Store) error { _, e := s.ReadCommunities(); return e }},
+		{"ReadCommunitySummaries", func(s Store) error { _, e := s.ReadCommunitySummaries(); return e }},
+		{"ReadFlowSnapshots", func(s Store) error { _, e := s.ReadFlowSnapshots(); return e }},
+		{"ReadRiskIndex", func(s Store) error { _, e := s.ReadRiskIndex(); return e }},
+		{"SearchNodesFTS", func(s Store) error {
+			_, e := s.SearchNodesFTS("q", 1)
+			return covLazyIgnoreFTSUnsupported(e)
+		}},
+		{"SearchNodesFTSWords", func(s Store) error {
+			_, e := s.SearchNodesFTSWords([]string{"w"}, 1)
+			return covLazyIgnoreFTSUnsupported(e)
+		}},
+		{"CountNodesFTSWords", func(s Store) error {
+			_, e := s.CountNodesFTSWords([]string{"w"})
+			return covLazyIgnoreFTSUnsupported(e)
+		}},
+		{"ReplaceFlows", func(s Store) error {
+			_, e := s.ReplaceFlows([]FlowRow{{ID: 1}}, [][]int64{{1}})
+			return e
+		}},
+		{"ReplaceCommunities", func(s Store) error {
+			_, e := s.ReplaceCommunities([]CommunityRow{{ID: 1}}, [][]string{{"pkg::A"}})
+			return e
+		}},
+		{"ReplaceCommunitySummaries", func(s Store) error {
+			_, e := s.ReplaceCommunitySummaries([]CommunitySummaryRow{{CommunityID: 1}})
+			return e
+		}},
+		{"ReplaceFlowSnapshots", func(s Store) error {
+			_, e := s.ReplaceFlowSnapshots([]FlowSnapshotRow{{FlowID: 1}})
+			return e
+		}},
+		{"ReplaceRiskIndex", func(s Store) error {
+			_, e := s.ReplaceRiskIndex([]RiskIndexRow{{NodeID: 1}})
+			return e
+		}},
+		{"ApplyEdgeRewrites", func(s Store) error {
+			_, e := s.ApplyEdgeRewrites([]EdgeRewrite{{EdgeID: 1}})
+			return e
+		}},
+		{"RebuildFTS", func(s Store) error { _, e := s.RebuildFTS(); return e }},
+		{"SetNodeSignature", func(s Store) error { return s.SetNodeSignature(1, "sig") }},
+		{"SetNodeCommunity", func(s Store) error { return s.SetNodeCommunity(1, 2) }},
+		{"NodesWithoutSignature", func(s Store) error { _, e := s.NodesWithoutSignature(); return e }},
+		{"ReadNodesByKind", func(s Store) error { _, e := s.ReadNodesByKind([]string{"Function"}); return e }},
+		{"ReadNodesByID", func(s Store) error { _, e := s.ReadNodesByID([]int64{1}); return e }},
+		{"ReadNodesByCommunity", func(s Store) error { _, e := s.ReadNodesByCommunity(1); return e }},
+		{"ReadAllNodes", func(s Store) error { _, e := s.ReadAllNodes(); return e }},
+		{"ReadAllEdges", func(s Store) error { _, e := s.ReadAllEdges(); return e }},
 	}
 }
 

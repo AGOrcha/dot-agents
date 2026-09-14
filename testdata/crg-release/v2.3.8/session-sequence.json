@@ -1,0 +1,80 @@
+[
+  {
+    "arguments": {},
+    "hints": {
+      "next_steps": [
+        {
+          "suggestion": "Drill into a specific flow for step-by-step details",
+          "tool": "get_flow"
+        },
+        {
+          "suggestion": "Check which flows are affected by recent changes",
+          "tool": "get_affected_flows"
+        },
+        {
+          "suggestion": "See the high-level architecture",
+          "tool": "get_architecture_overview"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "tool": "list_flows_tool"
+  },
+  {
+    "arguments": {
+      "flow_id": 1
+    },
+    "hints": {
+      "next_steps": [
+        {
+          "suggestion": "Inspect callers/callees of a step in this flow",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "Check if changes affect this flow",
+          "tool": "get_affected_flows"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "tool": "get_flow_tool"
+  },
+  {
+    "arguments": {},
+    "hints": {
+      "next_steps": [
+        {
+          "suggestion": "Check which flows are affected by recent changes",
+          "tool": "get_affected_flows"
+        },
+        {
+          "suggestion": "See the high-level architecture",
+          "tool": "get_architecture_overview"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "tool": "list_flows_tool"
+  },
+  {
+    "arguments": {},
+    "hints": {
+      "next_steps": [
+        {
+          "suggestion": "Get risk-scored change analysis",
+          "tool": "detect_changes"
+        },
+        {
+          "suggestion": "Build a full review context for the changes",
+          "tool": "get_review_context"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "tool": "get_affected_flows_tool"
+  }
+]

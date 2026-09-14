@@ -1,0 +1,160 @@
+[
+  {
+    "arguments": [
+      {
+        "description": "Git ref to diff against. Default: HEAD~1.\n\nProvide as a JSON string matching the following schema: {\"type\":\"string\"}",
+        "name": "base",
+        "required": false
+      }
+    ],
+    "description": "Pre-commit review workflow using detect_changes, affected_flows, and test gaps.\n\nProduces a structured code review with risk levels and actionable findings.",
+    "meta": {
+      "fastmcp": {
+        "tags": []
+      }
+    },
+    "name": "review_changes",
+    "rendered_defaults": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Review Workflow\n1. Call `get_minimal_context(task=\"review changes against HEAD~1\")` to get risk overview.\n2. If risk is \"low\": call `detect_changes(detail_level=\"minimal\")` \u2192 report summary + any test gaps.\n3. If risk is \"medium\" or \"high\":\n   a. Call `detect_changes(detail_level=\"standard\")` for full change list.\n   b. For each high-risk function, call `query_graph(pattern=\"callers_of\", target=<func>, detail_level=\"minimal\")`.\n   c. Call `get_affected_flows(detail_level=\"minimal\")` only if >3 changed functions.\n4. Summarize: risk level, what changed, test gaps, specific improvements needed.\n\nDo NOT call get_review_context unless you need source code snippets for a specific function.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ],
+    "rendered_template": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Review Workflow\n1. Call `get_minimal_context(task=\"review changes against ${arg:base}\")` to get risk overview.\n2. If risk is \"low\": call `detect_changes(detail_level=\"minimal\")` \u2192 report summary + any test gaps.\n3. If risk is \"medium\" or \"high\":\n   a. Call `detect_changes(detail_level=\"standard\")` for full change list.\n   b. For each high-risk function, call `query_graph(pattern=\"callers_of\", target=<func>, detail_level=\"minimal\")`.\n   c. Call `get_affected_flows(detail_level=\"minimal\")` only if >3 changed functions.\n4. Summarize: risk level, what changed, test gaps, specific improvements needed.\n\nDo NOT call get_review_context unless you need source code snippets for a specific function.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ]
+  },
+  {
+    "arguments": [],
+    "description": "Architecture documentation using communities, flows, and Mermaid diagrams.\n\nGenerates a comprehensive architecture map with module summaries and coupling warnings.",
+    "meta": {
+      "fastmcp": {
+        "tags": []
+      }
+    },
+    "name": "architecture_map",
+    "rendered_defaults": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Architecture Mapping Workflow\n1. Call `get_minimal_context(task=\"map architecture\")`.\n2. Call `get_architecture_overview(detail_level=\"minimal\")` for community coupling summary.\n3. Call `list_flows(detail_level=\"minimal\")` for critical flow names + criticality scores.\n4. Only call `get_community(name=<X>, detail_level=\"standard\")` for the 1-2 communities the user is most interested in.\n5. Produce a concise Mermaid diagram showing communities as boxes and key flows as arrows.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ],
+    "rendered_template": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Architecture Mapping Workflow\n1. Call `get_minimal_context(task=\"map architecture\")`.\n2. Call `get_architecture_overview(detail_level=\"minimal\")` for community coupling summary.\n3. Call `list_flows(detail_level=\"minimal\")` for critical flow names + criticality scores.\n4. Only call `get_community(name=<X>, detail_level=\"standard\")` for the 1-2 communities the user is most interested in.\n5. Produce a concise Mermaid diagram showing communities as boxes and key flows as arrows.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ]
+  },
+  {
+    "arguments": [
+      {
+        "description": "Description of the issue to debug.\n\nProvide as a JSON string matching the following schema: {\"type\":\"string\"}",
+        "name": "description",
+        "required": false
+      }
+    ],
+    "description": "Guided debugging using search, flow tracing, and recent changes.\n\nSystematic debugging workflow that traces execution paths and identifies root causes.",
+    "meta": {
+      "fastmcp": {
+        "tags": []
+      }
+    },
+    "name": "debug_issue",
+    "rendered_defaults": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Debug Workflow\n1. Call `get_minimal_context(task=\"debug: <description>\")`.\n2. Call `semantic_search_nodes(query=<keywords from description>, detail_level=\"minimal\", limit=5)`.\n3. For the top 1-2 results, call `query_graph(pattern=\"callers_of\", target=<name>, detail_level=\"minimal\")`.\n4. If the issue involves execution flow: call `get_flow(name=<relevant flow>)` for the single most relevant flow.\n5. Only call `get_review_context` or `get_impact_radius` if you need to trace the blast radius of a specific change.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ],
+    "rendered_template": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Debug Workflow\n1. Call `get_minimal_context(task=\"debug: ${arg:description}\")`.\n2. Call `semantic_search_nodes(query=<keywords from description>, detail_level=\"minimal\", limit=5)`.\n3. For the top 1-2 results, call `query_graph(pattern=\"callers_of\", target=<name>, detail_level=\"minimal\")`.\n4. If the issue involves execution flow: call `get_flow(name=<relevant flow>)` for the single most relevant flow.\n5. Only call `get_review_context` or `get_impact_radius` if you need to trace the blast radius of a specific change.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ]
+  },
+  {
+    "arguments": [],
+    "description": "New developer orientation using stats, architecture, and critical flows.\n\nCreates an onboarding guide covering codebase structure, key modules, and patterns.",
+    "meta": {
+      "fastmcp": {
+        "tags": []
+      }
+    },
+    "name": "onboard_developer",
+    "rendered_defaults": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Onboarding Workflow\n1. Call `get_minimal_context(task=\"onboard developer\")`.\n2. Call `list_graph_stats()` for technology overview.\n3. Call `get_architecture_overview(detail_level=\"minimal\")` for the 30-second mental model.\n4. Call `list_communities(detail_level=\"minimal\")` \u2014 present as a table of module names + sizes.\n5. Call `list_flows(detail_level=\"minimal\")` \u2014 highlight the top 3 critical flows.\n6. Only drill into a specific community or flow if the developer asks.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ],
+    "rendered_template": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Onboarding Workflow\n1. Call `get_minimal_context(task=\"onboard developer\")`.\n2. Call `list_graph_stats()` for technology overview.\n3. Call `get_architecture_overview(detail_level=\"minimal\")` for the 30-second mental model.\n4. Call `list_communities(detail_level=\"minimal\")` \u2014 present as a table of module names + sizes.\n5. Call `list_flows(detail_level=\"minimal\")` \u2014 highlight the top 3 critical flows.\n6. Only drill into a specific community or flow if the developer asks.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ]
+  },
+  {
+    "arguments": [
+      {
+        "description": "Git ref to diff against. Default: HEAD~1.\n\nProvide as a JSON string matching the following schema: {\"type\":\"string\"}",
+        "name": "base",
+        "required": false
+      }
+    ],
+    "description": "PR readiness check with risk scoring, test gaps, and dead code detection.\n\nProduces a merge readiness report with risk assessment and recommendations.",
+    "meta": {
+      "fastmcp": {
+        "tags": []
+      }
+    },
+    "name": "pre_merge_check",
+    "rendered_defaults": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Pre-Merge Check Workflow\n1. Call `get_minimal_context(task=\"pre-merge check\")`.\n2. Call `detect_changes(detail_level=\"minimal\")` for risk score and test gaps.\n3. If risk > 0.4: call `get_affected_flows(detail_level=\"minimal\")`.\n4. If test_gap_count > 0: call `query_graph(pattern=\"tests_for\", target=<each untested function>, detail_level=\"minimal\")` for up to 3 functions.\n5. Call `refactor(mode=\"dead_code\", detail_level=\"minimal\")` to check for newly dead code.\n6. Only call `find_large_functions` or `get_impact_radius` if risk > 0.7.\n7. Output: GO/NO-GO recommendation with 1-sentence justification + list of required follow-ups.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ],
+    "rendered_template": [
+      {
+        "content": {
+          "text": "## Rules for Token-Efficient Graph Usage\n1. ALWAYS call `get_minimal_context` first with a task description.\n2. Use `detail_level=\"minimal\"` on all tool calls unless the minimal output is insufficient.\n3. Only escalate to `detail_level=\"standard\"` or `\"verbose\"` for the specific entities that need deeper inspection.\n4. Never request more than 3 tool calls per turn unless absolutely necessary.\n5. Prefer targeted queries (query_graph with a specific symbol) over broad scans (list_communities with full members).\n6. When reviewing changes: detect_changes(detail_level=\"minimal\") \u2192 only expand on high-risk items.\n\n## Pre-Merge Check Workflow\n1. Call `get_minimal_context(task=\"pre-merge check\")`.\n2. Call `detect_changes(detail_level=\"minimal\")` for risk score and test gaps.\n3. If risk > 0.4: call `get_affected_flows(detail_level=\"minimal\")`.\n4. If test_gap_count > 0: call `query_graph(pattern=\"tests_for\", target=<each untested function>, detail_level=\"minimal\")` for up to 3 functions.\n5. Call `refactor(mode=\"dead_code\", detail_level=\"minimal\")` to check for newly dead code.\n6. Only call `find_large_functions` or `get_impact_radius` if risk > 0.7.\n7. Output: GO/NO-GO recommendation with 1-sentence justification + list of required follow-ups.",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ]
+  }
+]

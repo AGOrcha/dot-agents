@@ -1,0 +1,46 @@
+{
+  "arguments": {
+    "community_name": "test"
+  },
+  "case": "by_name_partial",
+  "is_error": false,
+  "structured_content": {
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Explore callers/callees of community members",
+          "tool": "query_graph"
+        },
+        {
+          "suggestion": "Browse other communities",
+          "tool": "list_communities"
+        },
+        {
+          "suggestion": "See how this community fits the architecture",
+          "tool": "get_architecture_overview"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "community": {
+      "cohesion": 0.75,
+      "description": "Directory-based community: c",
+      "dominant_language": "go",
+      "id": 3,
+      "level": 0,
+      "members": [
+        "${REPO_ROOT}/c_test.go::T1",
+        "${REPO_ROOT}/c_test.go::T2",
+        "${REPO_ROOT}/c_test.go::T3",
+        "${REPO_ROOT}/c_test.go::T4",
+        "${REPO_ROOT}/c_test.go::T5"
+      ],
+      "name": "c-test",
+      "size": 5
+    },
+    "status": "ok",
+    "summary": "Community 'c-test': 5 nodes, cohesion 0.7500"
+  },
+  "tool": "get_community_tool"
+}

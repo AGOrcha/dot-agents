@@ -1,0 +1,134 @@
+{
+  "arguments": {},
+  "case": "defaults",
+  "content": [
+    {
+      "text": "{\"status\":\"ok\",\"summary\":\"12 hub node(s) ranked by degree, showing 10 of 12\",\"hub_nodes\":[{\"name\":\"handleLogin\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::handleLogin\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/cmd/main.go\",\"in_degree\":2,\"out_degree\":3,\"total_degree\":5,\"community_id\":1},{\"name\":\"TestLogin\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin\",\"kind\":\"Test\",\"file\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"in_degree\":3,\"out_degree\":2,\"total_degree\":5,\"community_id\":2},{\"name\":\"TestValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken\",\"kind\":\"Test\",\"file\":\"${REPO_ROOT}/pkg/auth/auth_test.go\",\"in_degree\":3,\"out_degree\":2,\"total_degree\":5,\"community_id\":2},{\"name\":\"Login\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Login\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"in_degree\":1,\"out_degree\":2,\"total_degree\":3,\"community_id\":2},{\"name\":\"main\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::main\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/cmd/main.go\",\"in_degree\":1,\"out_degree\":1,\"total_degree\":2,\"community_id\":1},{\"name\":\"renderSession\",\"qualified_name\":\"${REPO_ROOT}/cmd/main.go::renderSession\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/cmd/main.go\",\"in_degree\":2,\"out_degree\":0,\"total_degree\":2,\"community_id\":1},{\"name\":\"Session\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::Session\",\"kind\":\"Class\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"in_degree\":1,\"out_degree\":1,\"total_degree\":2,\"community_id\":2},{\"name\":\"hashPassword\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::hashPassword\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"in_degree\":2,\"out_degree\":0,\"total_degree\":2,\"community_id\":2},{\"name\":\"ValidateToken\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::ValidateToken\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"in_degree\":1,\"out_degree\":1,\"total_degree\":2,\"community_id\":2},{\"name\":\"revoked\",\"qualified_name\":\"${REPO_ROOT}/pkg/auth/auth.go::revoked\",\"kind\":\"Function\",\"file\":\"${REPO_ROOT}/pkg/auth/auth.go\",\"in_degree\":2,\"out_degree\":0,\"total_degree\":2,\"community_id\":2}],\"count\":10,\"total\":12,\"truncated\":true,\"next_tool_suggestions\":[\"get_impact_radius -- check blast radius of a hub\",\"query_graph callers_of -- see what calls a hub\",\"get_bridge_nodes -- find architectural chokepoints\"],\"_graph\":{\"updated_at\":\"${TIMESTAMP}\",\"age_seconds\":\"${AGE_SECONDS}\",\"built_at_sha\":\"${HEAD_SHA}\",\"built_on_branch\":\"main\",\"head_sha\":\"${HEAD_SHA}\",\"head_matches_build\":true}}",
+      "type": "text"
+    }
+  ],
+  "is_error": false,
+  "structured_content": {
+    "_graph": {
+      "age_seconds": "${AGE_SECONDS}",
+      "built_at_sha": "${HEAD_SHA}",
+      "built_on_branch": "main",
+      "head_matches_build": true,
+      "head_sha": "${HEAD_SHA}",
+      "updated_at": "${TIMESTAMP}"
+    },
+    "count": 10,
+    "hub_nodes": [
+      {
+        "community_id": 1,
+        "file": "${REPO_ROOT}/cmd/main.go",
+        "in_degree": 2,
+        "kind": "Function",
+        "name": "handleLogin",
+        "out_degree": 3,
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::handleLogin",
+        "total_degree": 5
+      },
+      {
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "in_degree": 3,
+        "kind": "Test",
+        "name": "TestLogin",
+        "out_degree": 2,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestLogin",
+        "total_degree": 5
+      },
+      {
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth_test.go",
+        "in_degree": 3,
+        "kind": "Test",
+        "name": "TestValidateToken",
+        "out_degree": 2,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth_test.go::TestValidateToken",
+        "total_degree": 5
+      },
+      {
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "in_degree": 1,
+        "kind": "Function",
+        "name": "Login",
+        "out_degree": 2,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Login",
+        "total_degree": 3
+      },
+      {
+        "community_id": 1,
+        "file": "${REPO_ROOT}/cmd/main.go",
+        "in_degree": 1,
+        "kind": "Function",
+        "name": "main",
+        "out_degree": 1,
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::main",
+        "total_degree": 2
+      },
+      {
+        "community_id": 1,
+        "file": "${REPO_ROOT}/cmd/main.go",
+        "in_degree": 2,
+        "kind": "Function",
+        "name": "renderSession",
+        "out_degree": 0,
+        "qualified_name": "${REPO_ROOT}/cmd/main.go::renderSession",
+        "total_degree": 2
+      },
+      {
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "in_degree": 1,
+        "kind": "Class",
+        "name": "Session",
+        "out_degree": 1,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::Session",
+        "total_degree": 2
+      },
+      {
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "in_degree": 2,
+        "kind": "Function",
+        "name": "hashPassword",
+        "out_degree": 0,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::hashPassword",
+        "total_degree": 2
+      },
+      {
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "in_degree": 1,
+        "kind": "Function",
+        "name": "ValidateToken",
+        "out_degree": 1,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::ValidateToken",
+        "total_degree": 2
+      },
+      {
+        "community_id": 2,
+        "file": "${REPO_ROOT}/pkg/auth/auth.go",
+        "in_degree": 2,
+        "kind": "Function",
+        "name": "revoked",
+        "out_degree": 0,
+        "qualified_name": "${REPO_ROOT}/pkg/auth/auth.go::revoked",
+        "total_degree": 2
+      }
+    ],
+    "next_tool_suggestions": [
+      "get_impact_radius -- check blast radius of a hub",
+      "query_graph callers_of -- see what calls a hub",
+      "get_bridge_nodes -- find architectural chokepoints"
+    ],
+    "status": "ok",
+    "summary": "12 hub node(s) ranked by degree, showing 10 of 12",
+    "total": 12,
+    "truncated": true
+  },
+  "tool": "get_hub_nodes_tool"
+}

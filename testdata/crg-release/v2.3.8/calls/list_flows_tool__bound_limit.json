@@ -1,0 +1,14 @@
+{
+  "arguments": {
+    "limit": 0
+  },
+  "case": "bound_limit",
+  "content": [
+    {
+      "text": "Error calling tool 'list_flows_tool': limit must be an integer greater than or equal to 1",
+      "type": "text"
+    }
+  ],
+  "is_error": true,
+  "tool": "list_flows_tool"
+}
