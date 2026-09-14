@@ -59,24 +59,26 @@ func runKGSyncIO(io kgIO, cmd *cobra.Command, _ []string) error {
 	ok := false
 	defer func() { journalKG(repoPath, journal.CmdKGSync, input, observed, ok) }()
 
-	var gitArgs []string
+	// `-c maintenance.auto=false -c gc.auto=0`: git would otherwise spawn a
+	// DETACHED `git maintenance run --auto` that inherits this process's
+	// stdout and outlives the pull. A backgrounded grandchild holding the
+	// CLI's output handle keeps a caller that reads that handle waiting long
+	// after `da kg sync` has returned.
+	subcommand := "pull"
 	if push {
-		gitArgs = []string{"-C", home, "push"}
-	} else {
-		gitArgs = []string{"-C", home, "pull"}
+		subcommand = "push"
+	}
+	gitArgs := []string{
+		"-c", "maintenance.auto=false", "-c", "gc.auto=0",
+		"-C", home, subcommand,
 	}
 
-	op := "pull"
-	if push {
-		op = "push"
-	}
-
-	ui.Info(fmt.Sprintf("Running git %s in %s ...", op, home))
+	ui.Info(fmt.Sprintf("Running git %s in %s ...", subcommand, home))
 	gitCmd := execabs.Command("git", gitArgs...)
 	gitCmd.Stdout = os.Stdout
 	gitCmd.Stderr = os.Stderr
 	if err := gitCmd.Run(); err != nil {
-		return fmt.Errorf("git %s failed: %w", op, err)
+		return fmt.Errorf("git %s failed: %w", subcommand, err)
 	}
 
 	if push {

@@ -2,9 +2,11 @@ package crg
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
@@ -283,10 +285,38 @@ func assertRowsEqual[T any](t *testing.T, table string, got, want []T) {
 			table, len(got), len(want), got, want)
 	}
 	for i := range want {
-		if !reflect.DeepEqual(got[i], want[i]) {
-			t.Errorf("%s row %d mismatch\n got: %+v\nwant: %+v", table, i, got[i], want[i])
+		if reflect.DeepEqual(got[i], want[i]) {
+			continue
+		}
+		t.Errorf("%s row %d mismatch:\n%s", table, i, rowFieldDiff(got[i], want[i]))
+	}
+}
+
+// rowFieldDiff renders the differing FIELDS of two row structs, each value
+// Go-quoted. Naming the column and quoting the values is what turns a failure
+// into a diagnosis: these rows carry long absolute paths, and the divergence
+// is routinely one character deep inside one of them (an escaped backslash, a
+// separator) that two adjacent %+v dumps hide completely.
+//
+// Falls back to whole-value dumps when T is not a struct or the difference
+// lives in unexported state, so no mismatch can ever print nothing.
+func rowFieldDiff[T any](got, want T) string {
+	gv, wv := reflect.ValueOf(got), reflect.ValueOf(want)
+	var b strings.Builder
+	if gv.Kind() == reflect.Struct {
+		for i := range gv.NumField() {
+			f := gv.Type().Field(i)
+			if !f.IsExported() || gv.Field(i).Equal(wv.Field(i)) {
+				continue
+			}
+			fmt.Fprintf(&b, "  %s:\n     got: %#v\n    want: %#v\n",
+				f.Name, gv.Field(i).Interface(), wv.Field(i).Interface())
 		}
 	}
+	if b.Len() == 0 {
+		fmt.Fprintf(&b, "   got: %+v\n  want: %+v\n", got, want)
+	}
+	return b.String()
 }
 
 // TestPostprocessSplit_StandaloneLeavesSummaryTablesUntouched proves the

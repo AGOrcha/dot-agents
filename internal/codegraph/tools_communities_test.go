@@ -737,6 +737,14 @@ func commLoadFixture(t *testing.T, path, root string) commFixture {
 // commReadJSON decodes a recorded file with the placeholder root substituted
 // into every string, so an absolute path it records points at this test's
 // repository copy.
+//
+// The substituted root is SLASH-NORMALIZED, because the graph's node identity
+// is: scanFile stores filepath.ToSlash(filepath.Join(absRoot, rel)), so a
+// stored absolute path is `C:/.../001/pkg/auth/auth.go` on Windows too, never
+// `C:\...`. Substituting the native spelling would build a hybrid expectation
+// (native-separator root, forward-slash tail) that matches nothing the product
+// ever produces. On POSIX ToSlash is the identity, so the substituted bytes
+// are unchanged there.
 func commReadJSON(t *testing.T, path, root string, into any) {
 	t.Helper()
 
@@ -745,7 +753,8 @@ func commReadJSON(t *testing.T, path, root string, into any) {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	body = bytes.ReplaceAll(body,
-		[]byte(commJSONQuoted(t, repoRootPlaceholder)), []byte(commJSONQuoted(t, root)))
+		[]byte(commJSONQuoted(t, repoRootPlaceholder)),
+		[]byte(commJSONQuoted(t, filepath.ToSlash(root))))
 	if err := json.Unmarshal(body, into); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
 	}
@@ -778,7 +787,7 @@ func commPayload(t *testing.T, path string, raw json.RawMessage) map[string]any 
 
 // commJSONQuoted renders a string the way it appears inside a JSON document,
 // without the surrounding quotes, so a substitution on the raw bytes cannot
-// break escaping on a root containing a backslash.
+// break escaping whatever the temp root's spelling contains.
 func commJSONQuoted(t *testing.T, value string) string {
 	t.Helper()
 	encoded, err := json.Marshal(value)

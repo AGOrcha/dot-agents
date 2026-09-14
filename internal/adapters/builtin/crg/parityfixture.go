@@ -242,6 +242,15 @@ type releaseGraphJSON struct {
 // names, edge endpoints, community descriptions and flow_snapshots critical
 // paths all move with it, and a test that hardcoded the generator's path
 // would pass only on the machine that generated the fixture.
+//
+// The root is slash-normalized before substitution because node identity is
+// slash-normalized by construction: the scanner stores
+// filepath.ToSlash(filepath.Join(absRoot, rel)), so a Windows node is
+// `C:/tmp/x/pkg/auth/auth.go`, never `C:\tmp\x\...`. Splicing a NATIVE root
+// into the fixture would fabricate an identity the product never produces,
+// and the mismatch surfaces only where an identity is re-encoded — e.g.
+// flow_snapshots.critical_path, whose json.dumps escaping doubles every
+// backslash the expected value carries raw.
 func LoadReleaseGraph(path, repoRoot string) (ReleaseGraph, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -251,7 +260,8 @@ func LoadReleaseGraph(path, repoRoot string) (ReleaseGraph, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return ReleaseGraph{}, fmt.Errorf("crg: parse release graph %s: %w", path, err)
 	}
-	rebase := func(s string) string { return strings.ReplaceAll(s, repoRootPlaceholder, repoRoot) }
+	slashRoot := filepath.ToSlash(repoRoot)
+	rebase := func(s string) string { return strings.ReplaceAll(s, repoRootPlaceholder, slashRoot) }
 
 	var g ReleaseGraph
 	for _, n := range raw.Nodes {

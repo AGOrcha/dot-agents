@@ -530,13 +530,20 @@ func TestCovGitHelpersSurfaceAnUnreadableHead(t *testing.T) {
 // Rename pairing has to look the deleted path up in HEAD, and a lookup that
 // fails is not the same as "this delete is not a rename source" — reporting
 // the path set anyway would drop or duplicate paths with no way to tell.
+//
+// The disguise is `git~1` — the NTFS 8.3 short-name alias of `.git` — and it
+// has to live in a SUBDIRECTORY. At the repository root, NTFS really does
+// resolve that alias onto the repository's own `.git` directory, so creating
+// the fixture there fails on Windows before the assertion is reached. One
+// level down there is no `.git` to alias, so the name is an ordinary file
+// everywhere while still being the path component go-git rejects.
 func TestCovGitWorkingTreeFilesSurfacesAnUnresolvableDeletedPath(t *testing.T) {
 	root := covGitRepo(t)
-	gitOracleWrite(t, root, "git~1", "x\n")
+	gitOracleWrite(t, root, "disguised/git~1", "x\n")
 	gitOracleWrite(t, root, "keep.go", "package p\n")
 	gitOracleRun(t, root, "-c", "core.protectNTFS=false", "add", "-A")
 	gitOracleRun(t, root, "commit", "-m", "baseline")
-	gitOracleRun(t, root, "rm", "-q", "git~1")
+	gitOracleRun(t, root, "rm", "-q", "disguised/git~1")
 	gitOracleWrite(t, root, "added.go", "package p\n")
 	gitOracleRun(t, root, "add", "added.go")
 
