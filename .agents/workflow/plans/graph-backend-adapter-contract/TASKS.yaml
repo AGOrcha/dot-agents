@@ -299,6 +299,7 @@ tasks:
           Do NOT delete bridge until ALL §11.4 gate conditions are
           met. If even one consumer's lockfile still has
           `reads_from: [crg-bridge]`, keep the bridge.
+        - (fb:kg-graph-home-effective-resolution) OPEN — commands/workflow/graph.go reads kg.graph_home flat (config.LoadAgentsRC), so a layer-supplied KG graph home is invisible to the native namespace commands. Resolve it from the effective layered snapshot (read-only, no lock write) while preserving the existing precedence/default contract and without re-projecting user resources into projects. Cutover-readiness gap only: it does not alter the ratified §11.4 decommissioning gate. Consumer artifact — commands/workflow/graph.go. Discovered during PR #552 layered-consumer work; deliberately NOT implemented there.
     - id: t7-app-type-profiles-wiring
       title: Wire graph_backend adapter-ref selection into app-type-profiles
       status: completed
