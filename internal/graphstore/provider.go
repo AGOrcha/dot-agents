@@ -31,7 +31,10 @@ type CodeGraphProvider interface {
 	ListFlows(limit int, sortBy string) (*FlowsResult, error)
 	// ListCommunities returns the detected code communities.
 	ListCommunities(minSize int, sortBy string) (*CommunitiesResult, error)
-	// Postprocess recomputes the derived views (flows/communities/FTS).
+	// PostprocessReport recomputes the derived views (flows/communities/
+	// FTS) and returns upstream's post-process result.
+	PostprocessReport(opts PostprocessOptions) (*CRGOperationReport, error)
+	// Postprocess recomputes the derived views, discarding the report.
 	Postprocess(opts PostprocessOptions) error
 	// DetectChanges returns the change-impact report for the current diff.
 	DetectChanges(opts DetectChangesOptions) (*CRGChangeReport, error)

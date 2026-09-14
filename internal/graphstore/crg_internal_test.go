@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -136,10 +137,10 @@ func TestCRGBridge_run_BadBin(t *testing.T) {
 	}
 }
 
-func TestCRGBridge_runStreamed_BadBin(t *testing.T) {
+func TestCRGBridge_PostprocessReport_BadBin(t *testing.T) {
 	b := &CRGBridge{RepoRoot: t.TempDir(), Bin: "/no/such/binary"}
-	if err := b.runStreamed("foo"); err == nil {
-		t.Error("expected runStreamed to fail when binary missing")
+	if _, err := b.PostprocessReport(PostprocessOptions{}); err == nil {
+		t.Error("expected PostprocessReport to fail when the binary is missing")
 	}
 }
 
@@ -285,8 +286,13 @@ func TestReadCRGLanguages(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	ddl := `CREATE TABLE nodes (id INTEGER PRIMARY KEY, language TEXT);
-INSERT INTO nodes (language) VALUES ('go'), ('python'), ('go'), (''), ('ruby');`
+	// `status --json` derives its languages from the FILE inventory: a
+	// symbol row's language cannot keep a language alive after its File
+	// node is gone, and the blank one is skipped.
+	ddl := `CREATE TABLE nodes (id INTEGER PRIMARY KEY, kind TEXT, language TEXT);
+INSERT INTO nodes (kind, language) VALUES
+  ('File', 'go'), ('File', 'python'), ('File', 'go'), ('File', ''), ('File', 'ruby'),
+  ('Function', 'rust');`
 	if _, err := db.Exec(ddl); err != nil {
 		t.Fatalf("ddl: %v", err)
 	}
@@ -294,9 +300,8 @@ INSERT INTO nodes (language) VALUES ('go'), ('python'), ('go'), (''), ('ruby');`
 	if err != nil {
 		t.Fatalf("readCRGLanguages: %v", err)
 	}
-
-	if len(langs) != 3 {
-		t.Errorf("expected 3 langs, got %v", langs)
+	if !slices.Equal(langs, []string{"go", "python", "ruby"}) {
+		t.Errorf("langs = %v, want [go python ruby] from the File inventory only", langs)
 	}
 }
 
@@ -326,8 +331,9 @@ func TestCRGBridge_Status_EmptyDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ddl := `CREATE TABLE nodes (id INTEGER PRIMARY KEY, file_path TEXT, language TEXT, updated_at TEXT);
-CREATE TABLE edges (id INTEGER PRIMARY KEY);`
+	ddl := `CREATE TABLE nodes (id INTEGER PRIMARY KEY, kind TEXT, file_path TEXT, language TEXT, updated_at TEXT);
+CREATE TABLE edges (id INTEGER PRIMARY KEY);
+CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 	if _, err := db.Exec(ddl); err != nil {
 		t.Fatalf("ddl: %v", err)
 	}
@@ -357,9 +363,10 @@ func TestCRGBridge_Status_LangCSV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ddl := `CREATE TABLE nodes (id INTEGER PRIMARY KEY, file_path TEXT, language TEXT, updated_at TEXT);
-INSERT INTO nodes (file_path, language, updated_at) VALUES ('a.go', 'go', '2026-01-01T00:00:00Z'), ('b.py', 'python', '2026-01-02T00:00:00Z');
-CREATE TABLE edges (id INTEGER PRIMARY KEY);`
+	ddl := `CREATE TABLE nodes (id INTEGER PRIMARY KEY, kind TEXT, file_path TEXT, language TEXT, updated_at TEXT);
+INSERT INTO nodes (kind, file_path, language, updated_at) VALUES ('File', 'a.go', 'go', '2026-01-01T00:00:00Z'), ('File', 'b.py', 'python', '2026-01-02T00:00:00Z');
+CREATE TABLE edges (id INTEGER PRIMARY KEY);
+CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 	if _, err := db.Exec(ddl); err != nil {
 		t.Fatalf("ddl: %v", err)
 	}
@@ -370,11 +377,11 @@ CREATE TABLE edges (id INTEGER PRIMARY KEY);`
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if !strings.Contains(status.Languages, "go") {
-		t.Errorf("expected 'go' in languages, got %q", status.Languages)
+	if !slices.Contains(status.Languages, "go") {
+		t.Errorf("expected 'go' in languages, got %v", status.Languages)
 	}
-	if !strings.Contains(status.Languages, "python") {
-		t.Errorf("expected 'python' in languages, got %q", status.Languages)
+	if !slices.Contains(status.Languages, "python") {
+		t.Errorf("expected 'python' in languages, got %v", status.Languages)
 	}
 }
 
@@ -414,26 +421,16 @@ func TestUnmarshalSkippingLogPrefix_LogOnly(t *testing.T) {
 	}
 }
 
-func TestParseCRGMutationSummary_TabSeparated(t *testing.T) {
-	out := []byte("3 files updated, 12 nodes, 7 edges\n")
-	files, nodes, edges, ok := parseCRGMutationSummary(out)
-	if !ok {
-		t.Fatal("expected to parse")
+// TestParseCRGBuildOutput_CRLF pins that a Windows-style transcript parses:
+// the CLI line is matched anchored, so a stray \r would otherwise defeat it.
+func TestParseCRGBuildOutput_CRLF(t *testing.T) {
+	out := []byte("INFO: go\r\nIncremental: 3 files updated, 12 nodes, 7 edges (postprocess=full)\r\n")
+	rep := parseCRGBuildOutput(out)
+	if rep.FilesUpdated == nil || *rep.FilesUpdated != 3 {
+		t.Fatalf("files_updated = %v, want 3", rep.FilesUpdated)
 	}
-	if files != 3 || nodes != 12 || edges != 7 {
-		t.Errorf("got files=%d nodes=%d edges=%d", files, nodes, edges)
-	}
-}
-
-func TestParseCRGMutationSummary_CRSplit(t *testing.T) {
-
-	out := []byte("1 file, 2 nodes, 3 edges")
-	files, nodes, edges, ok := parseCRGMutationSummary(out)
-	if !ok {
-		t.Fatal("expected to parse single line")
-	}
-	if files != 1 || nodes != 2 || edges != 3 {
-		t.Errorf("got files=%d nodes=%d edges=%d", files, nodes, edges)
+	if rep.TotalNodes == nil || *rep.TotalNodes != 12 || rep.TotalEdges == nil || *rep.TotalEdges != 7 {
+		t.Errorf("counters = %v/%v, want 12/7", rep.TotalNodes, rep.TotalEdges)
 	}
 }
 
@@ -447,7 +444,7 @@ func TestCRGBridge_BuildReport_FailedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &CRGBridge{RepoRoot: dir, Bin: bin}
-	_, err := b.BuildReport(BuildOptions{SkipFlows: true, SkipPostprocess: true})
+	_, err := b.BuildReport(BuildOptions{Postprocess: PostprocessNone})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -456,48 +453,73 @@ func TestCRGBridge_BuildReport_FailedRun(t *testing.T) {
 	}
 }
 
-func TestCRGBridge_BuildReport_EmptyGraphAfterRun(t *testing.T) {
+// TestCRGBridge_BuildReport_ForwardsUpstreamFlags pins the command surface
+// the rollback path exists to preserve: the postprocess LEVEL becomes
+// upstream's own flags, and an embedding pair is forwarded verbatim.
+func TestCRGBridge_BuildReport_ForwardsUpstreamFlags(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell binary path differs on Windows")
 	}
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "ok-bin")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho built\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	b := &CRGBridge{RepoRoot: dir, Bin: bin}
-	report, err := b.BuildReport(BuildOptions{SkipFlows: true})
-	if err != nil {
-		t.Fatalf("BuildReport: %v", err)
-	}
-	if report.Outcome != CRGReadinessUnbuilt {
-		t.Errorf("expected outcome=unbuilt, got %q (summary=%s)", report.Outcome, report.Summary)
+	for _, tc := range []struct {
+		level string
+		want  string
+	}{
+		{PostprocessNone, "--skip-postprocess"},
+		{PostprocessMinimal, "--skip-flows"},
+		{PostprocessFull, ""},
+	} {
+		t.Run(tc.level, func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "echo-args")
+			// Echoing argv lets the report's summary carry it: an
+			// unrecognised transcript becomes the summary verbatim.
+			if err := os.WriteFile(bin, []byte("#!/bin/sh\necho \"$@\"\nexit 0\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			b := &CRGBridge{RepoRoot: dir, Bin: bin}
+			report, err := b.BuildReport(BuildOptions{
+				Postprocess:       tc.level,
+				EmbeddingProvider: "local",
+				EmbeddingModel:    "all-MiniLM-L6-v2",
+			})
+			if err != nil {
+				t.Fatalf("BuildReport: %v", err)
+			}
+			if tc.want != "" && !strings.Contains(report.Summary, tc.want) {
+				t.Errorf("argv %q missing %q", report.Summary, tc.want)
+			}
+			if tc.want == "" && strings.Contains(report.Summary, "--skip-") {
+				t.Errorf("argv %q carries a skip flag at the full level", report.Summary)
+			}
+			if !strings.Contains(report.Summary, "--embedding-provider local") ||
+				!strings.Contains(report.Summary, "--embedding-model all-MiniLM-L6-v2") {
+				t.Errorf("argv %q does not forward the embedding pair", report.Summary)
+			}
+			if len(report.Warnings) != 0 {
+				t.Errorf("warnings = %v, want none for a complete pair", report.Warnings)
+			}
+		})
 	}
 }
 
-func TestCRGBridge_BuildReport_ReadyOutcome(t *testing.T) {
+// TestCRGBridge_BuildReport_HalfEmbeddingPairWarns pins upstream's
+// all-or-nothing opt-in: half a pair is a report warning, not an error.
+func TestCRGBridge_BuildReport_HalfEmbeddingPairWarns(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell binary path differs on Windows")
 	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "ok-bin")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho built\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	writeFakeCRGDBInternal(t, dir, 2, 1)
-
 	b := &CRGBridge{RepoRoot: dir, Bin: bin}
-	report, err := b.BuildReport(BuildOptions{})
+	report, err := b.BuildReport(BuildOptions{EmbeddingProvider: "local"})
 	if err != nil {
 		t.Fatalf("BuildReport: %v", err)
 	}
-	if report.Outcome != CRGReadinessReady {
-		t.Errorf("expected ready outcome, got %q", report.Outcome)
-	}
-	if !strings.Contains(report.Summary, "nodes") {
-		t.Errorf("expected nodes count in summary, got %q", report.Summary)
+	if !slices.Contains(report.Warnings, EmbeddingRefreshWarning) {
+		t.Errorf("warnings = %v, want upstream's half-pair warning", report.Warnings)
 	}
 }
 

@@ -27,31 +27,99 @@ swap with no caller-visible change.
 
 ## Role segregation (ISP) — depend on the narrowest role
 
-The 28-method surface is split into five roles. **A caller, and the Deps
-handle, should depend on the narrowest role it actually uses.** This is
-the Interface-Segregation point: a test fake stubs only that role's
-handful of methods, not all 28 — exactly what the cg6b 95%-coverage tail
-exploits.
+The surface is split into six roles. **A caller, and the Deps handle,
+should depend on the narrowest role it actually uses.** This is the
+Interface-Segregation point: a test fake stubs only that role's handful
+of methods, not the whole store — exactly what the cg6b 95%-coverage
+tail exploits.
 
 | Role | Methods | Typical caller |
 |---|---|---|
 | `CodeGraphReader` | `GetNode`, `GetNodesByFile`, `GetEdgesBySource/Target/Among`, `GetAllFiles`, `SearchNodes`, `GetMetadata`, `GetStats`, `GetImpactRadius` | read-mostly: status, review, impact, orient |
 | `CodeGraphWriter` | `UpsertNode`, `UpsertEdge`, `RemoveFileData`, `StoreFileNodesEdges`, `SetMetadata`, `Commit` | build/update pipeline only |
+| `CodeGraphDerived` | `ReadFlows`, `ReadFlowMemberships`, `ReadCommunities`, `ReadCommunitySummaries`, `ReadFlowSnapshots`, `ReadRiskIndex`, `SearchNodesFTS`, `SearchNodesFTSWords`, `CountNodesFTSWords`, `ReplaceFlows`, `ReplaceCommunities`, `ReplaceCommunitySummaries`, `ReplaceFlowSnapshots`, `ReplaceRiskIndex`, `ApplyEdgeRewrites`, `RebuildFTS`, `SetNodeSignature`, `SetNodeCommunity`, `NodesWithoutSignature`, `ReadNodesByKind`, `ReadNodesByCommunity`, `ReadNodesByID`, `ReadAllNodes`, `ReadAllEdges` | the postprocess lifecycle and the derived-view query tools |
 | `KGNoteStore` | `UpsertKGNote`, `GetKGNote`, `SearchKGNotes`, `ListArchivedKGNotes` | KG curation/sync |
 | `NoteSymbolLinkStore` | `UpsertNoteSymbolLink`, `GetLinksForNote/ForSymbol`, `DeleteNoteSymbolLink` | warm-link sync |
 | `Closer` | `Close` | the handle owner only — borrowed handles must not depend on it |
 
-`Store = CodeGraphReader + CodeGraphWriter + KGNoteStore +
-NoteSymbolLinkStore + Closer` (interface embedding). Whole-store
+`Store = CodeGraphReader + CodeGraphWriter + CodeGraphDerived +
+KGNoteStore + NoteSymbolLinkStore + Closer` (interface embedding). Whole-store
 callers and `var _ Store = (*SQLiteStore)(nil)` /
 `(*PostgresStore)(nil)` still hold unchanged; each role also has its own
 `var _ Role = (*SQLiteStore)(nil)` / `(*PostgresStore)(nil)` assertion so
 narrowing to any role is compiler-guaranteed safe.
 
+### `CodeGraphDerived` — the derived layer
+
+The code graph has two layers. The EXTRACTED layer (`nodes`, `edges`) is
+written per file by `CodeGraphWriter` as the scanner parses source. The
+DERIVED layer is recomputed wholesale from it by the postprocess
+lifecycle: execution `flows` and their `flow_memberships`,
+`communities`, the three pre-computed summary tables
+(`community_summaries`, `flow_snapshots`, `risk_index`), and the
+`nodes_fts` full-text index. It is upstream code-review-graph v2.3.8's
+schema-v9 derived set, DDL for DDL.
+
+Three guarantees are specific to this role.
+
+1. **Generation swaps, not merges.** Every `Replace*` is one
+   `DELETE`-then-`INSERT` transaction, so an interrupted recompute leaves
+   the PREVIOUS generation intact rather than a half-filled table. There
+   is deliberately no per-row insert/delete on the role: a caller must
+   not be able to construct a partial generation.
+2. **Flows/communities and the summary tables refresh SEPARATELY.** A
+   standalone postprocess recomputes flows, communities and FTS but NOT
+   the summary tables (upstream's `run_postprocess` never calls
+   `_compute_summaries`); only a build or update at `postprocess="full"`
+   refreshes all six. That is why the three summary writers are separate
+   entry points rather than one "refresh derived views" call. The
+   consequence is visible and intended: after a standalone postprocess
+   the summary tables still describe the PREVIOUS generation, including
+   rows keyed by flow and community ids that no longer exist.
+3. **Full-text search is SQLite-only, and says so.** `nodes_fts` is an
+   FTS5 external-content virtual table with BM25 ranking and an
+   FTS5-specific rebuild command. Postgres has no equivalent — tsvector
+   tokenizes differently and ranks differently — so `RebuildFTS`,
+   `SearchNodesFTS`, `SearchNodesFTSWords` and `CountNodesFTSWords`
+   return `ErrFTSUnsupported` there instead of an empty result. Callers
+   test with `errors.Is` and degrade to `SearchNodes`, the portable
+   substring search available on both backends. An emulation would
+   silently return a DIFFERENT result set and rank order for the same
+   query, which is precisely the quiet divergence this contract exists to
+   prevent.
+
+### Foreign keys on code-graph tables are DECLARED, not ENFORCED
+
+`community_summaries` -> `communities`, `flow_snapshots` -> `flows` and
+`risk_index` -> `nodes` all carry `FOREIGN KEY` clauses, copied verbatim
+from upstream. Upstream runs with `PRAGMA foreign_keys` OFF (Python's
+`sqlite3` default), so those declarations constrain nothing — and
+upstream DEPENDS on that. Replacing `communities` while
+`community_summaries` still references the old ids is normal, tolerated
+staleness (guarantee 2 above), and a full rebuild deletes `nodes` rows
+out from under existing `risk_index` rows.
+
+`OpenSQLite` enables `PRAGMA foreign_keys=ON` for the KG layer, which
+does want referential integrity. Both are satisfied by suspending
+enforcement on a DEDICATED CONNECTION for the duration of the writes
+upstream's inert constraints permit. That covers the derived writers AND
+the ingestion path — `StoreFileNodesEdges` and `RemoveFileData`, whose
+leading `DELETE FROM nodes WHERE file_path=?` would otherwise be refused
+on any graph that already holds a `risk_index`.
+
+**If you add a code-graph table referencing `nodes`, `flows` or
+`communities`, every write path that deletes from those parents must go
+through the same FK-suspended transaction.** The alternative — clearing
+the referencing table before a rebuild — is wrong: it would erase the
+tolerated staleness the release contract pins
+(`summary_tables_after_selective_postprocess` records non-zero flows and
+communities beside ZERO summaries, and `postprocess_none_build` leaves
+the previous generation's summary tables in place).
+
 ### How a caller picks a role
 
 1. Identify the single concern the caller exercises (it almost always
-   uses exactly one of read / write / KG-note / link).
+   uses exactly one of read / write / derived / KG-note / link).
 2. Depend on that role interface in the function/struct signature — not
    `Store`. If it genuinely spans concerns, depend on `Store`.
 3. Obtain the role by declaring the dependency as the narrow role type

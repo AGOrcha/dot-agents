@@ -63,7 +63,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     is_test         BOOLEAN       NOT NULL DEFAULT FALSE,
     file_hash       TEXT,
     extra           TEXT          NOT NULL DEFAULT '{}',
-    updated_at      DOUBLE PRECISION NOT NULL
+    updated_at      DOUBLE PRECISION NOT NULL,
+    signature       TEXT,
+    community_id    BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS edges (
@@ -74,7 +76,9 @@ CREATE TABLE IF NOT EXISTS edges (
     file_path        TEXT          NOT NULL,
     line             INTEGER       NOT NULL DEFAULT 0,
     extra            TEXT          NOT NULL DEFAULT '{}',
-    updated_at       DOUBLE PRECISION NOT NULL
+    updated_at       DOUBLE PRECISION NOT NULL,
+    confidence       DOUBLE PRECISION DEFAULT 1.0,
+    confidence_tier  TEXT          DEFAULT 'EXTRACTED'
 );
 
 CREATE TABLE IF NOT EXISTS metadata (
@@ -103,6 +107,73 @@ CREATE TABLE IF NOT EXISTS note_symbol_links (
     UNIQUE(note_id, qualified_name, link_kind)
 );
 
+-- Derived views (upstream schema v3-v6). Same columns, constraints and
+-- defaults as the SQLite DDL in migrations.go, spelled in Postgres types:
+-- BIGSERIAL for AUTOINCREMENT, DOUBLE PRECISION for REAL, now() for
+-- datetime('now'). There is deliberately NO nodes_fts equivalent -- see
+-- the FTS methods below.
+CREATE TABLE IF NOT EXISTS flows (
+    id             BIGSERIAL PRIMARY KEY,
+    name           TEXT    NOT NULL,
+    entry_point_id BIGINT  NOT NULL,
+    depth          INTEGER NOT NULL,
+    node_count     INTEGER NOT NULL,
+    file_count     INTEGER NOT NULL,
+    criticality    DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    path_json      TEXT    NOT NULL,
+    created_at     TEXT    NOT NULL DEFAULT (now()::text),
+    updated_at     TEXT    NOT NULL DEFAULT (now()::text)
+);
+
+CREATE TABLE IF NOT EXISTS flow_memberships (
+    flow_id  BIGINT  NOT NULL,
+    node_id  BIGINT  NOT NULL,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (flow_id, node_id)
+);
+
+CREATE TABLE IF NOT EXISTS communities (
+    id                BIGSERIAL PRIMARY KEY,
+    name              TEXT    NOT NULL,
+    level             INTEGER NOT NULL DEFAULT 0,
+    parent_id         BIGINT,
+    cohesion          DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    size              INTEGER NOT NULL DEFAULT 0,
+    dominant_language TEXT,
+    description       TEXT,
+    created_at        TEXT    NOT NULL DEFAULT (now()::text)
+);
+
+CREATE TABLE IF NOT EXISTS community_summaries (
+    community_id      BIGINT PRIMARY KEY,
+    name              TEXT   NOT NULL,
+    purpose           TEXT    DEFAULT '',
+    key_symbols       TEXT    DEFAULT '[]',
+    risk              TEXT    DEFAULT 'unknown',
+    size              INTEGER DEFAULT 0,
+    dominant_language TEXT    DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS flow_snapshots (
+    flow_id       BIGINT PRIMARY KEY,
+    name          TEXT   NOT NULL,
+    entry_point   TEXT   NOT NULL,
+    critical_path TEXT    DEFAULT '[]',
+    criticality   DOUBLE PRECISION DEFAULT 0.0,
+    node_count    INTEGER DEFAULT 0,
+    file_count    INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS risk_index (
+    node_id           BIGINT PRIMARY KEY,
+    qualified_name    TEXT   NOT NULL,
+    risk_score        DOUBLE PRECISION DEFAULT 0.0,
+    caller_count      INTEGER DEFAULT 0,
+    test_coverage     TEXT    DEFAULT 'unknown',
+    security_relevant INTEGER DEFAULT 0,
+    last_computed     TEXT    DEFAULT ''
+);
+
 -- Code graph indexes
 CREATE INDEX IF NOT EXISTS idx_nodes_file      ON nodes(file_path);
 CREATE INDEX IF NOT EXISTS idx_nodes_kind      ON nodes(kind);
@@ -111,6 +182,16 @@ CREATE INDEX IF NOT EXISTS idx_edges_source    ON edges(source_qualified);
 CREATE INDEX IF NOT EXISTS idx_edges_target    ON edges(target_qualified);
 CREATE INDEX IF NOT EXISTS idx_edges_kind      ON edges(kind);
 CREATE INDEX IF NOT EXISTS idx_edges_file      ON edges(file_path);
+CREATE INDEX IF NOT EXISTS idx_nodes_community ON nodes(community_id);
+CREATE INDEX IF NOT EXISTS idx_edges_target_kind ON edges(target_qualified, kind);
+CREATE INDEX IF NOT EXISTS idx_edges_source_kind ON edges(source_qualified, kind);
+CREATE INDEX IF NOT EXISTS idx_edges_composite  ON edges(kind, source_qualified, target_qualified, file_path, line);
+CREATE INDEX IF NOT EXISTS idx_flows_criticality ON flows(criticality DESC);
+CREATE INDEX IF NOT EXISTS idx_flows_entry      ON flows(entry_point_id);
+CREATE INDEX IF NOT EXISTS idx_flow_memberships_node ON flow_memberships(node_id);
+CREATE INDEX IF NOT EXISTS idx_communities_parent ON communities(parent_id);
+CREATE INDEX IF NOT EXISTS idx_communities_cohesion ON communities(cohesion DESC);
+CREATE INDEX IF NOT EXISTS idx_risk_index_score ON risk_index(risk_score DESC);
 
 -- KG indexes
 CREATE INDEX IF NOT EXISTS idx_kg_notes_type     ON kg_notes(note_type);
@@ -365,7 +446,7 @@ func (s *PostgresStore) GetNode(qualifiedName string) (*GraphNode, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, kind, name, qualified_name, file_path, line_start, line_end,
 		       language, parent_name, params, return_type, modifiers, is_test,
-		       file_hash, extra, updated_at
+		       file_hash, extra, updated_at, signature, community_id
 		FROM nodes WHERE qualified_name=$1`, qualifiedName)
 	n, err := pgScanNode(row)
 	if err == pgx.ErrNoRows {
@@ -380,7 +461,7 @@ func (s *PostgresStore) GetNodesByFile(filePath string) ([]GraphNode, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, kind, name, qualified_name, file_path, line_start, line_end,
 		       language, parent_name, params, return_type, modifiers, is_test,
-		       file_hash, extra, updated_at
+		       file_hash, extra, updated_at, signature, community_id
 		FROM nodes WHERE file_path=$1`, filePath)
 	if err != nil {
 		return nil, err
@@ -393,7 +474,8 @@ func (s *PostgresStore) GetEdgesBySource(qualifiedName string) ([]GraphEdge, err
 	ctx, cancel := requestContext(nil)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, kind, source_qualified, target_qualified, file_path, line, extra, updated_at
+		SELECT id, kind, source_qualified, target_qualified, file_path, line, extra, updated_at,
+		       confidence, confidence_tier
 		FROM edges WHERE source_qualified=$1`, qualifiedName)
 	if err != nil {
 		return nil, err
@@ -406,7 +488,8 @@ func (s *PostgresStore) GetEdgesByTarget(qualifiedName string) ([]GraphEdge, err
 	ctx, cancel := requestContext(nil)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, kind, source_qualified, target_qualified, file_path, line, extra, updated_at
+		SELECT id, kind, source_qualified, target_qualified, file_path, line, extra, updated_at,
+		       confidence, confidence_tier
 		FROM edges WHERE target_qualified=$1`, qualifiedName)
 	if err != nil {
 		return nil, err
@@ -429,7 +512,8 @@ func (s *PostgresStore) GetEdgesAmong(qualifiedNames []string) ([]GraphEdge, err
 
 	// Postgres supports $1 = ANY($2) for array membership — no batching needed.
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, kind, source_qualified, target_qualified, file_path, line, extra, updated_at
+		SELECT id, kind, source_qualified, target_qualified, file_path, line, extra, updated_at,
+		       confidence, confidence_tier
 		FROM edges WHERE source_qualified = ANY($1)`,
 		qualifiedNames,
 	)
@@ -483,7 +567,7 @@ func (s *PostgresStore) SearchNodes(query string, limit int) ([]GraphNode, error
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, kind, name, qualified_name, file_path, line_start, line_end,
 		       language, parent_name, params, return_type, modifiers, is_test,
-		       file_hash, extra, updated_at
+		       file_hash, extra, updated_at, signature, community_id
 		FROM nodes WHERE name ILIKE $1 OR qualified_name ILIKE $2
 		LIMIT $3`,
 		pattern, pattern, limit,
@@ -771,36 +855,48 @@ func pgScanNode(row pgRowScanner) (*GraphNode, error) {
 	var n GraphNode
 	var extraStr string
 	var modifiers *string
+	var signature *string
+	var communityID *int64
 	err := row.Scan(
 		&n.ID, &n.Kind, &n.Name, &n.QualifiedName, &n.FilePath,
 		&n.LineStart, &n.LineEnd, &n.Language, &n.ParentName,
 		&n.Params, &n.ReturnType, &modifiers, &n.IsTest,
-		&n.FileHash, &extraStr, &n.UpdatedAt,
+		&n.FileHash, &extraStr, &n.UpdatedAt, &signature, &communityID,
 	)
 	if err != nil {
 		return nil, err
 	}
 	n.Extra = decodeExtra(extraStr)
+	n.Signature = derefString(signature)
+	n.CommunityID = derefInt64(communityID)
 	return &n, nil
+}
+
+// derefString / derefInt64 read a nullable Postgres column into the
+// GraphNode zero value ("" / 0), matching the SQLite backend's sql.Null*
+// handling of the same two nullable columns.
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func derefInt64(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 func pgCollectNodes(rows pgx.Rows) ([]GraphNode, error) {
 	var result []GraphNode
 	for rows.Next() {
-		var n GraphNode
-		var extraStr string
-		var modifiers *string
-		err := rows.Scan(
-			&n.ID, &n.Kind, &n.Name, &n.QualifiedName, &n.FilePath,
-			&n.LineStart, &n.LineEnd, &n.Language, &n.ParentName,
-			&n.Params, &n.ReturnType, &modifiers, &n.IsTest,
-			&n.FileHash, &extraStr, &n.UpdatedAt,
-		)
+		n, err := pgScanNode(rows)
 		if err != nil {
 			return nil, err
 		}
-		n.Extra = decodeExtra(extraStr)
-		result = append(result, n)
+		result = append(result, *n)
 	}
 	return result, rows.Err()
 }
@@ -810,14 +906,21 @@ func pgCollectEdges(rows pgx.Rows) ([]GraphEdge, error) {
 	for rows.Next() {
 		var e GraphEdge
 		var extraStr string
+		var confidence *float64
+		var tier *string
 		err := rows.Scan(
 			&e.ID, &e.Kind, &e.SourceQualified, &e.TargetQualified,
 			&e.FilePath, &e.Line, &extraStr, &e.UpdatedAt,
+			&confidence, &tier,
 		)
 		if err != nil {
 			return nil, err
 		}
 		e.Extra = decodeExtra(extraStr)
+		if confidence != nil {
+			e.Confidence = *confidence
+		}
+		e.ConfidenceTier = derefString(tier)
 		result = append(result, e)
 	}
 	return result, rows.Err()
@@ -858,4 +961,479 @@ func pgEncodeExtra(m map[string]any) (string, error) {
 		return "{}", err
 	}
 	return string(b), nil
+}
+
+// ---------------------------------------------------------------------------
+// Code graph — derived views (CodeGraphDerived)
+// ---------------------------------------------------------------------------
+//
+// Postgres hosts the six derived TABLES natively: they are plain relational
+// tables and the replace-writers below are the same DELETE + INSERT inside one
+// transaction the SQLite backend runs, so the atomic-generation-swap guarantee
+// holds identically.
+//
+// It cannot host the nodes_fts index. That index is a SQLite FTS5
+// EXTERNAL-CONTENT virtual table: it stores no rows of its own, projects
+// nodes(name, qualified_name, file_path, signature) by rowid, ranks with FTS5's
+// BM25 `rank` column, and is repopulated by the FTS5-specific
+// `INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')` command. Postgres has
+// none of that: its full-text story is tsvector + GIN with different
+// tokenizing and a different (ts_rank) score, so an emulation would silently
+// return a DIFFERENT result set and rank order for the same query — exactly
+// the divergence the parity contract exists to prevent. RebuildFTS and
+// SearchNodesFTS therefore fail with ErrFTSUnsupported, which callers can
+// detect with errors.Is and fall back from, rather than pretending to index
+// zero rows or returning an empty match list.
+//
+// SearchNodes (CodeGraphReader) remains available on both backends and is the
+// portable substring search; it is what a caller should degrade to.
+
+// pgDerivedTx runs fn in one transaction, rolling back on error. It is the
+// Postgres equivalent of SQLiteStore.derivedTx; there is no foreign-key
+// suspension because the Postgres derived DDL deliberately declares no FKs
+// between the derived tables — upstream's declarations are inert (Python's
+// sqlite3 leaves enforcement off) and reproducing an inert constraint as an
+// ENFORCED one would break the documented generation-swap semantics.
+func (s *PostgresStore) pgDerivedTx(fn func(ctx context.Context, tx pgx.Tx) error) error {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	if err := fn(ctx, tx); err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *PostgresStore) ReadFlows() ([]FlowRow, error) {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, entry_point_id, depth, node_count, file_count,
+		        criticality, path_json, created_at, updated_at
+		 FROM flows ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FlowRow
+	for rows.Next() {
+		var f FlowRow
+		if err := rows.Scan(&f.ID, &f.Name, &f.EntryPointID, &f.Depth,
+			&f.NodeCount, &f.FileCount, &f.Criticality, &f.PathJSON,
+			&f.CreatedAt, &f.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) ReadFlowMemberships() ([]FlowMembershipRow, error) {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	rows, err := s.pool.Query(ctx,
+		"SELECT flow_id, node_id, position FROM flow_memberships ORDER BY flow_id, node_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FlowMembershipRow
+	for rows.Next() {
+		var m FlowMembershipRow
+		if err := rows.Scan(&m.FlowID, &m.NodeID, &m.Position); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) ReadCommunities() ([]CommunityRow, error) {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, level, parent_id, cohesion, size,
+		        dominant_language, description
+		 FROM communities ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CommunityRow
+	for rows.Next() {
+		var c CommunityRow
+		var parent *int64
+		var lang, desc *string
+		if err := rows.Scan(&c.ID, &c.Name, &c.Level, &parent, &c.Cohesion,
+			&c.Size, &lang, &desc); err != nil {
+			return nil, err
+		}
+		c.ParentID = parent
+		c.DominantLanguage = derefString(lang)
+		c.Description = derefString(desc)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) ReadCommunitySummaries() ([]CommunitySummaryRow, error) {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	rows, err := s.pool.Query(ctx,
+		`SELECT community_id, name, purpose, key_symbols, risk, size,
+		        dominant_language
+		 FROM community_summaries ORDER BY community_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CommunitySummaryRow
+	for rows.Next() {
+		var c CommunitySummaryRow
+		if err := rows.Scan(&c.CommunityID, &c.Name, &c.Purpose, &c.KeySymbols,
+			&c.Risk, &c.Size, &c.DominantLanguage); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) ReadFlowSnapshots() ([]FlowSnapshotRow, error) {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	rows, err := s.pool.Query(ctx,
+		`SELECT flow_id, name, entry_point, critical_path, criticality,
+		        node_count, file_count
+		 FROM flow_snapshots ORDER BY flow_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FlowSnapshotRow
+	for rows.Next() {
+		var f FlowSnapshotRow
+		if err := rows.Scan(&f.FlowID, &f.Name, &f.EntryPoint, &f.CriticalPath,
+			&f.Criticality, &f.NodeCount, &f.FileCount); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) ReadRiskIndex() ([]RiskIndexRow, error) {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	rows, err := s.pool.Query(ctx,
+		`SELECT node_id, qualified_name, risk_score, caller_count,
+		        test_coverage, security_relevant, last_computed
+		 FROM risk_index ORDER BY node_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RiskIndexRow
+	for rows.Next() {
+		var r RiskIndexRow
+		var sec int
+		if err := rows.Scan(&r.NodeID, &r.QualifiedName, &r.RiskScore,
+			&r.CallerCount, &r.TestCoverage, &sec, &r.LastComputed); err != nil {
+			return nil, err
+		}
+		r.SecurityRelevant = sec != 0
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SearchNodesFTS is not available on Postgres. See the file-section comment:
+// emulating an FTS5 BM25 external-content index with tsvector would return a
+// different result set and rank order, so this reports the capability gap
+// instead. Degrade to SearchNodes.
+func (s *PostgresStore) SearchNodesFTS(string, int) ([]int64, error) {
+	return nil, ErrFTSUnsupported
+}
+
+// SearchNodesFTSWords is not available on Postgres; see SearchNodesFTS.
+func (s *PostgresStore) SearchNodesFTSWords([]string, int) ([]int64, error) {
+	return nil, ErrFTSUnsupported
+}
+
+// CountNodesFTSWords is not available on Postgres; see SearchNodesFTS.
+func (s *PostgresStore) CountNodesFTSWords([]string) (int, error) {
+	return 0, ErrFTSUnsupported
+}
+
+// ApplyEdgeRewrites writes the recomputed endpoints and extra for each edge
+// inside one transaction; see the SQLite implementation for why it is atomic.
+func (s *PostgresStore) ApplyEdgeRewrites(rewrites []EdgeRewrite) (int, error) {
+	if len(rewrites) == 0 {
+		return 0, nil
+	}
+	err := s.pgDerivedTx(func(ctx context.Context, tx pgx.Tx) error {
+		for _, r := range rewrites {
+			extra, err := encodeExtra(r.Extra)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx,
+				`UPDATE edges SET source_qualified = $1, target_qualified = $2, extra = $3
+				 WHERE id = $4`,
+				r.SourceQualified, r.TargetQualified, extra, r.EdgeID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return len(rewrites), nil
+}
+
+// RebuildFTS is not available on Postgres; there is no nodes_fts index to
+// rebuild. Returning ErrFTSUnsupported rather than (0, nil) keeps "this
+// backend has no full-text index" distinguishable from "the graph is empty".
+func (s *PostgresStore) RebuildFTS() (int, error) {
+	return 0, ErrFTSUnsupported
+}
+
+func (s *PostgresStore) ReplaceFlows(flows []FlowRow, paths [][]int64) (int, error) {
+	if len(paths) != len(flows) {
+		return 0, fmt.Errorf("graphstore: ReplaceFlows got %d flows but %d paths", len(flows), len(paths))
+	}
+	count := 0
+	err := s.pgDerivedTx(func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "DELETE FROM flow_memberships"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "DELETE FROM flows"); err != nil {
+			return err
+		}
+		for i, f := range flows {
+			var flowID int64
+			if err := tx.QueryRow(ctx,
+				`INSERT INTO flows
+				   (name, entry_point_id, depth, node_count, file_count,
+				    criticality, path_json)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+				f.Name, f.EntryPointID, f.Depth, f.NodeCount, f.FileCount,
+				f.Criticality, encodeIDPath(paths[i]),
+			).Scan(&flowID); err != nil {
+				return err
+			}
+			for position, nodeID := range paths[i] {
+				if _, err := tx.Exec(ctx,
+					`INSERT INTO flow_memberships (flow_id, node_id, position)
+					 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+					flowID, nodeID, position); err != nil {
+					return err
+				}
+			}
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *PostgresStore) ReplaceCommunities(communities []CommunityRow, members [][]string) (int, error) {
+	if len(members) != len(communities) {
+		return 0, fmt.Errorf("graphstore: ReplaceCommunities got %d communities but %d member sets",
+			len(communities), len(members))
+	}
+	count := 0
+	err := s.pgDerivedTx(func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "DELETE FROM communities"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "UPDATE nodes SET community_id = NULL"); err != nil {
+			return err
+		}
+		for i, c := range communities {
+			var communityID int64
+			if err := tx.QueryRow(ctx,
+				`INSERT INTO communities
+				   (name, level, cohesion, size, dominant_language, description)
+				 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+				c.Name, c.Level, c.Cohesion, c.Size, c.DominantLanguage, c.Description,
+			).Scan(&communityID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx,
+				"UPDATE nodes SET community_id = $1 WHERE qualified_name = ANY($2)",
+				communityID, members[i]); err != nil {
+				return err
+			}
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *PostgresStore) ReplaceCommunitySummaries(rows []CommunitySummaryRow) (int, error) {
+	return s.pgReplaceRows("community_summaries", len(rows), func(ctx context.Context, tx pgx.Tx) error {
+		for _, r := range rows {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO community_summaries
+				   (community_id, name, purpose, key_symbols, size, dominant_language)
+				 VALUES ($1, $2, $3, $4, $5, $6)
+				 ON CONFLICT (community_id) DO UPDATE SET
+				   name=EXCLUDED.name, purpose=EXCLUDED.purpose,
+				   key_symbols=EXCLUDED.key_symbols, size=EXCLUDED.size,
+				   dominant_language=EXCLUDED.dominant_language`,
+				r.CommunityID, r.Name, r.Purpose, r.KeySymbols, r.Size, r.DominantLanguage,
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *PostgresStore) ReplaceFlowSnapshots(rows []FlowSnapshotRow) (int, error) {
+	return s.pgReplaceRows("flow_snapshots", len(rows), func(ctx context.Context, tx pgx.Tx) error {
+		for _, r := range rows {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO flow_snapshots
+				   (flow_id, name, entry_point, critical_path, criticality,
+				    node_count, file_count)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7)
+				 ON CONFLICT (flow_id) DO UPDATE SET
+				   name=EXCLUDED.name, entry_point=EXCLUDED.entry_point,
+				   critical_path=EXCLUDED.critical_path,
+				   criticality=EXCLUDED.criticality,
+				   node_count=EXCLUDED.node_count, file_count=EXCLUDED.file_count`,
+				r.FlowID, r.Name, r.EntryPoint, r.CriticalPath, r.Criticality,
+				r.NodeCount, r.FileCount,
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *PostgresStore) ReplaceRiskIndex(rows []RiskIndexRow) (int, error) {
+	return s.pgReplaceRows("risk_index", len(rows), func(ctx context.Context, tx pgx.Tx) error {
+		for _, r := range rows {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO risk_index
+				   (node_id, qualified_name, risk_score, caller_count,
+				    test_coverage, security_relevant, last_computed)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7)
+				 ON CONFLICT (node_id) DO UPDATE SET
+				   qualified_name=EXCLUDED.qualified_name,
+				   risk_score=EXCLUDED.risk_score,
+				   caller_count=EXCLUDED.caller_count,
+				   test_coverage=EXCLUDED.test_coverage,
+				   security_relevant=EXCLUDED.security_relevant,
+				   last_computed=EXCLUDED.last_computed`,
+				r.NodeID, r.QualifiedName, r.RiskScore, r.CallerCount,
+				r.TestCoverage, boolToInt(r.SecurityRelevant), r.LastComputed,
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// pgReplaceRows is the DELETE-then-insert transaction shared by the three
+// summary-table writers.
+func (s *PostgresStore) pgReplaceRows(table string, n int, insert func(context.Context, pgx.Tx) error) (int, error) {
+	err := s.pgDerivedTx(func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "DELETE FROM "+table); err != nil {
+			return err
+		}
+		return insert(ctx, tx)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *PostgresStore) SetNodeSignature(id int64, signature string) error {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	_, err := s.pool.Exec(ctx, "UPDATE nodes SET signature = $1 WHERE id = $2", signature, id)
+	return err
+}
+
+func (s *PostgresStore) SetNodeCommunity(id int64, communityID int64) error {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	_, err := s.pool.Exec(ctx, "UPDATE nodes SET community_id = $1 WHERE id = $2", communityID, id)
+	return err
+}
+
+func (s *PostgresStore) NodesWithoutSignature() ([]GraphNode, error) {
+	return s.queryNodes("WHERE signature IS NULL ORDER BY id")
+}
+
+func (s *PostgresStore) ReadNodesByKind(kinds []string) ([]GraphNode, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	return s.queryNodes("WHERE kind = ANY($1) ORDER BY kind, id", kinds)
+}
+
+func (s *PostgresStore) ReadNodesByID(ids []int64) ([]GraphNode, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return s.queryNodes("WHERE id = ANY($1) ORDER BY id", ids)
+}
+
+func (s *PostgresStore) ReadNodesByCommunity(communityID int64) ([]GraphNode, error) {
+	return s.queryNodes("WHERE community_id = $1 ORDER BY id", communityID)
+}
+
+func (s *PostgresStore) ReadAllNodes() ([]GraphNode, error) {
+	return s.queryNodes("ORDER BY id")
+}
+
+func (s *PostgresStore) ReadAllEdges() ([]GraphEdge, error) {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, kind, source_qualified, target_qualified, file_path, line,
+		        extra, updated_at, confidence, confidence_tier
+		 FROM edges ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return pgCollectEdges(rows)
+}
+
+// queryNodes runs a full-column nodes SELECT with the caller's trailing
+// clause, so the column list (and therefore the pgScanNode destination
+// order) is written exactly once.
+func (s *PostgresStore) queryNodes(clause string, args ...any) ([]GraphNode, error) {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, kind, name, qualified_name, file_path, line_start, line_end,
+		        language, parent_name, params, return_type, modifiers, is_test,
+		        file_hash, extra, updated_at, signature, community_id
+		 FROM nodes `+clause, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return pgCollectNodes(rows)
 }

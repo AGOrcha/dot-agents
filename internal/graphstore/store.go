@@ -66,6 +66,15 @@ type GraphNode struct {
 	FileHash      string
 	Extra         map[string]any
 	UpdatedAt     float64
+	// Signature is the rendered declaration the FTS index searches over
+	// ("def Login((user, password string))", "class Session", or the path
+	// for a File node). Empty until the postprocess signature pass
+	// renders it.
+	Signature string
+	// CommunityID is the community this node was assigned to by community
+	// detection. 0 means unassigned: the column is nullable and File
+	// nodes are never members.
+	CommunityID int64
 }
 
 // GraphEdge is an edge as stored and returned from the graph.
@@ -78,6 +87,11 @@ type GraphEdge struct {
 	Line            int
 	Extra           map[string]any
 	UpdatedAt       float64
+	// Confidence is the extractor's 0..1 confidence in this edge.
+	Confidence float64
+	// ConfidenceTier is the provenance band ("EXTRACTED" for an edge the
+	// parser saw directly, vs a weaker inferred tier).
+	ConfidenceTier string
 }
 
 // GraphStats aggregates health metrics for the graph.
@@ -193,6 +207,14 @@ type CodeGraphWriter interface {
 	Commit() error
 }
 
+// CodeGraphDerived is the derived-view slice of the code graph — the six
+// schema-v9 derived tables, the nodes_fts index and the two node columns
+// the derivation maintains. Its methods and the reasons they are shaped
+// the way they are (atomic generation swaps; the deliberate split between
+// the flows/communities/FTS refresh and the summary-table refresh) are
+// documented in derived.go. Only the postprocess lifecycle and the
+// derived-view query tools depend on this role; the scanner does not.
+
 // KGNoteStore is the knowledge-graph note view: upsert/get/search a note
 // and list archived notes. KG curation/sync callers depend on this role
 // (often paired with NoteSymbolLinkStore).
@@ -231,6 +253,7 @@ type Closer interface {
 type Store interface {
 	CodeGraphReader
 	CodeGraphWriter
+	CodeGraphDerived
 	KGNoteStore
 	NoteSymbolLinkStore
 	Closer
@@ -249,12 +272,14 @@ var (
 
 	_ CodeGraphReader     = (*SQLiteStore)(nil)
 	_ CodeGraphWriter     = (*SQLiteStore)(nil)
+	_ CodeGraphDerived    = (*SQLiteStore)(nil)
 	_ KGNoteStore         = (*SQLiteStore)(nil)
 	_ NoteSymbolLinkStore = (*SQLiteStore)(nil)
 	_ Closer              = (*SQLiteStore)(nil)
 
 	_ CodeGraphReader     = (*PostgresStore)(nil)
 	_ CodeGraphWriter     = (*PostgresStore)(nil)
+	_ CodeGraphDerived    = (*PostgresStore)(nil)
 	_ KGNoteStore         = (*PostgresStore)(nil)
 	_ NoteSymbolLinkStore = (*PostgresStore)(nil)
 	_ Closer              = (*PostgresStore)(nil)

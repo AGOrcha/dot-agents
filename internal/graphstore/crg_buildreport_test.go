@@ -31,49 +31,36 @@ func writeCorruptCRGDB(t *testing.T, repoRoot string) {
 	}
 }
 
-// TestCRGBridge_BuildReport_ErrorOutcome covers the default (error) branch of
-// BuildReport's outcome switch by seeding a corrupt graph.db file. Status
-// reports state=error, and BuildReport's default arm should set
-// Outcome=error.
-func TestCRGBridge_BuildReport_ErrorOutcome(t *testing.T) {
+// TestCRGBridge_Status_ErrorState covers the default (error) branch of the
+// readiness classification by seeding a corrupt graph.db file. The readiness
+// overlay lives on Status now: upstream's build result carries no status
+// block, so the build no longer classifies readiness itself.
+func TestCRGBridge_Status_ErrorState(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell binary path differs on Windows")
 	}
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "ok-bin")
-	// Build script always succeeds.
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	writeCorruptCRGDB(t, dir)
 
-	b := &CRGBridge{RepoRoot: dir, Bin: bin}
-	report, err := b.BuildReport(BuildOptions{})
+	status, err := (&CRGBridge{RepoRoot: dir}).Status()
 	if err != nil {
-		t.Fatalf("BuildReport unexpected error: %v", err)
+		t.Fatalf("Status unexpected error: %v", err)
 	}
-	if report.Outcome != CRGReadinessError {
-		t.Errorf("expected outcome=error, got %q (summary=%s)", report.Outcome, report.Summary)
+	if status.State != CRGReadinessError {
+		t.Errorf("state = %q, want error (message=%s)", status.State, status.Message)
 	}
-	if report.Summary == "" {
-		t.Error("expected non-empty summary on error outcome")
+	if status.Message == "" {
+		t.Error("expected non-empty message on the error state")
 	}
 }
 
-// TestCRGBridge_BuildReport_BusyOrLockedOutcome covers the busy_or_locked
-// branch by acquiring an exclusive lock on the graph.db file before invoking
-// BuildReport.  When SQLite encounters a held BEGIN EXCLUSIVE transaction it
-// returns "database is locked" — Status classifies that as busy_or_locked,
-// and BuildReport must map it to outcome=busy_or_locked.
-func TestCRGBridge_BuildReport_BusyOrLockedOutcome(t *testing.T) {
+// TestCRGBridge_Status_BusyOrLockedState covers the busy_or_locked branch by
+// holding a write lock on graph.db while Status reads it.
+func TestCRGBridge_Status_BusyOrLockedState(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell binary path differs on Windows")
 	}
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "ok-bin")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 
 	// Seed a valid db so Status doesn't bail on "missing".
 	writeFakeCRGDBInternal(t, dir, 1, 0)
@@ -104,21 +91,19 @@ func TestCRGBridge_BuildReport_BusyOrLockedOutcome(t *testing.T) {
 		t.Fatalf("insert under lock: %v", err)
 	}
 
-	b := &CRGBridge{RepoRoot: dir, Bin: bin}
-	report, err := b.BuildReport(BuildOptions{})
+	status, err := (&CRGBridge{RepoRoot: dir}).Status()
 	if err != nil {
-		t.Fatalf("BuildReport: %v", err)
+		t.Fatalf("Status: %v", err)
 	}
 	// modernc.org/sqlite returns "database is locked" or similar; if the
 	// underlying driver happens to allow this read without blocking (WAL,
-	// shared cache), we still want the test to pass — accept either
-	// busy_or_locked or ready as a non-fatal outcome.
-	switch report.Outcome {
+	// shared cache), we still want the test to pass.
+	switch status.State {
 	case CRGReadinessBusyOrLocked:
 		// happy path — busy/locked branch covered.
 	case CRGReadinessReady, CRGReadinessUnbuilt, CRGReadinessError:
-		t.Logf("driver did not block: outcome=%s summary=%s (acceptable on platforms where modernc.org/sqlite uses a non-blocking reader)", report.Outcome, report.Summary)
+		t.Logf("driver did not block: state=%s message=%s (acceptable on platforms where modernc.org/sqlite uses a non-blocking reader)", status.State, status.Message)
 	default:
-		t.Errorf("unexpected outcome %q", report.Outcome)
+		t.Errorf("unexpected state %q", status.State)
 	}
 }

@@ -247,6 +247,200 @@ func (l *lazyStore) DeleteNoteSymbolLink(id int64) error {
 	return s.DeleteNoteSymbolLink(id)
 }
 
+// --- CodeGraphDerived ---
+
+func (l *lazyStore) ReadFlows() ([]FlowRow, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadFlows()
+}
+
+func (l *lazyStore) ReadFlowMemberships() ([]FlowMembershipRow, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadFlowMemberships()
+}
+
+func (l *lazyStore) ReadCommunities() ([]CommunityRow, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadCommunities()
+}
+
+func (l *lazyStore) ReadCommunitySummaries() ([]CommunitySummaryRow, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadCommunitySummaries()
+}
+
+func (l *lazyStore) ReadFlowSnapshots() ([]FlowSnapshotRow, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadFlowSnapshots()
+}
+
+func (l *lazyStore) ReadRiskIndex() ([]RiskIndexRow, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadRiskIndex()
+}
+
+func (l *lazyStore) SearchNodesFTS(query string, limit int) ([]int64, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.SearchNodesFTS(query, limit)
+}
+
+func (l *lazyStore) SearchNodesFTSWords(words []string, limit int) ([]int64, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.SearchNodesFTSWords(words, limit)
+}
+
+func (l *lazyStore) CountNodesFTSWords(words []string) (int, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return 0, err
+	}
+	return s.CountNodesFTSWords(words)
+}
+
+func (l *lazyStore) ReplaceFlows(flows []FlowRow, paths [][]int64) (int, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return 0, err
+	}
+	return s.ReplaceFlows(flows, paths)
+}
+
+func (l *lazyStore) ReplaceCommunities(communities []CommunityRow, members [][]string) (int, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return 0, err
+	}
+	return s.ReplaceCommunities(communities, members)
+}
+
+func (l *lazyStore) ReplaceCommunitySummaries(rows []CommunitySummaryRow) (int, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return 0, err
+	}
+	return s.ReplaceCommunitySummaries(rows)
+}
+
+func (l *lazyStore) ReplaceFlowSnapshots(rows []FlowSnapshotRow) (int, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return 0, err
+	}
+	return s.ReplaceFlowSnapshots(rows)
+}
+
+func (l *lazyStore) ReplaceRiskIndex(rows []RiskIndexRow) (int, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return 0, err
+	}
+	return s.ReplaceRiskIndex(rows)
+}
+
+func (l *lazyStore) ApplyEdgeRewrites(rewrites []EdgeRewrite) (int, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return 0, err
+	}
+	return s.ApplyEdgeRewrites(rewrites)
+}
+
+func (l *lazyStore) RebuildFTS() (int, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return 0, err
+	}
+	return s.RebuildFTS()
+}
+
+func (l *lazyStore) SetNodeSignature(id int64, signature string) error {
+	s, err := l.resolve()
+	if err != nil {
+		return err
+	}
+	return s.SetNodeSignature(id, signature)
+}
+
+func (l *lazyStore) SetNodeCommunity(id int64, communityID int64) error {
+	s, err := l.resolve()
+	if err != nil {
+		return err
+	}
+	return s.SetNodeCommunity(id, communityID)
+}
+
+func (l *lazyStore) NodesWithoutSignature() ([]GraphNode, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.NodesWithoutSignature()
+}
+
+func (l *lazyStore) ReadNodesByKind(kinds []string) ([]GraphNode, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadNodesByKind(kinds)
+}
+
+func (l *lazyStore) ReadNodesByID(ids []int64) ([]GraphNode, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadNodesByID(ids)
+}
+
+func (l *lazyStore) ReadNodesByCommunity(communityID int64) ([]GraphNode, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadNodesByCommunity(communityID)
+}
+
+func (l *lazyStore) ReadAllNodes() ([]GraphNode, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadAllNodes()
+}
+
+func (l *lazyStore) ReadAllEdges() ([]GraphEdge, error) {
+	s, err := l.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.ReadAllEdges()
+}
+
 // --- Closer ---
 
 // Close releases the backend only if it was ever opened. A LazyStore that

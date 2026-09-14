@@ -2,9 +2,11 @@ package graphstore_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,11 +37,11 @@ Last updated: 2026-04-11T00:49:52
 	if s.Files != 50 {
 		t.Errorf("Files: got %d, want 50", s.Files)
 	}
-	if s.Languages != "go, ruby" {
-		t.Errorf("Languages: got %q, want %q", s.Languages, "go, ruby")
+	if strings.Join(s.Languages, ", ") != "go, ruby" {
+		t.Errorf("Languages: got %v, want [go ruby]", s.Languages)
 	}
-	if s.LastUpdated != "2026-04-11T00:49:52" {
-		t.Errorf("LastUpdated: got %q", s.LastUpdated)
+	if s.LastUpdatedOrNever() != "2026-04-11T00:49:52" {
+		t.Errorf("LastUpdated: got %q", s.LastUpdatedOrNever())
 	}
 }
 
@@ -131,17 +133,19 @@ func TestCRGBridgeFreshBuildRealCRG(t *testing.T) {
 	// python3 from the same real .venv/bin directory so site-packages are present.
 	bridge := &graphstore.CRGBridge{RepoRoot: tmpDir, Bin: crgBin}
 	report, err := bridge.BuildReport(graphstore.BuildOptions{
-		SkipFlows:       true,
-		SkipPostprocess: true,
+		Postprocess: graphstore.PostprocessNone,
 	})
 	if err != nil {
 		skipOrFailCRGBuildErr(t, report, err)
 	}
-	if report.Outcome != graphstore.CRGReadinessReady {
-		t.Fatalf("expected outcome=%q, got %q; summary: %s", graphstore.CRGReadinessReady, report.Outcome, report.Summary)
+	if report.Status != "ok" || report.BuildType != "full" {
+		t.Fatalf("report = %+v; summary: %s", report, report.Summary)
 	}
-	if report.Status == nil || report.Status.Nodes == 0 {
-		t.Fatalf("expected non-zero nodes, got status=%+v", report.Status)
+	if report.FilesParsed == nil || *report.FilesParsed == 0 {
+		t.Fatalf("expected the CLI's parsed-file count, got %+v", report)
+	}
+	if report.PostprocessLevel != graphstore.PostprocessNone {
+		t.Errorf("postprocess_level = %q, want %q", report.PostprocessLevel, graphstore.PostprocessNone)
 	}
 
 	// Direct SQLite assertion: the produced graph.db must have rows in nodes.
@@ -222,6 +226,11 @@ func writeFakeCRGDB(t *testing.T, repoRoot string, nodeCount, edgeCount int) {
 	}
 	defer db.Close()
 
+	// Upstream-SHAPED, not merely parseable: `status --json` derives its
+	// file count and language inventory from the FILE-node inventory and
+	// its timestamp from metadata.last_updated, so a fixture without both
+	// reads back as an unbuilt graph. The first node is the File node and
+	// the rest are its symbols, which is what a real graph looks like.
 	ddl := `
 		CREATE TABLE nodes (
 		  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,19 +243,29 @@ func writeFakeCRGDB(t *testing.T, repoRoot string, nodeCount, edgeCount int) {
 		  id INTEGER PRIMARY KEY AUTOINCREMENT,
 		  kind TEXT, source_qualified TEXT, target_qualified TEXT,
 		  file_path TEXT, line INTEGER, extra TEXT, updated_at REAL
-		);`
+		);
+		CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 	if _, err := db.Exec(ddl); err != nil {
 		t.Fatalf("ddl: %v", err)
 	}
-	for i := 0; i < nodeCount; i++ {
-		name := "fn" + string(rune('a'+i))
+	insertNode := func(kind, name, qualified string) {
 		_, _ = db.Exec(
 			`INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end,language,parent_name,params,return_type,is_test,file_hash,extra,updated_at)
 			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			"Function", name, "pkg::"+name, "f.go", 1, 5, "go", "pkg", "", "", 0, "", "{}", 1.0,
+			kind, name, qualified, "f.go", 1, 5, "go", "pkg", "", "", 0, "", "{}", 1.0,
 		)
 	}
-	for i := 0; i < edgeCount; i++ {
+	if nodeCount > 0 {
+		insertNode("File", "f.go", "f.go")
+		if _, err := db.Exec(`INSERT INTO metadata (key,value) VALUES ('last_updated','2026-01-01T00:00:00')`); err != nil {
+			t.Fatalf("seed last_updated: %v", err)
+		}
+	}
+	for i := 1; i < nodeCount; i++ {
+		name := "fn" + string(rune('a'+i))
+		insertNode("Function", name, "pkg::"+name)
+	}
+	for range edgeCount {
 		_, _ = db.Exec(
 			`INSERT INTO edges (kind,source_qualified,target_qualified,file_path,line,extra,updated_at)
 			 VALUES (?,?,?,?,?,?,?)`,
@@ -460,22 +479,73 @@ func TestCRGBridge_Status_PopulatedDB(t *testing.T) {
 	if status.Nodes != 3 || status.Edges != 1 {
 		t.Errorf("got nodes=%d edges=%d", status.Nodes, status.Edges)
 	}
-	// 1 distinct file_path = 1 file
+	// One File node = one file. Upstream counts the File-node inventory,
+	// not DISTINCT file_path, so a symbol row can never keep a file alive
+	// after its File node is gone.
 	if status.Files != 1 {
 		t.Errorf("got files=%d, want 1", status.Files)
+	}
+	if !slices.Equal(status.Languages, []string{"go"}) {
+		t.Errorf("languages = %v, want [go]", status.Languages)
+	}
+	if !status.Ready || status.State != graphstore.CRGReadinessReady {
+		t.Errorf("status = %+v, want a ready graph", status)
 	}
 }
 
 // ── CRGOperationReport JSON shape ─────────────────────────────────────────────
 
-func TestCRGOperationReport_JSONShape(t *testing.T) {
-	rep := graphstore.CRGOperationReport{
-		Operation: "build",
-		Outcome:   graphstore.CRGReadinessReady,
-		Summary:   "ok",
+// TestCRGOperationReport_PresenceRules pins the encoding the whole parity
+// contract rests on: an absent key, a present-but-null key and a present
+// zero must be three distinguishable things.
+func TestCRGOperationReport_PresenceRules(t *testing.T) {
+	encode := func(rep graphstore.CRGOperationReport) map[string]any {
+		data, err := json.Marshal(rep)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(data, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return out
 	}
-	if rep.Operation != "build" || rep.Outcome != graphstore.CRGReadinessReady {
-		t.Errorf("unexpected: %+v", rep)
+
+	bare := encode(graphstore.CRGOperationReport{Status: "ok", Summary: "ok"})
+	if len(bare) != 2 {
+		t.Fatalf("a bare report encoded %d keys, want only status and summary: %v", len(bare), bare)
+	}
+
+	full := encode(graphstore.CRGOperationReport{
+		Status:        "ok",
+		Summary:       "ok",
+		BaseResolved:  graphstore.NullString(),
+		TotalNodes:    new(0),
+		ChangedFiles:  new([]string{}),
+		ResolverStats: graphstore.NullResolverStats(),
+	})
+	base, ok := full["base_resolved"]
+	if !ok || base != nil {
+		t.Errorf("base_resolved = %#v (present=%v), want a present null", base, ok)
+	}
+	if nodes, ok := full["total_nodes"]; !ok || nodes != float64(0) {
+		t.Errorf("total_nodes = %#v (present=%v), want a present zero", nodes, ok)
+	}
+	if changed, ok := full["changed_files"]; !ok || len(changed.([]any)) != 0 {
+		t.Errorf("changed_files = %#v (present=%v), want a present empty list", changed, ok)
+	}
+	// A nil resolver member is a present null; a nil ResolverStats omits all
+	// seven keys, which is what the bare report above proves.
+	if python, ok := full["python_resolution"]; !ok || python != nil {
+		t.Errorf("python_resolution = %#v (present=%v), want a present null", python, ok)
+	}
+
+	zeroed := encode(graphstore.CRGOperationReport{
+		Status: "ok", Summary: "ok", ResolverStats: graphstore.ZeroResolverStats(),
+	})
+	block, ok := zeroed["event_resolution"].(map[string]any)
+	if !ok || block["calls_emitted"] != float64(0) {
+		t.Errorf("event_resolution = %#v, want the all-zero block", zeroed["event_resolution"])
 	}
 }
 
@@ -513,9 +583,9 @@ func parseCRGStatusOutputExported(out []byte) *graphstore.CRGStatus {
 		case "Files":
 			s.Files = parseLeadingInt(val)
 		case "Languages":
-			s.Languages = val
+			s.Languages = strings.Split(val, ", ")
 		case "Last updated":
-			s.LastUpdated = val
+			s.LastUpdated = new(val)
 		}
 	}
 	return s

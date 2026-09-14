@@ -56,7 +56,7 @@ func TestCRGBridge_Status_NoEdgesTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`CREATE TABLE nodes (
-		id INTEGER PRIMARY KEY, file_path TEXT, updated_at TEXT, language TEXT
+		id INTEGER PRIMARY KEY, kind TEXT, file_path TEXT, updated_at TEXT, language TEXT
 	)`); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestCRGBridge_Status_LanguagesQueryFails(t *testing.T) {
 	}
 	// nodes without `language` column will fail the readCRGLanguages query.
 	if _, err := db.Exec(`CREATE TABLE nodes (
-		id INTEGER PRIMARY KEY, file_path TEXT, updated_at TEXT
+		id INTEGER PRIMARY KEY, kind TEXT, file_path TEXT, updated_at TEXT
 	); CREATE TABLE edges (id INTEGER PRIMARY KEY);`); err != nil {
 		t.Fatal(err)
 	}
