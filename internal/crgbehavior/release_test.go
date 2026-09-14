@@ -98,14 +98,40 @@ func TestReleaseValidateRejectsOffBaselineFixtures(t *testing.T) {
 	}
 }
 
-// The probe interpolates a table name into one COUNT query, so a fixture may
-// only name SQL identifiers.
-func TestReleaseRejectsANonIdentifierTableName(t *testing.T) {
-	rel := testRelease()
-	rel.Tables = append(rel.Tables, TableSpec{Name: "nodes; DROP TABLE nodes", Columns: []string{"id"}})
-	err := rel.Validate()
-	if err == nil || !strings.Contains(err.Error(), "not a SQL identifier") {
-		t.Fatalf("Validate error = %v, want a non-identifier rejection", err)
+// Row counts run through a literal statement per table, so a fixture may only
+// name tables the pinned release is known to write. That rejects an
+// injection-shaped name AND a perfectly well-formed identifier the release
+// never writes — the second case is the one a pure identifier check accepted,
+// and it would have reached the probe as an unanswerable table.
+func TestReleaseRejectsAnUnwrittenTableName(t *testing.T) {
+	for _, name := range []string{"nodes; DROP TABLE nodes", "risk_scores", "Nodes"} {
+		t.Run(name, func(t *testing.T) {
+			rel := testRelease()
+			rel.Tables = append(rel.Tables, TableSpec{Name: name, Columns: []string{"id"}})
+			err := rel.Validate()
+			if err == nil || !strings.Contains(err.Error(), "not known to write") {
+				t.Fatalf("Validate error = %v, want %q rejected as unwritten", err, name)
+			}
+		})
+	}
+}
+
+// Every table the checked-in fixture declares must have a row-count statement,
+// so the closed set in schema.go cannot drift away from the fixture it serves.
+func TestSchemaCountsEveryReleaseTable(t *testing.T) {
+	rel, err := LoadRelease(releaseFixturePath())
+	if err != nil {
+		t.Fatalf("load the checked-in release fixture: %v", err)
+	}
+	for _, spec := range rel.Tables {
+		if _, ok := rowCountSQL[spec.Name]; !ok {
+			t.Errorf("release fixture declares %q with no row-count statement", spec.Name)
+		}
+	}
+	for table := range rowCountSQL {
+		if _, ok := rel.Table(table); !ok {
+			t.Errorf("rowCountSQL declares %q, which the release fixture does not", table)
+		}
 	}
 }
 

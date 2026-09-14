@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,11 +111,30 @@ func (s SchemaReport) UncomputedSurfaces() map[string]string {
 	return out
 }
 
-// identRe is the strict identifier allowlist for the one place the probe must
-// interpolate a table name (COUNT(*) takes no bindable table parameter). Names
-// come from the validated release fixture; the allowlist makes that a checked
-// invariant rather than a trusted-input assumption.
-var identRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// rowCountSQL is the row-count statement for every table the pinned release
+// writes.
+//
+// The statements are LITERAL. SQL cannot bind a table name, and building the
+// query by concatenation — even behind an identifier allowlist — puts the
+// decision about what is safe in the probe instead of in the source. The gate
+// certifies ONE release with ONE known schema (PinnedSchemaVersion), so the
+// set of countable tables is closed: a fixture naming a table that is not here
+// is a fixture defect the probe reports, never a query the probe invents.
+//
+// TestSchemaCountsEveryReleaseTable keeps this in lockstep with the checked-in
+// release fixture.
+var rowCountSQL = map[string]string{
+	tableMetadata:           `SELECT COUNT(*) FROM "metadata"`,
+	tableNodes:              `SELECT COUNT(*) FROM "nodes"`,
+	tableEdges:              `SELECT COUNT(*) FROM "edges"`,
+	tableFlows:              `SELECT COUNT(*) FROM "flows"`,
+	tableFlowMemberships:    `SELECT COUNT(*) FROM "flow_memberships"`,
+	tableFlowSnapshots:      `SELECT COUNT(*) FROM "flow_snapshots"`,
+	tableCommunities:        `SELECT COUNT(*) FROM "communities"`,
+	tableCommunitySummaries: `SELECT COUNT(*) FROM "community_summaries"`,
+	tableRiskIndex:          `SELECT COUNT(*) FROM "risk_index"`,
+	tableNodesFTS:           `SELECT COUNT(*) FROM "nodes_fts"`,
+}
 
 // ProbeSchema reads the bridge graph's declared schema version and the state of
 // every table the pinned release's fixture describes, BEFORE any view is read.
@@ -270,15 +288,17 @@ func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
 	return out, rowsErr(rows, table)
 }
 
-// countRows returns a table's row count. SQLite cannot bind a table name, so
-// the identifier is checked against identRe and quoted.
+// countRows returns a table's row count, using the literal statement declared
+// for that table. A table the pinned release is not known to write is refused
+// rather than counted through a query assembled at run time.
 func countRows(db *sql.DB, table string) (int, error) {
-	if !identRe.MatchString(table) {
-		return 0, fmt.Errorf("crgbehavior: release fixture declares a non-identifier table name %q", table)
+	query, ok := rowCountSQL[table]
+	if !ok {
+		return 0, fmt.Errorf("crgbehavior: release fixture declares table %q, which %s %s is not known to write",
+			table, PackageName, PinnedVersion)
 	}
 	var n int
-	// #nosec G202 -- table is a validated SQL identifier from the release fixture.
-	if err := db.QueryRow(`SELECT COUNT(*) FROM "` + table + `"`).Scan(&n); err != nil {
+	if err := db.QueryRow(query).Scan(&n); err != nil {
 		return 0, fmt.Errorf("crgbehavior: count %s rows: %w", table, err)
 	}
 	return n, nil

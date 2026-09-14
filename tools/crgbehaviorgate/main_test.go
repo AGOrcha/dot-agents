@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -437,20 +438,24 @@ func TestMtTRecordRefusesUnloadablePinnedInputs(t *testing.T) {
 	}
 }
 
-// The worktrees are materialized under the temp root, never inside the
-// repository, so a checked-out pinned commit can never be mistaken for working
-// state or picked up by a build.
-func TestMtTDefaultWorkDirIsOutsideTheRepository(t *testing.T) {
-	dir := defaultWorkDir()
-	// filepath.Clean, because os.TempDir() keeps TMPDIR's trailing separator
-	// on macOS ("/var/folders/.../T/") while filepath.Dir strips it.
-	wantParent := filepath.Clean(os.TempDir())
-	if parent := filepath.Dir(dir); parent != wantParent {
-		t.Fatalf("work dir parent = %q, want the temp root %q", parent, wantParent)
+// The worktrees are materialized under the user's OWN cache directory: never
+// inside the repository, so a checked-out pinned commit cannot be mistaken for
+// working state, and never under the shared temp root, because the path is
+// stable and a stable guessable path in a world-writable directory is one
+// another user can pre-create or aim at a symlink.
+func TestMtTDefaultWorkDirIsPrivateAndOutsideTheRepository(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache) // honoured by os.UserCacheDir on Linux
+	t.Setenv("HOME", cache)           // and by the macOS/Windows equivalents
+	dir, ok := defaultWorkDir()
+	if !ok {
+		t.Fatal("defaultWorkDir found no user cache directory")
 	}
-	base := filepath.Base(dir)
-	if !strings.Contains(base, "crg") || !strings.Contains(base, "worktree") {
+	if base := filepath.Base(dir); !strings.Contains(base, "crg") || !strings.Contains(base, "worktree") {
 		t.Fatalf("work dir %q does not name the gate's worktrees", base)
+	}
+	if dir == filepath.Clean(os.TempDir()) || filepath.Dir(dir) == filepath.Clean(os.TempDir()) {
+		t.Fatalf("work dir %q sits in the shared temp root", dir)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -458,6 +463,23 @@ func TestMtTDefaultWorkDirIsOutsideTheRepository(t *testing.T) {
 	}
 	if strings.HasPrefix(dir, cwd+string(filepath.Separator)) {
 		t.Fatalf("work dir %q is inside the repository tree %q", dir, cwd)
+	}
+}
+
+// Without a user cache directory the gate refuses to guess: falling back to the
+// shared temp root is the exposure the cache directory exists to avoid.
+func TestMtTAbsentUserCacheDirIsAUsageError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.UserCacheDir on Windows reads %LocalAppData%, which the runner always sets")
+	}
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("HOME", "")
+	code, _, stderr := run("-repo", ".")
+	if code != exitError {
+		t.Fatalf("exit = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "-work-dir") {
+		t.Fatalf("stderr = %q, want it to ask for -work-dir", stderr)
 	}
 }
 

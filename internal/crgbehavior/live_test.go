@@ -71,8 +71,8 @@ func TestClassifyQueryErrorSeparatesEnvironmentFromBehavior(t *testing.T) {
 	if got := classifyQueryError(env); !errors.Is(got, ErrBridgeUnavailable) {
 		t.Fatalf("classifyQueryError(env) = %v, want ErrBridgeUnavailable", got)
 	}
-	real := errors.New("sqlite3.OperationalError: database is locked")
-	if got := classifyQueryError(real); errors.Is(got, ErrBridgeUnavailable) {
+	behavior := errors.New("sqlite3.OperationalError: database is locked")
+	if got := classifyQueryError(behavior); errors.Is(got, ErrBridgeUnavailable) {
 		t.Fatalf("a real query failure was excused as an unavailable bridge: %v", got)
 	}
 }

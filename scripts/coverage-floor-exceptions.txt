@@ -35,6 +35,6 @@ commands/observability/cmd.go                              # [obs-subsystem] bel
 commands/observability/history.go                          # [obs-subsystem] below the retained 95% floor; obs plan raises + removes
 commands/observability/outbox.go                           # [obs-subsystem] below the retained 95% floor; obs plan raises + removes
 commands/workflow/observability_hook.go                    # [obs-subsystem] below the retained 95% floor; obs plan raises + removes
-tools/crgbehaviorgate/main.go                              # [release-bound] 94.00%; the residual statements need the pinned Python code-review-graph 2.3.8 installed and a full per-commit graph build
+tools/crgbehaviorgate/main.go                              # [release-bound] 94.50%; the residual statements need the pinned Python code-review-graph 2.3.8 installed and a full per-commit graph build
 internal/crgbehavior/materialize.go                        # [release-bound] 75.64%; drives the pinned Python code-review-graph 2.3.8 CLI through a full per-commit graph build
 internal/crgbehavior/live.go                               # [release-bound] 80.43%; issues real commands to the pinned Python code-review-graph 2.3.8 CLI against a real built graph

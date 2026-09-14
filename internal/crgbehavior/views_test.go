@@ -27,73 +27,63 @@ func TestViewsReadTheReleaseRowsExactly(t *testing.T) {
 	entry, step, widget := repoFile("pkg/a.go", "Entry"), repoFile("pkg/a.go", "Step"), repoFile("pkg/b.go", "Widget")
 
 	t.Run("flows keep identity, ordered path and metrics", func(t *testing.T) {
-		want := []BridgeFlow{{
+		vsTSame(t, "flows", views.Flows, []BridgeFlow{{
 			Name: "Entry", EntryPoint: entry, Path: []string{entry, step},
 			Depth: 1, NodeCount: 2, FileCount: 1, Criticality: 0.1875,
-		}}
-		if !reflect.DeepEqual(views.Flows, want) {
-			t.Fatalf("flows = %+v, want %+v", views.Flows, want)
-		}
+		}})
 	})
 
 	t.Run("snapshots are re-keyed off the autoincrement flow id", func(t *testing.T) {
-		want := []BridgeFlowSnapshot{{
+		vsTSame(t, "flow_snapshots", views.FlowSnapshots, []BridgeFlowSnapshot{{
 			EntryPoint: entry, Name: "Entry",
 			CriticalPath: []string{"pkg/a.go::Entry", "pkg/a.go::Step"},
 			Criticality:  0.1875, NodeCount: 2, FileCount: 1,
-		}}
-		if !reflect.DeepEqual(views.FlowSnapshots, want) {
-			t.Fatalf("flow_snapshots = %+v, want %+v", views.FlowSnapshots, want)
-		}
+		}})
 	})
 
+	// The cluster key is the smallest member id, so a relabelled partition
+	// still compares equal.
 	t.Run("communities use a relabel-invariant cluster key", func(t *testing.T) {
-		want := map[string]string{entry: entry, step: entry, widget: unassignedCluster}
-		if !reflect.DeepEqual(views.Communities, want) {
-			t.Fatalf("communities = %v, want %v (smallest member id keys the cluster)", views.Communities, want)
-		}
-		if views.CommunitiesAssigned != 2 {
-			t.Fatalf("communities assigned = %d, want 2", views.CommunitiesAssigned)
-		}
-		summaries := []BridgeCommunitySummary{{
+		vsTSame(t, "communities", views.Communities,
+			map[string]string{entry: entry, step: entry, widget: unassignedCluster})
+		vsTSame(t, "communities assigned", views.CommunitiesAssigned, 2)
+		vsTSame(t, "community_summaries", views.CommunitySummaries, []BridgeCommunitySummary{{
 			Cluster: entry, Name: "pkg", Purpose: "pkg",
 			KeySymbols: []string{"Entry", "Step"}, Risk: "unknown", Size: 2, DominantLanguage: "go",
-		}}
-		if !reflect.DeepEqual(views.CommunitySummaries, summaries) {
-			t.Fatalf("community_summaries = %+v, want %+v", views.CommunitySummaries, summaries)
-		}
+		}})
 	})
 
 	t.Run("risk rows are read in full", func(t *testing.T) {
-		want := map[string]BridgeRisk{
+		vsTSame(t, "risk_index", views.RiskIndex, map[string]BridgeRisk{
 			entry: {QualifiedName: "pkg/a.go::Entry", RiskScore: 0.3, CallerCount: 0, TestCoverage: "untested"},
 			step:  {QualifiedName: "pkg/a.go::Step", RiskScore: 0.7, CallerCount: 4, TestCoverage: "untested", SecurityRelevant: true},
-		}
-		if !reflect.DeepEqual(views.RiskIndex, want) {
-			t.Fatalf("risk_index = %+v, want %+v", views.RiskIndex, want)
-		}
+		})
 	})
 
 	t.Run("schema-v9 edge confidence is preserved with the upstream kind", func(t *testing.T) {
-		want := []BridgeEdge{
+		vsTSame(t, "edges", views.Edges, []BridgeEdge{
 			{Kind: "CALLS", From: "pkg/a.go::Entry", To: "pkg/a.go::Step", FilePath: "pkg/a.go", Line: 4,
 				Confidence: 1.0, ConfidenceTier: "EXTRACTED"},
 			{Kind: edgeKindImportsFrom, From: "pkg/a.go::Entry", To: "pkg/b.go::Widget", FilePath: "pkg/a.go", Line: 1,
 				Confidence: 0.75, ConfidenceTier: "INFERRED"},
 			{Kind: "CALLS", From: "pkg/a.go::Step", To: "append", FilePath: "pkg/a.go", Line: 11,
 				Confidence: 0.5, ConfidenceTier: "HEURISTIC"},
-		}
-		if !reflect.DeepEqual(views.Edges, want) {
-			t.Fatalf("edges = %+v, want %+v", views.Edges, want)
-		}
+		})
 	})
 
 	t.Run("the FTS index content is normalized and deduplicated", func(t *testing.T) {
-		want := []string{"pkg/a.go::Entry", "pkg/a.go::Step", "pkg/b.go::Widget"}
-		if !reflect.DeepEqual(views.FTSIndex, want) {
-			t.Fatalf("fts index = %v, want %v", views.FTSIndex, want)
-		}
+		vsTSame(t, "fts index", views.FTSIndex, []string{"pkg/a.go::Entry", "pkg/a.go::Step", "pkg/b.go::Widget"})
 	})
+}
+
+// vsTSame fails unless a read view equals the release rows it must reproduce.
+// Every exactness assertion goes through it so each subtest above stays one
+// statement of data plus one comparison.
+func vsTSame[T any](t *testing.T, label string, got, want T) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%s = %+v, want %+v", label, got, want)
+	}
 }
 
 // flow_memberships is derived from the release's ordered path_json, so position

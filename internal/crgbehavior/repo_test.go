@@ -737,8 +737,8 @@ func TestRepoTChangesReportsUnreadableBlobContent(t *testing.T) {
 	}
 }
 
-// repoTEncodable is a hand-built git object a fixture writes into storage.
-type repoTEncodable interface {
+// repoTEncoder is a hand-built git object a fixture writes into storage.
+type repoTEncoder interface {
 	Encode(plumbing.EncodedObject) error
 }
 
@@ -746,7 +746,7 @@ type repoTEncodable interface {
 // Dangling trees, parents and blobs are real repository states — an
 // interrupted fetch or a half-finished gc leaves exactly that — and no
 // worktree API produces one.
-func repoTStore(t *testing.T, fixture repoTFixture, obj repoTEncodable) plumbing.Hash {
+func repoTStore(t *testing.T, fixture repoTFixture, obj repoTEncoder) plumbing.Hash {
 	t.Helper()
 	enc := fixture.repo.Storer.NewEncodedObject()
 	if err := obj.Encode(enc); err != nil {

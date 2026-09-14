@@ -378,7 +378,7 @@ func (s *BridgeStore) readNodes() ([]bridgeNode, error) {
 		n.nativeID = crg.SymbolID(crg.Symbol{QualifiedName: n.qualifiedName, FilePath: n.filePath})
 		out = append(out, n)
 	}
-	return out, rowsErr(rows, "nodes")
+	return out, rowsErr(rows, tableNodes)
 }
 
 // viewsFromNodes builds the symbol corpus and the canonical community partition
@@ -477,7 +477,7 @@ func (s *BridgeStore) readEdges() ([]BridgeEdge, error) {
 		}
 		out = append(out, e)
 	}
-	return out, rowsErr(rows, "edges")
+	return out, rowsErr(rows, tableEdges)
 }
 
 // readFlows reads the release's `flows` rows, decoding `path_json` into the
@@ -654,7 +654,7 @@ func (s *BridgeStore) clusterKeys(clusters map[string]string, byID map[int64]str
 			out[communityID] = clusters[native]
 		}
 	}
-	return out, rowsErr(rows, "nodes")
+	return out, rowsErr(rows, tableNodes)
 }
 
 // readRiskIndex reads the release's `risk_index` rows in full. `last_computed`
@@ -739,6 +739,8 @@ func ftsQuery(term string) string {
 // Table names the gate reads. Hoisted so the release fixture, the capability
 // probe and the readers share one spelling.
 const (
+	tableNodes              = "nodes"
+	tableEdges              = "edges"
 	tableFlows              = "flows"
 	tableFlowMemberships    = "flow_memberships"
 	tableFlowSnapshots      = "flow_snapshots"

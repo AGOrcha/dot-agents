@@ -128,11 +128,13 @@ func (r Release) Validate() error {
 		if len(t.Columns) == 0 {
 			return fmt.Errorf("crgbehavior: release fixture table %q declares no columns", t.Name)
 		}
-		// The probe must interpolate a table name once (SQLite cannot bind one
-		// to COUNT). Constraining the fixture to SQL identifiers at load makes
-		// that a checked invariant rather than a trusted-input assumption.
-		if !identRe.MatchString(t.Name) {
-			return fmt.Errorf("crgbehavior: release fixture table name %q is not a SQL identifier", t.Name)
+		// The probe counts rows through a literal statement per table, so the
+		// fixture may only name tables the pinned release is known to write.
+		// Checking that at LOAD turns a fixture defect into one clear error
+		// instead of a mid-probe failure on one table.
+		if _, ok := rowCountSQL[t.Name]; !ok {
+			return fmt.Errorf("crgbehavior: release fixture names table %q, which %s %s is not known to write",
+				t.Name, PackageName, PinnedVersion)
 		}
 	}
 	return nil

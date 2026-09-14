@@ -667,7 +667,7 @@ func TestMlTReadBuiltStateLeavesTheBuiltGraphUntouched(t *testing.T) {
 	if _, err := m.readBuiltState(bridge, Task{Identifiers: []string{"Entry"}}); err == nil {
 		t.Fatal("the live query against an unusable interpreter reported success")
 	}
-	if after := mlTDigest(t, dbPath); after != before {
+	if mlTDigest(t, dbPath) != before {
 		t.Fatal("the read half mutated the graph the lifecycle probe must observe in place")
 	}
 }

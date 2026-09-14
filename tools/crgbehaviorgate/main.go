@@ -97,7 +97,7 @@ func parseArgs(args []string, stderr io.Writer) (options, int, bool) {
 	fs := flag.NewFlagSet("crgbehaviorgate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&o.repo, "repo", ".", "repository whose history the corpus is pinned from")
-	fs.StringVar(&o.workDir, "work-dir", defaultWorkDir(), "parent directory for the per-commit worktrees")
+	fs.StringVar(&o.workDir, "work-dir", "", "parent directory for the per-commit worktrees (default: a private directory under the user cache)")
 	fs.StringVar(&o.manifest, "manifest", crgbehavior.DefaultManifestPath, "pinned corpus manifest path")
 	fs.StringVar(&o.release, "release", crgbehavior.DefaultReleasePath, "pinned release capability fixture path")
 	fs.StringVar(&o.contract, "contract", crgbehavior.DefaultContractPath, "corpus contract path")
@@ -118,14 +118,37 @@ func parseArgs(args []string, stderr io.Writer) (options, int, bool) {
 		fmt.Fprintln(stderr, "crgbehaviorgate: -regen and -record are separate commands; run one at a time")
 		return o, exitError, false
 	}
+	if o.workDir == "" {
+		dir, ok := defaultWorkDir()
+		if !ok {
+			fmt.Fprintln(stderr, "crgbehaviorgate: no user cache directory to materialize worktrees in; pass -work-dir")
+			return o, exitError, false
+		}
+		o.workDir = dir
+	}
 	return o, exitPass, true
 }
 
-// defaultWorkDir is where per-commit worktrees are materialized. It is outside
-// the repository so a materialized checkout can never be mistaken for working
-// state or picked up by a build.
-func defaultWorkDir() string {
-	return filepath.Join(os.TempDir(), "crg-behavior-worktrees")
+// defaultWorkDir is where per-commit worktrees are materialized when -work-dir
+// is not given. It is outside the repository so a materialized checkout can
+// never be mistaken for working state or picked up by a build.
+//
+// It lives in the user's own cache directory rather than the shared temp root.
+// The path is deliberately STABLE — addWorktree clears whatever an interrupted
+// run left at it — and a stable, guessable path under a world-writable
+// directory is a path another user can pre-create or point at a symlink. The
+// cache directory is the user's own, so stability costs nothing.
+//
+// ok is false when the platform reports no cache directory (no HOME, no
+// XDG_CACHE_HOME). The gate then refuses to guess and asks for -work-dir:
+// falling back to the shared temp root would reintroduce exactly the exposure
+// this avoids.
+func defaultWorkDir() (string, bool) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(cache, "crg-behavior-worktrees"), true
 }
 
 // regenerate rewrites the pinned corpus manifest from real history, using the
