@@ -63,6 +63,11 @@ COMMIT_ENV = {
 # Files added by the second commit; everything else is in the first commit.
 SECOND_COMMIT_FILES = ("pkg/auth/token.go",)
 
+# The fixture repository's central source file. Most call fixtures target it
+# so their payloads stay comparable across tools; naming it once keeps the
+# whole CALL_CASES table pointing at the same file.
+AUTH_FILE = "pkg/auth/auth.go"
+
 # CLI commands whose option surface the bridge adapter must preserve.
 CLI_HELP_COMMANDS = (
     "build",
@@ -96,12 +101,12 @@ CALL_CASES: tuple[tuple[str, str, dict], ...] = (
     (
         "changed_files",
         "get_impact_radius_tool",
-        {"changed_files": ["pkg/auth/auth.go"], "max_depth": 3},
+        {"changed_files": [AUTH_FILE], "max_depth": 3},
     ),
     (
         "minimal",
         "get_impact_radius_tool",
-        {"changed_files": ["pkg/auth/auth.go"], "detail_level": "minimal"},
+        {"changed_files": [AUTH_FILE], "detail_level": "minimal"},
     ),
     (
         # A path with no node rows: the blast radius is empty because nothing
@@ -129,7 +134,7 @@ CALL_CASES: tuple[tuple[str, str, dict], ...] = (
     (
         "file_summary",
         "query_graph_tool",
-        {"pattern": "file_summary", "target": "pkg/auth/auth.go"},
+        {"pattern": "file_summary", "target": AUTH_FILE},
     ),
     (
         "unknown_pattern",
@@ -150,7 +155,7 @@ CALL_CASES: tuple[tuple[str, str, dict], ...] = (
     (
         "children_of",
         "query_graph_tool",
-        {"pattern": "children_of", "target": "pkg/auth/auth.go"},
+        {"pattern": "children_of", "target": AUTH_FILE},
     ),
     (
         "tests_for",
@@ -165,7 +170,7 @@ CALL_CASES: tuple[tuple[str, str, dict], ...] = (
     (
         "importers_of",
         "query_graph_tool",
-        {"pattern": "importers_of", "target": "pkg/auth/auth.go"},
+        {"pattern": "importers_of", "target": AUTH_FILE},
     ),
     (
         "inheritors_of",
@@ -199,20 +204,20 @@ CALL_CASES: tuple[tuple[str, str, dict], ...] = (
     (
         "max_results",
         "query_graph_tool",
-        {"pattern": "children_of", "target": "pkg/auth/auth.go", "max_results": 2},
+        {"pattern": "children_of", "target": AUTH_FILE, "max_results": 2},
     ),
     ("defaults", "get_review_context_tool", {}),
     (
         "minimal",
         "get_review_context_tool",
-        {"changed_files": ["pkg/auth/auth.go"], "detail_level": "minimal"},
+        {"changed_files": [AUTH_FILE], "detail_level": "minimal"},
     ),
     (
         # include_source=False drops `source_snippets` entirely rather than
         # emitting an empty dict, so the key's absence is the contract.
         "no_source",
         "get_review_context_tool",
-        {"changed_files": ["pkg/auth/auth.go"], "include_source": False},
+        {"changed_files": [AUTH_FILE], "include_source": False},
     ),
     (
         # max_files below the change-set size: the file lists are cut, every
@@ -222,7 +227,7 @@ CALL_CASES: tuple[tuple[str, str, dict], ...] = (
         "get_review_context_tool",
         {
             "changed_files": [
-                "pkg/auth/auth.go",
+                AUTH_FILE,
                 "cmd/main.go",
                 "pkg/auth/auth_test.go",
             ],
@@ -236,7 +241,7 @@ CALL_CASES: tuple[tuple[str, str, dict], ...] = (
         # kept ranges and "... (truncated)" once the budget is spent.
         "max_lines_per_file",
         "get_review_context_tool",
-        {"changed_files": ["pkg/auth/auth.go"], "max_lines_per_file": 5},
+        {"changed_files": [AUTH_FILE], "max_lines_per_file": 5},
     ),
     ("query", "semantic_search_nodes_tool", {"query": "token"}),
     (
@@ -298,12 +303,12 @@ CALL_CASES: tuple[tuple[str, str, dict], ...] = (
     (
         "changed_files",
         "get_affected_flows_tool",
-        {"changed_files": ["pkg/auth/auth.go"], "detail_level": "minimal"},
+        {"changed_files": [AUTH_FILE], "detail_level": "minimal"},
     ),
     (
         "max_flows",
         "get_affected_flows_tool",
-        {"changed_files": ["pkg/auth/auth.go"], "max_flows": 1},
+        {"changed_files": [AUTH_FILE], "max_flows": 1},
     ),
     ("defaults", "list_communities_tool", {}),
     ("minimal", "list_communities_tool", {"detail_level": "minimal"}),
@@ -345,7 +350,7 @@ CALL_CASES: tuple[tuple[str, str, dict], ...] = (
     (
         "minimal",
         "detect_changes_tool",
-        {"changed_files": ["pkg/auth/auth.go"], "detail_level": "minimal"},
+        {"changed_files": [AUTH_FILE], "detail_level": "minimal"},
     ),
     ("defaults", "get_hub_nodes_tool", {}),
     ("minimal", "get_hub_nodes_tool", {"top_n": 3, "detail_level": "minimal"}),
@@ -533,6 +538,46 @@ def dump_tools_list() -> list[dict]:
     return asyncio.run(_list())
 
 
+def _prompt_messages(result) -> list[dict]:
+    return [
+        message.model_dump(exclude_none=True, mode="json")
+        for message in result.messages
+    ]
+
+
+def _templatize(messages: list[dict], markers: dict[str, str]) -> list[dict]:
+    """Turn each argument's unique marker back into a ``${arg:name}`` token."""
+    for message in messages:
+        content = message.get("content", {})
+        if not isinstance(content, dict) or not isinstance(content.get("text"), str):
+            continue
+        for name, marker in markers.items():
+            content["text"] = content["text"].replace(marker, "${arg:" + name + "}")
+    return messages
+
+
+async def _capture_prompt(client, prompt) -> dict:
+    """Record one prompt's declaration plus its two pinned renderings.
+
+    Two renderings pin the contract: one with no arguments at all (the
+    prompt's own defaults) and one with a unique marker per argument, which
+    turns the rendered text into a template by showing exactly where each
+    argument is interpolated.
+    """
+    record = prompt.model_dump(exclude_none=True, mode="json")
+    names = [a["name"] for a in record.get("arguments", [])]
+    default_render = await client.get_prompt(record["name"], {})
+    markers = {name: f"<<<ARG:{name}>>>" for name in names}
+    marked_render = (
+        await client.get_prompt(record["name"], markers)
+        if markers
+        else default_render
+    )
+    record["rendered_defaults"] = _prompt_messages(default_render)
+    record["rendered_template"] = _templatize(_prompt_messages(marked_render), markers)
+    return record
+
+
 def dump_prompts() -> list[dict]:
     """Capture the published prompt surface and each prompt's rendered text.
 
@@ -544,41 +589,9 @@ def dump_prompts() -> list[dict]:
     from code_review_graph import main as crg_main
 
     async def _run() -> list[dict]:
-        out = []
         async with Client(crg_main.mcp) as client:
-            for prompt in await client.list_prompts():
-                record = prompt.model_dump(exclude_none=True, mode="json")
-                names = [a["name"] for a in record.get("arguments", [])]
-                # Two renderings pin the contract: one with no arguments at
-                # all (the prompt's own defaults) and one with a unique marker
-                # per argument, which turns the rendered text into a template
-                # by showing exactly where each argument is interpolated.
-                default_render = await client.get_prompt(record["name"], {})
-                markers = {name: f"<<<ARG:{name}>>>" for name in names}
-                marked_render = (
-                    await client.get_prompt(record["name"], markers)
-                    if markers
-                    else default_render
-                )
-
-                def _messages(result):
-                    return [
-                        message.model_dump(exclude_none=True, mode="json")
-                        for message in result.messages
-                    ]
-
-                record["rendered_defaults"] = _messages(default_render)
-                template = _messages(marked_render)
-                for message in template:
-                    content = message.get("content", {})
-                    if isinstance(content, dict) and isinstance(content.get("text"), str):
-                        for name, marker in markers.items():
-                            content["text"] = content["text"].replace(
-                                marker, "${arg:" + name + "}"
-                            )
-                record["rendered_template"] = template
-                out.append(record)
-        return out
+            prompts = await client.list_prompts()
+            return [await _capture_prompt(client, prompt) for prompt in prompts]
 
     return asyncio.run(_run())
 
@@ -923,11 +936,13 @@ def dump_graph(repo: Path) -> dict:
         conn.close()
 
 
-def dump_cli(crg_bin: str, repo: Path) -> dict:
+def dump_cli(crg_bin: Path, repo: Path) -> dict:
+    """Capture the CLI surface of the validated code-review-graph binary."""
+    argv0 = os.fspath(crg_bin)
     out: dict = {"help": {}}
     for command in CLI_HELP_COMMANDS:
         proc = subprocess.run(
-            [crg_bin, command, "--help"],
+            [argv0, command, "--help"],
             capture_output=True,
             text=True,
             check=False,
@@ -943,7 +958,7 @@ def dump_cli(crg_bin: str, repo: Path) -> dict:
         ("dead_code_json", ["dead-code", "--repo", str(repo), "--json"]),
     ):
         proc = subprocess.run(
-            [crg_bin, *args], capture_output=True, text=True, check=False
+            [argv0, *args], capture_output=True, text=True, check=False
         )
         out[name] = {
             "exit_code": proc.returncode,
@@ -964,46 +979,63 @@ _ISO_TIMESTAMP_RE = re.compile(
 _JSON_AGE_RE = re.compile(r'("age_seconds"\s*:\s*)-?\d+(?:\.\d+)?')
 
 
+def _placeholder_for(key: str, item):
+    """Return the ``${PLACEHOLDER}`` a volatile key/value pair collapses to.
+
+    ``None`` means the value is not volatile by virtue of its key and should
+    be normalized structurally instead.
+    """
+    if key in TIMESTAMP_KEYS and isinstance(item, str) and item:
+        return "${TIMESTAMP}"
+    if key in AGE_KEYS and isinstance(item, (int, float)):
+        return "${AGE_SECONDS}"
+    if key in DURATION_KEYS and isinstance(item, (int, float)):
+        return "${DURATION}"
+    if key in SAVINGS_KEYS and isinstance(item, (int, float)):
+        return "${" + key.upper() + "}"
+    return None
+
+
+def _normalize_text(text: str, repo: Path, commits: dict[str, str]) -> str:
+    """Apply the same substitutions to a string body as to parsed structure."""
+    for real in (str(Path(repo).resolve()), str(repo)):
+        text = text.replace(real, "${REPO_ROOT}")
+    for sha, token in commits.items():
+        text = text.replace(sha, token)
+        text = text.replace(sha[:8], token + "_SHORT")
+    text = _ISO_TIMESTAMP_RE.sub("${TIMESTAMP}", text)
+    text = _JSON_AGE_RE.sub(r'\1"${AGE_SECONDS}"', text)
+    for key in DURATION_KEYS:
+        text = re.sub(
+            r'("' + key + r'"\s*:\s*)-?\d+(?:\.\d+)?',
+            r'\1"${DURATION}"',
+            text,
+        )
+    for key in SAVINGS_KEYS:
+        text = re.sub(
+            r'("' + key + r'"\s*:\s*)-?\d+(?:\.\d+)?',
+            r'\1"${' + key.upper() + '}"',
+            text,
+        )
+    return text
+
+
 def normalize(value, repo: Path, commits: dict[str, str]):
     """Replace volatile values with stable ``${PLACEHOLDER}`` tokens."""
     if isinstance(value, dict):
         out = {}
         for key, item in value.items():
-            if key in TIMESTAMP_KEYS and isinstance(item, str) and item:
-                out[key] = "${TIMESTAMP}"
-            elif key in AGE_KEYS and isinstance(item, (int, float)):
-                out[key] = "${AGE_SECONDS}"
-            elif key in DURATION_KEYS and isinstance(item, (int, float)):
-                out[key] = "${DURATION}"
-            elif key in SAVINGS_KEYS and isinstance(item, (int, float)):
-                out[key] = "${" + key.upper() + "}"
-            else:
-                out[key] = normalize(item, repo, commits)
+            placeholder = _placeholder_for(key, item)
+            out[key] = (
+                normalize(item, repo, commits)
+                if placeholder is None
+                else placeholder
+            )
         return out
     if isinstance(value, list):
         return [normalize(item, repo, commits) for item in value]
     if isinstance(value, str):
-        text = value
-        for real in (str(Path(repo).resolve()), str(repo)):
-            text = text.replace(real, "${REPO_ROOT}")
-        for sha, token in commits.items():
-            text = text.replace(sha, token)
-            text = text.replace(sha[:8], token + "_SHORT")
-        text = _ISO_TIMESTAMP_RE.sub("${TIMESTAMP}", text)
-        text = _JSON_AGE_RE.sub(r'\1"${AGE_SECONDS}"', text)
-        for key in DURATION_KEYS:
-            text = re.sub(
-                r'("' + key + r'"\s*:\s*)-?\d+(?:\.\d+)?',
-                r'\1"${DURATION}"',
-                text,
-            )
-        for key in SAVINGS_KEYS:
-            text = re.sub(
-                r'("' + key + r'"\s*:\s*)-?\d+(?:\.\d+)?',
-                r'\1"${' + key.upper() + '}"',
-                text,
-            )
-        return text
+        return _normalize_text(value, repo, commits)
     return value
 
 
@@ -1045,6 +1077,57 @@ def write_json(path: Path, payload) -> None:
     )
 
 
+# The generator runs whatever program ``--crg-bin`` names and rewrites the
+# whole fixture tree under whatever directory ``--out`` names. Both are
+# operator-supplied strings, so both are pinned down at the single point
+# where they enter the program: this script drives exactly one executable and
+# owns exactly one tree inside the repository it is run from, and it should
+# refuse to run a different program or to write anywhere else rather than do
+# either by accident.
+_CRG_BIN_NAME_RE = re.compile(r"code-review-graph(?:\.exe)?")
+
+
+def resolve_crg_bin(value: str) -> Path | None:
+    """Resolve ``--crg-bin`` to the code-review-graph executable.
+
+    The basename must be exactly the program this generator knows how to
+    drive; the executable path is then re-derived from that allowlisted name
+    (through ``PATH`` when the value carries no directory) and must be a
+    real, executable file. Returns the resolved absolute path, or ``None``
+    when the value does not name a runnable code-review-graph.
+    """
+    name = Path(value).name
+    if not _CRG_BIN_NAME_RE.fullmatch(name):
+        return None
+    has_dir = os.sep in value or (os.altsep is not None and os.altsep in value)
+    if has_dir:
+        candidate: str | None = os.fspath(Path(value).parent / name)
+    else:
+        candidate = shutil.which(name)
+    if candidate is None:
+        return None
+    resolved = Path(candidate).resolve()
+    if not os.path.isfile(resolved) or not os.access(resolved, os.X_OK):
+        return None
+    return resolved
+
+
+def resolve_out_dir(value: str) -> Path | None:
+    """Resolve ``--out`` to a fixture directory inside the working tree.
+
+    The generator creates, overwrites and deletes files beneath this path, so
+    it is confined to the repository it is invoked from: ``..`` segments, an
+    absolute path elsewhere on the machine, or a symlink leading out of the
+    tree are rejected. Returns the resolved absolute path, or ``None`` when
+    it falls outside the current working directory.
+    """
+    root = Path.cwd().resolve()
+    resolved = Path(value).resolve()
+    if not resolved.is_relative_to(root):
+        return None
+    return resolved
+
+
 def main() -> int:
     # A call fixture is written to `calls/<tool>__<case>.json`, so two
     # CALL_CASES entries sharing a (tool, case) pair silently overwrite each
@@ -1078,7 +1161,28 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    out = Path(args.out)
+    crg_bin = resolve_crg_bin(args.crg_bin)
+    if crg_bin is None:
+        print(
+            f"--crg-bin {args.crg_bin!r} is not a runnable code-review-graph "
+            f"executable. Pass the path to the installed code-review-graph "
+            f"binary (for example .venv/bin/code-review-graph), or put it on "
+            f"PATH and omit the flag.",
+            file=sys.stderr,
+        )
+        return 2
+
+    out = resolve_out_dir(args.out)
+    if out is None:
+        print(
+            f"--out {args.out!r} resolves outside {Path.cwd().resolve()}. The "
+            f"generator rewrites the repository's own fixture tree, so run it "
+            f"from the repository root with an --out inside it (default: "
+            f"testdata/crg-release/v{RELEASE_VERSION}).",
+            file=sys.stderr,
+        )
+        return 2
+
     source = out / "repo"
     if not source.is_dir():
         print(f"fixture sources missing: {source}", file=sys.stderr)
@@ -1123,7 +1227,7 @@ def main() -> int:
     session_sequence = dump_session_sequence(repo)
     schema = dump_schema(repo)
     graph = dump_graph(repo)
-    cli = dump_cli(args.crg_bin, repo)
+    cli = dump_cli(crg_bin, repo)
 
     if schema["schema_version"] != RELEASE_SCHEMA_VERSION:
         print(
