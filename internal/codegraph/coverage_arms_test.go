@@ -2,6 +2,7 @@ package codegraph
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -9,103 +10,41 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
-// ── bulk export / snapshot error propagation ─────────────────────────────────
+// ── bulk export / derived-read error propagation ─────────────────────────────
 
-// TestReadEdgesPropagatesNodeEnumerationFailure covers ReadEdges' first read:
-// the node walk it needs before it can ask for any edges.
-func TestReadEdgesPropagatesNodeEnumerationFailure(t *testing.T) {
-	e := engineWithStore(t, writeFixture(t), &fakeStore{filesErr: errFake})
+// TestReadEdgesPropagatesStoreFailure covers ReadEdges' single read.
+func TestReadEdgesPropagatesStoreFailure(t *testing.T) {
+	e := engineWithStore(t, writeFixture(t), &fakeStore{allEdgesErr: errFake})
 	if _, err := e.ReadEdges(0); !errors.Is(err, errFake) {
-		t.Fatalf("err = %v, want the injected file-enumeration failure", err)
+		t.Fatalf("err = %v, want the injected edge-read failure", err)
 	}
 }
 
-// TestSnapshotPropagatesEdgeEnumerationFailure covers readSnapshot's edge read.
-// ListCommunities is the shortest public path through e.snapshot().
-func TestSnapshotPropagatesEdgeEnumerationFailure(t *testing.T) {
-	store := &fakeStore{
-		files:    []string{"lib/lib.go"},
-		nodes:    map[string][]graphstore.GraphNode{"lib/lib.go": {{Kind: kindFunction, QualifiedName: "lib.Greet", FilePath: "lib/lib.go"}}},
-		edgesErr: errFake,
+// TestReadNodesPropagatesStoreFailure covers ReadNodes' single read.
+func TestReadNodesPropagatesStoreFailure(t *testing.T) {
+	e := engineWithStore(t, writeFixture(t), &fakeStore{allNodesErr: errFake})
+	if _, err := e.ReadNodes(0); !errors.Is(err, errFake) {
+		t.Fatalf("err = %v, want the injected node-read failure", err)
 	}
-	e := engineWithStore(t, writeFixture(t), store)
+}
+
+// TestListCommunitiesPropagatesDerivedReadFailure covers the derived-table
+// read every community query starts from.
+func TestListCommunitiesPropagatesDerivedReadFailure(t *testing.T) {
+	e := engineWithStore(t, writeFixture(t), &fakeStore{communitiesErr: errFake})
 	if _, err := e.ListCommunities(0, ""); !errors.Is(err, errFake) {
-		t.Fatalf("err = %v, want the injected edge-enumeration failure", err)
+		t.Fatalf("err = %v, want the injected communities-read failure", err)
 	}
 }
 
-// TestReadAllEdgesCollapsesDuplicateSourcesAndEdges asserts the documented
-// de-duplication: a source qualified name is queried once even when two nodes
-// share it, and an edge id already collected is not repeated.
-func TestReadAllEdgesCollapsesDuplicateSourcesAndEdges(t *testing.T) {
-	shared := graphstore.GraphEdge{ID: 7, Kind: edgeCalls, SourceQualified: "lib.Greet", TargetQualified: "lib.decorate"}
-	store := &fakeStore{
-		edges: map[string][]graphstore.GraphEdge{
-			"lib.Greet":    {shared},
-			"lib.decorate": {shared, {ID: 9, Kind: edgeCalls, SourceQualified: "lib.decorate", TargetQualified: "lib.Greet"}},
-		},
-	}
-	nodes := []graphstore.GraphNode{
-		{QualifiedName: "lib.Greet", FilePath: "lib/lib.go"},
-		{QualifiedName: "lib.Greet", FilePath: "lib/other.go"},
-		{QualifiedName: "lib.decorate", FilePath: "lib/lib.go"},
-	}
-	edges, err := readAllEdges(store, nodes)
-	if err != nil {
-		t.Fatalf("readAllEdges: %v", err)
-	}
-	if len(edges) != 2 || edges[0].ID != 7 || edges[1].ID != 9 {
-		t.Fatalf("readAllEdges = %+v, want edges 7 and 9 exactly once", edges)
-	}
-	if got := strings.Join(store.edgeSources, ","); got != "lib.Greet,lib.decorate" {
-		t.Fatalf("queried sources = %q, want each source once", got)
-	}
-}
-
-// ── git diff failure arms ────────────────────────────────────────────────────
-
-// fakeGit puts a `git` first on PATH that reports every revision as resolvable
-// and then fails the diff, writing diagnostic to stderr.
-func fakeGit(t *testing.T, diagnostic string) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell git shim is not executable on Windows")
-	}
-	dir := t.TempDir()
-	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = rev-parse ]; then exit 0; fi\ndone\n"
-	if diagnostic != "" {
-		script += "echo " + diagnostic + " >&2\n"
-	}
-	script += "exit 3\n"
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
-		t.Fatalf("write git shim: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-func TestGitChangedFilesSurfacesDiffDiagnostic(t *testing.T) {
-	fakeGit(t, "refusing-to-diff")
-	_, err := gitChangedFiles(t.TempDir(), "main")
-	if err == nil {
-		t.Fatal("want an error when git diff fails")
-	}
-	if !strings.Contains(err.Error(), "refusing-to-diff") {
-		t.Fatalf("err = %v, want git's own diagnostic retained", err)
-	}
-}
-
-func TestGitChangedFilesReportsSilentDiffFailure(t *testing.T) {
-	fakeGit(t, "")
-	_, err := gitChangedFiles(t.TempDir(), "main")
-	if err == nil {
-		t.Fatal("want an error when git diff fails without output")
-	}
-	if !strings.Contains(err.Error(), "git diff main...HEAD") {
-		t.Fatalf("err = %v, want the failing command named", err)
+// TestListFlowsPropagatesDerivedReadFailure covers the same for flows.
+func TestListFlowsPropagatesDerivedReadFailure(t *testing.T) {
+	e := engineWithStore(t, writeFixture(t), &fakeStore{flowsErr: errFake})
+	if _, err := e.ListFlows(0, ""); !errors.Is(err, errFake) {
+		t.Fatalf("err = %v, want the injected flows-read failure", err)
 	}
 }
 
@@ -144,7 +83,7 @@ func TestScanSkipsUnreadableSubtree(t *testing.T) {
 		t.Fatalf("Scan must skip the unreadable subtree, not fail: %v", err)
 	}
 	for _, f := range files {
-		if strings.HasPrefix(f.Path, "locked/") {
+		if strings.HasPrefix(f.RelPath, "locked/") {
 			t.Fatalf("unreadable subtree produced a unit: %+v", f)
 		}
 	}
@@ -166,15 +105,19 @@ func TestScanSkipsUnreadableSourceFile(t *testing.T) {
 		t.Fatalf("Scan must skip the unreadable file, not fail: %v", err)
 	}
 	for _, f := range files {
-		if f.Path == "broken.go" {
+		if f.RelPath == "broken.go" {
 			t.Fatal("unreadable file produced an ingestion unit")
 		}
 	}
 }
 
-// TestScanResolvesSamePackageMethodExpression covers the qualifier arm where a
-// selector's qualifier is a same-package receiver type rather than an import.
-func TestScanResolvesSamePackageMethodExpression(t *testing.T) {
+// TestScanLeavesMethodExpressionTargetBare covers the selector arm where the
+// qualifier is a same-package receiver TYPE rather than a package. The old
+// unique-member resolver turned `Config.Label(c)` into the receiver-qualified
+// symbol; the release does not — any selector callee keeps the bare member
+// name, because the member lives on the operand's type and the release does no
+// type inference. Verified against the v2.3.8 parser on this same source.
+func TestScanLeavesMethodExpressionTargetBare(t *testing.T) {
 	root := writeFixture(t)
 	writeExtra(t, root, "lib/method.go", `package lib
 
@@ -189,66 +132,76 @@ func LabelOf(c Config) string { return Config.Label(c) }
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
+	caller := fixtureSymbol(root, "lib/method.go", "LabelOf")
+	var targets []string
 	for _, ref := range corpus.References {
-		if ref.From == "lib.LabelOf" && ref.To == "lib.Config.Label" && ref.Kind == edgeCalls {
-			return
+		if ref.Kind == edgeCalls && ref.From == caller {
+			targets = append(targets, ref.To)
 		}
 	}
-	t.Fatalf("method expression not resolved to the receiver-qualified symbol: %+v", corpus.References)
+	if len(targets) != 1 || targets[0] != "Label" {
+		t.Fatalf("method-expression CALLS targets = %v, want exactly [Label] (bare)", targets)
+	}
 }
 
 // ── query limit / ordering arms ──────────────────────────────────────────────
 
-// TestListFlowsTruncatesToLimit covers the explicit-limit truncation, which
-// needs more derived flows than the fixture graph produces on its own.
+// TestListFlowsTruncatesToLimit covers the explicit-limit truncation against
+// more persisted flows than a caller asked for.
 func TestListFlowsTruncatesToLimit(t *testing.T) {
-	orig := flowsFromStore
-	t.Cleanup(func() { flowsFromStore = orig })
-	flowsFromStore = func(crg.StoreReader, string) ([]crg.Flow, error) {
-		return []crg.Flow{
-			{ID: "a@f.go", EntryPoint: "a", Criticality: 3},
-			{ID: "b@f.go", EntryPoint: "b", Criticality: 2},
-			{ID: "c@f.go", EntryPoint: "c", Criticality: 1},
-		}, nil
-	}
-	result, err := builtEngine(t, nil).ListFlows(2, "")
+	e := engineWithStore(t, writeFixture(t), &fakeStore{
+		flows: []graphstore.FlowRow{
+			{ID: 1, Name: "a", Criticality: 3},
+			{ID: 2, Name: "b", Criticality: 2},
+			{ID: 3, Name: "c", Criticality: 1},
+		},
+	})
+	result, err := e.ListFlows(2, "")
 	if err != nil {
 		t.Fatalf("ListFlows: %v", err)
 	}
 	if len(result.Flows) != 2 {
 		t.Fatalf("ListFlows(2) = %d flows, want 2", len(result.Flows))
 	}
-	if result.Flows[0].EntryPoint != "a" || result.Flows[1].EntryPoint != "b" {
+	if result.Flows[0].Name != "a" || result.Flows[1].Name != "b" {
 		t.Fatalf("truncated the wrong flows: %+v", result.Flows)
+	}
+}
+
+// TestListFlowsAppliesDefaultLimit covers the non-positive-limit default.
+func TestListFlowsAppliesDefaultLimit(t *testing.T) {
+	rows := make([]graphstore.FlowRow, defaultFlowLimit+3)
+	for i := range rows {
+		rows[i] = graphstore.FlowRow{ID: int64(i + 1), Name: fmt.Sprintf("f%02d", i)}
+	}
+	e := engineWithStore(t, writeFixture(t), &fakeStore{flows: rows})
+	result, err := e.ListFlows(-1, sortByCriticality)
+	if err != nil {
+		t.Fatalf("ListFlows: %v", err)
+	}
+	if len(result.Flows) != defaultFlowLimit {
+		t.Fatalf("ListFlows(-1) = %d flows, want the %d default", len(result.Flows), defaultFlowLimit)
 	}
 }
 
 // TestSortFlowsRanksHigherCriticalityFirst covers the criticality comparison
 // itself (stubFlows deliberately ties, exercising only the tie-break).
 func TestSortFlowsRanksHigherCriticalityFirst(t *testing.T) {
-	flows := []crg.Flow{
-		{ID: "a@f.go", EntryPoint: "a", Criticality: 1},
-		{ID: "z@f.go", EntryPoint: "z", Criticality: 5},
+	flows := []graphstore.FlowInfo{
+		{ID: 1, Name: "a", Criticality: 1},
+		{ID: 2, Name: "z", Criticality: 5},
 	}
-	sortFlows(flows, "criticality")
-	if flows[0].EntryPoint != "z" {
+	sortFlows(flows, sortByCriticality)
+	if flows[0].Name != "z" {
 		t.Fatalf("criticality sort = %+v, want the most critical flow first", flows)
 	}
 }
 
-// TestPostprocessPropagatesSnapshotFailure covers Postprocess' snapshot read.
-func TestPostprocessPropagatesSnapshotFailure(t *testing.T) {
-	e := engineWithStore(t, writeFixture(t), &fakeStore{filesErr: errFake})
-	if err := e.Postprocess(graphstore.PostprocessOptions{}); !errors.Is(err, errFake) {
-		t.Fatalf("err = %v, want the injected snapshot failure", err)
-	}
-}
-
-// TestDetectChangesPropagatesSnapshotFailure covers DetectChanges' snapshot
-// read, which happens after the diff resolves.
-func TestDetectChangesPropagatesSnapshotFailure(t *testing.T) {
-	e := engineWithStore(t, writeFixture(t), &fakeStore{filesErr: errFake})
-	if _, err := e.DetectChanges(graphstore.DetectChangesOptions{}); !errors.Is(err, errFake) {
-		t.Fatalf("err = %v, want the injected snapshot failure", err)
+// TestDetectChangesPropagatesDerivedReadFailure covers the risk-index read
+// DetectChanges performs after the diff resolves.
+func TestDetectChangesPropagatesDerivedReadFailure(t *testing.T) {
+	e := engineWithStore(t, writeFixture(t), &fakeStore{riskErr: errFake})
+	if _, err := e.DetectChanges(graphstore.DetectChangesOptions{Files: []string{"lib/lib.go"}}); !errors.Is(err, errFake) {
+		t.Fatalf("err = %v, want the injected risk-index failure", err)
 	}
 }

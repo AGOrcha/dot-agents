@@ -1,0 +1,55 @@
+{
+  "arguments": {
+    "detail_level": "minimal",
+    "min_size": 3
+  },
+  "case": "min_size_boundary",
+  "is_error": false,
+  "structured_content": {
+    "_hints": {
+      "next_steps": [
+        {
+          "suggestion": "Inspect a specific community's members",
+          "tool": "get_community"
+        },
+        {
+          "suggestion": "See cross-community coupling and warnings",
+          "tool": "get_architecture_overview"
+        },
+        {
+          "suggestion": "See execution flows across communities",
+          "tool": "list_flows"
+        }
+      ],
+      "related": [],
+      "warnings": []
+    },
+    "communities": [
+      {
+        "cohesion": 0.625,
+        "name": "epsilon",
+        "size": 30
+      },
+      {
+        "cohesion": 0.75,
+        "name": "c-test",
+        "size": 5
+      },
+      {
+        "cohesion": 0.5,
+        "name": "alpha",
+        "size": 4
+      },
+      {
+        "cohesion": 0.25,
+        "name": "beta",
+        "size": 3
+      }
+    ],
+    "status": "ok",
+    "summary": "Found 4 communities",
+    "total": 4,
+    "truncated": false
+  },
+  "tool": "list_communities_tool"
+}

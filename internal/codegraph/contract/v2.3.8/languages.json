@@ -1,0 +1,208 @@
+{
+  "extensions": {
+    ".astro": "typescript",
+    ".bash": "bash",
+    ".c": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cs": "csharp",
+    ".cxx": "cpp",
+    ".dart": "dart",
+    ".ex": "elixir",
+    ".exs": "elixir",
+    ".gd": "gdscript",
+    ".go": "go",
+    ".h": "c",
+    ".hcl": "hcl",
+    ".hh": "cpp",
+    ".hpp": "cpp",
+    ".ipynb": "notebook",
+    ".java": "java",
+    ".jl": "julia",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ksh": "bash",
+    ".kt": "kotlin",
+    ".lua": "lua",
+    ".luau": "luau",
+    ".m": "objc",
+    ".mjs": "javascript",
+    ".nix": "nix",
+    ".php": "php",
+    ".pl": "perl",
+    ".pm": "perl",
+    ".properties": "properties",
+    ".ps1": "powershell",
+    ".psd1": "powershell",
+    ".psm1": "powershell",
+    ".py": "python",
+    ".r": "r",
+    ".rb": "ruby",
+    ".res": "rescript",
+    ".resi": "rescript",
+    ".rs": "rust",
+    ".scala": "scala",
+    ".sh": "bash",
+    ".sol": "solidity",
+    ".sql": "sql",
+    ".sv": "verilog",
+    ".svelte": "svelte",
+    ".svh": "verilog",
+    ".swift": "swift",
+    ".t": "perl",
+    ".tf": "hcl",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".v": "verilog",
+    ".vb": "vbnet",
+    ".vh": "verilog",
+    ".vue": "vue",
+    ".xs": "c",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".zig": "zig",
+    ".zsh": "bash"
+  },
+  "languages": {
+    "bash": [
+      ".bash",
+      ".ksh",
+      ".sh",
+      ".zsh"
+    ],
+    "c": [
+      ".c",
+      ".h",
+      ".xs"
+    ],
+    "cpp": [
+      ".cc",
+      ".cpp",
+      ".cxx",
+      ".hh",
+      ".hpp"
+    ],
+    "csharp": [
+      ".cs"
+    ],
+    "dart": [
+      ".dart"
+    ],
+    "elixir": [
+      ".ex",
+      ".exs"
+    ],
+    "gdscript": [
+      ".gd"
+    ],
+    "go": [
+      ".go"
+    ],
+    "hcl": [
+      ".hcl",
+      ".tf"
+    ],
+    "java": [
+      ".java"
+    ],
+    "javascript": [
+      ".js",
+      ".jsx",
+      ".mjs"
+    ],
+    "julia": [
+      ".jl"
+    ],
+    "kotlin": [
+      ".kt"
+    ],
+    "lua": [
+      ".lua"
+    ],
+    "luau": [
+      ".luau"
+    ],
+    "nix": [
+      ".nix"
+    ],
+    "notebook": [
+      ".ipynb"
+    ],
+    "objc": [
+      ".m"
+    ],
+    "perl": [
+      ".pl",
+      ".pm",
+      ".t"
+    ],
+    "php": [
+      ".php"
+    ],
+    "powershell": [
+      ".ps1",
+      ".psd1",
+      ".psm1"
+    ],
+    "properties": [
+      ".properties"
+    ],
+    "python": [
+      ".py"
+    ],
+    "r": [
+      ".r"
+    ],
+    "rescript": [
+      ".res",
+      ".resi"
+    ],
+    "ruby": [
+      ".rb"
+    ],
+    "rust": [
+      ".rs"
+    ],
+    "scala": [
+      ".scala"
+    ],
+    "solidity": [
+      ".sol"
+    ],
+    "sql": [
+      ".sql"
+    ],
+    "svelte": [
+      ".svelte"
+    ],
+    "swift": [
+      ".swift"
+    ],
+    "tsx": [
+      ".tsx"
+    ],
+    "typescript": [
+      ".astro",
+      ".ts"
+    ],
+    "vbnet": [
+      ".vb"
+    ],
+    "verilog": [
+      ".sv",
+      ".svh",
+      ".v",
+      ".vh"
+    ],
+    "vue": [
+      ".vue"
+    ],
+    "yaml": [
+      ".yaml",
+      ".yml"
+    ],
+    "zig": [
+      ".zig"
+    ]
+  }
+}

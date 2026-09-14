@@ -19,19 +19,27 @@ const disabledSummary = "Graph backend is disabled (none)."
 // nullStatus is the status a disabled backend reports.
 func nullStatus() *graphstore.CRGStatus {
 	return &graphstore.CRGStatus{
-		LastUpdated: "never",
-		State:       graphstore.CRGReadinessUnbuilt,
-		Message:     "graph backend disabled (none)",
+		Languages: []string{},
+		State:     graphstore.CRGReadinessUnbuilt,
+		Message:   "graph backend disabled (none)",
+		VCS:       graphstore.VCSNone,
 	}
 }
 
-// BuildReport reports that no build ran.
+// BuildReport reports that no build ran. The report keeps upstream's shape —
+// a full build with zero of everything — so a caller does not need a
+// disabled-backend special case to read it.
 func (NullProvider) BuildReport(graphstore.BuildOptions) (*graphstore.CRGOperationReport, error) {
 	return &graphstore.CRGOperationReport{
-		Operation: "build",
-		Outcome:   graphstore.CRGReadinessUnbuilt,
-		Summary:   "Graph backend is disabled (none); nothing was built.",
-		Status:    nullStatus(),
+		Status:            statusOK,
+		BuildType:         buildTypeFull,
+		BaseResolved:      graphstore.NullString(),
+		Summary:           "Graph backend is disabled (none); nothing was built.",
+		FilesParsed:       new(0),
+		TotalNodes:        new(0),
+		TotalEdges:        new(0),
+		StaleFilesRemoved: new(0),
+		Errors:            new([]graphstore.BuildErrorRow{}),
 	}, nil
 }
 
@@ -41,10 +49,17 @@ func (n NullProvider) Build(graphstore.BuildOptions) error { return nil }
 // UpdateReport reports that no update ran.
 func (NullProvider) UpdateReport(graphstore.UpdateOptions) (*graphstore.CRGOperationReport, error) {
 	return &graphstore.CRGOperationReport{
-		Operation: "update",
-		Outcome:   "no_diff",
-		Summary:   "Graph backend is disabled (none); nothing was updated.",
-		Status:    nullStatus(),
+		Status:            statusOK,
+		BuildType:         buildTypeIncremental,
+		BaseResolved:      graphstore.NullString(),
+		Summary:           "Graph backend is disabled (none); nothing was updated.",
+		FilesUpdated:      new(0),
+		TotalNodes:        new(0),
+		TotalEdges:        new(0),
+		ChangedFiles:      new([]string{}),
+		DependentFiles:    new([]string{}),
+		StaleFilesRemoved: new(0),
+		Errors:            new([]graphstore.BuildErrorRow{}),
 	}, nil
 }
 
@@ -71,6 +86,11 @@ func (NullProvider) ListFlows(int, string) (*graphstore.FlowsResult, error) {
 // ListCommunities returns no communities.
 func (NullProvider) ListCommunities(int, string) (*graphstore.CommunitiesResult, error) {
 	return &graphstore.CommunitiesResult{Status: statusOK, Summary: disabledSummary}, nil
+}
+
+// PostprocessReport reports that no post-processing ran.
+func (NullProvider) PostprocessReport(graphstore.PostprocessOptions) (*graphstore.CRGOperationReport, error) {
+	return &graphstore.CRGOperationReport{Status: statusOK, Summary: disabledSummary}, nil
 }
 
 // Postprocess is a no-op.

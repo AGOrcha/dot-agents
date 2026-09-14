@@ -103,24 +103,45 @@ func symbolKinds(t *testing.T, root string) map[string]string {
 	return out
 }
 
-func TestScanDeclaresFunctionsAndTypes(t *testing.T) {
+// fixtureFile is a fixture file's node identity: the absolute, slash-separated
+// path, which is also the File node's whole qualified name.
+func fixtureFile(root, rel string) string {
+	return filepath.ToSlash(filepath.Join(root, filepath.FromSlash(rel)))
+}
+
+// fixtureSymbol is the identity of a symbol declared in a fixture file:
+// `<abs path>::<symbol path>`, where a method's symbol path is
+// `<Receiver>.<Method>`.
+func fixtureSymbol(root, rel, symbol string) string {
+	return fixtureFile(root, rel) + "::" + symbol
+}
+
+func TestScanDeclaresFunctionsTypesAndTests(t *testing.T) {
 	root := writeFixture(t)
 	kinds := symbolKinds(t, root)
-	want := map[string]string{
-		"lib.Config":   kindType,
-		"lib.Greet":    kindFunction,
-		"lib.decorate": kindFunction,
-		"app.Run":      kindFunction,
-		"app.TestRun":  kindFunction,
-	}
-	for qual, kind := range want {
-		if kinds[qual] != kind {
-			t.Errorf("symbol %q kind = %q, want %q", qual, kinds[qual], kind)
+	for _, want := range []struct {
+		qualified string
+		kind      string
+	}{
+		{fixtureSymbol(root, "lib/lib.go", "Config"), kindClass},
+		{fixtureSymbol(root, "lib/lib.go", "Greet"), kindFunction},
+		{fixtureSymbol(root, "lib/lib.go", "decorate"), kindFunction},
+		{fixtureSymbol(root, "app/app.go", "Run"), kindFunction},
+		{fixtureSymbol(root, "app/app_test.go", "TestRun"), kindTest},
+	} {
+		if kinds[want.qualified] != want.kind {
+			t.Errorf("symbol %q kind = %q, want %q",
+				want.qualified, kinds[want.qualified], want.kind)
 		}
 	}
 }
 
-func TestScanResolvesCallImportAndTestEdges(t *testing.T) {
+// TestScanEmitsUpstreamEdgeVocabulary pins the four edge kinds and the
+// resolution each endpoint gets. The type-usage `IMPORTS` edge this fixture
+// used to assert (`app.Run -> lib.Config`) no longer exists: the release emits
+// IMPORTS_FROM from the FILE to the raw import path, and models a type
+// reference as no edge at all.
+func TestScanEmitsUpstreamEdgeVocabulary(t *testing.T) {
 	root := writeFixture(t)
 	_, corpus, err := Scan(root, "abc123")
 	if err != nil {
@@ -131,13 +152,27 @@ func TestScanResolvesCallImportAndTestEdges(t *testing.T) {
 		seen[r.Kind+" "+r.From+"->"+r.To] = true
 	}
 	for _, want := range []string{
-		"CALLS lib.Greet->lib.decorate",
-		"CALLS app.Run->lib.Greet",
-		"IMPORTS app.Run->lib.Config",
-		"TESTED_BY app.Run->app.TestRun",
+		// A file contains the symbols declared in it.
+		"CONTAINS " + fixtureFile(root, "lib/lib.go") + "->" + fixtureSymbol(root, "lib/lib.go", "Greet"),
+		// A same-file call resolves to the full identity.
+		"CALLS " + fixtureSymbol(root, "lib/lib.go", "Greet") + "->" + fixtureSymbol(root, "lib/lib.go", "decorate"),
+		// A cross-package call through a package selector stays BARE.
+		"CALLS " + fixtureSymbol(root, "app/app.go", "Run") + "->Greet",
+		// An import edge is file-scoped and targets the raw import path.
+		"IMPORTS_FROM " + fixtureFile(root, "app/app.go") + "->example.com/fixture/lib",
+		// A test's callee is mirrored back, bare source and all: `Run` is
+		// declared in app.go, not in the test file, so it never resolved.
+		"TESTED_BY Run->" + fixtureSymbol(root, "app/app_test.go", "TestRun"),
 	} {
 		if !seen[want] {
 			t.Errorf("missing reference %q; got %v", want, seen)
+		}
+	}
+	for _, gone := range []string{
+		"IMPORTS " + fixtureSymbol(root, "app/app.go", "Run") + "->" + fixtureSymbol(root, "lib/lib.go", "Config"),
+	} {
+		if seen[gone] {
+			t.Errorf("reference %q must not be emitted: the release has no type-usage edge", gone)
 		}
 	}
 }
@@ -153,8 +188,10 @@ func TestScanSkipsVendoredAndHiddenTrees(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, ok := symbolKinds(t, root)["vendor/pkg.Hidden"]; ok {
-		t.Error("vendored symbol was ingested")
+	for _, pruned := range []string{"vendor/pkg/x.go", ".hidden/x.go"} {
+		if _, ok := symbolKinds(t, root)[fixtureSymbol(root, pruned, "Hidden")]; ok {
+			t.Errorf("symbol from pruned tree %q was ingested", pruned)
+		}
 	}
 }
 
@@ -168,19 +205,27 @@ func TestScanSkipsUnparseableFile(t *testing.T) {
 		t.Fatalf("Scan: %v", err)
 	}
 	for _, f := range files {
-		if f.Path == "broken.go" {
+		if f.RelPath == "broken.go" {
 			t.Fatal("unparseable file must not produce an ingestion unit")
 		}
 	}
 }
 
-func TestScanRootPackageUsesPackageName(t *testing.T) {
+// TestScanIdentifiesRootFileSymbolsByPath replaces the old
+// "root package uses the package name as its qualifier" case: there is no
+// package qualifier in the identity any more, so a file at the repository root
+// is named by its path like every other file.
+func TestScanIdentifiesRootFileSymbolsByPath(t *testing.T) {
 	root := writeFixture(t)
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if kind := symbolKinds(t, root)["main.main"]; kind != kindFunction {
-		t.Fatalf("root package symbol kind = %q, want Function", kind)
+	kinds := symbolKinds(t, root)
+	if kind := kinds[fixtureSymbol(root, "main.go", "main")]; kind != kindFunction {
+		t.Fatalf("root file symbol kind = %q, want Function", kind)
+	}
+	if _, ok := kinds["main.main"]; ok {
+		t.Error("a package-qualified identity must not be emitted")
 	}
 }
 
@@ -190,7 +235,7 @@ func TestScanMethodsCarryReceiverName(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "lib", "method.go"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if kind := symbolKinds(t, root)["lib.Config.Label"]; kind != kindFunction {
+	if kind := symbolKinds(t, root)[fixtureSymbol(root, "lib/method.go", "Config.Label")]; kind != kindFunction {
 		t.Fatalf("method kind = %q, want Function", kind)
 	}
 }
@@ -201,20 +246,32 @@ func TestScanMissingRootErrors(t *testing.T) {
 	}
 }
 
-func TestBuildReportPopulatesStatus(t *testing.T) {
+func TestBuildReportCarriesFullBuildCounters(t *testing.T) {
 	e := builtEngine(t, nil)
 	report, err := e.BuildReport(graphstore.BuildOptions{})
 	if err != nil {
 		t.Fatalf("BuildReport: %v", err)
 	}
-	if report.Outcome != graphstore.CRGReadinessReady {
-		t.Fatalf("outcome = %q, want ready (%s)", report.Outcome, report.Summary)
+	if report.Status != statusOK || report.BuildType != buildTypeFull {
+		t.Fatalf("report = %+v, want an ok full build", report)
 	}
-	if report.Status.Nodes == 0 || report.Status.Edges == 0 || report.Status.Files == 0 {
-		t.Fatalf("status counts empty: %+v", report.Status)
+	if report.BaseResolved == nil || report.BaseResolved.Valid {
+		t.Errorf("base_resolved = %#v, want a present null for a full build", report.BaseResolved)
 	}
-	if !strings.Contains(report.Status.Languages, languageGo) {
-		t.Errorf("languages = %q, want go", report.Status.Languages)
+	if report.FilesParsed == nil || *report.FilesParsed == 0 ||
+		report.TotalNodes == nil || *report.TotalNodes == 0 ||
+		report.TotalEdges == nil || *report.TotalEdges == 0 {
+		t.Fatalf("counters empty: %+v", report)
+	}
+	if report.Summary != graphstore.FullBuildSummary(*report.FilesParsed, *report.TotalNodes, *report.TotalEdges) {
+		t.Errorf("summary = %q, want upstream's full-build sentence", report.Summary)
+	}
+	status, err := e.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(status.Languages) == 0 || status.Languages[0] != languageGo {
+		t.Errorf("languages = %v, want [go]", status.Languages)
 	}
 }
 
@@ -251,8 +308,9 @@ func TestBuildRemovesStaleFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadNodes: %v", err)
 	}
+	stale := fixtureFile(root, "lib/lib.go")
 	for _, n := range nodes {
-		if n.FilePath == "lib/lib.go" {
+		if n.FilePath == stale {
 			t.Fatalf("stale node survived rebuild: %+v", n)
 		}
 	}
@@ -274,66 +332,112 @@ func TestStatusUnbuiltWithoutDatabase(t *testing.T) {
 
 func TestUpdateNoDiffLeavesGraphUnchanged(t *testing.T) {
 	e := builtEngine(t, nil)
-	report, err := e.UpdateReport(graphstore.UpdateOptions{})
+	report, err := e.UpdateReport(graphstore.UpdateOptions{Base: "HEAD"})
 	if err != nil {
 		t.Fatalf("UpdateReport: %v", err)
 	}
-	if report.Outcome != "no_diff" {
-		t.Fatalf("outcome = %q, want no_diff", report.Outcome)
+	if report.BuildType != buildTypeIncremental {
+		t.Fatalf("build_type = %q, want %q", report.BuildType, buildTypeIncremental)
+	}
+	if report.FilesUpdated == nil || *report.FilesUpdated != 0 {
+		t.Fatalf("files_updated = %v, want 0", report.FilesUpdated)
+	}
+	if report.Summary != graphstore.NoChangesSummary() {
+		t.Fatalf("summary = %q, want %q", report.Summary, graphstore.NoChangesSummary())
 	}
 }
 
 func TestUpdateReingestsChangedFile(t *testing.T) {
-	e := builtEngine(t, []string{"lib/lib.go"})
-	report, err := e.UpdateReport(graphstore.UpdateOptions{Base: "HEAD~1"})
+	e := builtEngine(t, nil)
+	// Change the file's content so the hash check does not skip it.
+	writeExtra(t, e.root, "lib/lib.go", "package lib\n\nfunc Greet() string { return \"hey\" }\n")
+	e.changedFiles = func(string, string) ([]string, error) { return []string{"lib/lib.go"}, nil }
+
+	report, err := e.UpdateReport(graphstore.UpdateOptions{Base: "HEAD"})
 	if err != nil {
 		t.Fatalf("UpdateReport: %v", err)
 	}
-	if report.Outcome != "updated" {
-		t.Fatalf("outcome = %q, want updated", report.Outcome)
+	if report.FilesUpdated == nil || *report.FilesUpdated != 1 {
+		t.Fatalf("files_updated = %v, want 1", report.FilesUpdated)
 	}
-	if len(report.ChangedFiles) != 1 {
-		t.Fatalf("changed files = %v", report.ChangedFiles)
+	if report.ChangedFiles == nil || len(*report.ChangedFiles) != 1 {
+		t.Fatalf("changed_files = %v, want one entry", report.ChangedFiles)
+	}
+	if report.TotalNodes == nil || *report.TotalNodes == 0 {
+		t.Fatalf("total_nodes = %v, want the re-parsed file's rows", report.TotalNodes)
 	}
 }
 
 func TestUpdateRemovesDeletedFile(t *testing.T) {
-	e := builtEngine(t, []string{"lib/lib.go"})
-	root := e.root
-	if err := os.Remove(filepath.Join(root, "lib", "lib.go")); err != nil {
+	e := builtEngine(t, nil)
+	stale := fixtureFile(e.root, "lib/lib.go")
+	if err := os.Remove(filepath.Join(e.root, "lib", "lib.go")); err != nil {
 		t.Fatal(err)
 	}
-	report, err := e.UpdateReport(graphstore.UpdateOptions{})
+	e.changedFiles = func(string, string) ([]string, error) { return []string{"lib/lib.go"}, nil }
+
+	report, err := e.UpdateReport(graphstore.UpdateOptions{Base: "HEAD"})
 	if err != nil {
 		t.Fatalf("UpdateReport: %v", err)
 	}
-	if report.Outcome != "no_mutation" {
-		t.Fatalf("outcome = %q, want no_mutation", report.Outcome)
+	if report.FilesUpdated == nil || *report.FilesUpdated == 0 {
+		t.Fatalf("files_updated = %v, want the purge counted", report.FilesUpdated)
 	}
-	if err := e.Update(graphstore.UpdateOptions{}); err != nil {
-		t.Fatalf("Update: %v", err)
+	nodes, err := e.ReadNodes(0)
+	if err != nil {
+		t.Fatalf("ReadNodes: %v", err)
+	}
+	for _, n := range nodes {
+		if n.FilePath == stale {
+			t.Fatalf("deleted file's rows survived the update: %+v", n)
+		}
 	}
 }
 
 func TestUpdatePropagatesGitError(t *testing.T) {
-	e, _ := newEngine(t, nil)
+	// A populated graph is what keeps the update incremental; an empty one
+	// escalates to a full rebuild and never asks for a diff.
+	e := builtEngine(t, nil)
 	e.changedFiles = func(string, string) ([]string, error) { return nil, os.ErrPermission }
-	if _, err := e.UpdateReport(graphstore.UpdateOptions{}); err == nil {
+	if _, err := e.UpdateReport(graphstore.UpdateOptions{Base: "HEAD"}); err == nil {
 		t.Fatal("want git error propagated")
 	}
 }
 
-func TestImpactRadiusReachesCallers(t *testing.T) {
+// TestImpactRadiusReachesResolvedCallees walks the impact radius across the
+// call edges the release actually resolves. `Greet -> decorate` is same-file
+// and therefore resolved, so it propagates; `app.Run -> lib.Greet` goes
+// through a package selector, which the release leaves as the BARE name
+// `Greet`, so there is no edge into the changed symbol and the cross-package
+// caller is NOT impacted. That is upstream's behaviour for Go, not a gap in
+// the traversal: its own postprocess resolution needs the import target to
+// name an indexed FILE, and a Go import target is a module path.
+func TestImpactRadiusReachesResolvedCallees(t *testing.T) {
 	e := builtEngine(t, nil)
-	result, err := e.GetImpactRadius(graphstore.ImpactOptions{ChangedFiles: []string{"lib/lib.go"}, MaxDepth: 3})
+	root := e.root
+	result, err := e.GetImpactRadius(graphstore.ImpactOptions{
+		ChangedFiles: []string{"lib/lib.go"}, MaxDepth: 3,
+	})
 	if err != nil {
 		t.Fatalf("GetImpactRadius: %v", err)
 	}
 	if len(result.ChangedNodes) == 0 {
 		t.Fatalf("no changed nodes: %+v", result)
 	}
-	if !containsQualified(result.ImpactedNodes, "app.Run") {
-		t.Fatalf("app.Run not in impact radius: %+v", result.ImpactedNodes)
+	// `decorate` lives in the changed FILE, so a file-seeded traversal reports
+	// it as a CHANGED node, not an impacted one — computeImpactRadius
+	// deliberately excludes seeds from ImpactedNodes. The edge is what is
+	// being asserted here: without the resolved `Greet -> decorate` call the
+	// symbol would not be reachable at all.
+	if !containsQualified(result.ChangedNodes, fixtureSymbol(root, "lib/lib.go", "decorate")) {
+		t.Fatalf("resolved same-file callee missing from the changed set: %+v", result.ChangedNodes)
+	}
+	if containsQualified(result.ImpactedNodes, fixtureSymbol(root, "lib/lib.go", "decorate")) {
+		t.Fatalf("a seed symbol must not also be reported as impacted: %+v", result.ImpactedNodes)
+	}
+	if containsQualified(result.ImpactedNodes, fixtureSymbol(root, "app/app.go", "Run")) {
+		t.Fatalf("cross-package caller reached: the release leaves `auth.Greet`-style "+
+			"targets bare, so no such edge exists: %+v", result.ImpactedNodes)
 	}
 }
 
@@ -434,41 +538,52 @@ func TestListCommunitiesAlternateSorts(t *testing.T) {
 	}
 }
 
-func TestPostprocessRecordsDerivedCounts(t *testing.T) {
+func TestPostprocessReportsDerivedCounts(t *testing.T) {
 	e := builtEngine(t, nil)
-	if err := e.Postprocess(graphstore.PostprocessOptions{}); err != nil {
-		t.Fatalf("Postprocess: %v", err)
+	report, err := e.PostprocessReport(graphstore.PostprocessOptions{})
+	if err != nil {
+		t.Fatalf("PostprocessReport: %v", err)
+	}
+	if report.SignaturesUpdated == nil || !*report.SignaturesUpdated {
+		t.Error("signatures_updated missing from a full post-process")
+	}
+	for name, got := range map[string]*int{
+		"fts_indexed":          report.FTSIndexed,
+		"flows_detected":       report.FlowsDetected,
+		"communities_detected": report.CommunitiesDetected,
+	} {
+		if got == nil {
+			t.Errorf("%s missing from a full post-process", name)
+		}
 	}
 	store, err := e.readStore()
 	if err != nil || store == nil {
 		t.Fatalf("readStore: %v", err)
 	}
-	for _, key := range []string{"last_postprocess", "flow_memberships", "communities", "fts_tokens"} {
-		v, gerr := store.GetMetadata(key)
-		if gerr != nil || v == "" {
-			t.Errorf("metadata %q = %q (err %v)", key, v, gerr)
-		}
+	stamp, err := store.GetMetadata(metaLastPostprocessed)
+	if err != nil || stamp == "" {
+		t.Errorf("metadata[%s] = %q (err %v), want a timestamp", metaLastPostprocessed, stamp, err)
 	}
 }
 
 func TestPostprocessHonorsSkipFlags(t *testing.T) {
 	e := builtEngine(t, nil)
-	if err := e.Postprocess(graphstore.PostprocessOptions{NoFlows: true, NoCommunities: true, NoFTS: true}); err != nil {
-		t.Fatalf("Postprocess: %v", err)
+	report, err := e.PostprocessReport(graphstore.PostprocessOptions{
+		Flows:       new(false),
+		Communities: new(false),
+		FTS:         new(false),
+	})
+	if err != nil {
+		t.Fatalf("PostprocessReport: %v", err)
 	}
-	store, err := e.readStore()
-	if err != nil || store == nil {
-		t.Fatalf("readStore: %v", err)
-	}
-	if v, _ := store.GetMetadata("flow_memberships"); v != "" {
-		t.Fatalf("flow_memberships written despite NoFlows: %q", v)
-	}
-}
-
-func TestPostprocessUnbuiltIsNoOp(t *testing.T) {
-	e, _ := newEngine(t, nil)
-	if err := e.Postprocess(graphstore.PostprocessOptions{}); err != nil {
-		t.Fatalf("Postprocess on unbuilt graph: %v", err)
+	for name, got := range map[string]*int{
+		"fts_indexed":          report.FTSIndexed,
+		"flows_detected":       report.FlowsDetected,
+		"communities_detected": report.CommunitiesDetected,
+	} {
+		if got != nil {
+			t.Errorf("%s = %d although its step was disabled", name, *got)
+		}
 	}
 }
 
@@ -481,7 +596,7 @@ func TestDetectChangesReportsRiskAndGaps(t *testing.T) {
 	if len(report.ChangedFunctions) == 0 {
 		t.Fatalf("no changed functions: %+v", report)
 	}
-	if !hasTestGap(report.TestGaps, "lib.decorate") {
+	if !hasTestGap(report.TestGaps, fixtureSymbol(e.root, "lib/lib.go", "decorate")) {
 		t.Errorf("untested helper missing from test gaps: %+v", report.TestGaps)
 	}
 	if len(report.ReviewPriorities) == 0 || report.Summary == "" {
@@ -566,17 +681,5 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 	if err := e.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
-	}
-}
-
-func TestGitChangedFilesReportsError(t *testing.T) {
-	if _, err := gitChangedFiles(t.TempDir(), "HEAD~1"); err == nil {
-		t.Fatal("want error outside a git repository")
-	}
-}
-
-func TestHeadCommitOutsideRepoIsEmpty(t *testing.T) {
-	if got := headCommit(t.TempDir()); got != "" {
-		t.Fatalf("headCommit = %q, want empty outside a repo", got)
 	}
 }

@@ -40,12 +40,16 @@ func nullReads(t *testing.T, n NullProvider) {
 func nullWrites(t *testing.T, n NullProvider) {
 	t.Helper()
 	build, err := n.BuildReport(graphstore.BuildOptions{})
-	if err != nil || build.Outcome != graphstore.CRGReadinessUnbuilt {
+	if err != nil || build.Status != statusOK || build.BuildType != buildTypeFull {
 		t.Errorf("BuildReport = %+v, err %v", build, err)
 	}
 	update, err := n.UpdateReport(graphstore.UpdateOptions{})
-	if err != nil || update.Outcome != "no_diff" {
+	if err != nil || update.Status != statusOK || update.BuildType != buildTypeIncremental {
 		t.Errorf("UpdateReport = %+v, err %v", update, err)
+	}
+	post, err := n.PostprocessReport(graphstore.PostprocessOptions{})
+	if err != nil || post.Status != statusOK {
+		t.Errorf("PostprocessReport = %+v, err %v", post, err)
 	}
 	if err := n.Build(graphstore.BuildOptions{}); err != nil {
 		t.Errorf("Build: %v", err)

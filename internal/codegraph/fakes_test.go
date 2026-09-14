@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
@@ -37,6 +36,27 @@ type fakeStore struct {
 	removeErr   error
 	writeErr    error
 	metaErr     error
+	meta        map[string]string
+	// The derived-view role: the persisted tables every query path and the
+	// post-process pass read back.
+	allNodes       []graphstore.GraphNode
+	allNodesErr    error
+	allEdges       []graphstore.GraphEdge
+	allEdgesErr    error
+	flows          []graphstore.FlowRow
+	flowsErr       error
+	memberships    []graphstore.FlowMembershipRow
+	membershipsErr error
+	communities    []graphstore.CommunityRow
+	communitiesErr error
+	risk           []graphstore.RiskIndexRow
+	riskErr        error
+	// The post-process worklist and its injectable failures.
+	pendingSignatures []graphstore.GraphNode
+	signatureErr      error
+	ftsIndexed        int
+	ftsErr            error
+	edgesByTarget     map[string][]graphstore.GraphEdge
 }
 
 func (f *fakeStore) GetAllFiles() ([]string, error) { return f.files, f.filesErr }
@@ -52,6 +72,11 @@ func (f *fakeStore) GetEdgesBySource(qualified string) ([]graphstore.GraphEdge, 
 
 func (f *fakeStore) GetStats() (graphstore.GraphStats, error) { return f.stats, f.statsErr }
 
+// GetEdgesByTarget backs the dependent expansion an incremental update runs.
+func (f *fakeStore) GetEdgesByTarget(qualified string) ([]graphstore.GraphEdge, error) {
+	return f.edgesByTarget[qualified], f.edgesErr
+}
+
 func (f *fakeStore) GetImpactRadius([]string, int, int) (graphstore.ImpactResult, error) {
 	return f.impact, f.impactErr
 }
@@ -65,6 +90,99 @@ func (f *fakeStore) StoreFileNodesEdges(string, []graphstore.NodeInfo, []graphst
 func (f *fakeStore) SetMetadata(string, string) error { return f.metaErr }
 
 func (f *fakeStore) Close() error { return nil }
+
+func (f *fakeStore) GetMetadata(key string) (string, error) { return f.meta[key], f.metaErr }
+
+func (f *fakeStore) Commit() error { return f.writeErr }
+
+func (f *fakeStore) ReadAllNodes() ([]graphstore.GraphNode, error) {
+	return f.allNodes, f.allNodesErr
+}
+
+func (f *fakeStore) ReadAllEdges() ([]graphstore.GraphEdge, error) {
+	return f.allEdges, f.allEdgesErr
+}
+
+func (f *fakeStore) ReadFlows() ([]graphstore.FlowRow, error) { return f.flows, f.flowsErr }
+
+func (f *fakeStore) ReadFlowMemberships() ([]graphstore.FlowMembershipRow, error) {
+	return f.memberships, f.membershipsErr
+}
+
+func (f *fakeStore) ReadCommunities() ([]graphstore.CommunityRow, error) {
+	return f.communities, f.communitiesErr
+}
+
+func (f *fakeStore) ReadRiskIndex() ([]graphstore.RiskIndexRow, error) { return f.risk, f.riskErr }
+
+func (f *fakeStore) ReadNodesByID(ids []int64) ([]graphstore.GraphNode, error) {
+	var out []graphstore.GraphNode
+	for _, node := range f.allNodes {
+		for _, id := range ids {
+			if node.ID == id {
+				out = append(out, node)
+				break
+			}
+		}
+	}
+	return out, f.allNodesErr
+}
+
+func (f *fakeStore) ReadNodesByCommunity(id int64) ([]graphstore.GraphNode, error) {
+	var out []graphstore.GraphNode
+	for _, node := range f.allNodes {
+		if node.CommunityID == id {
+			out = append(out, node)
+		}
+	}
+	return out, f.allNodesErr
+}
+
+// The post-process writers. fakeStore embeds graphstore.Store as a NIL
+// interface, so any method the engine calls and the fake does not override
+// SEGFAULTS rather than failing to compile — every write the lifecycle
+// performs therefore needs a body here, not only the ones a given test
+// cares about.
+func (f *fakeStore) NodesWithoutSignature() ([]graphstore.GraphNode, error) {
+	return f.pendingSignatures, f.signatureErr
+}
+
+func (f *fakeStore) SetNodeSignature(int64, string) error { return f.signatureErr }
+
+func (f *fakeStore) SetNodeCommunity(int64, int64) error { return f.writeErr }
+
+func (f *fakeStore) RebuildFTS() (int, error) { return f.ftsIndexed, f.ftsErr }
+
+func (f *fakeStore) ReplaceFlows(flows []graphstore.FlowRow, _ [][]int64) (int, error) {
+	f.flows = flows
+	return len(flows), f.writeErr
+}
+
+func (f *fakeStore) ReplaceCommunities(communities []graphstore.CommunityRow, _ [][]string) (int, error) {
+	f.communities = communities
+	return len(communities), f.writeErr
+}
+
+func (f *fakeStore) ReplaceCommunitySummaries(rows []graphstore.CommunitySummaryRow) (int, error) {
+	return len(rows), f.writeErr
+}
+
+func (f *fakeStore) ReplaceFlowSnapshots(rows []graphstore.FlowSnapshotRow) (int, error) {
+	return len(rows), f.writeErr
+}
+
+func (f *fakeStore) ReplaceRiskIndex(rows []graphstore.RiskIndexRow) (int, error) {
+	f.risk = rows
+	return len(rows), f.writeErr
+}
+
+func (f *fakeStore) ReadCommunitySummaries() ([]graphstore.CommunitySummaryRow, error) {
+	return nil, f.communitiesErr
+}
+
+func (f *fakeStore) ReadFlowSnapshots() ([]graphstore.FlowSnapshotRow, error) {
+	return nil, f.flowsErr
+}
 
 // engineWithStore returns an engine rooted at root whose persistence is the
 // given fake, with a stubbed diff so no test reaches git.
@@ -114,28 +232,5 @@ func writeExtra(t *testing.T, root, rel, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write %s: %v", rel, err)
-	}
-}
-
-// failCRGDerivations points every crg derivation seam at a failing stub for the
-// duration of the test. Production binds the real derivations; the in-process
-// namespace projection cannot fail on its own, so the seam is the only way to
-// reach the engine's readback-failure arms.
-func failCRGDerivations(t *testing.T) {
-	t.Helper()
-	flows, memberships := flowsFromStore, flowMembershipsFromStore
-	communities, risk, post := communitiesFromStore, riskIndexFromStore, postprocessFromStore
-	t.Cleanup(func() {
-		flowsFromStore, flowMembershipsFromStore = flows, memberships
-		communitiesFromStore, riskIndexFromStore, postprocessFromStore = communities, risk, post
-	})
-	flowsFromStore = func(crg.StoreReader, string) ([]crg.Flow, error) { return nil, errFake }
-	flowMembershipsFromStore = func(crg.StoreReader, string) ([]crg.FlowMembership, error) {
-		return nil, errFake
-	}
-	communitiesFromStore = func(crg.StoreReader, string) (map[string]string, error) { return nil, errFake }
-	riskIndexFromStore = func(crg.StoreReader, string) (map[string]float64, error) { return nil, errFake }
-	postprocessFromStore = func(crg.StoreReader, string) (crg.Postprocess, error) {
-		return crg.Postprocess{}, errFake
 	}
 }

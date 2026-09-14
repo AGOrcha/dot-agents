@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
@@ -40,43 +41,37 @@ func TestBuildReportPropagatesStoreFailures(t *testing.T) {
 	}
 	for name, store := range cases {
 		e := engineWithStore(t, root, store)
-		if _, err := e.BuildReport(graphstore.BuildOptions{}); !errors.Is(err, errFake) {
+		if _, err := e.BuildReport(graphstore.BuildOptions{Postprocess: graphstore.PostprocessNone}); !errors.Is(err, errFake) {
 			t.Errorf("%s: err = %v, want the injected failure", name, err)
 		}
 	}
 }
 
-func TestBuildReportPropagatesStatusFailure(t *testing.T) {
-	e := engineWithStore(t, writeFixture(t), &fakeStore{})
-	e.status = func() (*graphstore.CRGStatus, error) { return nil, errFake }
-	if _, err := e.BuildReport(graphstore.BuildOptions{}); !errors.Is(err, errFake) {
-		t.Fatalf("err = %v, want the injected status failure", err)
-	}
-}
-
 func TestUpdateReportPropagatesFailures(t *testing.T) {
 	root := writeFixture(t)
-	e := engineWithStore(t, root, &fakeStore{writeErr: errFake})
-	if _, err := e.UpdateReport(graphstore.UpdateOptions{}); !errors.Is(err, errFake) {
-		t.Fatalf("write err = %v, want the injected failure", err)
+	// A populated graph is what keeps the update on the incremental path;
+	// an empty one escalates to a full rebuild before reaching these arms.
+	// The stored file must be the graph's ABSOLUTE spelling under root, or
+	// the foreign-root guard fires before the injected failure can.
+	indexed := Open(root).absPath("lib/lib.go")
+	populated := func(store *fakeStore) *fakeStore {
+		store.stats = graphstore.GraphStats{TotalNodes: 1, FilesCount: 1}
+		store.files = append(store.files, indexed)
+		return store
 	}
-	e = engineWithStore(t, root, &fakeStore{metaErr: errFake})
-	if _, err := e.UpdateReport(graphstore.UpdateOptions{}); !errors.Is(err, errFake) {
-		t.Fatalf("metadata err = %v, want the injected failure", err)
+	cases := map[string]*fakeStore{
+		"node write":     populated(&fakeStore{writeErr: errFake}),
+		"metadata write": populated(&fakeStore{metaErr: errFake}),
+		"stats read":     {statsErr: errFake},
 	}
-	e = engineWithStore(t, root, &fakeStore{})
-	e.status = func() (*graphstore.CRGStatus, error) { return nil, errFake }
-	if _, err := e.UpdateReport(graphstore.UpdateOptions{}); !errors.Is(err, errFake) {
-		t.Fatalf("status err = %v, want the injected failure", err)
-	}
-}
-
-func TestUpdateReportFailsWhenScanRootMissing(t *testing.T) {
-	e := Open(filepath.Join(t.TempDir(), "missing"))
-	e.changedFiles = func(string, string) ([]string, error) { return []string{"a.go"}, nil }
-	t.Cleanup(func() { _ = e.Close() })
-	if _, err := e.UpdateReport(graphstore.UpdateOptions{}); err == nil {
-		t.Fatal("want a scan failure")
+	for name, store := range cases {
+		e := engineWithStore(t, root, store)
+		if _, err := e.UpdateReport(graphstore.UpdateOptions{
+			Base:        "HEAD",
+			Postprocess: graphstore.PostprocessNone,
+		}); !errors.Is(err, errFake) {
+			t.Errorf("%s: err = %v, want the injected failure", name, err)
+		}
 	}
 }
 
@@ -87,48 +82,51 @@ func TestUpdateReportFailsWhenStoreCannotOpen(t *testing.T) {
 	}
 }
 
-func TestNoDiffReportPropagatesStatusFailure(t *testing.T) {
-	e := engineWithStore(t, writeFixture(t), &fakeStore{})
-	e.changedFiles = func(string, string) ([]string, error) { return nil, nil }
-	e.status = func() (*graphstore.CRGStatus, error) { return nil, errFake }
-	if _, err := e.UpdateReport(graphstore.UpdateOptions{}); !errors.Is(err, errFake) {
-		t.Fatalf("err = %v, want the injected status failure", err)
+func TestUpdateReportPropagatesDiffFailure(t *testing.T) {
+	e := engineWithStore(t, writeFixture(t), &fakeStore{
+		stats: graphstore.GraphStats{TotalNodes: 1, FilesCount: 1},
+	})
+	e.changedFiles = func(string, string) ([]string, error) { return nil, errFake }
+	if _, err := e.UpdateReport(graphstore.UpdateOptions{Base: "HEAD"}); !errors.Is(err, errFake) {
+		t.Fatalf("err = %v, want the injected diff failure", err)
 	}
 }
 
-func TestApplyChangedFilesPropagatesRemoveFailure(t *testing.T) {
-	e := engineWithStore(t, writeFixture(t), &fakeStore{removeErr: errFake})
-	e.changedFiles = func(string, string) ([]string, error) { return []string{"deleted.go"}, nil }
-	if _, err := e.UpdateReport(graphstore.UpdateOptions{}); !errors.Is(err, errFake) {
-		t.Fatalf("err = %v, want the injected remove failure", err)
+// TestIncrementalRefusesAForeignGraph covers the guard that stops an
+// incremental reconciliation from deleting a graph built somewhere else: every
+// stored file would look stale, so the mismatch must be reported instead.
+func TestIncrementalRefusesAForeignGraph(t *testing.T) {
+	e := engineWithStore(t, writeFixture(t), &fakeStore{
+		stats: graphstore.GraphStats{TotalNodes: 1, FilesCount: 1},
+		files: []string{"/somewhere/else/lib.go"},
+	})
+	_, err := e.UpdateReport(graphstore.UpdateOptions{Base: "HEAD"})
+	if err == nil || !strings.Contains(err.Error(), "different repository root") {
+		t.Fatalf("err = %v, want a foreign-root refusal", err)
 	}
 }
 
-// ── report classification ────────────────────────────────────────────────────
-
-func TestBuildOutcomeReportClassifiesEveryState(t *testing.T) {
-	cases := []struct {
-		status *graphstore.CRGStatus
-		want   string
-	}{
-		{&graphstore.CRGStatus{Ready: true, State: graphstore.CRGReadinessReady}, graphstore.CRGReadinessReady},
-		{&graphstore.CRGStatus{State: graphstore.CRGReadinessBusyOrLocked}, graphstore.CRGReadinessBusyOrLocked},
-		{&graphstore.CRGStatus{State: graphstore.CRGReadinessUnbuilt}, graphstore.CRGReadinessUnbuilt},
-		{&graphstore.CRGStatus{State: graphstore.CRGReadinessError, Message: "boom"}, graphstore.CRGReadinessError},
-	}
-	for _, tc := range cases {
-		got := buildOutcomeReport("build", tc.status, "ready")
-		if got.Outcome != tc.want || got.Summary == "" {
-			t.Errorf("state %q -> %+v, want outcome %q with a summary", tc.status.State, got, tc.want)
-		}
-	}
-}
+// ── status classification ────────────────────────────────────────────────────
 
 func TestApplyStatsMarksUnbuiltWithoutTimestamp(t *testing.T) {
-	status := &graphstore.CRGStatus{LastUpdated: "never"}
+	status := &graphstore.CRGStatus{}
 	applyStats(status, graphstore.GraphStats{TotalNodes: 3, FilesCount: 1})
 	if status.State != graphstore.CRGReadinessUnbuilt || status.Message == "" {
 		t.Fatalf("status = %+v, want unbuilt with a message", status)
+	}
+	if status.LastUpdated != nil {
+		t.Errorf("last_updated = %q, want null without a build timestamp", *status.LastUpdated)
+	}
+}
+
+func TestApplyStatsSortsLanguages(t *testing.T) {
+	status := &graphstore.CRGStatus{}
+	applyStats(status, graphstore.GraphStats{
+		TotalNodes: 3, FilesCount: 1, LastUpdated: "2024-01-01T00:00:00",
+		Languages: []string{"python", "go"},
+	})
+	if !status.Ready || status.Languages[0] != "go" || status.Languages[1] != "python" {
+		t.Fatalf("status = %+v, want a ready graph with sorted languages", status)
 	}
 }
 
@@ -174,25 +172,19 @@ func TestReadPathsDegradeOnStoreOpenFailure(t *testing.T) {
 	}
 }
 
-func TestReadPathsPropagateEnumerationFailures(t *testing.T) {
+func TestReadPathsPropagateStoreFailures(t *testing.T) {
 	root := writeFixture(t)
-	nodesFake := &fakeStore{files: []string{"lib/lib.go"}, nodesErr: errFake}
-	edgesFake := &fakeStore{
-		files:    []string{"lib/lib.go"},
-		nodes:    map[string][]graphstore.GraphNode{"lib/lib.go": {{Kind: kindFunction, QualifiedName: "lib.Greet", FilePath: "lib/lib.go"}}},
-		edgesErr: errFake,
-	}
-	if _, err := engineWithStore(t, root, &fakeStore{filesErr: errFake}).ReadNodes(0); !errors.Is(err, errFake) {
-		t.Errorf("file enumeration: err = %v", err)
-	}
-	if _, err := engineWithStore(t, root, nodesFake).ReadNodes(0); !errors.Is(err, errFake) {
+	if _, err := engineWithStore(t, root, &fakeStore{allNodesErr: errFake}).ReadNodes(0); !errors.Is(err, errFake) {
 		t.Errorf("node read: err = %v", err)
 	}
-	if _, err := engineWithStore(t, root, edgesFake).ReadEdges(0); !errors.Is(err, errFake) {
+	if _, err := engineWithStore(t, root, &fakeStore{allEdgesErr: errFake}).ReadEdges(0); !errors.Is(err, errFake) {
 		t.Errorf("edge read: err = %v", err)
 	}
-	if _, err := engineWithStore(t, root, nodesFake).ListCommunities(0, ""); !errors.Is(err, errFake) {
-		t.Errorf("communities snapshot: err = %v", err)
+	if _, err := engineWithStore(t, root, &fakeStore{communitiesErr: errFake}).ListCommunities(0, ""); !errors.Is(err, errFake) {
+		t.Errorf("communities read: err = %v", err)
+	}
+	if _, err := engineWithStore(t, root, &fakeStore{flowsErr: errFake}).ListFlows(0, ""); !errors.Is(err, errFake) {
+		t.Errorf("flows read: err = %v", err)
 	}
 }
 
@@ -220,33 +212,7 @@ func TestDetectChangesPropagatesDiffFailure(t *testing.T) {
 	}
 }
 
-// ── derivation failure arms ──────────────────────────────────────────────────
-
-func TestDerivationFailuresPropagate(t *testing.T) {
-	failCRGDerivations(t)
-	e := builtEngine(t, []string{"lib/lib.go"})
-	if _, err := e.ListFlows(0, ""); !errors.Is(err, errFake) {
-		t.Errorf("ListFlows err = %v", err)
-	}
-	if _, err := e.ListCommunities(0, ""); !errors.Is(err, errFake) {
-		t.Errorf("ListCommunities err = %v", err)
-	}
-	if err := e.Postprocess(graphstore.PostprocessOptions{}); !errors.Is(err, errFake) {
-		t.Errorf("Postprocess err = %v", err)
-	}
-}
-
-func TestDetectChangesToleratesDerivationFailure(t *testing.T) {
-	failCRGDerivations(t)
-	e := builtEngine(t, []string{"lib/lib.go"})
-	report, err := e.DetectChanges(graphstore.DetectChangesOptions{})
-	if err != nil {
-		t.Fatalf("DetectChanges must degrade, not fail: %v", err)
-	}
-	if len(report.AffectedFlows) != 0 || report.RiskScore != 0 {
-		t.Fatalf("want a degraded report, got %+v", report)
-	}
-}
+// ── post-process failure arms ────────────────────────────────────────────────
 
 func TestPostprocessPropagatesMetadataFailure(t *testing.T) {
 	e := engineWithStore(t, writeFixture(t), &fakeStore{metaErr: errFake})
@@ -255,21 +221,41 @@ func TestPostprocessPropagatesMetadataFailure(t *testing.T) {
 	}
 }
 
-// ── small pure helpers ───────────────────────────────────────────────────────
-
-func TestNonEmptyLinesTrimsAndSorts(t *testing.T) {
-	got := nonEmptyLines("b.go\n\n  a.go  \r\n")
-	if strings.Join(got, ",") != "a.go,b.go" {
-		t.Fatalf("nonEmptyLines = %v", got)
+// TestPostprocessOnUnbuiltGraphIsNoOp covers the soft arm: a post-process
+// against a repository with no graph is nothing to do, not a failure.
+func TestPostprocessOnUnbuiltGraphIsNoOp(t *testing.T) {
+	e := Open(writeFixture(t))
+	t.Cleanup(func() { _ = e.Close() })
+	report, err := e.PostprocessReport(graphstore.PostprocessOptions{})
+	if err != nil {
+		t.Fatalf("PostprocessReport on an unbuilt graph: %v", err)
 	}
-	if nonEmptyLines("   \n\n") != nil {
-		t.Fatal("blank input must yield no lines")
+	if report.Status != statusOK || report.Summary == "" {
+		t.Fatalf("report = %+v, want a clean no-op result", report)
 	}
 }
 
-func TestCommunityNameFallsBackToRepresentativeID(t *testing.T) {
-	if got := communityName(graphSnapshot{}, "orphan-id"); got != "orphan-id" {
-		t.Fatalf("communityName = %q, want the raw id", got)
+// ── small pure helpers ───────────────────────────────────────────────────────
+
+func TestSecondsSinceIsNeverNegative(t *testing.T) {
+	if got := secondsSince(time.Now().Add(time.Hour)); got != 0 {
+		t.Fatalf("secondsSince(future) = %v, want 0", got)
+	}
+	if got := secondsSince(time.Now().Add(-2 * time.Second)); got < 1.9 {
+		t.Fatalf("secondsSince(2s ago) = %v, want about 2", got)
+	}
+}
+
+func TestRelPathKeepsPathsOutsideTheRepository(t *testing.T) {
+	e := Open(t.TempDir())
+	t.Cleanup(func() { _ = e.Close() })
+	outside := "/somewhere/else/lib.go"
+	if got := e.relPath(outside); got != outside {
+		t.Fatalf("relPath(%q) = %q, want the absolute path kept", outside, got)
+	}
+	inside := e.absPath("pkg/lib.go")
+	if got := e.relPath(inside); got != "pkg/lib.go" {
+		t.Fatalf("relPath(%q) = %q, want the repo-relative path", inside, got)
 	}
 }
 
@@ -295,21 +281,42 @@ func TestHashNodeFallsBackOnOutOfRangeOffsets(t *testing.T) {
 	}
 }
 
-func TestImportAliasHandlesEveryImportForm(t *testing.T) {
-	cases := map[string]struct {
-		spec *ast.ImportSpec
-		path string
-		want string
-	}{
-		"implicit": {&ast.ImportSpec{}, "example.com/x/lib", "lib"},
-		"explicit": {&ast.ImportSpec{Name: ast.NewIdent("alias")}, "example.com/x/lib", "alias"},
-		"blank":    {&ast.ImportSpec{Name: ast.NewIdent("_")}, "example.com/x/lib", ""},
-		"dot":      {&ast.ImportSpec{Name: ast.NewIdent(".")}, "example.com/x/lib", ""},
+// TestScanImportEdgesUseRawPathForEveryImportForm replaces the old
+// `importAlias` unit test. Import aliases no longer participate in identity at
+// all: the release emits one file-scoped IMPORTS_FROM edge per import spec
+// whose target is the RAW import path, so an implicit, aliased, blank or dot
+// import are indistinguishable in the graph.
+func TestScanImportEdgesUseRawPathForEveryImportForm(t *testing.T) {
+	root := writeFixture(t)
+	writeExtra(t, root, "app/imports.go", `package app
+
+import (
+	"strings"
+	str "strings"
+	_ "example.com/fixture/lib"
+	. "errors"
+)
+
+func Forms() string { return strings.TrimSpace(str.ToLower("x")) }
+`)
+	_, corpus, err := Scan(root, "")
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
 	}
-	for name, tc := range cases {
-		if got := importAlias(tc.spec, tc.path); got != tc.want {
-			t.Errorf("%s: importAlias = %q, want %q", name, got, tc.want)
+	file := fixtureFile(root, "app/imports.go")
+	imports := map[string]bool{}
+	for _, ref := range corpus.References {
+		if ref.Kind == edgeImportsFrom && ref.From == file {
+			imports[ref.To] = true
 		}
+	}
+	for _, want := range []string{"strings", "example.com/fixture/lib", "errors"} {
+		if !imports[want] {
+			t.Errorf("missing IMPORTS_FROM target %q; got %v", want, imports)
+		}
+	}
+	if imports["str"] || imports["lib"] {
+		t.Errorf("an import alias leaked into an edge target: %v", imports)
 	}
 }
 
@@ -335,21 +342,44 @@ func TestBaseTypeNameUnwrapsPointersAndGenerics(t *testing.T) {
 
 // ── scanner resolution edge cases ────────────────────────────────────────────
 
-func TestScanIgnoresAmbiguousBareNames(t *testing.T) {
+// TestScanNeverResolvesBareNameAcrossFiles replaces the old
+// "ignores AMBIGUOUS bare names" case. The release does not resolve a bare
+// name across files at all — not even a unique one — so uniqueness stopped
+// being the deciding factor: `Greet` calling `decorate` resolves because both
+// are in lib.go, and a same-named `decorate` elsewhere changes nothing.
+func TestScanNeverResolvesBareNameAcrossFiles(t *testing.T) {
 	root := writeFixture(t)
+	writeExtra(t, root, "lib/split.go", "package lib\n\nfunc Split() string { return decorate(\"x\") }\n")
 	writeExtra(t, root, "other/other.go", "package other\n\nfunc decorate(s string) string { return s }\n")
 	_, corpus, err := Scan(root, "")
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
+	var splitTargets []string
 	for _, ref := range corpus.References {
-		if ref.To == "other.decorate" {
-			t.Fatalf("ambiguous bare name resolved to the wrong package: %+v", ref)
+		if ref.Kind == edgeCalls && ref.From == fixtureSymbol(root, "lib/split.go", "Split") {
+			splitTargets = append(splitTargets, ref.To)
+		}
+	}
+	// `decorate` lives in lib/lib.go — the same PACKAGE but a different FILE.
+	if len(splitTargets) != 1 || splitTargets[0] != "decorate" {
+		t.Fatalf("cross-file CALLS targets = %v, want exactly [decorate] (bare)", splitTargets)
+	}
+	// No CALL anywhere may land on the same-named symbol in the other
+	// package. The containment edge from that file to its own `decorate` is
+	// not a resolution, so it is excluded rather than asserted against.
+	for _, ref := range corpus.References {
+		if ref.Kind == edgeCalls && ref.To == fixtureSymbol(root, "other/other.go", "decorate") {
+			t.Fatalf("a bare name resolved into another package: %+v", ref)
 		}
 	}
 }
 
-func TestScanResolvesAliasedImports(t *testing.T) {
+// TestScanLeavesAliasedImportCallsBare pins the other half of the import
+// change: an aliased import is not a resolution channel, so a call through the
+// alias keeps the bare member name exactly as a call through the package name
+// does.
+func TestScanLeavesAliasedImportCallsBare(t *testing.T) {
 	root := writeFixture(t)
 	writeExtra(t, root, "app/alias.go", `package app
 
@@ -364,28 +394,29 @@ func AliasRun() string { return l.Greet(l.Config{}) }
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	found := false
+	caller := fixtureSymbol(root, "app/alias.go", "AliasRun")
+	var targets []string
 	for _, ref := range corpus.References {
-		if ref.From == "app.AliasRun" && ref.To == "lib.Greet" && ref.Kind == edgeCalls {
-			found = true
+		if ref.Kind == edgeCalls && ref.From == caller {
+			targets = append(targets, ref.To)
 		}
 	}
-	if !found {
-		t.Fatalf("aliased import call not resolved: %+v", corpus.References)
+	if len(targets) != 1 || targets[0] != "Greet" {
+		t.Fatalf("aliased-import CALLS targets = %v, want exactly [Greet] (bare)", targets)
 	}
 }
 
 func TestScanSkipsUnreadableFile(t *testing.T) {
 	root := writeFixture(t)
 	// A directory named like a Go file is unreadable as a source file, which is
-	// the read-failure arm parseUnit must skip rather than fail on.
+	// the read-failure arm scanFile must skip rather than fail on.
 	writeExtra(t, root, "weird.go/keep.txt", "x")
 	files, _, err := Scan(root, "")
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	for _, f := range files {
-		if f.Path == "weird.go" {
+		if f.RelPath == "weird.go" {
 			t.Fatal("unreadable path must not produce an ingestion unit")
 		}
 	}
@@ -416,26 +447,35 @@ func initGitRepo(t *testing.T) string {
 	return root
 }
 
-func TestGitChangedFilesFallsBackToTrackedFiles(t *testing.T) {
+// TestResolveIncrementalBaseRejectsAnAnchorlessGitRepo covers the arm that
+// forces a full rebuild: a git repository whose graph records no
+// last-built commit has no usable diff base, and substituting HEAD~1 would
+// report a stale graph as up to date.
+func TestResolveIncrementalBaseRejectsAnAnchorlessGitRepo(t *testing.T) {
 	root := initGitRepo(t)
-	// The repository has only a root commit, so HEAD~1 does not resolve.
-	files, err := gitChangedFiles(root, "")
+	e := Open(root)
+	t.Cleanup(func() { _ = e.Close() })
+	base, ok, err := e.resolveIncrementalBase(&fakeStore{})
 	if err != nil {
-		t.Fatalf("gitChangedFiles: %v", err)
+		t.Fatalf("resolveIncrementalBase: %v", err)
 	}
-	if len(files) == 0 {
-		t.Fatal("want every tracked file when the base does not resolve")
+	if ok || base != "" {
+		t.Fatalf("resolveIncrementalBase = (%q, %v), want no usable base", base, ok)
 	}
 }
 
-func TestGitChangedFilesDiffsAResolvableBase(t *testing.T) {
+// TestResolveIncrementalBaseUsesTheStoredAnchor covers the happy arm.
+func TestResolveIncrementalBaseUsesTheStoredAnchor(t *testing.T) {
 	root := initGitRepo(t)
-	files, err := gitChangedFiles(root, "HEAD")
+	e := Open(root)
+	t.Cleanup(func() { _ = e.Close() })
+	head := headCommit(root)
+	base, ok, err := e.resolveIncrementalBase(&fakeStore{meta: map[string]string{metaGitHeadSHA: head}})
 	if err != nil {
-		t.Fatalf("gitChangedFiles: %v", err)
+		t.Fatalf("resolveIncrementalBase: %v", err)
 	}
-	if len(files) != 0 {
-		t.Fatalf("HEAD...HEAD = %v, want no changes", files)
+	if !ok || base != head {
+		t.Fatalf("resolveIncrementalBase = (%q, %v), want (%q, true)", base, ok, head)
 	}
 }
 
@@ -445,8 +485,8 @@ func TestHeadCommitResolvesInsideRepo(t *testing.T) {
 	}
 }
 
-func TestGitTrackedFilesFailsOutsideRepo(t *testing.T) {
-	if _, err := gitTrackedFiles(t.TempDir()); err == nil {
-		t.Fatal("want an error outside a git repository")
+func TestHeadCommitOutsideRepositoryIsEmpty(t *testing.T) {
+	if got := headCommit(t.TempDir()); got != "" {
+		t.Fatalf("headCommit = %q, want empty outside a git repository", got)
 	}
 }

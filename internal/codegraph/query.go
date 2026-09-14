@@ -2,10 +2,9 @@ package codegraph
 
 import (
 	"fmt"
+	"math"
 	"sort"
-	"time"
 
-	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
@@ -22,28 +21,14 @@ const (
 	reviewPriorityLimit  = 10
 )
 
-// The crg derivation seams. Production always binds the real, parity-verified
-// adapter derivations; they are indirected only so tests can exercise the
-// store-readback error arms below, which the in-process namespaceView
-// projection can never produce on its own.
-var (
-	flowsFromStore           = crg.FlowsFromStore
-	flowMembershipsFromStore = crg.FlowMembershipsFromStore
-	communitiesFromStore     = crg.CommunitiesFromStore
-	riskIndexFromStore       = crg.RiskIndexFromStore
-	postprocessFromStore     = crg.PostprocessFromStore
-)
-
-// snapshot loads the persisted graph for a read-only query, returning an empty
-// snapshot when the graph has never been built. Every query path below degrades
-// to an empty (but well-formed) result in that case rather than erroring — the
-// same soft behaviour the bridge had when its database was missing.
-func (e *Engine) snapshot() (graphSnapshot, error) {
-	store, err := e.readStore()
-	if err != nil || store == nil {
-		return graphSnapshot{}, err
-	}
-	return readSnapshot(store)
+// derivedReader is the slice of the store the derived-view accessors below
+// read. They read the PERSISTED tables the post-process pass wrote rather
+// than recomputing a view on every call — the same thing upstream's MCP
+// tools do, and the only way `list_flows` can report the flow ids
+// `get_flow` resolves.
+type derivedReader interface {
+	graphstore.CodeGraphReader
+	graphstore.CodeGraphDerived
 }
 
 // ── Impact radius (§11.1 row 4) ──────────────────────────────────────────────
@@ -65,11 +50,23 @@ func (e *Engine) GetImpactRadius(opts graphstore.ImpactOptions) (*graphstore.CRG
 		result.Summary = "Code graph not built; no impact computed."
 		return result, nil
 	}
-	impact, err := store.GetImpactRadius(files, opts.MaxDepth, opts.MaxResults)
+	// The seeds are repo-relative (git's spelling); the graph keys files by
+	// their absolute path, so they are resolved before the traversal and the
+	// caller's own spelling is echoed back unchanged.
+	impact, err := store.GetImpactRadius(e.graphPaths(files), opts.MaxDepth, opts.MaxResults)
 	if err != nil {
 		return nil, err
 	}
 	return impactResult(files, impact), nil
+}
+
+// graphPaths maps caller-supplied paths onto the spelling the graph stores.
+func (e *Engine) graphPaths(files []string) []string {
+	out := make([]string, 0, len(files))
+	for _, file := range files {
+		out = append(out, e.absPath(file))
+	}
+	return out
 }
 
 // impactSeedFiles resolves the seed file set: the caller's explicit list, else
@@ -111,18 +108,25 @@ func impactNodes(nodes []graphstore.GraphNode) []graphstore.ImpactNode {
 
 // ── Flows (§11.1 row 5) ──────────────────────────────────────────────────────
 
-// ListFlows returns the execution flows derived from the persisted CALLS graph
-// via the crg adapter's flow derivation — the same code the §11.6 flows parity
-// oracle compares, so the CLI and the parity gate can never diverge.
+// ListFlows returns the execution flows the last post-process persisted.
 func (e *Engine) ListFlows(limit int, sortBy string) (*graphstore.FlowsResult, error) {
-	snap, err := e.snapshot()
+	store, err := e.readStore()
 	if err != nil {
 		return nil, err
 	}
-	flows, err := flowsFromStore(snap.view, crg.Name)
+	result := &graphstore.FlowsResult{Status: statusOK, Summary: "0 flow(s)"}
+	if store == nil {
+		return result, nil
+	}
+	rows, err := store.ReadFlows()
 	if err != nil {
 		return nil, err
 	}
+	entryPoints, err := flowEntryPointNames(store, rows)
+	if err != nil {
+		return nil, err
+	}
+	flows := flowInfos(rows, entryPoints)
 	sortFlows(flows, sortBy)
 	if limit <= 0 {
 		limit = defaultFlowLimit
@@ -130,22 +134,59 @@ func (e *Engine) ListFlows(limit int, sortBy string) (*graphstore.FlowsResult, e
 	if len(flows) > limit {
 		flows = flows[:limit]
 	}
-	return &graphstore.FlowsResult{
-		Status:  statusOK,
-		Summary: fmt.Sprintf("%d flow(s)", len(flows)),
-		Flows:   flowInfos(snap, flows),
-	}, nil
+	result.Flows = flows
+	result.Summary = fmt.Sprintf("%d flow(s)", len(flows))
+	return result, nil
 }
 
-// sortFlows orders flows by the requested key; criticality (descending) is the
-// default, matching the bridge.
-func sortFlows(flows []crg.Flow, sortBy string) {
+// flowEntryPointNames resolves each flow's entry-point node id to its
+// qualified name in one batched read.
+func flowEntryPointNames(store derivedReader, rows []graphstore.FlowRow) (map[int64]string, error) {
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.EntryPointID)
+	}
+	nodes, err := store.ReadNodesByID(ids)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[int64]string, len(nodes))
+	for _, node := range nodes {
+		names[node.ID] = node.QualifiedName
+	}
+	return names, nil
+}
+
+// flowInfos projects persisted flow rows onto the wire shape. The id is the
+// row's own primary key, so it round-trips through a `get_flow` lookup.
+func flowInfos(rows []graphstore.FlowRow, entryPoints map[int64]string) []graphstore.FlowInfo {
+	out := make([]graphstore.FlowInfo, 0, len(rows))
+	for _, row := range rows {
+		entry := entryPoints[row.EntryPointID]
+		if entry == "" {
+			entry = row.Name
+		}
+		out = append(out, graphstore.FlowInfo{
+			ID:          row.ID,
+			Name:        row.Name,
+			EntryPoint:  entry,
+			StepCount:   row.NodeCount,
+			Criticality: row.Criticality,
+			Kind:        "call_flow",
+		})
+	}
+	return out
+}
+
+// sortFlows orders flows by the requested key; criticality (descending) is
+// the default, matching upstream.
+func sortFlows(flows []graphstore.FlowInfo, sortBy string) {
 	if sortBy == "" {
 		sortBy = sortByCriticality
 	}
 	sort.SliceStable(flows, func(i, j int) bool {
 		if sortBy == "name" || sortBy == "entry_point" {
-			return flows[i].EntryPoint < flows[j].EntryPoint
+			return flows[i].Name < flows[j].Name
 		}
 		if flows[i].Criticality != flows[j].Criticality {
 			return flows[i].Criticality > flows[j].Criticality
@@ -154,134 +195,63 @@ func sortFlows(flows []crg.Flow, sortBy string) {
 	})
 }
 
-// flowInfos projects derived flows onto the bridge's FlowInfo shape. Flow ids
-// are positional: the derivation keys a flow by its entry-point symbol id
-// (a string), while the wire shape carries an int64, so the index is the stable
-// identifier within one response.
-func flowInfos(snap graphSnapshot, flows []crg.Flow) []graphstore.FlowInfo {
-	out := make([]graphstore.FlowInfo, 0, len(flows))
-	for i, f := range flows {
-		name := f.EntryPoint
-		if node, ok := snap.nodeByID[f.ID]; ok && node.Name != "" {
-			name = node.QualifiedName
-		}
-		out = append(out, graphstore.FlowInfo{
-			ID:          int64(i + 1),
-			Name:        name,
-			EntryPoint:  f.EntryPoint,
-			StepCount:   len(f.Members),
-			Criticality: f.Criticality,
-			Kind:        "call_flow",
-		})
-	}
-	return out
-}
-
 // ── Communities (§11.1 row 6) ────────────────────────────────────────────────
 
-// ListCommunities returns the code communities derived from the persisted
-// dependency graph via the crg adapter's partition derivation.
+// ListCommunities returns the code communities the last post-process
+// persisted, with their member symbols.
 func (e *Engine) ListCommunities(minSize int, sortBy string) (*graphstore.CommunitiesResult, error) {
-	snap, err := e.snapshot()
+	store, err := e.readStore()
 	if err != nil {
 		return nil, err
 	}
-	clusters, err := communitiesFromStore(snap.view, crg.Name)
+	result := &graphstore.CommunitiesResult{Status: statusOK, Summary: "0 community/communities"}
+	if store == nil {
+		return result, nil
+	}
+	rows, err := store.ReadCommunities()
 	if err != nil {
 		return nil, err
 	}
-	communities := communityInfos(snap, clusters, minSize)
-	sortCommunities(communities, sortBy)
-	return &graphstore.CommunitiesResult{
-		Status:      statusOK,
-		Summary:     fmt.Sprintf("%d community/communities", len(communities)),
-		Communities: communities,
-	}, nil
-}
-
-// communityInfos groups the cluster map into the bridge's CommunityInfo shape.
-func communityInfos(snap graphSnapshot, clusters map[string]string, minSize int) []graphstore.CommunityInfo {
-	members := map[string][]string{}
-	for id, cluster := range clusters {
-		members[cluster] = append(members[cluster], id)
-	}
-	reps := make([]string, 0, len(members))
-	for rep := range members {
-		reps = append(reps, rep)
-	}
-	sort.Strings(reps)
-
-	internal := internalEdgeCounts(snap, clusters)
-	out := make([]graphstore.CommunityInfo, 0, len(reps))
-	for i, rep := range reps {
-		ids := members[rep]
-		if len(ids) < minSize {
+	communities := make([]graphstore.CommunityInfo, 0, len(rows))
+	for _, row := range rows {
+		if row.Size < minSize {
 			continue
 		}
-		sort.Strings(ids)
-		out = append(out, communityInfo(snap, int64(i+1), rep, ids, internal[rep]))
-	}
-	return out
-}
-
-// communityInfo builds one community record. Cohesion is the share of a
-// component's possible undirected pairs that are actually connected — a
-// structural measure computed from storage, unlike the bridge's LLM-authored
-// descriptions (see the documented delta in the consumer audit).
-func communityInfo(snap graphSnapshot, id int64, rep string, ids []string, internalEdges int) graphstore.CommunityInfo {
-	size := len(ids)
-	cohesion := 0.0
-	if pairs := size * (size - 1) / 2; pairs > 0 {
-		cohesion = float64(internalEdges) / float64(pairs)
-	}
-	return graphstore.CommunityInfo{
-		ID:               id,
-		Name:             communityName(snap, rep),
-		Size:             size,
-		Cohesion:         cohesion,
-		DominantLanguage: dominantLanguage(snap, ids),
-		Members:          snap.qualifiedNames(ids),
-	}
-}
-
-// communityName names a community after its representative symbol.
-func communityName(snap graphSnapshot, rep string) string {
-	if node, ok := snap.nodeByID[rep]; ok {
-		return node.QualifiedName
-	}
-	return rep
-}
-
-// dominantLanguage returns the most common language among a community's members.
-func dominantLanguage(snap graphSnapshot, ids []string) string {
-	counts := map[string]int{}
-	for _, id := range ids {
-		if node, ok := snap.nodeByID[id]; ok && node.Language != "" {
-			counts[node.Language]++
+		members, err := communityMembers(store, row.ID)
+		if err != nil {
+			return nil, err
 		}
+		communities = append(communities, graphstore.CommunityInfo{
+			ID:               row.ID,
+			Name:             row.Name,
+			Size:             row.Size,
+			Cohesion:         row.Cohesion,
+			DominantLanguage: row.DominantLanguage,
+			Description:      row.Description,
+			Members:          members,
+		})
 	}
-	best, bestCount := "", 0
-	for lang, n := range counts {
-		if n > bestCount || (n == bestCount && lang < best) {
-			best, bestCount = lang, n
-		}
-	}
-	return best
+	sortCommunities(communities, sortBy)
+	result.Communities = communities
+	result.Summary = fmt.Sprintf("%d community/communities", len(communities))
+	return result, nil
 }
 
-// internalEdgeCounts counts edges whose endpoints share a cluster.
-func internalEdgeCounts(snap graphSnapshot, clusters map[string]string) map[string]int {
-	counts := map[string]int{}
-	for _, e := range snap.view.edges {
-		if from, to := clusters[e.From], clusters[e.To]; from != "" && from == to {
-			counts[from]++
-		}
+// communityMembers lists one community's member symbols by qualified name.
+func communityMembers(store derivedReader, id int64) ([]string, error) {
+	nodes, err := store.ReadNodesByCommunity(id)
+	if err != nil {
+		return nil, err
 	}
-	return counts
+	members := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		members = append(members, node.QualifiedName)
+	}
+	return members, nil
 }
 
-// sortCommunities orders communities by the requested key (size descending by
-// default, matching the bridge).
+// sortCommunities orders communities by the requested key (size descending
+// by default, matching upstream).
 func sortCommunities(communities []graphstore.CommunityInfo, sortBy string) {
 	if sortBy == "" {
 		sortBy = defaultCommunitySort
@@ -300,82 +270,38 @@ func sortCommunities(communities []graphstore.CommunityInfo, sortBy string) {
 	})
 }
 
-// ── Postprocess (§11.1 row 7) ────────────────────────────────────────────────
-
-// Postprocess recomputes the derived views and records their sizes as store
-// metadata. The kg-native backend derives flows/communities/FTS on demand, so
-// this is a verification-and-stamp pass rather than a materialization pass; the
-// recorded counts are what `da kg code-status` consumers can assert on.
-func (e *Engine) Postprocess(opts graphstore.PostprocessOptions) error {
-	store, err := e.readStore()
-	if err != nil {
-		return err
-	}
-	if store == nil {
-		return nil // nothing built yet — a no-op, not a failure
-	}
-	snap, err := readSnapshot(store)
-	if err != nil {
-		return err
-	}
-	post, err := postprocessFromStore(snap.view, crg.Name)
-	if err != nil {
-		return err
-	}
-	return storePostprocessMetadata(store, opts, post, e.now().UTC().Format(time.RFC3339))
-}
-
-// storePostprocessMetadata writes the per-view counts the operator asked for.
-func storePostprocessMetadata(store graphstore.CodeGraphWriter, opts graphstore.PostprocessOptions, post crg.Postprocess, stamp string) error {
-	writes := map[string]string{"last_postprocess": stamp}
-	if !opts.NoFlows {
-		writes["flow_memberships"] = fmt.Sprintf("%d", len(post.FlowMemberships))
-	}
-	if !opts.NoCommunities {
-		writes["communities"] = fmt.Sprintf("%d", distinctValues(post.Communities))
-	}
-	if !opts.NoFTS {
-		writes["fts_tokens"] = fmt.Sprintf("%d", len(post.FTS))
-	}
-	keys := make([]string, 0, len(writes))
-	for k := range writes {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		if err := store.SetMetadata(k, writes[k]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// distinctValues counts the distinct values of a map (here: cluster ids).
-func distinctValues(m map[string]string) int {
-	seen := map[string]bool{}
-	for _, v := range m {
-		seen[v] = true
-	}
-	return len(seen)
-}
-
 // ── Detect changes (§11.1 row 8) ─────────────────────────────────────────────
 
-// DetectChanges returns the change-impact report for the current diff, built
-// from the persisted graph: changed symbols with degree-centrality risk, the
-// flows they participate in, symbols with no test edge, and the ranked review
-// priorities.
+// DetectChanges returns the change-impact report for the changed-file set,
+// built from the PERSISTED graph and its derived tables: the symbols those
+// files declare, the risk_index score the last post-process computed for
+// each, the flows they participate in, and the ones with no test edge.
+//
+// It is file-level by construction. Upstream attributes changed symbols from
+// `git diff --unified=0` hunk boundaries, which is why the MCP
+// detect_changes tool is routed to the retained bridge; this provider-level
+// accessor answers the same question at file granularity for the CLI.
 func (e *Engine) DetectChanges(opts graphstore.DetectChangesOptions) (*graphstore.CRGChangeReport, error) {
-	files, err := e.detectFiles(opts)
+	target, release, err := e.rooted(opts.RepoRoot)
 	if err != nil {
 		return nil, err
 	}
-	snap, err := e.snapshot()
+	defer release()
+	files, err := target.detectFiles(opts)
 	if err != nil {
 		return nil, err
 	}
-	changed := changedSymbols(snap, files)
-	report := buildChangeReport(snap, changed)
+	store, err := target.readStore()
+	if err != nil {
+		return nil, err
+	}
+	if store == nil {
+		return &graphstore.CRGChangeReport{Summary: changeSummary(0, 0, 0, 0)}, nil
+	}
+	report, err := target.buildChangeReport(store, files)
+	if err != nil {
+		return nil, err
+	}
 	if opts.Brief {
 		return &graphstore.CRGChangeReport{Summary: report.Summary}, nil
 	}
@@ -390,153 +316,174 @@ func (e *Engine) detectFiles(opts graphstore.DetectChangesOptions) ([]string, er
 	return e.changedFiles(e.root, opts.Base)
 }
 
-// changedSymbols returns the crg note ids of symbols declared in the given
-// files, in stable order.
-func changedSymbols(snap graphSnapshot, files []string) []string {
-	want := make(map[string]bool, len(files))
-	for _, f := range files {
-		want[f] = true
-	}
-	var ids []string
-	for id, node := range snap.nodeByID {
-		if want[node.FilePath] {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	return ids
-}
-
 // buildChangeReport assembles the full change-impact report.
-func buildChangeReport(snap graphSnapshot, changed []string) *graphstore.CRGChangeReport {
-	risk := riskScores(snap)
+func (e *Engine) buildChangeReport(store derivedReader, files []string) (*graphstore.CRGChangeReport, error) {
+	changed, err := e.changedNodes(store, files)
+	if err != nil {
+		return nil, err
+	}
+	risk, err := riskByQualifiedName(store)
+	if err != nil {
+		return nil, err
+	}
+	edges, err := store.ReadAllEdges()
+	if err != nil {
+		return nil, err
+	}
 	report := &graphstore.CRGChangeReport{
-		ChangedFunctions: changedNodeRows(snap, changed, risk),
-		TestGaps:         testGaps(snap, changed),
-		AffectedFlows:    affectedFlows(snap, changed),
+		ChangedFunctions: changedNodeRows(changed, risk, callerCounts(edges)),
+		TestGaps:         testGaps(changed, testedSymbols(edges)),
+	}
+	report.AffectedFlows, err = flowsContainingChangedSymbols(store, changed)
+	if err != nil {
+		return nil, err
 	}
 	report.ReviewPriorities = reviewPriorities(report.ChangedFunctions)
 	report.RiskScore = maxRisk(report.ChangedFunctions)
-	report.Summary = fmt.Sprintf(
-		"%d changed symbol(s), %d affected flow(s), %d test gap(s); risk %.2f",
+	report.Summary = changeSummary(
 		len(report.ChangedFunctions), len(report.AffectedFlows), len(report.TestGaps), report.RiskScore)
-	return report
+	return report, nil
 }
 
-// riskScores returns the normalized (0..1) degree-centrality risk per note id,
-// computed by the crg adapter's risk-index derivation.
-func riskScores(snap graphSnapshot) map[string]float64 {
-	raw := riskIndex(snap)
-	max := 0.0
-	for _, v := range raw {
-		if v > max {
-			max = v
+// changeSummary renders the report's one-line headline.
+func changeSummary(symbols, flows, gaps int, risk float64) string {
+	return fmt.Sprintf("%d changed symbol(s), %d affected flow(s), %d test gap(s); risk %.2f",
+		symbols, flows, gaps, risk)
+}
+
+// changedNodes returns the non-File symbols the changed files declare, in
+// stable qualified-name order.
+func (e *Engine) changedNodes(store derivedReader, files []string) ([]graphstore.GraphNode, error) {
+	var changed []graphstore.GraphNode
+	seen := map[string]bool{}
+	for _, file := range files {
+		abs := e.absPath(file)
+		if seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		nodes, err := store.GetNodesByFile(abs)
+		if err != nil {
+			return nil, err
+		}
+		for _, node := range nodes {
+			if node.Kind != nodeKindFile {
+				changed = append(changed, node)
+			}
 		}
 	}
-	if max == 0 {
-		return raw
-	}
-	out := make(map[string]float64, len(raw))
-	for id, v := range raw {
-		out[id] = v / max
-	}
-	return out
+	sort.SliceStable(changed, func(i, j int) bool {
+		return changed[i].QualifiedName < changed[j].QualifiedName
+	})
+	return changed, nil
 }
 
-// riskIndex reads the derived risk index, tolerating an empty graph.
-func riskIndex(snap graphSnapshot) map[string]float64 {
-	idx, err := riskIndexFromStore(snap.view, crg.Name)
+// riskByQualifiedName reads the persisted risk_index into a lookup.
+func riskByQualifiedName(store derivedReader) (map[string]float64, error) {
+	rows, err := store.ReadRiskIndex()
 	if err != nil {
-		return map[string]float64{}
+		return nil, err
 	}
-	return idx
+	risk := make(map[string]float64, len(rows))
+	for _, row := range rows {
+		risk[row.QualifiedName] = row.RiskScore
+	}
+	return risk, nil
 }
 
 // changedNodeRows projects changed symbols onto the report's node shape,
-// carrying the caller count the bridge reported.
-func changedNodeRows(snap graphSnapshot, changed []string, risk map[string]float64) []graphstore.CRGChangedNode {
-	callers := callerCounts(snap)
+// highest risk first.
+func changedNodeRows(changed []graphstore.GraphNode, risk map[string]float64, callers map[string]int) []graphstore.CRGChangedNode {
 	out := make([]graphstore.CRGChangedNode, 0, len(changed))
-	for _, id := range changed {
-		node := snap.nodeByID[id]
+	for _, node := range changed {
 		out = append(out, graphstore.CRGChangedNode{
 			Name:          node.Name,
 			QualifiedName: node.QualifiedName,
 			FilePath:      node.FilePath,
-			RiskScore:     risk[id],
-			Callers:       callers[id],
+			RiskScore:     risk[node.QualifiedName],
+			Callers:       callers[node.QualifiedName],
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].RiskScore > out[j].RiskScore })
 	return out
 }
 
-// callerCounts counts incoming edges per note id.
-func callerCounts(snap graphSnapshot) map[string]int {
+// callerCounts counts the CALLS edges targeting each symbol.
+func callerCounts(edges []graphstore.GraphEdge) map[string]int {
 	counts := map[string]int{}
-	for _, e := range snap.view.edges {
-		counts[e.To]++
+	for _, edge := range edges {
+		if edge.Kind == graphstore.EdgeKindCalls {
+			counts[edge.TargetQualified]++
+		}
 	}
 	return counts
 }
 
-// testGaps returns the changed non-test symbols with no TESTED_BY edge.
-func testGaps(snap graphSnapshot, changed []string) []graphstore.CRGTestGap {
+// testedSymbols is the set of symbols with at least one TESTED_BY edge.
+func testedSymbols(edges []graphstore.GraphEdge) map[string]bool {
 	tested := map[string]bool{}
-	for _, e := range snap.view.edges {
-		if e.Type == edgeTestedBy {
-			tested[e.From] = true
+	for _, edge := range edges {
+		if edge.Kind == graphstore.EdgeKindTestedBy {
+			tested[edge.SourceQualified] = true
 		}
 	}
-	var out []graphstore.CRGTestGap
-	for _, id := range changed {
-		node := snap.nodeByID[id]
-		if node.IsTest || tested[id] {
-			continue
-		}
-		out = append(out, graphstore.CRGTestGap{QualifiedName: node.QualifiedName, FilePath: node.FilePath})
-	}
-	return out
+	return tested
 }
 
-// affectedFlows returns the derived flows that contain at least one changed
-// symbol.
-func affectedFlows(snap graphSnapshot, changed []string) []graphstore.CRGFlow {
-	rows, err := flowMembershipsFromStore(snap.view, crg.Name)
-	if err != nil {
-		return nil
-	}
-	changedSet := make(map[string]bool, len(changed))
-	for _, id := range changed {
-		changedSet[id] = true
-	}
-	hit := map[string]bool{}
-	for _, row := range rows {
-		if changedSet[row.MemberID] {
-			hit[row.FlowID] = true
+// testGaps returns the changed non-test symbols with no TESTED_BY edge.
+func testGaps(changed []graphstore.GraphNode, tested map[string]bool) []graphstore.CRGTestGap {
+	var out []graphstore.CRGTestGap
+	for _, node := range changed {
+		if node.IsTest || tested[node.QualifiedName] {
+			continue
 		}
-	}
-	ids := make([]string, 0, len(hit))
-	for id := range hit {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	out := make([]graphstore.CRGFlow, 0, len(ids))
-	for i, id := range ids {
-		out = append(out, graphstore.CRGFlow{
-			ID:         int64(i + 1),
-			EntryPoint: communityName(snap, id),
+		out = append(out, graphstore.CRGTestGap{
+			QualifiedName: node.QualifiedName,
+			FilePath:      node.FilePath,
 		})
 	}
 	return out
 }
 
+// flowsContainingChangedSymbols returns the persisted flows that contain at
+// least one of the changed symbols.
+func flowsContainingChangedSymbols(store derivedReader, changed []graphstore.GraphNode) ([]graphstore.CRGFlow, error) {
+	if len(changed) == 0 {
+		return nil, nil
+	}
+	memberships, err := store.ReadFlowMemberships()
+	if err != nil {
+		return nil, err
+	}
+	changedIDs := make(map[int64]bool, len(changed))
+	for _, node := range changed {
+		changedIDs[node.ID] = true
+	}
+	hit := map[int64]bool{}
+	for _, row := range memberships {
+		if changedIDs[row.NodeID] {
+			hit[row.FlowID] = true
+		}
+	}
+	if len(hit) == 0 {
+		return nil, nil
+	}
+	flows, err := store.ReadFlows()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]graphstore.CRGFlow, 0, len(hit))
+	for _, flow := range flows {
+		if hit[flow.ID] {
+			out = append(out, graphstore.CRGFlow{ID: flow.ID, EntryPoint: flow.Name})
+		}
+	}
+	return out, nil
+}
+
 // reviewPriorities ranks the highest-risk changed symbols.
 func reviewPriorities(changed []graphstore.CRGChangedNode) []graphstore.CRGPriority {
-	limit := reviewPriorityLimit
-	if len(changed) < limit {
-		limit = len(changed)
-	}
+	limit := min(reviewPriorityLimit, len(changed))
 	out := make([]graphstore.CRGPriority, 0, limit)
 	for _, n := range changed[:limit] {
 		out = append(out, graphstore.CRGPriority{
@@ -550,11 +497,9 @@ func reviewPriorities(changed []graphstore.CRGChangedNode) []graphstore.CRGPrior
 
 // maxRisk is the report-level risk score: the highest changed-symbol risk.
 func maxRisk(changed []graphstore.CRGChangedNode) float64 {
-	max := 0.0
+	highest := 0.0
 	for _, n := range changed {
-		if n.RiskScore > max {
-			max = n.RiskScore
-		}
+		highest = math.Max(highest, n.RiskScore)
 	}
-	return max
+	return highest
 }
