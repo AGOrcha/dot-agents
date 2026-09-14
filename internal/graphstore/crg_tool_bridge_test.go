@@ -3,8 +3,8 @@ package graphstore
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -28,7 +28,13 @@ func discoverableRelease(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	binary, err := exec.LookPath(crgBinName)
+	// Discover the release from THIS repository, not from PATH: CI installs it
+	// into the repo-root .venv without putting .venv/bin on PATH, so a
+	// PATH-only lookup would skip in exactly the environment the bridge is
+	// meant to be exercised in. DiscoverCRGBin is the probe production uses.
+	_, testFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Join(filepath.Dir(testFile), "..", "..")
+	binary, err := DiscoverCRGBin(repoRoot)
 	if err != nil {
 		t.Skipf("code-review-graph %s is not installed: %v", crgrelease.Version, err)
 	}

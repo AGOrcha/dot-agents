@@ -1,7 +1,7 @@
 # coverage-gate per-file exceptions allowlist
 #
 # === RATCHET ===
-# ratchet-max-entries: 179
+# ratchet-max-entries: 188
 # The coverage gate fails if the allowlist grows above this number.
 # To add a new entry: prove there is no test-driven path to the threshold,
 # bump this line in the same commit, and include the rationale in PR review.
@@ -210,3 +210,17 @@ commands/observability/history.go                            # [obs-subsystem] 6
 commands/observability/outbox.go                             # [obs-subsystem] 71.71% merged multi-OS; obs plan raises to 100% + removes
 commands/workflow/observability_hook.go                      # [obs-subsystem] 69.64% merged multi-OS; obs plan raises to 100% + removes
 internal/dashboard/events/broker.go                          # [flaky-concurrency] dispatch (broker.go:275) has a nondeterministically-covered concurrent branch — 83-100% file coverage across runs; allowlisted so it stops flaking the 100% merged gate; obs/dashboard plan owns a deterministic test
+
+# === kg-native CRG cutover (PR #553) ===
+# Each entry is a defensive guard on a condition the surrounding control flow
+# has already excluded, named per file below. Every other statement in these
+# files is covered; they all clear the 95% floor unaided.
+internal/crgrelease/validate.go                              # [defensive-guards] 99.57%; decodeArguments' non-string-key return is unreachable — the loop is entered only after Token() confirmed Delim '{', and in object key position encoding/json returns a string or an error (handled one line above)
+internal/codegraph/capability.go                             # [defensive-guards] 96.20%; mustLanguageContract's decode-failure, empty-extensions and missing-Go panics guard go:embed'd compile-time bytes that TestEmbeddedLanguageContractMatchesFixture already pins byte-for-byte against the generated fixture
+internal/codegraph/tools_context.go                          # [defensive-guards] 99.71%; releaseChangeSet's second Subversion check and its non-Subversion error return are both preempted by the ReleaseChangedFiles call above them, which runs the identical isSubversionWorkingCopy probe on the same root and completes every read the working-tree pass repeats
+internal/codegraph/tools_git.go                              # [defensive-guards] 99.55%; releaseWorktreeBlob's os.Readlink guard needs Readlink to fail on the very path os.Lstat just reported as a symlink, which requires a concurrent replacement between the two syscalls
+internal/codegraph/tools_lifecycle.go                        # [defensive-guards] 96.30%; lifecycleReportPayload's decode guard cannot fire — json.Marshal of a struct always yields an object, so unmarshalling it into map[string]any succeeds whenever the Marshal above it did
+internal/codegraph/tools_query.go                            # [defensive-guards] 99.91%; testsFor's already-seen skip on a transitive match is unreachable because releaseTransitiveTests deduplicates by qualified name before returning; the same map is live for the naming-convention pass below it
+commands/kg/graph_capabilities.go                            # [defensive-guards] 95.45%; the two crgrelease.Capabilities() failure returns need the embedded release surface and its routing table to disagree (both compile-time state in another package, pinned by that package's own tests), and json.MarshalIndent cannot fail on a diagnostic built only from strings, ints, bools and slices
+internal/graphstore/crg_release.go                           # [defensive-guards] 96.77%; graphSchemaVersion's sql.Open guard cannot fire — modernc.org/sqlite registers its driver at init and implements neither DriverContext nor OpenConnector, so sql.Open is purely lazy (same rationale as the sql.Open guards in the already-listed crg.go)
+internal/graphstore/crg_tool_bridge.go                       # [defensive-guards] 97.78%; CallTool's timeout return needs the 10-minute crgToolCallTimeout to elapse, which exceeds go test's own deadline
