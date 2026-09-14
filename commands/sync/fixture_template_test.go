@@ -77,6 +77,13 @@ func syncRepoTemplate() (string, error) {
 			{"init"},
 			{"config", "user.name", "Test"},
 			{"config", "user.email", "test@example.com"},
+			// Must precede the first commit: `git commit` otherwise spawns a
+			// DETACHED `git maintenance run --auto`, which keeps creating and
+			// unlinking transient paths under .git after the commit returns —
+			// racing both copyGitTemplate's WalkDir over this template and a
+			// fixture's own TempDir teardown.
+			{"config", "maintenance.auto", "false"},
+			{"config", "gc.auto", "0"},
 			{"commit", "--allow-empty", "-m", "seed"},
 		} {
 			if err := run(args...); err != nil {

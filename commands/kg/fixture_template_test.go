@@ -67,6 +67,12 @@ func kgRepoTemplate() (string, error) {
 			{"init"},
 			{"config", "user.name", "test"},
 			{"config", "user.email", "test@example.com"},
+			// `git commit` otherwise spawns a DETACHED `git maintenance run
+			// --auto`, which keeps creating and unlinking transient paths
+			// under .git after the commit returns — racing both the template
+			// copy's WalkDir and a fixture's own TempDir teardown.
+			{"config", "maintenance.auto", "false"},
+			{"config", "gc.auto", "0"},
 		} {
 			if err := run(args...); err != nil {
 				kgRepoTemplateErr = err
