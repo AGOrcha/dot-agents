@@ -1,12 +1,16 @@
 name: crg
-version: 1.0.0
+version: 1.1.0
 description: |-
   Code Review Graph adapter (kg-native). Bootstrap performs Tree-sitter
-  ingestion of a repo's symbols into the kg_crg.* namespace: functions, types,
-  and the call / test / import edges between them. Replaces the legacy Python
-  subprocess bridge (spec §11). Dual-read mode (§11.3): da core prefers this
-  namespace; the crg-bridge mirror remains active until the §11.4 gate passes.
-# §11.6 anchor columns: nodes.kind (Function|Type), nodes.language, edges.kind.
+  ingestion of a repo's symbols into the kg_crg.* namespace: files, types,
+  functions and tests, plus the containment / call / import / test edges
+  between them. Replaces the legacy Python subprocess bridge (spec §11).
+  Dual-read mode (§11.3): da core prefers this namespace; the crg-bridge
+  mirror remains active until the §11.4 gate passes.
+# Parity anchor columns: nodes.kind, nodes.language, edges.kind. The
+# vocabularies below are upstream code-review-graph v2.3.8's, and are pinned
+# by testdata/crg-release/v2.3.8/graph.json — they are not free to drift from
+# what the scanner emits.
 note_types:
   - name: symbol
     fields:
@@ -16,7 +20,10 @@ note_types:
       - name: kind
         type: enum
         required: true
-        values: [Function, Type]
+        # Upstream's four node kinds. `File` is a real node, not a container:
+        # it owns the IMPORTS_FROM edges and anchors CONTAINS, and its
+        # identity is the bare file path.
+        values: [File, Class, Function, Test]
       - name: language
         type: string
         required: true
@@ -29,22 +36,32 @@ note_types:
       - name: content_hash
         type: string
         required: true
+# Upstream's four edge kinds. CONTAINS is structural (file -> symbol, class ->
+# method); CALLS and IMPORTS_FROM may carry a BARE target that resolves to no
+# node, which is intentional and is what the criticality score reads as an
+# external call; TESTED_BY is stored production -> test.
 edge_types:
+  - name: CONTAINS
+    from: symbol
+    to: symbol
   - name: CALLS
+    from: symbol
+    to: symbol
+  - name: IMPORTS_FROM
     from: symbol
     to: symbol
   - name: TESTED_BY
     from: symbol
     to: symbol
-  - name: IMPORTS
-    from: symbol
-    to: symbol
 # O5 staleness: the source_mutation driver fires on note content-hash change
 # (per O5 — NOT on any-upsert).
 staleness_drivers: [source_mutation]
+# CONTAINS is deliberately absent from the impact traversal: a changed file
+# already seeds every symbol declared in it, so following containment only
+# widens the blast radius through structure that is already covered.
 impact_radius:
   query: |-
-    MATCH (s:symbol)-[:CALLS|TESTED_BY|IMPORTS*1..max_depth]->(n:symbol)
+    MATCH (s:symbol)-[:CALLS|TESTED_BY|IMPORTS_FROM*1..max_depth]->(n:symbol)
     WHERE s.id IN $changed_ids
     RETURN n.id AS id
   max_depth: 3

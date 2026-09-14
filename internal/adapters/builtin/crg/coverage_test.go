@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/adapters/sdk"
@@ -58,6 +59,62 @@ func TestBootstrap_PropagatesReadbackError(t *testing.T) {
 	s := sdk.For(Name, fs)
 	if _, err := Bootstrap(s, fs, smallCorpus(), nil); err == nil {
 		t.Fatal("Bootstrap must propagate a readback (snapshot) failure")
+	}
+}
+
+// TestLoadReleaseGraph_Errors covers the release-fixture loader's failure
+// arms: the derived-view parity tests are only as trustworthy as their oracle,
+// so a missing or malformed fixture must fail loudly rather than yield an
+// empty ReleaseGraph that every comparison then trivially matches.
+func TestLoadReleaseGraph_Errors(t *testing.T) {
+	if _, err := LoadReleaseGraph("/nonexistent/graph.json", "/root"); err == nil {
+		t.Fatal("missing release graph must error")
+	}
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(bad, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadReleaseGraph(bad, "/root"); err == nil {
+		t.Fatal("malformed release graph JSON must error")
+	}
+}
+
+// TestLoadReleaseGraph_SubstitutesRepoRoot proves the ${REPO_ROOT} rebase
+// reaches every path-bearing field, not just node paths. Upstream's node
+// identity IS the absolute file path, so a field left un-rebased would compare
+// against a placeholder string and fail in a way that looks like an algorithm
+// bug rather than a fixture bug.
+func TestLoadReleaseGraph_SubstitutesRepoRoot(t *testing.T) {
+	const root = "/tmp/anywhere"
+	g, err := LoadReleaseGraph(releaseGraphPath(t), root)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	rebased := []string{}
+	for _, n := range g.Nodes {
+		rebased = append(rebased, n.QualifiedName, n.FilePath, n.Signature, n.Name)
+	}
+	for _, e := range g.Edges {
+		rebased = append(rebased, e.SourceQualified, e.TargetQualified, e.FilePath)
+	}
+	for _, s := range g.FlowSnapshots {
+		rebased = append(rebased, s.EntryPoint, s.CriticalPath)
+	}
+	for _, r := range g.RiskIndex {
+		rebased = append(rebased, r.QualifiedName)
+	}
+	for _, f := range g.FTS {
+		rebased = append(rebased, f.Name, f.QualifiedName, f.FilePath, f.Signature)
+	}
+	for _, value := range rebased {
+		if strings.Contains(value, "${REPO_ROOT}") {
+			t.Fatalf("un-rebased placeholder in %q", value)
+		}
+	}
+	// And the substitution actually landed somewhere, so an empty fixture
+	// cannot pass the check above by having nothing to rebase.
+	if !strings.HasPrefix(g.Nodes[0].FilePath, root) {
+		t.Fatalf("node file path = %q, want a %q prefix", g.Nodes[0].FilePath, root)
 	}
 }
 

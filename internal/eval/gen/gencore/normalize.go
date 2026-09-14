@@ -11,12 +11,12 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
-// crgSymbolSep is the "<file>::<name>" separator the code-review-graph ingestion
-// stamps into a node's qualified name. graphstore's makeQualified
-// (internal/graphstore/sqlite.go) falls back to `FilePath + "::" + Name` for any
-// node without a parent scope, and code-review-graph nodes carry no parent — so
-// their qualified names are "<absolute-file-path>::<decl>". The native
-// graphstore convention is "pkg.Symbol", which never contains this separator.
+// crgSymbolSep is the "<file>::<name>" separator a code-graph qualified name
+// carries. graphstore's makeQualified (internal/graphstore/sqlite.go) builds
+// every non-File identity as `FilePath + "::" + [ParentName + "." +] Name`, so
+// symbol names are "<absolute-file-path>::<decl>" whether they came from the
+// Python bridge or the kg-native scanner. A File node's identity is its bare
+// path and carries no separator.
 const crgSymbolSep = "::"
 
 // resolveRepoRoot returns the repository root the generator relativizes KG file
@@ -102,9 +102,11 @@ func cleanRelative(slashPath, orig string) (string, error) {
 	return cleaned, nil
 }
 
-// cleanSymbol returns the usable decl name from a KG qualified name. A
-// code-review-graph name ("<abs-file>::Decl") collapses to the segment after the
-// last separator ("Decl"); a native name ("pkg/foo.Bar") is returned unchanged.
+// cleanSymbol returns the usable decl name from a KG qualified name.
+// "<abs-file>::Decl" collapses to the segment after the last separator
+// ("Decl"), and "<abs-file>::Receiver.Method" to "Receiver.Method"; a name
+// carrying no separator (a File node, whose identity is its bare path) is
+// returned unchanged.
 func cleanSymbol(qn string) string {
 	if i := strings.LastIndex(qn, crgSymbolSep); i >= 0 {
 		return qn[i+len(crgSymbolSep):]

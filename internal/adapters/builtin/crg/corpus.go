@@ -23,7 +23,7 @@ const (
 // snapshots are computed from the readback (readback.go), never from this.
 type Symbol struct {
 	QualifiedName string `json:"qualified_name"`
-	Kind          string `json:"kind"` // Function | Type (nodes.kind anchor)
+	Kind          string `json:"kind"` // File | Class | Function | Test (nodes.kind anchor)
 	Language      string `json:"language"`
 	FilePath      string `json:"file_path"`
 	LineStart     int    `json:"line_start"`
@@ -31,7 +31,8 @@ type Symbol struct {
 }
 
 // Reference is one typed edge between two symbols (by qualified name). Kind is
-// one of CALLS, TESTED_BY, IMPORTS — the edges.kind parity anchor.
+// one of CONTAINS, CALLS, IMPORTS_FROM, TESTED_BY — upstream's edge
+// vocabulary and the edges.kind parity anchor.
 type Reference struct {
 	Kind string `json:"kind"`
 	From string `json:"from"`
