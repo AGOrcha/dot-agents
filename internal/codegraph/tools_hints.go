@@ -134,7 +134,11 @@ func (e *Engine) Session() *SessionState {
 // per connection; this exists so a test can assert the session-dependent
 // suppression from a known starting point.
 func (e *Engine) ResetSession() {
-	e.sessionOnce.Do(func() {})
+	e.sessionOnce.Do(func() {
+		// Intentionally empty: this only burns the once so the Session()
+		// accessor stops constructing a session, letting the assignment
+		// below install the replacement without a later Do overwriting it.
+	})
 	e.session = NewSessionState()
 }
 
@@ -245,43 +249,65 @@ func (s *SessionState) buildNextSteps(hintName string) []hintSuggestion {
 func extractHintWarnings(result map[string]any) []string {
 	var warnings []string
 
-	if gaps, ok := result["test_gaps"].([]any); ok && len(gaps) > 0 {
-		names := make([]string, 0, len(gaps))
-		for i, gap := range gaps {
-			if i >= 5 {
-				break
-			}
-			if entry, ok := gap.(map[string]any); ok {
-				if name, ok := entry["name"].(string); ok {
-					names = append(names, name)
-					continue
-				}
-			}
-			names = append(names, fmt.Sprintf("%v", gap))
-		}
-		warnings = append(warnings, "Test coverage gaps: "+joinComma(names))
+	if gaps, ok := hintTestGapWarning(result); ok {
+		warnings = append(warnings, gaps)
 	}
 
 	if risk, ok := toFloat(result["risk_score"]); ok && risk > 0.7 {
 		warnings = append(warnings, fmt.Sprintf("High risk score (%.2f) — review carefully", risk))
 	}
 
-	if existing, ok := result["warnings"].([]any); ok {
-		for i, item := range existing {
-			if i >= 3 {
-				break
+	warnings = append(warnings, hintPassthroughWarnings(result)...)
+	return warnings
+}
+
+// hintTestGapWarning summarises a payload's `test_gaps`, naming at most the
+// first five and falling back to the raw rendering of an entry that carries
+// no `name`. The bool reports whether the payload listed any gap at all.
+func hintTestGapWarning(result map[string]any) (string, bool) {
+	gaps, ok := result["test_gaps"].([]any)
+	if !ok || len(gaps) == 0 {
+		return "", false
+	}
+	names := make([]string, 0, len(gaps))
+	for i, gap := range gaps {
+		if i >= 5 {
+			break
+		}
+		if entry, ok := gap.(map[string]any); ok {
+			if name, ok := entry["name"].(string); ok {
+				names = append(names, name)
+				continue
 			}
-			switch typed := item.(type) {
-			case string:
-				warnings = append(warnings, typed)
-			case map[string]any:
-				if message, ok := typed["message"].(string); ok {
-					warnings = append(warnings, message)
-				}
+		}
+		names = append(names, fmt.Sprintf("%v", gap))
+	}
+	return "Test coverage gaps: " + joinComma(names), true
+}
+
+// hintPassthroughWarnings forwards at most the first three warnings the
+// payload already carries, accepting both a plain string and a map with a
+// `message` field.
+func hintPassthroughWarnings(result map[string]any) []string {
+	existing, ok := result["warnings"].([]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for i, item := range existing {
+		if i >= 3 {
+			break
+		}
+		switch typed := item.(type) {
+		case string:
+			out = append(out, typed)
+		case map[string]any:
+			if message, ok := typed["message"].(string); ok {
+				out = append(out, message)
 			}
 		}
 	}
-	return warnings
+	return out
 }
 
 // buildRelated suggests impacted files the session has not touched yet.
@@ -309,33 +335,49 @@ func (s *SessionState) buildRelated(result map[string]any) []string {
 // trackResult records the files and nodes this result exposed.
 func (s *SessionState) trackResult(result map[string]any) {
 	for _, key := range []string{"changed_files", "impacted_files"} {
-		if items, ok := result[key].([]any); ok {
-			paths := make([]string, 0, len(items))
-			for _, item := range items {
-				if path, ok := item.(string); ok {
-					paths = append(paths, path)
-				}
-			}
-			s.recordFiles(paths)
-		}
+		s.recordFiles(hintStringItems(result, key))
 	}
 	var nodeIDs []string
 	for _, key := range []string{"results", "changed_nodes", "impacted_nodes"} {
-		items, ok := result[key].([]any)
+		nodeIDs = append(nodeIDs, hintQualifiedNames(result, key)...)
+	}
+	s.recordNodes(nodeIDs)
+}
+
+// hintStringItems returns the string entries the payload lists under key,
+// skipping any entry that is not a string.
+func hintStringItems(result map[string]any, key string) []string {
+	items, ok := result[key].([]any)
+	if !ok {
+		return nil
+	}
+	paths := make([]string, 0, len(items))
+	for _, item := range items {
+		if path, ok := item.(string); ok {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+// hintQualifiedNames returns the non-empty `qualified_name` of every map
+// entry the payload lists under key.
+func hintQualifiedNames(result map[string]any, key string) []string {
+	items, ok := result[key].([]any)
+	if !ok {
+		return nil
+	}
+	var names []string
+	for _, item := range items {
+		entry, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		for _, item := range items {
-			entry, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			if qualified, ok := entry["qualified_name"].(string); ok && qualified != "" {
-				nodeIDs = append(nodeIDs, qualified)
-			}
+		if qualified, ok := entry["qualified_name"].(string); ok && qualified != "" {
+			names = append(names, qualified)
 		}
 	}
-	s.recordNodes(nodeIDs)
+	return names
 }
 
 // capSuggestions/capStrings bound a hint list and keep it a JSON array rather

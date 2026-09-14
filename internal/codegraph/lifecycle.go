@@ -1008,14 +1008,20 @@ func (e *Engine) stamp() string { return e.now().Format(upstreamTimeLayout) }
 // pinned clock or stubbed diff still applies.
 func (e *Engine) rooted(repoRoot string) (*Engine, func(), error) {
 	if repoRoot == "" {
-		return e, func() {}, nil
+		return e, func() {
+			// Intentionally empty: no scoped engine was opened, so the
+			// caller's release must not close this engine's database.
+		}, nil
 	}
 	requested, err := filepath.Abs(repoRoot)
 	if err != nil {
 		return nil, nil, fmt.Errorf("codegraph: resolve repo root %q: %w", repoRoot, err)
 	}
 	if NormalizeFilePath(requested) == NormalizeFilePath(e.absRoot()) {
-		return e, func() {}, nil
+		return e, func() {
+			// Intentionally empty: the requested root resolves to this
+			// engine's own root, so there is no second engine to close.
+		}, nil
 	}
 	scoped := Open(repoRoot)
 	scoped.changedFiles = e.changedFiles

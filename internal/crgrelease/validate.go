@@ -15,6 +15,12 @@ import (
 // means reproducing this too.
 const PydanticVersion = "2.13"
 
+// msgInvalidString is the validator's diagnostic for a non-string value where
+// a string is required. Clients match the wording verbatim, so every site
+// that rejects a non-string — a bare string parameter, an explicit null on
+// one, or a list element — must report exactly this text.
+const msgInvalidString = "Input should be a valid string"
+
 // ToolError is a tools/call failure expressed the way the pinned release
 // expresses it: the MCP result is NOT a JSON-RPC error, it is a successful
 // response carrying `isError: true` and one text block holding the message.
@@ -127,7 +133,6 @@ func (a Args) StringSlice(name string) ([]string, bool) {
 //
 // raw may be nil or empty, which the release treats as "no arguments".
 func (t Tool) Bind(raw json.RawMessage) (Args, *ToolError) {
-	args := Args{tool: t.Name, values: make(map[string]any, len(t.Params))}
 	supplied, order, err := decodeArguments(raw)
 	if err != nil {
 		// A non-object arguments payload never reaches a field validator;
@@ -139,69 +144,122 @@ func (t Tool) Bind(raw json.RawMessage) (Args, *ToolError) {
 		}})}
 	}
 
-	var issues []validationIssue
+	args := Args{tool: t.Name, values: make(map[string]any, len(t.Params))}
+	issues, fatal := t.bindDeclared(&args, supplied, order)
+	if fatal != nil {
+		return Args{}, fatal
+	}
+	issues = append(issues, t.unknownArgumentIssues(supplied, order)...)
+	if len(issues) > 0 {
+		return Args{}, &ToolError{Message: renderIssues(t.Name, issues)}
+	}
+	return args, nil
+}
 
+// bindDeclared validates every parameter the tool declares, writing accepted
+// values into args. Declared parameters are walked in declaration order —
+// that is the order the release's validator reports field errors in. The
+// second result is non-nil only for a contract bug (a published default that
+// violates its own schema), which aborts binding outright.
+func (t Tool) bindDeclared(
+	args *Args, supplied map[string]json.RawMessage, order []string,
+) ([]validationIssue, *ToolError) {
 	required := make(map[string]bool, len(t.Required))
 	for _, name := range t.Required {
 		required[name] = true
 	}
-	// The whole arguments object, in the order the client sent it, is the
-	// reported input for a missing argument.
-	argsObject := orderedMap{keys: order, values: map[string]any{}}
-	for _, name := range order {
-		argsObject.values[name] = decodeAny(supplied[name])
-	}
+	argsObject := newArgsObject(supplied, order)
 
-	// Declared parameters first, in declaration order — that is the order the
-	// release's validator reports field errors in.
+	var issues []validationIssue
 	for _, name := range t.order {
 		param := t.Params[name]
 		value, present := supplied[name]
 		if !present {
-			if required[name] {
-				issues = append(issues, validationIssue{
-					loc:      name,
-					message:  "Missing required argument",
-					kind:     "missing_argument",
-					value:    argsObject,
-					valueSet: true,
-				})
-				continue
+			issue, fatal := t.bindOmitted(args, name, param, required[name], argsObject)
+			if fatal != nil {
+				return nil, fatal
 			}
-			if param.HasDefault && param.Default != nil {
-				coerced, issue := coerce(param, param.Default)
-				if issue != nil {
-					// A default that does not satisfy its own schema is a
-					// contract bug, not a client error.
-					return Args{}, &ToolError{Message: fmt.Sprintf(
-						"crgrelease: %s default for %s violates its schema", t.Name, name)}
-				}
-				args.values[name] = coerced
+			if issue != nil {
+				issues = append(issues, *issue)
 			}
 			continue
 		}
-		decoded := decodeAny(value)
-		if decoded == nil {
-			if param.Optional {
-				// Explicit null on an optional parameter is the release's way
-				// of saying "unset"; leave the value absent.
-				continue
-			}
-			issues = append(issues, nullIssue(name, param))
-			continue
-		}
-		coerced, issue := coerce(param, decoded)
-		if issue != nil {
-			issue.loc = name + issue.loc
+		if issue := bindSupplied(args, name, param, value); issue != nil {
 			issues = append(issues, *issue)
-			continue
 		}
-		args.values[name] = coerced
 	}
+	return issues, nil
+}
 
-	// Unknown arguments are reported LAST, in the order they were sent: the
-	// schema closes the argument object, so an unrecognised key is a hard
-	// failure rather than an ignored extra.
+// newArgsObject rebuilds the whole arguments object in the order the client
+// sent it, which is the reported input for a missing-argument failure.
+func newArgsObject(supplied map[string]json.RawMessage, order []string) orderedMap {
+	argsObject := orderedMap{keys: order, values: map[string]any{}}
+	for _, name := range order {
+		argsObject.values[name] = decodeAny(supplied[name])
+	}
+	return argsObject
+}
+
+// bindOmitted applies the release's semantics for a declared parameter the
+// client did not send: a required one is reported missing, and anything else
+// takes its published default when it has a non-null one.
+func (t Tool) bindOmitted(
+	args *Args, name string, param Param, required bool, argsObject orderedMap,
+) (*validationIssue, *ToolError) {
+	if required {
+		return &validationIssue{
+			loc:      name,
+			message:  "Missing required argument",
+			kind:     "missing_argument",
+			value:    argsObject,
+			valueSet: true,
+		}, nil
+	}
+	if !param.HasDefault || param.Default == nil {
+		return nil, nil
+	}
+	coerced, issue := coerce(param, param.Default)
+	if issue != nil {
+		// A default that does not satisfy its own schema is a contract bug,
+		// not a client error.
+		return nil, &ToolError{Message: fmt.Sprintf(
+			"crgrelease: %s default for %s violates its schema", t.Name, name)}
+	}
+	args.values[name] = coerced
+	return nil, nil
+}
+
+// bindSupplied validates one argument the client did send, writing the
+// coerced value into args when the validator accepts it.
+func bindSupplied(args *Args, name string, param Param, value json.RawMessage) *validationIssue {
+	decoded := decodeAny(value)
+	if decoded == nil {
+		if param.Optional {
+			// Explicit null on an optional parameter is the release's way
+			// of saying "unset"; leave the value absent.
+			return nil
+		}
+		issue := nullIssue(name, param)
+		return &issue
+	}
+	coerced, issue := coerce(param, decoded)
+	if issue != nil {
+		issue.loc = name + issue.loc
+		return issue
+	}
+	args.values[name] = coerced
+	return nil
+}
+
+// unknownArgumentIssues reports arguments the tool does not declare, in the
+// order they were sent. The schema closes the argument object, so an
+// unrecognised key is a hard failure rather than an ignored extra; the
+// release emits these issues after every declared-parameter failure.
+func (t Tool) unknownArgumentIssues(
+	supplied map[string]json.RawMessage, order []string,
+) []validationIssue {
+	var issues []validationIssue
 	for _, name := range order {
 		if _, known := t.Params[name]; known {
 			continue
@@ -214,11 +272,7 @@ func (t Tool) Bind(raw json.RawMessage) (Args, *ToolError) {
 			valueSet: true,
 		})
 	}
-
-	if len(issues) > 0 {
-		return Args{}, &ToolError{Message: renderIssues(t.Name, issues)}
-	}
-	return args, nil
+	return issues
 }
 
 // orderedMap preserves a JSON object's key order. The release's diagnostics
@@ -284,7 +338,7 @@ func nullIssue(name string, param Param) validationIssue {
 	case "array":
 		issue.message, issue.kind = "Input should be a valid list", "list_type"
 	default:
-		issue.message, issue.kind = "Input should be a valid string", "string_type"
+		issue.message, issue.kind = msgInvalidString, "string_type"
 	}
 	return issue
 }
@@ -309,7 +363,7 @@ func coerce(param Param, value any) (any, *validationIssue) {
 		text, ok := value.(string)
 		if !ok {
 			return nil, &validationIssue{
-				message:  "Input should be a valid string",
+				message:  msgInvalidString,
 				kind:     "string_type",
 				value:    value,
 				valueSet: true,
@@ -365,7 +419,7 @@ func coerce(param Param, value any) (any, *validationIssue) {
 			if !ok {
 				return nil, &validationIssue{
 					loc:      "." + strconv.Itoa(index),
-					message:  "Input should be a valid string",
+					message:  msgInvalidString,
 					kind:     "string_type",
 					value:    item,
 					valueSet: true,
@@ -534,42 +588,66 @@ func pyRepr(value any) string {
 	case float64:
 		return strconv.FormatFloat(typed, 'g', -1, 64)
 	case []any:
-		parts := make([]string, 0, len(typed))
-		for _, item := range typed {
-			parts = append(parts, pyRepr(item))
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
+		return pyReprAnySlice(typed)
 	case []string:
-		parts := make([]string, 0, len(typed))
-		for _, item := range typed {
-			parts = append(parts, pyRepr(item))
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
+		return pyReprStringSlice(typed)
 	case orderedMap:
-		if len(typed.keys) == 0 {
-			return "{}"
-		}
-		parts := make([]string, 0, len(typed.keys))
-		for _, key := range typed.keys {
-			parts = append(parts, pyRepr(key)+": "+pyRepr(typed.values[key]))
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
+		return pyReprOrderedMap(typed)
 	case map[string]any:
-		if len(typed) == 0 {
-			return "{}"
-		}
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		parts := make([]string, 0, len(keys))
-		for _, key := range keys {
-			parts = append(parts, pyRepr(key)+": "+pyRepr(typed[key]))
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
+		return pyReprMap(typed)
 	}
 	return fmt.Sprintf("%v", value)
+}
+
+// pyReprAnySlice renders a decoded JSON array as a Python list.
+func pyReprAnySlice(items []any) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, pyRepr(item))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// pyReprStringSlice renders a coerced list parameter's value as a Python
+// list. It is a distinct case because coercion has already narrowed the
+// element type, so the value no longer travels as []any.
+func pyReprStringSlice(items []string) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, pyRepr(item))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// pyReprOrderedMap renders a dict in the client's own key order, which is how
+// Python renders the arguments object a missing-argument failure echoes.
+func pyReprOrderedMap(value orderedMap) string {
+	if len(value.keys) == 0 {
+		return "{}"
+	}
+	parts := make([]string, 0, len(value.keys))
+	for _, key := range value.keys {
+		parts = append(parts, pyRepr(key)+": "+pyRepr(value.values[key]))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// pyReprMap renders a dict whose key order was not recorded. Go map iteration
+// is randomised, so the keys are sorted to keep the diagnostic deterministic.
+func pyReprMap(value map[string]any) string {
+	if len(value) == 0 {
+		return "{}"
+	}
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, pyRepr(key)+": "+pyRepr(value[key]))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 // pyType renders the validator's `input_type` annotation.

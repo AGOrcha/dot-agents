@@ -526,61 +526,95 @@ func sortFlowsByCriticality(rows []graphstore.FlowRow, paths [][]int64) {
 	copy(paths, sortedPaths)
 }
 
-// traceSingleFlow ports flows._trace_single_flow: a forward BFS over CALLS
-// edges from ep, visiting each reachable node once.
+// frontierNode is one queued position in a traceSingleFlow BFS: a qualified
+// name and its depth from the entry point.
+type frontierNode struct {
+	qn    string
+	depth int
+}
+
+// flowFrontier is the mutable state of one traceSingleFlow BFS: the path
+// discovered so far in first-seen order, the visited set, the pending queue,
+// and the maximum depth reached.
+type flowFrontier struct {
+	pathIDs    []int64
+	pathQNames []string
+	visited    map[string]bool
+	queue      []frontierNode
+	maxReached int
+}
+
+// expandFlowFrontier queues every unvisited CALLS target of cur, appending it
+// to the path in discovery order.
+//
+// A target that does not resolve to a node is skipped WITHOUT being marked
+// visited — it is an external call, counted by computeCriticality rather than
+// walked.
+func (g *graphIndex) expandFlowFrontier(f *flowFrontier, cur frontierNode) {
+	for _, targetQN := range g.callsOut[cur.qn] {
+		if f.visited[targetQN] {
+			continue
+		}
+		target, ok := g.byQN[targetQN]
+		if !ok {
+			continue
+		}
+		f.visited[targetQN] = true
+		f.pathIDs = append(f.pathIDs, target.ID)
+		f.pathQNames = append(f.pathQNames, targetQN)
+		f.queue = append(f.queue, frontierNode{targetQN, cur.depth + 1})
+	}
+}
+
+// walkFlow runs the forward BFS over CALLS edges from ep, visiting each
+// reachable node once. It returns the discovered path — ids and qualified
+// names, both in first-seen order — and the maximum depth actually REACHED.
 //
 // The path is FIRST-SEEN order, not sorted: position 0 is the entry point and
 // later positions follow BFS discovery, which is the order
 // flow_memberships.position records and flow_snapshots' critical path slices.
-// Depth is the maximum depth actually REACHED (so a two-node flow has depth
-// 1), never maxDepth. A target that does not resolve to a node is skipped
-// WITHOUT being marked visited — it is an external call, counted by
-// computeCriticality rather than walked.
-func (g *graphIndex) traceSingleFlow(ep graphstore.GraphNode, maxDepth int) (graphstore.FlowRow, []int64, bool) {
-	type frontierNode struct {
-		qn    string
-		depth int
+// The reported depth is what the walk reached (so a two-node flow has depth
+// 1), never maxDepth.
+func (g *graphIndex) walkFlow(ep graphstore.GraphNode, maxDepth int) ([]int64, []string, int) {
+	f := &flowFrontier{
+		pathIDs:    []int64{ep.ID},
+		pathQNames: []string{ep.QualifiedName},
+		visited:    map[string]bool{ep.QualifiedName: true},
+		queue:      []frontierNode{{ep.QualifiedName, 0}},
 	}
-
-	pathIDs := []int64{ep.ID}
-	pathQNames := []string{ep.QualifiedName}
-	visited := map[string]bool{ep.QualifiedName: true}
-	queue := []frontierNode{{ep.QualifiedName, 0}}
-	actualDepth := 0
-
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		if cur.depth > actualDepth {
-			actualDepth = cur.depth
+	for len(f.queue) > 0 {
+		cur := f.queue[0]
+		f.queue = f.queue[1:]
+		if cur.depth > f.maxReached {
+			f.maxReached = cur.depth
 		}
 		if cur.depth >= maxDepth {
 			continue
 		}
-		for _, targetQN := range g.callsOut[cur.qn] {
-			if visited[targetQN] {
-				continue
-			}
-			target, ok := g.byQN[targetQN]
-			if !ok {
-				continue
-			}
-			visited[targetQN] = true
-			pathIDs = append(pathIDs, target.ID)
-			pathQNames = append(pathQNames, targetQN)
-			queue = append(queue, frontierNode{targetQN, cur.depth + 1})
-		}
+		g.expandFlowFrontier(f, cur)
 	}
+	return f.pathIDs, f.pathQNames, f.maxReached
+}
 
-	if len(pathIDs) < 2 {
-		return graphstore.FlowRow{}, nil, false
-	}
-
-	files := make(map[string]bool, len(pathQNames))
-	for _, qn := range pathQNames {
+// distinctFileCount counts the distinct files the given qualified names
+// resolve to. A name with no node in the graph contributes nothing.
+func (g *graphIndex) distinctFileCount(qns []string) int {
+	files := make(map[string]bool, len(qns))
+	for _, qn := range qns {
 		if n, ok := g.byQN[qn]; ok {
 			files[n.FilePath] = true
 		}
+	}
+	return len(files)
+}
+
+// traceSingleFlow ports flows._trace_single_flow: walk the graph forward from
+// ep and describe the resulting flow. A walk that reaches nothing beyond the
+// entry point is not a flow at all.
+func (g *graphIndex) traceSingleFlow(ep graphstore.GraphNode, maxDepth int) (graphstore.FlowRow, []int64, bool) {
+	pathIDs, pathQNames, actualDepth := g.walkFlow(ep, maxDepth)
+	if len(pathIDs) < 2 {
+		return graphstore.FlowRow{}, nil, false
 	}
 
 	row := graphstore.FlowRow{
@@ -588,7 +622,7 @@ func (g *graphIndex) traceSingleFlow(ep graphstore.GraphNode, maxDepth int) (gra
 		EntryPointID: ep.ID,
 		Depth:        actualDepth,
 		NodeCount:    len(pathIDs),
-		FileCount:    len(files),
+		FileCount:    g.distinctFileCount(pathQNames),
 	}
 	row.Criticality = g.computeCriticality(pathIDs, actualDepth)
 	return row, pathIDs, true
@@ -640,17 +674,35 @@ func (g *graphIndex) computeCriticality(nodeIDs []int64, depth int) float64 {
 	if len(nodeIDs) == 0 {
 		return 0.0
 	}
+	nodes := g.resolvePathNodes(nodeIDs)
+	if len(nodes) == 0 {
+		return 0.0
+	}
+
+	depthScore := math.Min(float64(depth)/depthSaturation, 1.0)
+	criticality := flowFileSpreadScore(nodes)*weightFileSpread +
+		g.flowExternalCallScore(nodes)*weightExternal +
+		flowSecurityScore(nodes)*weightSecurity +
+		g.flowTestGapScore(nodes)*weightTestGap +
+		depthScore*weightDepth
+	return roundTo4(math.Min(math.Max(criticality, 0.0), 1.0))
+}
+
+// resolvePathNodes maps a flow path's node ids back to graph nodes, dropping
+// any id the graph no longer carries.
+func (g *graphIndex) resolvePathNodes(nodeIDs []int64) []*graphstore.GraphNode {
 	nodes := make([]*graphstore.GraphNode, 0, len(nodeIDs))
 	for _, id := range nodeIDs {
 		if n, ok := g.byID[id]; ok {
 			nodes = append(nodes, n)
 		}
 	}
-	if len(nodes) == 0 {
-		return 0.0
-	}
+	return nodes
+}
 
-	// File spread: one file scores 0, fileSpreadSaturation+1 files score 1.
+// flowFileSpreadScore scores how far the flow reaches across files: one file
+// scores 0, fileSpreadSaturation+1 files score 1.
+func flowFileSpreadScore(nodes []*graphstore.GraphNode) float64 {
 	files := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
 		files[n.FilePath] = true
@@ -659,8 +711,12 @@ func (g *graphIndex) computeCriticality(nodeIDs []int64, depth int) float64 {
 	if len(files) > 1 {
 		fileSpread = math.Min(float64(len(files)-1)/fileSpreadSaturation, 1.0)
 	}
+	return fileSpread
+}
 
-	// External calls: CALLS targets that are not nodes in this graph.
+// flowExternalCallScore scores the calls leaving the indexed graph: CALLS
+// targets that are not nodes in it.
+func (g *graphIndex) flowExternalCallScore(nodes []*graphstore.GraphNode) float64 {
 	externalCount := 0
 	for _, n := range nodes {
 		for _, targetQN := range g.callsOut[n.QualifiedName] {
@@ -669,35 +725,31 @@ func (g *graphIndex) computeCriticality(nodeIDs []int64, depth int) float64 {
 			}
 		}
 	}
-	externalScore := math.Min(float64(externalCount)/externalSaturation, 1.0)
+	return math.Min(float64(externalCount)/externalSaturation, 1.0)
+}
 
-	// Security sensitivity: a node hits at most once, however many keywords
-	// its name or qualified name contains.
+// flowSecurityScore is the share of path nodes carrying a security-sensitive
+// identifier. A node hits at most once, however many keywords its name or
+// qualified name contains.
+func flowSecurityScore(nodes []*graphstore.GraphNode) float64 {
 	securityHits := 0
 	for _, n := range nodes {
 		if containsAnyKeyword(strings.ToLower(n.Name), strings.ToLower(n.QualifiedName), securityKeywords) {
 			securityHits++
 		}
 	}
-	securityScore := math.Min(float64(securityHits)/float64(len(nodes)), 1.0)
+	return math.Min(float64(securityHits)/float64(len(nodes)), 1.0)
+}
 
-	// Test-coverage gap: the share of path nodes with no TESTED_BY edge.
+// flowTestGapScore is the share of path nodes with no TESTED_BY edge.
+func (g *graphIndex) flowTestGapScore(nodes []*graphstore.GraphNode) float64 {
 	testedCount := 0
 	for _, n := range nodes {
 		if g.hasTestedBy[n.QualifiedName] {
 			testedCount++
 		}
 	}
-	testGap := 1.0 - float64(testedCount)/float64(len(nodes))
-
-	depthScore := math.Min(float64(depth)/depthSaturation, 1.0)
-
-	criticality := fileSpread*weightFileSpread +
-		externalScore*weightExternal +
-		securityScore*weightSecurity +
-		testGap*weightTestGap +
-		depthScore*weightDepth
-	return roundTo4(math.Min(math.Max(criticality, 0.0), 1.0))
+	return 1.0 - float64(testedCount)/float64(len(nodes))
 }
 
 // containsAnyKeyword reports whether either lowered string contains any
@@ -866,49 +918,60 @@ type dirGroup struct {
 	members []graphstore.GraphNode
 }
 
-// detectFileBased ports communities._detect_file_based: strip the longest
-// common directory prefix from every node's path, then pick a grouping depth.
+// maxDirDepth returns the deepest remaining directory nesting across paths
+// once the shared prefix is stripped — the upper bound of the depth search.
+func maxDirDepth(dirParts [][]string, prefixLen int) int {
+	deepest := 0
+	for _, p := range dirParts {
+		if d := len(p) - prefixLen; d > deepest {
+			deepest = d
+		}
+	}
+	return deepest
+}
+
+// countGroupsAtMinSize counts the groups large enough to become communities.
+func countGroupsAtMinSize(groups []dirGroup, minSize int) int {
+	qualifying := 0
+	for _, grp := range groups {
+		if len(grp.members) >= minSize {
+			qualifying++
+		}
+	}
+	return qualifying
+}
+
+// bestDirGrouping strips the longest common directory prefix from every
+// node's path, then picks a grouping depth.
 //
 // The depth search aims for at least communityGroupTarget qualifying groups,
 // and its exit behaviour is subtle enough to state: when no depth reaches
 // that target — the case for any small repository — the loop runs to the
 // maximum depth and keeps the DEEPEST grouping, not the first one tried.
-func detectFileBased(
-	nodes []graphstore.GraphNode,
-	edges []graphstore.GraphEdge,
-	minSize int,
-) ([]graphstore.CommunityRow, [][]string) {
+func bestDirGrouping(nodes []graphstore.GraphNode, minSize int) []dirGroup {
 	dirParts := make([][]string, len(nodes))
 	for i, n := range nodes {
 		dirParts[i] = dirSegments(n.FilePath)
 	}
 	prefixLen := commonPrefixLen(dirParts)
-
-	maxDepth := 0
-	for _, p := range dirParts {
-		if d := len(p) - prefixLen; d > maxDepth {
-			maxDepth = d
-		}
-	}
+	deepest := maxDirDepth(dirParts, prefixLen)
 
 	best := groupAtDepth(nodes, prefixLen, 1)
-	for depth := 1; depth <= maxDepth; depth++ {
-		groups := groupAtDepth(nodes, prefixLen, depth)
-		qualifying := 0
-		for _, grp := range groups {
-			if len(grp.members) >= minSize {
-				qualifying++
-			}
-		}
-		best = groups
-		if qualifying >= communityGroupTarget {
+	for depth := 1; depth <= deepest; depth++ {
+		best = groupAtDepth(nodes, prefixLen, depth)
+		if countGroupsAtMinSize(best, minSize) >= communityGroupTarget {
 			break
 		}
 	}
+	return best
+}
 
-	pending := make([]dirGroup, 0, len(best))
-	memberSets := make([]map[string]bool, 0, len(best))
-	for _, grp := range best {
+// qualifyingGroups keeps the groups that meet minSize, returning them
+// alongside each one's member qualified-name set for cohesion batching.
+func qualifyingGroups(groups []dirGroup, minSize int) ([]dirGroup, []map[string]bool) {
+	pending := make([]dirGroup, 0, len(groups))
+	memberSets := make([]map[string]bool, 0, len(groups))
+	for _, grp := range groups {
 		if len(grp.members) < minSize {
 			continue
 		}
@@ -919,6 +982,17 @@ func detectFileBased(
 		pending = append(pending, grp)
 		memberSets = append(memberSets, set)
 	}
+	return pending, memberSets
+}
+
+// detectFileBased ports communities._detect_file_based: group the nodes by
+// directory, then describe every qualifying group as a community.
+func detectFileBased(
+	nodes []graphstore.GraphNode,
+	edges []graphstore.GraphEdge,
+	minSize int,
+) ([]graphstore.CommunityRow, [][]string) {
+	pending, memberSets := qualifyingGroups(bestDirGrouping(nodes, minSize), minSize)
 
 	cohesions := computeCohesionBatch(memberSets, edges)
 	rows := make([]graphstore.CommunityRow, 0, len(pending))
@@ -1033,14 +1107,35 @@ func stripExtension(name string) string {
 // lets one edge walk bucket every community at once. An edge spanning two
 // different communities counts as external for BOTH.
 func computeCohesionBatch(memberSets []map[string]bool, edges []graphstore.GraphEdge) []float64 {
+	internal, external := tallyCommunityEdges(memberCommunityIndex(memberSets), len(memberSets), edges)
+	out := make([]float64, len(memberSets))
+	for i := range memberSets {
+		if total := internal[i] + external[i]; total > 0 {
+			out[i] = float64(internal[i]) / float64(total)
+		}
+	}
+	return out
+}
+
+// memberCommunityIndex reverses the member sets into a qualified-name ->
+// community index map. That reversal is only well defined because every
+// caller produces a PARTITION — a node belongs to at most one community.
+func memberCommunityIndex(memberSets []map[string]bool) map[string]int {
 	qnToIdx := make(map[string]int)
 	for idx, members := range memberSets {
 		for qn := range members {
 			qnToIdx[qn] = idx
 		}
 	}
-	internal := make([]int, len(memberSets))
-	external := make([]int, len(memberSets))
+	return qnToIdx
+}
+
+// tallyCommunityEdges counts internal and external edges for every community
+// in ONE pass over the edges. An edge spanning two different communities
+// counts as external for BOTH; an edge touching no community is ignored.
+func tallyCommunityEdges(qnToIdx map[string]int, communities int, edges []graphstore.GraphEdge) (internal, external []int) {
+	internal = make([]int, communities)
+	external = make([]int, communities)
 	for _, e := range edges {
 		src, srcOK := qnToIdx[e.SourceQualified]
 		tgt, tgtOK := qnToIdx[e.TargetQualified]
@@ -1058,13 +1153,7 @@ func computeCohesionBatch(memberSets []map[string]bool, edges []graphstore.Graph
 			external[tgt]++
 		}
 	}
-	out := make([]float64, len(memberSets))
-	for i := range memberSets {
-		if total := internal[i] + external[i]; total > 0 {
-			out[i] = float64(internal[i]) / float64(total)
-		}
-	}
-	return out
+	return internal, external
 }
 
 // memberQualifiedNames returns the members' qualified names in member order.

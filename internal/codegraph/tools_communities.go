@@ -372,14 +372,33 @@ func commArchitectureOverview(e *Engine) (commOverview, error) {
 	if err != nil {
 		return commOverview{}, err
 	}
+	nodeCommunity, names := commNodeCommunityIndex(communities)
 
-	// nodeCommunity is keyed by the SANITIZED member names while the edges
-	// below are looked up by their raw endpoints. That is upstream's
-	// asymmetry, not an oversight: a symbol whose name carries control
-	// characters is simply never matched, and "fixing" it here would report
-	// coupling the release does not.
-	nodeCommunity := map[string]int64{}
-	names := map[int64]string{}
+	edges, err := commAllEdges(e)
+	if err != nil {
+		return commOverview{}, err
+	}
+	crossEdges, counts, pairOrder := commCrossCommunityEdges(edges, nodeCommunity)
+
+	return commOverview{
+		communities: communities,
+		crossEdges:  crossEdges,
+		warnings:    commCouplingWarnings(counts, pairOrder, names),
+	}, nil
+}
+
+// commNodeCommunityIndex maps each community's member names to its id, and
+// each community id to its name.
+//
+// The member-name index is keyed by the SANITIZED names while the edges are
+// looked up by their raw endpoints. That is upstream's asymmetry, not an
+// oversight: a symbol whose name carries control characters is simply never
+// matched, and "fixing" it here would report coupling the release does not.
+func commNodeCommunityIndex(
+	communities []map[string]any,
+) (nodeCommunity map[string]int64, names map[int64]string) {
+	nodeCommunity = map[string]int64{}
+	names = map[int64]string{}
 	for _, community := range communities {
 		id, _ := community["id"].(int64)
 		names[id], _ = community["name"].(string)
@@ -390,15 +409,17 @@ func commArchitectureOverview(e *Engine) (commOverview, error) {
 			}
 		}
 	}
+	return nodeCommunity, names
+}
 
-	edges, err := commAllEdges(e)
-	if err != nil {
-		return commOverview{}, err
-	}
-
-	overview := commOverview{communities: communities, crossEdges: []any{}, warnings: []any{}}
-	counts := map[[2]int64]int{}
-	var pairOrder [][2]int64
+// commCrossCommunityEdges records every edge that crosses a community
+// boundary, alongside the per-pair edge counts in first-seen order so the
+// coupling ranking is deterministic.
+func commCrossCommunityEdges(
+	edges []graphstore.GraphEdge, nodeCommunity map[string]int64,
+) (crossEdges []any, counts map[[2]int64]int, pairOrder [][2]int64) {
+	crossEdges = []any{}
+	counts = map[[2]int64]int{}
 	for _, edge := range edges {
 		// Test code calling production code is the expected shape of a test
 		// suite, not an architectural smell, so TESTED_BY never counts as
@@ -419,7 +440,7 @@ func commArchitectureOverview(e *Engine) (commOverview, error) {
 			pairOrder = append(pairOrder, pair)
 		}
 		counts[pair]++
-		overview.crossEdges = append(overview.crossEdges, map[string]any{
+		crossEdges = append(crossEdges, map[string]any{
 			"source_community": source,
 			"target_community": target,
 			"edge_kind":        edge.Kind,
@@ -427,7 +448,15 @@ func commArchitectureOverview(e *Engine) (commOverview, error) {
 			"target":           SanitizeName(edge.TargetQualified),
 		})
 	}
+	return crossEdges, counts, pairOrder
+}
 
+// commCouplingWarnings phrases the heaviest community pairs as warnings, most
+// coupled first.
+func commCouplingWarnings(
+	counts map[[2]int64]int, pairOrder [][2]int64, names map[int64]string,
+) []any {
+	warnings := []any{}
 	for _, pair := range commByCountDescending(counts, pairOrder) {
 		count := counts[pair]
 		if count <= 10 {
@@ -441,10 +470,10 @@ func commArchitectureOverview(e *Engine) (commOverview, error) {
 		if commIsTestCommunity(first) || commIsTestCommunity(second) {
 			continue
 		}
-		overview.warnings = append(overview.warnings, fmt.Sprintf(
+		warnings = append(warnings, fmt.Sprintf(
 			"High coupling (%d edges) between '%s' and '%s'", count, first, second))
 	}
-	return overview, nil
+	return warnings
 }
 
 // commAllEdges reads every edge, tolerating a never-built graph.
@@ -467,10 +496,31 @@ func commAllEdges(e *Engine) ([]graphstore.GraphEdge, error) {
 // per community pair with a count and the leading edge kinds — enough to spot
 // a coupling smell, small enough to read.
 func commMinimalOverview(full commOverview) (communities, crossPairs []any) {
+	communities, names := commMinimalCommunities(full.communities)
+	pairs := commAggregateCrossPairs(full.crossEdges)
+
+	crossPairs = make([]any, 0, len(pairs.pairOrder))
+	for _, pair := range commByCountDescending(pairs.counts, pairs.pairOrder) {
+		top, _, _ := Bounded(commRankedKinds(pairs.kinds[pair], pairs.kindOrder[pair]), 3, 3)
+		crossPairs = append(crossPairs, map[string]any{
+			"source_community": commCommunityLabel(names, pair[0]),
+			"target_community": commCommunityLabel(names, pair[1]),
+			"edge_count":       pairs.counts[pair],
+			"top_kinds":        top,
+		})
+	}
+	return communities, crossPairs
+}
+
+// commMinimalCommunities reduces each community to the fields minimal mode
+// keeps, dropping the member list that dominates the full payload's size. The
+// community names are returned alongside because minimal mode labels its
+// cross-community pairs by name rather than by id.
+func commMinimalCommunities(full []map[string]any) (communities []any, names map[int64]string) {
 	minimalFields := []string{"id", "name", "size", "cohesion", "dominant_language"}
-	names := map[int64]string{}
-	communities = make([]any, 0, len(full.communities))
-	for _, community := range full.communities {
+	names = map[int64]string{}
+	communities = make([]any, 0, len(full))
+	for _, community := range full {
 		reduced := make(map[string]any, len(minimalFields))
 		for _, field := range minimalFields {
 			if value, ok := community[field]; ok {
@@ -482,12 +532,28 @@ func commMinimalOverview(full commOverview) (communities, crossPairs []any) {
 		}
 		communities = append(communities, reduced)
 	}
+	return communities, names
+}
 
-	counts := map[[2]int64]int{}
-	kinds := map[[2]int64]map[string]int{}
-	kindOrder := map[[2]int64][]string{}
-	var pairOrder [][2]int64
-	for _, entry := range full.crossEdges {
+// commCrossPairAggregate is the per-community-pair rollup of the full
+// overview's individual cross-community edges: how many edges cross each pair
+// and which kinds they are, both in first-seen order so the ranking is stable.
+type commCrossPairAggregate struct {
+	counts    map[[2]int64]int
+	kinds     map[[2]int64]map[string]int
+	kindOrder map[[2]int64][]string
+	pairOrder [][2]int64
+}
+
+// commAggregateCrossPairs collapses the full overview's per-edge
+// cross-community list into one row per community pair.
+func commAggregateCrossPairs(crossEdges []any) commCrossPairAggregate {
+	pairs := commCrossPairAggregate{
+		counts:    map[[2]int64]int{},
+		kinds:     map[[2]int64]map[string]int{},
+		kindOrder: map[[2]int64][]string{},
+	}
+	for _, entry := range crossEdges {
 		edge, ok := entry.(map[string]any)
 		if !ok {
 			continue
@@ -499,29 +565,18 @@ func commMinimalOverview(full commOverview) (communities, crossPairs []any) {
 		if pair[0] > pair[1] {
 			pair[0], pair[1] = pair[1], pair[0]
 		}
-		if _, seen := counts[pair]; !seen {
-			pairOrder = append(pairOrder, pair)
-			kinds[pair] = map[string]int{}
+		if _, seen := pairs.counts[pair]; !seen {
+			pairs.pairOrder = append(pairs.pairOrder, pair)
+			pairs.kinds[pair] = map[string]int{}
 		}
-		counts[pair]++
+		pairs.counts[pair]++
 		kind, _ := edge["edge_kind"].(string)
-		if _, seen := kinds[pair][kind]; !seen {
-			kindOrder[pair] = append(kindOrder[pair], kind)
+		if _, seen := pairs.kinds[pair][kind]; !seen {
+			pairs.kindOrder[pair] = append(pairs.kindOrder[pair], kind)
 		}
-		kinds[pair][kind]++
+		pairs.kinds[pair][kind]++
 	}
-
-	crossPairs = make([]any, 0, len(pairOrder))
-	for _, pair := range commByCountDescending(counts, pairOrder) {
-		top, _, _ := Bounded(commRankedKinds(kinds[pair], kindOrder[pair]), 3, 3)
-		crossPairs = append(crossPairs, map[string]any{
-			"source_community": commCommunityLabel(names, pair[0]),
-			"target_community": commCommunityLabel(names, pair[1]),
-			"edge_count":       counts[pair],
-			"top_kinds":        top,
-		})
-	}
-	return communities, crossPairs
+	return pairs
 }
 
 // commCommunityLabel names a community id, falling back to the release's

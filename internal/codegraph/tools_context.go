@@ -342,31 +342,36 @@ func pyStructEntries(rv reflect.Value) map[string]any {
 	entries := map[string]any{}
 	structType := rv.Type()
 	for i := range structType.NumField() {
-		field := structType.Field(i)
-		if !field.IsExported() {
-			continue
-		}
-		name, options, _ := strings.Cut(field.Tag.Get("json"), ",")
-		if name == "-" && options == "" {
-			continue
-		}
-		value := rv.Field(i)
-		if field.Anonymous && name == "" && field.Type.Kind() == reflect.Struct {
-			// An embedded struct's fields are promoted, not nested.
-			for key, promoted := range pyStructEntries(value) {
-				entries[key] = promoted
-			}
-			continue
-		}
-		if name == "" {
-			name = field.Name
-		}
-		if strings.Contains(options, "omitempty") && value.IsZero() {
-			continue
-		}
-		entries[name] = value.Interface()
+		addPyStructField(entries, structType.Field(i), rv.Field(i))
 	}
 	return entries
+}
+
+// addPyStructField records one struct field under its json name, skipping the
+// fields encoding/json would omit and promoting an embedded struct's own
+// entries instead of nesting them.
+func addPyStructField(entries map[string]any, field reflect.StructField, value reflect.Value) {
+	if !field.IsExported() {
+		return
+	}
+	name, options, _ := strings.Cut(field.Tag.Get("json"), ",")
+	if name == "-" && options == "" {
+		return
+	}
+	if field.Anonymous && name == "" && field.Type.Kind() == reflect.Struct {
+		// An embedded struct's fields are promoted, not nested.
+		for key, promoted := range pyStructEntries(value) {
+			entries[key] = promoted
+		}
+		return
+	}
+	if name == "" {
+		name = field.Name
+	}
+	if strings.Contains(options, "omitempty") && value.IsZero() {
+		return
+	}
+	entries[name] = value.Interface()
 }
 
 func writePyArray(b *strings.Builder, n int, at func(int) any) {
@@ -814,36 +819,48 @@ func ResolveGraphFilePaths(store graphstore.CodeGraphReader, root string, paths 
 		return resolved
 	}
 	seen := make(map[string]bool, len(paths))
-	add := func(path string) {
-		if !seen[path] {
-			seen[path] = true
-			resolved = append(resolved, path)
-		}
-	}
-
 	for _, filePath := range paths {
-		candidates := []string{NormalizeFilePath(filePath)}
-		if filepath.IsAbs(filePath) {
-			if rel, err := filepath.Rel(root, filepath.Clean(filePath)); err == nil &&
-				!strings.HasPrefix(rel, "..") {
-				candidates = append(candidates, NormalizeFilePath(rel))
-			}
-		} else {
-			candidates = append(candidates, NormalizeFilePath(filepath.Join(root, filePath)))
-		}
-
-		for _, candidate := range candidates {
-			if nodes, err := store.GetNodesByFile(candidate); err == nil && len(nodes) > 0 {
-				add(candidate)
-			}
-		}
-		for _, suffix := range dedupeStrings(candidates) {
-			for _, matched := range filesMatchingSuffix(store, suffix) {
-				add(matched)
+		for _, matched := range matchedGraphPaths(store, graphPathCandidates(root, filePath)) {
+			if !seen[matched] {
+				seen[matched] = true
+				resolved = append(resolved, matched)
 			}
 		}
 	}
 	return resolved
+}
+
+// graphPathCandidates is the set of stored-path spellings one user-facing path
+// could have been indexed under: the path as given, plus its repo-relative
+// form when it is absolute or its root-joined form when it is relative. An
+// absolute path outside root contributes nothing extra.
+func graphPathCandidates(root, filePath string) []string {
+	candidates := []string{NormalizeFilePath(filePath)}
+	if !filepath.IsAbs(filePath) {
+		return append(candidates, NormalizeFilePath(filepath.Join(root, filePath)))
+	}
+	rel, err := filepath.Rel(root, filepath.Clean(filePath))
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return candidates
+	}
+	return append(candidates, NormalizeFilePath(rel))
+}
+
+// matchedGraphPaths is the stored paths one input's candidates resolve to:
+// the candidates that are themselves indexed, in candidate order, followed by
+// the suffix matches. Duplicates are left for the caller to fold, which is
+// what keeps first-seen order across the whole input list.
+func matchedGraphPaths(store graphstore.CodeGraphReader, candidates []string) []string {
+	matches := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if nodes, err := store.GetNodesByFile(candidate); err == nil && len(nodes) > 0 {
+			matches = append(matches, candidate)
+		}
+	}
+	for _, suffix := range dedupeStrings(candidates) {
+		matches = append(matches, filesMatchingSuffix(store, suffix)...)
+	}
+	return matches
 }
 
 func dedupeStrings(items []string) []string {
@@ -1139,37 +1156,7 @@ func relaxImpactScores(
 		if len(frontier) == 0 {
 			break
 		}
-		next := map[string]float64{}
-		for _, edge := range edges {
-			direction, ok := impactEdgeDirections[edge.Kind]
-			if !ok {
-				direction = impactDefaultEdgeDirection
-			}
-			var from, to string
-			switch direction {
-			case impactDirectionOutgoing:
-				from, to = edge.SourceQualified, edge.TargetQualified
-			case impactDirectionIncoming:
-				from, to = edge.TargetQualified, edge.SourceQualified
-			default:
-				continue
-			}
-			score, onFrontier := frontier[from]
-			if !onFrontier {
-				continue
-			}
-			weight, ok := impactEdgeWeights[edge.Kind]
-			if !ok {
-				weight = impactDefaultEdgeWeight
-			}
-			candidate := score * weight * impactDepthDecay
-			if candidate <= impactScoreFloor || candidate <= best[to] {
-				continue
-			}
-			if candidate > next[to] {
-				next[to] = candidate
-			}
-		}
+		next := relaxImpactFrontier(frontier, best, edges)
 		if len(next) == 0 {
 			break
 		}
@@ -1179,6 +1166,62 @@ func relaxImpactScores(
 		frontier = next
 	}
 	return best
+}
+
+// relaxImpactFrontier is a single hop: the improved scores the frontier
+// reaches over edges. A candidate survives only when it clears the score
+// floor and beats the name's current best, which is what bounds the hop on a
+// cyclic graph.
+func relaxImpactFrontier(
+	frontier, best map[string]float64,
+	edges []graphstore.GraphEdge,
+) map[string]float64 {
+	next := map[string]float64{}
+	for _, edge := range edges {
+		from, to, propagates := impactEdgeEndpoints(edge)
+		if !propagates {
+			continue
+		}
+		score, onFrontier := frontier[from]
+		if !onFrontier {
+			continue
+		}
+		candidate := score * impactEdgeWeight(edge.Kind) * impactDepthDecay
+		if candidate <= impactScoreFloor || candidate <= best[to] {
+			continue
+		}
+		if candidate > next[to] {
+			next[to] = candidate
+		}
+	}
+	return next
+}
+
+// impactEdgeEndpoints orients an edge into the (from, to) pair impact
+// propagates along, and reports false for a kind that does not propagate at
+// all. An unlisted kind takes the default direction.
+func impactEdgeEndpoints(edge graphstore.GraphEdge) (from, to string, propagates bool) {
+	direction, ok := impactEdgeDirections[edge.Kind]
+	if !ok {
+		direction = impactDefaultEdgeDirection
+	}
+	switch direction {
+	case impactDirectionOutgoing:
+		return edge.SourceQualified, edge.TargetQualified, true
+	case impactDirectionIncoming:
+		return edge.TargetQualified, edge.SourceQualified, true
+	default:
+		return "", "", false
+	}
+}
+
+// impactEdgeWeight is the score multiplier for an edge kind, falling back to
+// the default weight for a kind with no entry of its own.
+func impactEdgeWeight(kind string) float64 {
+	if weight, ok := impactEdgeWeights[kind]; ok {
+		return weight
+	}
+	return impactDefaultEdgeWeight
 }
 
 // isVerilogDeclaration reports an RTL declaration, which is stored as a
@@ -1500,10 +1543,16 @@ func reviewContextTool(e *Engine, args crgrelease.Args) (any, error) {
 	if args.String("detail_level") == detailMinimal {
 		return minimalReviewContext(changedFiles, impact, originalTokens), nil
 	}
-	return standardReviewContext(
-		e.root, changedFiles, impact, args.Bool("include_source"),
-		maxResults, maxFiles, maxLinesPerFile, originalTokens,
-	), nil
+	return standardReviewContext(reviewContextRequest{
+		root:            e.root,
+		changedFiles:    changedFiles,
+		impact:          impact,
+		includeSource:   args.Bool("include_source"),
+		maxResults:      maxResults,
+		maxFiles:        maxFiles,
+		maxLinesPerFile: maxLinesPerFile,
+		originalTokens:  originalTokens,
+	}), nil
 }
 
 // minimalReviewContext is the token-efficient summary: risk band, counts, the
@@ -1535,27 +1584,34 @@ func minimalReviewContext(
 	return result
 }
 
+// reviewContextRequest carries what the standard review payload is rendered
+// from: the resolved change set, its impact analysis, and the caller's bounds.
+type reviewContextRequest struct {
+	root            string
+	changedFiles    []string
+	impact          ImpactRadiusResult
+	includeSource   bool
+	maxResults      int
+	maxFiles        int
+	maxLinesPerFile int
+	originalTokens  int
+}
+
 // standardReviewContext is the full review payload: a bounded subgraph, source
 // snippets under a shared line budget, and review guidance.
-func standardReviewContext(
-	root string,
-	changedFiles []string,
-	impact ImpactRadiusResult,
-	includeSource bool,
-	maxResults, maxFiles, maxLinesPerFile, originalTokens int,
-) map[string]any {
+func standardReviewContext(req reviewContextRequest) map[string]any {
 	// Every list below scales with the change set, so each is bounded and
 	// reports its untruncated total.
-	shownFiles, filesTotal, filesCut := Bounded(changedFiles, maxFiles, reviewCtxMaxFiles)
+	shownFiles, filesTotal, filesCut := Bounded(req.changedFiles, req.maxFiles, reviewCtxMaxFiles)
 	impactedFiles, impactedFilesTotal, impactedFilesCut :=
-		Bounded(impact.ImpactedFiles, maxFiles, reviewCtxMaxFiles)
+		Bounded(req.impact.ImpactedFiles, req.maxFiles, reviewCtxMaxFiles)
 	changedNodes, changedNodesTotal, changedNodesCut :=
-		Bounded(impact.ChangedNodes, maxResults, reviewCtxMaxNodes)
+		Bounded(req.impact.ChangedNodes, req.maxResults, reviewCtxMaxNodes)
 	impactedNodes, impactedNodesTotal, impactedNodesCut :=
-		Bounded(impact.ImpactedNodes, maxResults, reviewCtxMaxNodes)
-	edges, edgesTotal, edgesCut := Bounded(impact.Edges, maxResults, reviewCtxMaxEdges)
+		Bounded(req.impact.ImpactedNodes, req.maxResults, reviewCtxMaxNodes)
+	edges, edgesTotal, edgesCut := Bounded(req.impact.Edges, req.maxResults, reviewCtxMaxEdges)
 
-	guidance := reviewGuidance(impact)
+	guidance := reviewGuidance(req.impact)
 	context := map[string]any{
 		"changed_files":        shownFiles,
 		"changed_files_total":  filesTotal,
@@ -1574,8 +1630,9 @@ func standardReviewContext(
 		"review_guidance": guidance,
 	}
 
-	if includeSource {
-		attachSourceSnippets(context, root, shownFiles, impact.ChangedNodes, maxLinesPerFile)
+	if req.includeSource {
+		attachSourceSnippets(
+			context, req.root, shownFiles, req.impact.ChangedNodes, req.maxLinesPerFile)
 	}
 
 	return withContextSavings(map[string]any{
@@ -1593,7 +1650,7 @@ func standardReviewContext(
 			guidance,
 		}, "\n"),
 		"context": context,
-	}, originalTokens)
+	}, req.originalTokens)
 }
 
 func withContextSavings(result map[string]any, originalTokens int) map[string]any {
@@ -1790,41 +1847,64 @@ func relevantSourceLines(
 	filePath string,
 	maxLines int,
 ) string {
-	type window struct{ start, end int }
-	windows := make([]window, 0, len(nodes))
-	for _, node := range nodes {
-		if node.FilePath != filePath {
-			continue
-		}
-		windows = append(windows, window{
-			start: max(0, node.LineStart-reviewCtxContextBefore),
-			end:   min(len(lines), node.LineEnd+reviewCtxContextAfter),
-		})
-	}
+	windows := changedLineWindows(lines, nodes, filePath)
 	if len(windows) == 0 {
 		// No changed node lands in this file: show its head rather than
 		// nothing, so a reviewer still sees what the file is.
 		return numberedLines(lines, 0, min(reviewCtxFallbackLines, min(maxLines, len(lines))))
 	}
+	return renderSourceWindows(lines, mergeSourceWindows(windows), maxLines)
+}
 
+// sourceLineWindow is a half-open [start, end) range of 0-based line indices.
+type sourceLineWindow struct{ start, end int }
+
+// changedLineWindows is the context window around each of filePath's changed
+// nodes, clamped to the file and left unsorted and possibly overlapping.
+func changedLineWindows(
+	lines []string,
+	nodes []graphstore.GraphNode,
+	filePath string,
+) []sourceLineWindow {
+	windows := make([]sourceLineWindow, 0, len(nodes))
+	for _, node := range nodes {
+		if node.FilePath != filePath {
+			continue
+		}
+		windows = append(windows, sourceLineWindow{
+			start: max(0, node.LineStart-reviewCtxContextBefore),
+			end:   min(len(lines), node.LineEnd+reviewCtxContextAfter),
+		})
+	}
+	return windows
+}
+
+// mergeSourceWindows orders the windows and coalesces the ones that overlap.
+// Adjacent ranges merge too: a one-line gap between two snippets is not worth
+// an elision marker. It expects at least one window.
+func mergeSourceWindows(windows []sourceLineWindow) []sourceLineWindow {
 	sort.Slice(windows, func(i, j int) bool {
 		if windows[i].start != windows[j].start {
 			return windows[i].start < windows[j].start
 		}
 		return windows[i].end < windows[j].end
 	})
-	merged := []window{windows[0]}
+	merged := []sourceLineWindow{windows[0]}
 	for _, next := range windows[1:] {
 		last := &merged[len(merged)-1]
-		// Adjacent ranges merge too: a one-line gap between two snippets is
-		// not worth an elision marker.
 		if next.start <= last.end+1 {
 			last.end = max(last.end, next.end)
 			continue
 		}
 		merged = append(merged, next)
 	}
+	return merged
+}
 
+// renderSourceWindows numbers the merged windows' lines under a shared
+// maxLines budget, separating windows with an elision marker and appending a
+// truncation notice once the budget is spent.
+func renderSourceWindows(lines []string, merged []sourceLineWindow, maxLines int) string {
 	parts := []string{}
 	emitted := 0
 	for _, w := range merged {

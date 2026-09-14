@@ -281,48 +281,97 @@ type gapCategory struct {
 // max_per_category then cuts the visible rows again without touching those
 // totals.
 func findKnowledgeGaps(g *analysisGraph, communities []graphstore.CommunityRow) []gapCategory {
-	degree := make(map[string]int, len(g.nodes))
-	tested := make(map[string]bool)
+	edges := indexGapEdges(g)
+	nodes := collectNodeGaps(g, edges, len(communities))
+	sort.SliceStable(nodes.hotspots, func(i, j int) bool {
+		return nodes.hotspots[i]["degree"].(int) > nodes.hotspots[j]["degree"].(int)
+	})
+	thin, singleFile := collectCommunityGaps(communities, nodes)
+
+	return []gapCategory{
+		{"isolated_nodes", capRows(nodes.isolated, maxIsolatedNodes)},
+		{"thin_communities", thin},
+		{"untested_hotspots", capRows(nodes.hotspots, maxUntestedHotspots)},
+		{"single_file_communities", singleFile},
+	}
+}
+
+// gapEdgeIndex is everything the gap analysis reads out of the edge list: the
+// undirected degree of every endpoint, and the sources some TESTED_BY edge
+// covers.
+type gapEdgeIndex struct {
+	degree map[string]int
+	tested map[string]bool
+}
+
+// indexGapEdges walks the edge list once to build the degree counts and the
+// tested-source set the node scan consults.
+func indexGapEdges(g *analysisGraph) gapEdgeIndex {
+	index := gapEdgeIndex{
+		degree: make(map[string]int, len(g.nodes)),
+		tested: make(map[string]bool),
+	}
 	for _, edge := range g.edges {
-		degree[edge.SourceQualified]++
-		degree[edge.TargetQualified]++
+		index.degree[edge.SourceQualified]++
+		index.degree[edge.TargetQualified]++
 		if edge.Kind == graphstore.EdgeKindTestedBy {
-			tested[edge.SourceQualified] = true
+			index.tested[edge.SourceQualified] = true
 		}
 	}
+	return index
+}
 
-	isolated := make([]map[string]any, 0, len(g.nodes))
-	hotspots := make([]map[string]any, 0, len(g.nodes))
-	communitySizes := make(map[int64]int, len(communities))
-	communityFiles := make(map[int64]map[string]bool, len(communities))
+// nodeGapTally is the node-level pass of the gap analysis: the two node
+// categories it produces, plus the per-community member counts and file sets
+// the community-level pass reads.
+type nodeGapTally struct {
+	isolated       []map[string]any
+	hotspots       []map[string]any
+	communitySizes map[int64]int
+	communityFiles map[int64]map[string]bool
+}
+
+// collectNodeGaps scans every node once, collecting the isolated nodes and the
+// untested hotspots while accumulating each community's membership.
+func collectNodeGaps(g *analysisGraph, edges gapEdgeIndex, communities int) nodeGapTally {
+	tally := nodeGapTally{
+		isolated:       make([]map[string]any, 0, len(g.nodes)),
+		hotspots:       make([]map[string]any, 0, len(g.nodes)),
+		communitySizes: make(map[int64]int, communities),
+		communityFiles: make(map[int64]map[string]bool, communities),
+	}
 	for _, node := range g.nodes {
-		d := degree[node.QualifiedName]
+		d := edges.degree[node.QualifiedName]
 		// "Isolated" is degree <= 1, not degree 0: a symbol whose only edge is
 		// the CONTAINS from its own file is just as disconnected.
 		if d <= 1 {
-			isolated = append(isolated, gapNodeRow(node, d))
+			tally.isolated = append(tally.isolated, gapNodeRow(node, d))
 		}
-		if d >= hotspotMinDegree && !tested[node.QualifiedName] && !node.IsTest {
-			hotspots = append(hotspots, gapNodeRow(node, d))
+		if d >= hotspotMinDegree && !edges.tested[node.QualifiedName] && !node.IsTest {
+			tally.hotspots = append(tally.hotspots, gapNodeRow(node, d))
 		}
 		if node.CommunityID != 0 {
-			communitySizes[node.CommunityID]++
-			files := communityFiles[node.CommunityID]
+			tally.communitySizes[node.CommunityID]++
+			files := tally.communityFiles[node.CommunityID]
 			if files == nil {
 				files = map[string]bool{}
-				communityFiles[node.CommunityID] = files
+				tally.communityFiles[node.CommunityID] = files
 			}
 			files[node.FilePath] = true
 		}
 	}
-	sort.SliceStable(hotspots, func(i, j int) bool {
-		return hotspots[i]["degree"].(int) > hotspots[j]["degree"].(int)
-	})
+	return tally
+}
 
-	thin := make([]map[string]any, 0, len(communities))
-	singleFile := make([]map[string]any, 0, len(communities))
+// collectCommunityGaps is the community-level pass: the communities with too
+// few members, and the ones whose members all live in a single file.
+func collectCommunityGaps(
+	communities []graphstore.CommunityRow, nodes nodeGapTally,
+) (thin, singleFile []map[string]any) {
+	thin = make([]map[string]any, 0, len(communities))
+	singleFile = make([]map[string]any, 0, len(communities))
 	for _, community := range communities {
-		size := communitySizes[community.ID]
+		size := nodes.communitySizes[community.ID]
 		if size < thinCommunityMembers {
 			// A community row whose members have all gone reports size 0 and
 			// is thin, which is how a stale partition surfaces.
@@ -332,7 +381,7 @@ func findKnowledgeGaps(g *analysisGraph, communities []graphstore.CommunityRow) 
 				"size":         size,
 			})
 		}
-		files := communityFiles[community.ID]
+		files := nodes.communityFiles[community.ID]
 		if len(files) == 1 && size >= thinCommunityMembers {
 			singleFile = append(singleFile, map[string]any{
 				"community_id": community.ID,
@@ -342,13 +391,7 @@ func findKnowledgeGaps(g *analysisGraph, communities []graphstore.CommunityRow) 
 			})
 		}
 	}
-
-	return []gapCategory{
-		{"isolated_nodes", capRows(isolated, maxIsolatedNodes)},
-		{"thin_communities", thin},
-		{"untested_hotspots", capRows(hotspots, maxUntestedHotspots)},
-		{"single_file_communities", singleFile},
-	}
+	return thin, singleFile
 }
 
 func gapNodeRow(node graphstore.GraphNode, degree int) map[string]any {
@@ -472,6 +515,16 @@ const (
 	surpriseUnusualKind    = 0.15
 )
 
+// Degree bounds of the peripheral-to-hub test.
+const (
+	// surprisePeripheralDegree is the highest degree that still counts as
+	// peripheral.
+	surprisePeripheralDegree = 2
+	// surpriseHubDegreeFloor is the lowest hub threshold upstream will use,
+	// whatever the median says.
+	surpriseHubDegreeFloor = 10
+)
+
 // findSurprisingConnections is analysis.find_surprising_connections with no
 // result bound.
 //
@@ -481,6 +534,29 @@ const (
 // and it is why the fixture repository scores zero surprising connections.
 func findSurprisingConnections(g *analysisGraph) []surprisingEdge {
 	degree := g.totalDegrees()
+	highDegree, connected := surpriseHubDegree(degree)
+	if !connected {
+		return nil
+	}
+
+	scored := make([]surprisingEdge, 0, len(g.edges))
+	for _, edge := range g.edges {
+		if candidate, surprising := scoreSurprisingEdge(g, edge, degree, highDegree); surprising {
+			scored = append(scored, candidate)
+		}
+	}
+	// Stable, so equally surprising edges keep primary-key order.
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+	return scored
+}
+
+// surpriseHubDegree is the degree at which an endpoint counts as a hub: three
+// times the median degree of every node that carries an edge. It reports
+// false when no node carries one at all, which is upstream's "no surprising
+// connections" short-circuit.
+func surpriseHubDegree(degree map[string]int) (int, bool) {
 	degrees := make([]int, 0, len(degree))
 	for _, d := range degree {
 		if d > 0 {
@@ -488,81 +564,93 @@ func findSurprisingConnections(g *analysisGraph) []surprisingEdge {
 		}
 	}
 	if len(degrees) == 0 {
-		return nil
+		return 0, false
 	}
 	sort.Ints(degrees)
 	// Upstream's "median" is the upper-middle element, not the mean of the two
 	// middles. The floor of 10 stops a tiny graph, where triple the median is
 	// still 3, from calling every edge peripheral-to-hub.
-	median := degrees[len(degrees)/2]
-	highDegree := median * 3
-	if highDegree < 10 {
-		highDegree = 10
+	highDegree := degrees[len(degrees)/2] * 3
+	if highDegree < surpriseHubDegreeFloor {
+		highDegree = surpriseHubDegreeFloor
+	}
+	return highDegree, true
+}
+
+// scoreSurprisingEdge accumulates one edge's composite score and reports
+// whether it scored at all. An edge with an endpoint that is not a node of
+// the graph — every cross-package call and every import — is never scored.
+func scoreSurprisingEdge(
+	g *analysisGraph, edge graphstore.GraphEdge, degree map[string]int, highDegree int,
+) (surprisingEdge, bool) {
+	src, tgt := g.byQN[edge.SourceQualified], g.byQN[edge.TargetQualified]
+	if src == nil || tgt == nil {
+		return surprisingEdge{}, false
+	}
+	score := 0.0
+	reasons := []string{}
+
+	if isCrossCommunity(src, tgt) {
+		score += surpriseCrossCommunity
+		reasons = append(reasons, "cross-community")
+	}
+	if isCrossLanguage(src.FilePath, tgt.FilePath) {
+		score += surpriseCrossLanguage
+		reasons = append(reasons, "cross-language")
+	}
+	if isPeripheralToHub(degree[edge.SourceQualified], degree[edge.TargetQualified], highDegree) {
+		score += surprisePeripheralHub
+		reasons = append(reasons, "peripheral-to-hub")
+	}
+	if src.IsTest != tgt.IsTest && edge.Kind == graphstore.EdgeKindCalls {
+		score += surpriseCrossTest
+		reasons = append(reasons, "cross-test-boundary")
+	}
+	if edge.Kind == graphstore.EdgeKindCalls && src.Kind == graphstore.NodeKindType {
+		score += surpriseUnusualKind
+		reasons = append(reasons, "unusual-edge-kind")
 	}
 
-	scored := make([]surprisingEdge, 0, len(g.edges))
-	for _, edge := range g.edges {
-		src, tgt := g.byQN[edge.SourceQualified], g.byQN[edge.TargetQualified]
-		if src == nil || tgt == nil {
-			continue
-		}
-		score := 0.0
-		reasons := []string{}
-
-		srcCommunity := communityValue(src.CommunityID)
-		tgtCommunity := communityValue(tgt.CommunityID)
-		if srcCommunity != nil && tgtCommunity != nil && src.CommunityID != tgt.CommunityID {
-			score += surpriseCrossCommunity
-			reasons = append(reasons, "cross-community")
-		}
-
-		srcLang, tgtLang := pathSuffix(src.FilePath), pathSuffix(tgt.FilePath)
-		if srcLang != "" && tgtLang != "" && srcLang != tgtLang {
-			score += surpriseCrossLanguage
-			reasons = append(reasons, "cross-language")
-		}
-
-		srcDegree, tgtDegree := degree[edge.SourceQualified], degree[edge.TargetQualified]
-		if (srcDegree <= 2 && tgtDegree >= highDegree) ||
-			(tgtDegree <= 2 && srcDegree >= highDegree) {
-			score += surprisePeripheralHub
-			reasons = append(reasons, "peripheral-to-hub")
-		}
-
-		if src.IsTest != tgt.IsTest && edge.Kind == graphstore.EdgeKindCalls {
-			score += surpriseCrossTest
-			reasons = append(reasons, "cross-test-boundary")
-		}
-
-		if edge.Kind == graphstore.EdgeKindCalls && src.Kind == graphstore.NodeKindType {
-			score += surpriseUnusualKind
-			reasons = append(reasons, "unusual-edge-kind")
-		}
-
-		if score <= 0 {
-			continue
-		}
-		scored = append(scored, surprisingEdge{
-			source:          SanitizeName(src.Name),
-			sourceQualified: edge.SourceQualified,
-			target:          SanitizeName(tgt.Name),
-			targetQualified: edge.TargetQualified,
-			edgeKind:        edge.Kind,
-			// The accumulated sum carries binary error (0.3+0.2+0.2+0.15 is
-			// 0.8500000000000001). Every reachable score is a multiple of
-			// 0.05, so scaling by 100 lands on an integer and the rounding
-			// mode's tie-break rule is never reached.
-			score:           math.Round(score*100) / 100,
-			reasons:         reasons,
-			sourceCommunity: srcCommunity,
-			targetCommunity: tgtCommunity,
-		})
+	if score <= 0 {
+		return surprisingEdge{}, false
 	}
-	// Stable, so equally surprising edges keep primary-key order.
-	sort.SliceStable(scored, func(i, j int) bool {
-		return scored[i].score > scored[j].score
-	})
-	return scored
+	return surprisingEdge{
+		source:          SanitizeName(src.Name),
+		sourceQualified: edge.SourceQualified,
+		target:          SanitizeName(tgt.Name),
+		targetQualified: edge.TargetQualified,
+		edgeKind:        edge.Kind,
+		// The accumulated sum carries binary error (0.3+0.2+0.2+0.15 is
+		// 0.8500000000000001). Every reachable score is a multiple of
+		// 0.05, so scaling by 100 lands on an integer and the rounding
+		// mode's tie-break rule is never reached.
+		score:           math.Round(score*100) / 100,
+		reasons:         reasons,
+		sourceCommunity: communityValue(src.CommunityID),
+		targetCommunity: communityValue(tgt.CommunityID),
+	}, true
+}
+
+// isCrossCommunity reports whether community detection placed the endpoints
+// in DIFFERENT communities. An endpoint it never assigned (id 0, rendered
+// null) does not qualify: upstream requires both sides to have one.
+func isCrossCommunity(src, tgt *graphstore.GraphNode) bool {
+	return src.CommunityID != 0 && tgt.CommunityID != 0 && src.CommunityID != tgt.CommunityID
+}
+
+// isCrossLanguage reports whether the two files carry different, non-empty
+// path suffixes. A suffix-less path never qualifies: nothing is known about
+// its language, so a difference cannot be claimed.
+func isCrossLanguage(srcPath, tgtPath string) bool {
+	srcLang, tgtLang := pathSuffix(srcPath), pathSuffix(tgtPath)
+	return srcLang != "" && tgtLang != "" && srcLang != tgtLang
+}
+
+// isPeripheralToHub reports whether one endpoint is all but unconnected while
+// the other is a hub, in either direction.
+func isPeripheralToHub(srcDegree, tgtDegree, highDegree int) bool {
+	return (srcDegree <= surprisePeripheralDegree && tgtDegree >= highDegree) ||
+		(tgtDegree <= surprisePeripheralDegree && srcDegree >= highDegree)
 }
 
 // pathSuffix is upstream's crude language probe:
@@ -615,6 +703,9 @@ func getSurprisingConnectionsTool(e *Engine, args crgrelease.Args) (any, error) 
 const (
 	traverseMinDepth = 1
 	traverseMaxDepth = 6
+	// traverseModeBFS is the ONLY mode string upstream recognises; every
+	// other value, including a misspelling, traverses depth-first.
+	traverseModeBFS = "bfs"
 )
 
 // traverseFrame is one queued (node, depth) pair. One slice serves both modes:
@@ -655,35 +746,49 @@ func traverseGraphTool(e *Engine, args crgrelease.Args) (any, error) {
 	}
 	startQualifiedName := hits[0].Node.QualifiedName
 
+	traversal, approxTokens, err := traverseFrom(store, startQualifiedName, mode, depth, tokenBudget)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"start_node":    startQualifiedName,
+		"mode":          mode,
+		"max_depth":     depth,
+		"nodes_visited": len(traversal),
+		"traversal":     traversal,
+		"truncated":     approxTokens > tokenBudget,
+		"next_tool_suggestions": []string{
+			"query_graph callers_of -- focused relationship query",
+			"get_impact_radius -- blast radius analysis",
+		},
+	}, nil
+}
+
+// traverseFrom walks the graph outward from start until the queue drains or
+// the next entry would exceed the token budget.
+//
+// It returns the emitted rows and the accumulated token cost. That cost stays
+// OVER the budget when the walk was cut short, which is what the caller reads
+// back as `truncated`.
+func traverseFrom(
+	store graphstore.Store, start, mode string, maxDepth, tokenBudget int,
+) ([]map[string]any, int, error) {
 	visited := map[string]int{}
-	queue := []traverseFrame{{startQualifiedName, 0}}
+	queue := []traverseFrame{{start, 0}}
 	traversal := []map[string]any{}
 	approxTokens := 0
 
 	for len(queue) > 0 {
 		var current traverseFrame
-		if mode == "bfs" {
-			current, queue = queue[0], queue[1:]
-		} else {
-			// Any mode that is not exactly "bfs" is depth-first, including a
-			// misspelling: upstream branches on equality rather than on a set
-			// of known modes, and echoes the value back unchanged.
-			current, queue = queue[len(queue)-1], queue[:len(queue)-1]
-		}
-		if _, seen := visited[current.qualifiedName]; seen {
+		current, queue = popTraverseFrame(queue, mode)
+		if !visitTraverseFrame(visited, current, maxDepth) {
 			continue
 		}
-		// The depth cut happens BEFORE the node is marked visited, so a node
-		// first reached too deep can still be expanded when a shorter path to
-		// it comes off the queue later.
-		if current.depth > depth {
-			continue
-		}
-		visited[current.qualifiedName] = current.depth
 
 		node, err := store.GetNode(current.qualifiedName)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if node == nil {
 			// A bare cross-package call target: marked visited so the
@@ -702,43 +807,82 @@ func traverseGraphTool(e *Engine, args crgrelease.Args) (any, error) {
 		approxTokens += entry.tokenCost()
 		if approxTokens > tokenBudget {
 			// The over-budget entry is NOT emitted, and the accumulated total
-			// stays over budget, which is what makes `truncated` true below.
+			// stays over budget, which is what makes `truncated` true.
 			break
 		}
 		traversal = append(traversal, entry.dict())
 
-		outgoing, err := store.GetEdgesBySource(current.qualifiedName)
+		queue, err = appendTraverseNeighbours(queue, store, current, visited)
 		if err != nil {
-			return nil, err
-		}
-		incoming, err := store.GetEdgesByTarget(current.qualifiedName)
-		if err != nil {
-			return nil, err
-		}
-		for _, edge := range outgoing {
-			if _, seen := visited[edge.TargetQualified]; !seen {
-				queue = append(queue, traverseFrame{edge.TargetQualified, current.depth + 1})
-			}
-		}
-		for _, edge := range incoming {
-			if _, seen := visited[edge.SourceQualified]; !seen {
-				queue = append(queue, traverseFrame{edge.SourceQualified, current.depth + 1})
-			}
+			return nil, 0, err
 		}
 	}
+	return traversal, approxTokens, nil
+}
 
-	return map[string]any{
-		"start_node":    startQualifiedName,
-		"mode":          mode,
-		"max_depth":     depth,
-		"nodes_visited": len(traversal),
-		"traversal":     traversal,
-		"truncated":     approxTokens > tokenBudget,
-		"next_tool_suggestions": []string{
-			"query_graph callers_of -- focused relationship query",
-			"get_impact_radius -- blast radius analysis",
-		},
-	}, nil
+// popTraverseFrame takes the next frame off the queue: the front in BFS mode,
+// the back otherwise.
+//
+// Any mode that is not exactly "bfs" is depth-first, including a misspelling:
+// upstream branches on equality rather than on a set of known modes, and
+// echoes the value back unchanged.
+func popTraverseFrame(queue []traverseFrame, mode string) (traverseFrame, []traverseFrame) {
+	if mode == traverseModeBFS {
+		return queue[0], queue[1:]
+	}
+	return queue[len(queue)-1], queue[:len(queue)-1]
+}
+
+// visitTraverseFrame marks a frame visited and reports whether it should be
+// expanded.
+//
+// The depth cut happens BEFORE the node is marked visited, so a node first
+// reached too deep can still be expanded when a shorter path to it comes off
+// the queue later.
+func visitTraverseFrame(visited map[string]int, frame traverseFrame, maxDepth int) bool {
+	if _, seen := visited[frame.qualifiedName]; seen {
+		return false
+	}
+	if frame.depth > maxDepth {
+		return false
+	}
+	visited[frame.qualifiedName] = frame.depth
+	return true
+}
+
+// appendTraverseNeighbours queues every endpoint of the frame's edges, in
+// both directions and one level deeper: outgoing targets first, then incoming
+// sources, each in the store's primary-key order.
+func appendTraverseNeighbours(
+	queue []traverseFrame, store graphstore.Store, frame traverseFrame, visited map[string]int,
+) ([]traverseFrame, error) {
+	outgoing, err := store.GetEdgesBySource(frame.qualifiedName)
+	if err != nil {
+		return nil, err
+	}
+	incoming, err := store.GetEdgesByTarget(frame.qualifiedName)
+	if err != nil {
+		return nil, err
+	}
+	for _, edge := range outgoing {
+		queue = appendUnvisitedFrame(queue, edge.TargetQualified, frame.depth+1, visited)
+	}
+	for _, edge := range incoming {
+		queue = appendUnvisitedFrame(queue, edge.SourceQualified, frame.depth+1, visited)
+	}
+	return queue, nil
+}
+
+// appendUnvisitedFrame queues one neighbour unless the traversal already
+// reached it. The queue may still hold a duplicate of it — visitTraverseFrame
+// is what makes the second copy a no-op.
+func appendUnvisitedFrame(
+	queue []traverseFrame, qualifiedName string, depth int, visited map[string]int,
+) []traverseFrame {
+	if _, seen := visited[qualifiedName]; seen {
+		return queue
+	}
+	return append(queue, traverseFrame{qualifiedName, depth})
 }
 
 // traversalEntry is one row of the traversal, and the unit the token budget is

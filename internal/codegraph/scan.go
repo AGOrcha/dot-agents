@@ -660,42 +660,70 @@ type declEntry struct {
 // pre-scan missed — a type declared inside a function body, which is a node
 // but not a file-scope name.
 func (s *fileScan) resolveCallTargets() {
-	byName := make(map[string][]declEntry, len(s.decls))
-	parentOf := make(map[string]string, len(s.decls))
-	receiverOf := make(map[string]string, len(s.decls))
-	for _, d := range s.decls {
-		entry := declEntry{qualified: d.Symbol.QualifiedName, parent: d.ParentName}
-		if !containsEntry(byName[d.Name], entry) {
-			byName[d.Name] = append(byName[d.Name], entry)
-		}
-		parentOf[d.Symbol.QualifiedName] = d.ParentName
-		if d.receiver != "" {
-			receiverOf[d.Symbol.QualifiedName] = d.receiver
-		}
-	}
+	idx := s.buildDeclIndex()
 	for i := range s.edges {
 		e := &s.edges[i]
 		if e.Kind != edgeCalls {
 			continue
 		}
-		if e.methodReceiver && e.receiver == receiverOf[e.Source] {
-			var candidates []string
-			for _, entry := range byName[e.Target] {
-				if entry.parent == parentOf[e.Source] {
-					candidates = append(candidates, entry.qualified)
-				}
-			}
-			if len(candidates) == 1 {
-				e.Target = candidates[0]
-				continue
-			}
+		if candidates := idx.receiverCandidates(e); len(candidates) == 1 {
+			e.Target = candidates[0]
+			continue
 		}
 		if e.receiver == "" && !strings.Contains(e.Target, qualSep) {
-			if entries := byName[e.Target]; len(entries) > 0 {
+			if entries := idx.byName[e.Target]; len(entries) > 0 {
 				e.Target = entries[0].qualified
 			}
 		}
 	}
+}
+
+// declIndex is the view of one file's declarations that call-target
+// resolution reads: candidates per bare name, and the parent and receiver of
+// each qualified declaration.
+type declIndex struct {
+	byName     map[string][]declEntry
+	parentOf   map[string]string
+	receiverOf map[string]string
+}
+
+// buildDeclIndex indexes this file's declarations. A name keeps every
+// distinct candidate in declaration order, deduplicated so a name declared
+// twice with the same qualified name and parent stays a single candidate.
+func (s *fileScan) buildDeclIndex() declIndex {
+	idx := declIndex{
+		byName:     make(map[string][]declEntry, len(s.decls)),
+		parentOf:   make(map[string]string, len(s.decls)),
+		receiverOf: make(map[string]string, len(s.decls)),
+	}
+	for _, d := range s.decls {
+		entry := declEntry{qualified: d.Symbol.QualifiedName, parent: d.ParentName}
+		if !containsEntry(idx.byName[d.Name], entry) {
+			idx.byName[d.Name] = append(idx.byName[d.Name], entry)
+		}
+		idx.parentOf[d.Symbol.QualifiedName] = d.ParentName
+		if d.receiver != "" {
+			idx.receiverOf[d.Symbol.QualifiedName] = d.receiver
+		}
+	}
+	return idx
+}
+
+// receiverCandidates returns the declarations a call through the enclosing
+// method's own receiver could name: siblings on the same receiver type. It
+// returns nothing for any other edge, so only a single unambiguous candidate
+// qualifies the target.
+func (idx declIndex) receiverCandidates(e *scanEdge) []string {
+	if !e.methodReceiver || e.receiver != idx.receiverOf[e.Source] {
+		return nil
+	}
+	var candidates []string
+	for _, entry := range idx.byName[e.Target] {
+		if entry.parent == idx.parentOf[e.Source] {
+			candidates = append(candidates, entry.qualified)
+		}
+	}
+	return candidates
 }
 
 func containsEntry(entries []declEntry, want declEntry) bool {
@@ -905,7 +933,9 @@ type shadowScan struct {
 	claimed []ast.Node // `:=` statements already handled by their parent
 }
 
-func (sh *shadowScan) visit(n ast.Node, scope ast.Node) {
+// visit records any shadow a single node introduces, relative to the
+// innermost lexical scope the walk is currently inside.
+func (sh *shadowScan) visit(n, scope ast.Node) {
 	switch x := n.(type) {
 	case *ast.FuncLit:
 		if x.Body != nil && sh.signatureBinds(x.Type) {
@@ -922,10 +952,7 @@ func (sh *shadowScan) visit(n ast.Node, scope ast.Node) {
 	case *ast.CommClause:
 		sh.initStmt(x.Comm, x)
 	case *ast.RangeStmt:
-		if x.Tok == token.DEFINE && x.Body != nil &&
-			(identNamed(x.Key, sh.name) || identNamed(x.Value, sh.name)) {
-			sh.add(span{x.Body.Pos(), x.Body.End()}, x.Body)
-		}
+		sh.rangeStmt(x)
 	case *ast.ValueSpec:
 		if identsNamed(x.Names, sh.name) {
 			sh.add(span{x.End(), scope.End()}, scope)
@@ -935,15 +962,28 @@ func (sh *shadowScan) visit(n ast.Node, scope ast.Node) {
 			sh.add(span{x.End(), scope.End()}, scope)
 		}
 	case *ast.AssignStmt:
-		// A `:=` that is a plain statement binds for the rest of its scope,
-		// but upstream records at most one binding per scope and treats the
-		// method body's own scope as already bound.
-		if sh.isClaimed(x) || x.Tok != token.DEFINE || !sh.lhsBinds(x) {
-			return
-		}
-		if !sh.bound[key(scope)] {
-			sh.add(span{x.End(), scope.End()}, scope)
-		}
+		sh.assignStmt(x, scope)
+	}
+}
+
+// rangeStmt handles `for k, v := range …`, whose key and value bind for the
+// whole loop body.
+func (sh *shadowScan) rangeStmt(x *ast.RangeStmt) {
+	if x.Tok == token.DEFINE && x.Body != nil &&
+		(identNamed(x.Key, sh.name) || identNamed(x.Value, sh.name)) {
+		sh.add(span{x.Body.Pos(), x.Body.End()}, x.Body)
+	}
+}
+
+// assignStmt handles a `:=` that is a plain statement: it binds for the rest
+// of its scope, but upstream records at most one binding per scope and treats
+// the method body's own scope as already bound.
+func (sh *shadowScan) assignStmt(x *ast.AssignStmt, scope ast.Node) {
+	if sh.isClaimed(x) || x.Tok != token.DEFINE || !sh.lhsBinds(x) {
+		return
+	}
+	if !sh.bound[key(scope)] {
+		sh.add(span{x.End(), scope.End()}, scope)
 	}
 }
 

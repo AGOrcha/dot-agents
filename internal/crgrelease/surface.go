@@ -207,36 +207,52 @@ func decodeTool(doc toolDoc) (Tool, error) {
 	}, nil
 }
 
-// flattenTypes reduces a property's type declaration to the set of accepted
-// JSON type names, reporting whether `null` is among them.
-func flattenTypes(prop propDoc) (types []string, optional bool) {
-	add := func(value any) {
-		switch typed := value.(type) {
-		case string:
-			if typed == "null" {
-				optional = true
-				return
-			}
-			types = append(types, typed)
-		case []any:
-			for _, item := range typed {
-				if name, ok := item.(string); ok {
-					if name == "null" {
-						optional = true
-						continue
-					}
-					types = append(types, name)
-				}
+// typeSet accumulates a property's accepted JSON type names, folding `null`
+// out of the set and into an "optional" flag — the distinction that decides
+// whether a null argument is a validation error or an explicit "unset".
+type typeSet struct {
+	types    []string
+	optional bool
+}
+
+// add records one JSON type name.
+func (s *typeSet) add(name string) {
+	if name == "null" {
+		s.optional = true
+		return
+	}
+	s.types = append(s.types, name)
+}
+
+// addDeclared records a property's `type` declaration, which upstream spells
+// either as a single name or as a list of names. Anything else carries no
+// type information and is ignored.
+func (s *typeSet) addDeclared(declared any) {
+	switch typed := declared.(type) {
+	case string:
+		s.add(typed)
+	case []any:
+		for _, item := range typed {
+			if name, ok := item.(string); ok {
+				s.add(name)
 			}
 		}
 	}
-	add(prop.Type)
+}
+
+// flattenTypes reduces a property's type declaration to the set of accepted
+// JSON type names, reporting whether `null` is among them. Upstream spells
+// `Optional[...]` as an `anyOf` union, so the alternatives are flattened
+// recursively into the same set.
+func flattenTypes(prop propDoc) (types []string, optional bool) {
+	var set typeSet
+	set.addDeclared(prop.Type)
 	for _, alt := range prop.AnyOf {
 		altTypes, altOptional := flattenTypes(alt)
-		types = append(types, altTypes...)
-		optional = optional || altOptional
+		set.types = append(set.types, altTypes...)
+		set.optional = set.optional || altOptional
 	}
-	return types, optional
+	return set.types, set.optional
 }
 
 // hasKey reports whether a JSON object literally carries a key, which is how

@@ -168,54 +168,69 @@ func releaseChangeCandidates(
 	ctx context.Context, repo *git.Repository, baseTree *object.Tree,
 ) (map[string]bool, error) {
 	candidates := map[string]bool{}
+	if err := releaseCommitRangeCandidates(ctx, repo, baseTree, candidates); err != nil {
+		return nil, err
+	}
+	if err := releaseStatusCandidates(repo, candidates); err != nil {
+		return nil, err
+	}
+	if ctx.Err() != nil {
+		return nil, nil
+	}
+	return candidates, nil
+}
 
+// releaseCommitRangeCandidates adds every path the commits between baseTree
+// and HEAD touched.
+func releaseCommitRangeCandidates(
+	ctx context.Context, repo *git.Repository, baseTree *object.Tree, candidates map[string]bool,
+) error {
 	headTree, err := releaseHeadTree(repo)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if headTree != nil {
-		// Rename detection is off: this diff exists only to NAME candidate
-		// paths, and an undetected rename contributes its source and
-		// destination separately, which is the pair we want anyway.
-		changes, err := object.DiffTreeContext(ctx, baseTree, headTree)
-		if err != nil {
-			return nil, err
-		}
-		for _, change := range changes {
-			if change.From.Name != "" {
-				candidates[change.From.Name] = true
-			}
-			if change.To.Name != "" {
-				candidates[change.To.Name] = true
-			}
-		}
-	} else {
+	if headTree == nil {
 		// No HEAD, but base resolved. Every path in base is a candidate:
 		// there is no commit history that could have left one unchanged.
-		if err := releaseCollectTreePaths(baseTree, candidates); err != nil {
-			return nil, err
+		return releaseCollectTreePaths(baseTree, candidates)
+	}
+	// Rename detection is off: this diff exists only to NAME candidate
+	// paths, and an undetected rename contributes its source and
+	// destination separately, which is the pair we want anyway.
+	changes, err := object.DiffTreeContext(ctx, baseTree, headTree)
+	if err != nil {
+		return err
+	}
+	for _, change := range changes {
+		if change.From.Name != "" {
+			candidates[change.From.Name] = true
+		}
+		if change.To.Name != "" {
+			candidates[change.To.Name] = true
 		}
 	}
+	return nil
+}
 
+// releaseStatusCandidates adds every path the index or the working tree
+// touched, except the untracked ones: `git diff` never reports one, and that
+// is the one difference between the two discovery helpers that callers
+// depend on.
+func releaseStatusCandidates(repo *git.Repository, candidates map[string]bool) error {
 	status, err := releaseStatus(repo)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for path, entry := range status {
 		if entry.Staging == git.Unmodified && entry.Worktree == git.Unmodified {
 			continue
 		}
 		if entry.Staging == git.Untracked && entry.Worktree == git.Untracked {
-			// `git diff` never reports an untracked file. This is the one
-			// difference between the two helpers that callers depend on.
 			continue
 		}
 		candidates[path] = true
 	}
-	if ctx.Err() != nil {
-		return nil, nil
-	}
-	return candidates, nil
+	return nil
 }
 
 // releaseCollectTreePaths adds every blob path in tree to paths.

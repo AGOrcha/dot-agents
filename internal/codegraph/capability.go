@@ -144,56 +144,93 @@ func ScanCapability(root string) (CapabilityReport, error) {
 	if _, err := os.Stat(root); err != nil {
 		return CapabilityReport{}, fmt.Errorf("codegraph: capability scan %s: %w", root, err)
 	}
-	report := CapabilityReport{Root: root}
-	counts := map[string]int{}
-	observed := map[string]map[string]bool{}
-
-	err := walkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil // unreadable subtree — skip, exactly as ingestion does
-		}
-		if d.IsDir() {
-			return skipDirEntry(root, path, d)
-		}
-		if !d.Type().IsRegular() {
-			return nil
-		}
-		// Upstream lowercases a file's suffix before the lookup (".R" → ".r"),
-		// so a case-different extension is the same language here too.
-		ext := strings.ToLower(filepath.Ext(d.Name()))
-		language, supported := upstream.Extensions[ext]
-		if !supported && ext == "" && hasShebang(path) {
-			language, supported = LanguageShebangScript, true
-		}
-		switch {
-		case !supported:
-			language = LanguageUnindexed
-			report.UnsupportedFiles++
-		case nativeLanguages[language]:
-			report.NativeFiles++
-		default:
-			report.BridgeFiles++
-		}
-		counts[language]++
-		if ext != "" {
-			exts := observed[language]
-			if exts == nil {
-				exts = map[string]bool{}
-				observed[language] = exts
-			}
-			exts[ext] = true
-		}
-		return nil
-	})
-	if err != nil {
+	scan := newCapabilityScan(root)
+	if err := walkDir(root, scan.visit); err != nil {
 		return CapabilityReport{}, fmt.Errorf("codegraph: capability scan %s: %w", root, err)
 	}
+	return scan.report(), nil
+}
 
-	report.Languages = make([]SourceCapability, 0, len(counts))
-	for language, files := range counts {
+// capabilityScan accumulates one walk's tallies: how many files each language
+// claimed, which extensions were actually observed for it, and the running
+// native/bridge/unsupported partition.
+type capabilityScan struct {
+	root             string
+	counts           map[string]int
+	observed         map[string]map[string]bool
+	nativeFiles      int
+	bridgeFiles      int
+	unsupportedFiles int
+}
+
+func newCapabilityScan(root string) *capabilityScan {
+	return &capabilityScan{
+		root:     root,
+		counts:   map[string]int{},
+		observed: map[string]map[string]bool{},
+	}
+}
+
+// visit is the walk callback: it prunes with the ingester's own rules so the
+// diagnostic and the ingester always agree on which files count, and hands
+// every regular file to countFile.
+func (s *capabilityScan) visit(path string, d fs.DirEntry, walkErr error) error {
+	if walkErr != nil {
+		return nil // unreadable subtree — skip, exactly as ingestion does
+	}
+	if d.IsDir() {
+		return skipDirEntry(s.root, path, d)
+	}
+	if !d.Type().IsRegular() {
+		return nil
+	}
+	s.countFile(path, d.Name())
+	return nil
+}
+
+// countFile classifies one regular file by who can index it and folds it into
+// the tallies.
+func (s *capabilityScan) countFile(path, name string) {
+	// Upstream lowercases a file's suffix before the lookup (".R" → ".r"),
+	// so a case-different extension is the same language here too.
+	ext := strings.ToLower(filepath.Ext(name))
+	language, supported := upstream.Extensions[ext]
+	if !supported && ext == "" && hasShebang(path) {
+		language, supported = LanguageShebangScript, true
+	}
+	switch {
+	case !supported:
+		language = LanguageUnindexed
+		s.unsupportedFiles++
+	case nativeLanguages[language]:
+		s.nativeFiles++
+	default:
+		s.bridgeFiles++
+	}
+	s.counts[language]++
+	if ext != "" {
+		exts := s.observed[language]
+		if exts == nil {
+			exts = map[string]bool{}
+			s.observed[language] = exts
+		}
+		exts[ext] = true
+	}
+}
+
+// report renders the accumulated tallies as the language-sorted report.
+func (s *capabilityScan) report() CapabilityReport {
+	report := CapabilityReport{
+		Root:             s.root,
+		Languages:        make([]SourceCapability, 0, len(s.counts)),
+		NativeFiles:      s.nativeFiles,
+		BridgeFiles:      s.bridgeFiles,
+		UnsupportedFiles: s.unsupportedFiles,
+	}
+	for language, files := range s.counts {
 		report.Languages = append(report.Languages, SourceCapability{
 			Language:          language,
-			Extensions:        sortedKeys(observed[language]),
+			Extensions:        sortedKeys(s.observed[language]),
 			Files:             files,
 			Native:            nativeLanguages[language],
 			UpstreamSupported: language != LanguageUnindexed,
@@ -203,7 +240,7 @@ func ScanCapability(root string) (CapabilityReport, error) {
 		return report.Languages[i].Language < report.Languages[j].Language
 	})
 	report.FullyNative = report.BridgeFiles == 0 && report.NativeFiles > 0
-	return report, nil
+	return report
 }
 
 // BridgeLanguages returns the upstream-indexed languages the native scanner

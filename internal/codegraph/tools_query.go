@@ -278,47 +278,22 @@ func (q *graphQuery) run() (any, error) {
 // specific lookup, then a keyword search whose outcome is either a unique node
 // or the disambiguation response.
 func (q *graphQuery) resolveTarget() error {
-	// `file_summary` targets are paths and `consumers_of` bare targets are
-	// config keys, so neither goes through node resolution.
-	if q.pattern == "file_summary" {
+	if !q.resolvesNodes() {
 		return nil
 	}
-	if q.pattern == "consumers_of" && !strings.Contains(q.target, "::") {
-		return nil
-	}
-	if q.store == nil {
-		return nil
-	}
-
-	node, err := q.store.GetNode(q.target)
+	node, err := q.lookupNode()
 	if err != nil {
 		return err
-	}
-	if node == nil {
-		if node, err = q.store.GetNode(anchorUnderRoot(q.engine.root, q.target)); err != nil {
-			return err
-		}
 	}
 	if node != nil {
 		q.node = node
 		return nil
 	}
-
 	candidates, isJavaFQN, err := q.candidates()
 	if err != nil {
 		return err
 	}
-	if q.pattern == "inheritors_of" && !strings.Contains(q.target, "::") {
-		var exact []graphstore.GraphNode
-		for _, candidate := range candidates {
-			if candidate.Name == q.target && queryTypeKinds[candidate.Kind] {
-				exact = append(exact, candidate)
-			}
-		}
-		if len(exact) > 0 {
-			candidates = exact
-		}
-	}
+	candidates = q.exactInheritorCandidates(candidates)
 	switch {
 	case len(candidates) == 1:
 		q.node = &candidates[0]
@@ -326,29 +301,88 @@ func (q *graphQuery) resolveTarget() error {
 		// summary and the echoed `target` name the node that was queried.
 		q.target = q.node.QualifiedName
 	case len(candidates) > 1:
-		// A Java FQN's candidate list is already the complete evidence-backed
-		// set, so its count is the list length; a keyword search's list was
-		// capped at 20, so the real total needs a separate count.
-		count := len(candidates)
-		if !isJavaFQN {
-			if count, err = releaseCountSearchNodes(q.store, q.target); err != nil {
-				return err
-			}
+		return q.setAmbiguous(candidates, isJavaFQN)
+	}
+	return nil
+}
+
+// resolvesNodes reports whether the pattern's target goes through node
+// resolution at all. `file_summary` targets are paths and `consumers_of` bare
+// targets are config keys, so neither does; nor does anything at all when the
+// graph was never built.
+func (q *graphQuery) resolvesNodes() bool {
+	if q.pattern == "file_summary" {
+		return false
+	}
+	if q.pattern == "consumers_of" && !strings.Contains(q.target, "::") {
+		return false
+	}
+	return q.store != nil
+}
+
+// lookupNode is the first two resolution steps: the target as given, then the
+// target anchored under the repository root. Two misses is "no node", which
+// hands over to the candidate search rather than being an error.
+func (q *graphQuery) lookupNode() (*graphstore.GraphNode, error) {
+	node, err := q.store.GetNode(q.target)
+	if err != nil {
+		return nil, err
+	}
+	if node != nil {
+		return node, nil
+	}
+	return q.store.GetNode(anchorUnderRoot(q.engine.root, q.target))
+}
+
+// exactInheritorCandidates narrows a BARE `inheritors_of` candidate list to
+// exact type-name matches when there are any: a subclass query names a type,
+// so a same-named function is never the symbol being asked about. With no
+// exact match the unfiltered list stands, because disambiguating is still
+// more useful than answering nothing.
+func (q *graphQuery) exactInheritorCandidates(
+	candidates []graphstore.GraphNode,
+) []graphstore.GraphNode {
+	if q.pattern != "inheritors_of" || strings.Contains(q.target, "::") {
+		return candidates
+	}
+	var exact []graphstore.GraphNode
+	for _, candidate := range candidates {
+		if candidate.Name == q.target && queryTypeKinds[candidate.Kind] {
+			exact = append(exact, candidate)
 		}
-		ranked := rankDisambiguationCandidates(candidates, q.target)
-		q.ambiguous = map[string]any{
-			"status": "ambiguous",
-			"summary": fmt.Sprintf(
-				"'%s' matches %d node(s). Re-run with a qualified_name from disambiguation.",
-				q.target, count),
-			// Both keys carry the same list: `candidates` is the established
-			// name and `disambiguation` the clearer one #458 introduced.
-			"candidates":           ranked,
-			"disambiguation":       ranked,
-			"candidate_count":      count,
-			"candidates_truncated": count > len(candidates),
-			"hint":                 "Use a qualified_name from disambiguation as the target parameter.",
+	}
+	if len(exact) > 0 {
+		candidates = exact
+	}
+	return candidates
+}
+
+// setAmbiguous records the disambiguation response for a target that matched
+// more than one node.
+func (q *graphQuery) setAmbiguous(candidates []graphstore.GraphNode, isJavaFQN bool) error {
+	// A Java FQN's candidate list is already the complete evidence-backed set,
+	// so its count is the list length; a keyword search's list was capped at
+	// 20, so the real total needs a separate count.
+	count := len(candidates)
+	if !isJavaFQN {
+		var err error
+		if count, err = releaseCountSearchNodes(q.store, q.target); err != nil {
+			return err
 		}
+	}
+	ranked := rankDisambiguationCandidates(candidates, q.target)
+	q.ambiguous = map[string]any{
+		"status": "ambiguous",
+		"summary": fmt.Sprintf(
+			"'%s' matches %d node(s). Re-run with a qualified_name from disambiguation.",
+			q.target, count),
+		// Both keys carry the same list: `candidates` is the established
+		// name and `disambiguation` the clearer one #458 introduced.
+		"candidates":           ranked,
+		"disambiguation":       ranked,
+		"candidate_count":      count,
+		"candidates_truncated": count > len(candidates),
+		"hint":                 "Use a qualified_name from disambiguation as the target parameter.",
 	}
 	return nil
 }
@@ -580,6 +614,19 @@ func (q *graphQuery) dispatch() error {
 // `target_resolution: "unresolved"` rather than being presented as certain.
 func (q *graphQuery) callersOf(qualified string) error {
 	seen := map[string]bool{}
+	if err := q.addQualifiedCallers(qualified, seen); err != nil {
+		return err
+	}
+	if q.node == nil {
+		return nil
+	}
+	return q.addBareNameCallers(seen)
+}
+
+// addQualifiedCallers is the first pass: CALLS edges whose target is the
+// resolved qualified name, one result per distinct caller. An edge whose
+// source has no node row is dropped, because there is nothing to project.
+func (q *graphQuery) addQualifiedCallers(qualified string, seen map[string]bool) error {
 	incoming, err := q.store.GetEdgesByTarget(qualified)
 	if err != nil {
 		return err
@@ -598,19 +645,16 @@ func (q *graphQuery) callersOf(qualified string) error {
 			q.add(NodeToDict(*caller), &edge)
 		}
 	}
-	if q.node == nil {
-		return nil
-	}
+	return nil
+}
 
-	// A C++ overload set deliberately keeps its call targets bare. The
-	// candidates support disambiguation but do not prove that any one exact
-	// overload was called, so an ambiguous set contributes no callers at all.
-	overloads := 0
-	if q.node.Language == "cpp" {
-		if overloads, err = releaseCountNodesByName(
-			q.store, q.node.Name, "cpp", "Function", "Test"); err != nil {
-			return err
-		}
+// addBareNameCallers is the second pass: CALLS edges that still name the
+// symbol BARE because the call crossed a file. Every result it contributes is
+// tagged `target_resolution: "unresolved"`.
+func (q *graphQuery) addBareNameCallers(seen map[string]bool) error {
+	overloads, err := q.callerOverloadCount()
+	if err != nil {
+		return err
 	}
 	bare, err := releaseEdgesByTargetName(q.store, q.node.Name, "CALLS", q.node.Language)
 	if err != nil {
@@ -618,13 +662,7 @@ func (q *graphQuery) callersOf(qualified string) error {
 	}
 	for i := range bare {
 		edge := bare[i]
-		if hasUnresolvedTargets(edge.Extra) {
-			continue
-		}
-		if q.node.Language == "cpp" && edge.Extra["receiver"] != nil {
-			continue
-		}
-		if overloads > 1 || seen[edge.SourceQualified] {
+		if q.bareCallerRejected(edge, overloads, seen) {
 			continue
 		}
 		seen[edge.SourceQualified] = true
@@ -639,6 +677,33 @@ func (q *graphQuery) callersOf(qualified string) error {
 		}
 	}
 	return nil
+}
+
+// callerOverloadCount is the size of the C++ overload set sharing the resolved
+// node's name. A C++ overload set deliberately keeps its call targets bare, so
+// the candidates support disambiguation but do not prove that any one exact
+// overload was called; no other language needs the count.
+func (q *graphQuery) callerOverloadCount() (int, error) {
+	if q.node.Language != "cpp" {
+		return 0, nil
+	}
+	return releaseCountNodesByName(q.store, q.node.Name, "cpp", "Function", "Test")
+}
+
+// bareCallerRejected reports whether a bare-name CALLS edge is too weak to
+// report: a guessed target, a C++ call through a receiver (the bare name
+// proves nothing about which overload ran), an ambiguous overload set, or a
+// caller the qualified pass already reported.
+func (q *graphQuery) bareCallerRejected(
+	edge graphstore.GraphEdge, overloads int, seen map[string]bool,
+) bool {
+	if hasUnresolvedTargets(edge.Extra) {
+		return true
+	}
+	if q.node.Language == "cpp" && edge.Extra["receiver"] != nil {
+		return true
+	}
+	return overloads > 1 || seen[edge.SourceQualified]
 }
 
 // sourcesOfIncoming projects the SOURCE node of every incoming edge of one
@@ -692,43 +757,54 @@ func (q *graphQuery) calleesOf(qualified string) error {
 			q.add(NodeToDict(*callee), &edge)
 			continue
 		}
-		ambiguous, hasAmbiguous := stringList(edge.Extra["ambiguous_targets"])
-		unresolved, hasUnresolved := stringList(edge.Extra["unresolved_targets"])
-		reportable := hasAmbiguous || hasUnresolved ||
-			!strings.Contains(edge.TargetQualified, "::") ||
-			(q.node != nil && q.node.Language == "cpp")
-		if !reportable {
-			continue
+		if result := q.unreachableCalleeResult(edge); result != nil {
+			q.add(result, &edge)
 		}
-		result := map[string]any{
-			"kind":           "Function",
-			"name":           edge.TargetQualified,
-			"qualified_name": edge.TargetQualified,
-		}
-		// The release picks the candidate set with `ambiguous or unresolved`,
-		// so an ambiguous list that is PRESENT BUT EMPTY is falsy and hands
-		// over to the unresolved list — including the label, which is derived
-		// from the same truthiness test rather than from which key exists.
-		candidates, labelled := unresolved, hasUnresolved
-		resolution := "unresolved"
-		if len(ambiguous) > 0 {
-			candidates, labelled, resolution = ambiguous, true, "ambiguous"
-		}
-		if labelled {
-			shown := sanitizeAll(candidates, 20)
-			count, ok := extraInt(edge.Extra[resolution+"_target_count"])
-			if !ok {
-				count = len(candidates)
-			}
-			result["resolution"] = resolution
-			result["candidates"] = shown
-			result["candidate_count"] = count
-			result["candidates_truncated"] = truthy(edge.Extra[resolution+"_targets_truncated"]) ||
-				count > len(shown)
-		}
-		q.add(result, &edge)
 	}
 	return nil
+}
+
+// unreachableCalleeResult projects a CALLS edge whose target has no node row,
+// or nil when the edge is not reportable. A bare target, or one the extractor
+// recorded an ambiguous/unresolved candidate set for, IS reportable: "this
+// call goes somewhere we could not pin down" is information, and dropping it
+// would read as "this function calls nothing".
+func (q *graphQuery) unreachableCalleeResult(edge graphstore.GraphEdge) map[string]any {
+	ambiguous, hasAmbiguous := stringList(edge.Extra["ambiguous_targets"])
+	unresolved, hasUnresolved := stringList(edge.Extra["unresolved_targets"])
+	reportable := hasAmbiguous || hasUnresolved ||
+		!strings.Contains(edge.TargetQualified, "::") ||
+		(q.node != nil && q.node.Language == "cpp")
+	if !reportable {
+		return nil
+	}
+	result := map[string]any{
+		"kind":           "Function",
+		"name":           edge.TargetQualified,
+		"qualified_name": edge.TargetQualified,
+	}
+	// The release picks the candidate set with `ambiguous or unresolved`,
+	// so an ambiguous list that is PRESENT BUT EMPTY is falsy and hands
+	// over to the unresolved list — including the label, which is derived
+	// from the same truthiness test rather than from which key exists.
+	candidates, labelled := unresolved, hasUnresolved
+	resolution := "unresolved"
+	if len(ambiguous) > 0 {
+		candidates, labelled, resolution = ambiguous, true, "ambiguous"
+	}
+	if labelled {
+		shown := sanitizeAll(candidates, 20)
+		count, ok := extraInt(edge.Extra[resolution+"_target_count"])
+		if !ok {
+			count = len(candidates)
+		}
+		result["resolution"] = resolution
+		result["candidates"] = shown
+		result["candidate_count"] = count
+		result["candidates_truncated"] = truthy(edge.Extra[resolution+"_targets_truncated"]) ||
+			count > len(shown)
+	}
+	return result
 }
 
 // importsOf reports what a file imports. The projection is the raw edge target,
@@ -996,7 +1072,7 @@ func (q *graphQuery) consumersOf() error {
 	if q.node != nil {
 		raw = q.node.Name
 	} else {
-		raw = strings.TrimPrefix(raw, "config:")
+		raw = strings.TrimPrefix(raw, configTargetPrefix)
 	}
 	raw = strings.TrimSuffix(raw, ".*")
 	edges, err := releaseConfigConsumers(q.store, normalizeSpringConfigKey(raw))
@@ -1173,14 +1249,35 @@ func HybridSearch(
 	if limit == 0 {
 		return nil, searchModeNone, nil
 	}
-	fetchLimit := limit * 3
-
-	type ranked struct {
-		id    int64
-		score float64
+	merged, mode, err := hybridRankedNodes(store, query, limit*3)
+	if err != nil {
+		return nil, "", err
 	}
-	var merged []ranked
-	mode := searchModeFTS
+	if len(merged) == 0 {
+		return nil, searchModeNone, nil
+	}
+	byID, err := hybridCandidateNodes(store, merged)
+	if err != nil {
+		return nil, "", err
+	}
+	boosted := newHybridScorer(query, contextFiles).rank(merged, byID)
+	return boundSearchHits(boosted, kind, limit), mode, nil
+}
+
+// rankedNode is one entry of the fused ranked list: a node id and the score it
+// earned before any query-shape boost is applied.
+type rankedNode struct {
+	id    int64
+	score float64
+}
+
+// hybridRankedNodes produces the fused ranked list together with the
+// `search_mode` that says where it came from: FTS5's rank order when the index
+// answers, the keyword scan when it does not, and "none" when neither returns
+// anything at all.
+func hybridRankedNodes(
+	store graphstore.Store, query string, fetchLimit int,
+) ([]rankedNode, string, error) {
 	ids, err := store.SearchNodesFTS(query, fetchLimit)
 	if err != nil && !errors.Is(err, graphstore.ErrFTSUnsupported) {
 		return nil, "", err
@@ -1188,75 +1285,118 @@ func HybridSearch(
 	if len(ids) > 0 {
 		// Only one ranked list exists without an embedding provider, so RRF
 		// reduces to 1/(k + rank + 1) and the list is already sorted.
-		merged = make([]ranked, 0, len(ids))
+		fused := make([]rankedNode, 0, len(ids))
 		for rank, id := range ids {
-			merged = append(merged, ranked{id: id, score: 1.0 / float64(rrfK+rank+1)})
+			fused = append(fused, rankedNode{id: id, score: 1.0 / float64(rrfK+rank+1)})
 		}
-	} else {
-		keyword, err := releaseKeywordSearch(store, query, fetchLimit)
-		if err != nil {
-			return nil, "", err
-		}
-		if len(keyword) == 0 {
-			return nil, searchModeNone, nil
-		}
-		mode = searchModeKeyword
-		merged = make([]ranked, 0, len(keyword))
-		for _, scored := range keyword {
-			merged = append(merged, ranked{id: scored.id, score: scored.score})
-		}
+		return fused, searchModeFTS, nil
 	}
+	keyword, err := releaseKeywordSearch(store, query, fetchLimit)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(keyword) == 0 {
+		return nil, searchModeNone, nil
+	}
+	fused := make([]rankedNode, 0, len(keyword))
+	for _, scored := range keyword {
+		fused = append(fused, rankedNode{id: scored.id, score: scored.score})
+	}
+	return fused, searchModeKeyword, nil
+}
 
+// hybridCandidateNodes reads the ranked candidates' node rows, keyed by id. A
+// ranked id with no row is simply absent from the map, which is how a row that
+// disappeared after the index was written drops out of the results.
+func hybridCandidateNodes(
+	store graphstore.Store, merged []rankedNode,
+) (map[int64]graphstore.GraphNode, error) {
 	candidateIDs := make([]int64, 0, len(merged))
 	for _, item := range merged {
 		candidateIDs = append(candidateIDs, item.id)
 	}
 	nodes, err := store.ReadNodesByID(candidateIDs)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	byID := make(map[int64]graphstore.GraphNode, len(nodes))
 	for _, node := range nodes {
 		byID[node.ID] = node
 	}
+	return byID, nil
+}
 
-	boosts := detectQueryKindBoost(query)
-	context := map[string]bool{}
+// hybridScorer holds everything a hit's multiplier depends on, so the query's
+// shape is read once rather than once per candidate.
+type hybridScorer struct {
+	query      string
+	lowered    string
+	boosts     queryBoosts
+	contextual map[string]bool
+}
+
+// newHybridScorer reads the query's shape once and normalizes the caller's
+// context files into the spelling node paths are stored in.
+func newHybridScorer(query string, contextFiles []string) *hybridScorer {
+	contextual := map[string]bool{}
 	for _, file := range contextFiles {
-		context[NormalizeFilePath(file)] = true
+		contextual[NormalizeFilePath(file)] = true
 	}
-	lowered := strings.ToLower(query)
+	return &hybridScorer{
+		query:      query,
+		lowered:    strings.ToLower(query),
+		boosts:     detectQueryKindBoost(query),
+		contextual: contextual,
+	}
+}
 
+// rank projects the ranked ids onto their nodes, applies the boosts and orders
+// the result. Stable: the release relies on Python's stable sort, so equal
+// scores keep the fused rank order rather than being permuted.
+func (s *hybridScorer) rank(
+	merged []rankedNode, byID map[int64]graphstore.GraphNode,
+) []SearchHit {
 	boosted := make([]SearchHit, 0, len(merged))
 	for _, item := range merged {
 		node, ok := byID[item.id]
 		if !ok {
 			continue
 		}
-		boost := 1.0
-		if kindBoost, ok := boosts.kinds[node.Kind]; ok {
-			boost *= kindBoost
-		}
-		loweredQualified := strings.ToLower(node.QualifiedName)
-		if boosts.qualified > 0 && strings.Contains(query, ".") &&
-			strings.Contains(loweredQualified, lowered) {
-			boost *= boosts.qualified
-		}
-		for _, identifier := range boosts.identifiers {
-			if strings.Contains(loweredQualified, identifier) {
-				boost *= 2.0
-				break
-			}
-		}
-		if len(context) > 0 && context[node.FilePath] {
-			boost *= 1.5
-		}
-		boosted = append(boosted, SearchHit{Node: node, Score: item.score * boost})
+		boosted = append(boosted, SearchHit{Node: node, Score: item.score * s.boost(node)})
 	}
-	// Stable: the release relies on Python's stable sort, so equal scores keep
-	// the fused rank order rather than being permuted.
 	sort.SliceStable(boosted, func(i, j int) bool { return boosted[i].Score > boosted[j].Score })
+	return boosted
+}
 
+// boost is one node's multiplier: its kind against the query's intent, a
+// dotted query against the qualified name, any identifier-shaped token the
+// query carried, and membership of the caller's context files.
+func (s *hybridScorer) boost(node graphstore.GraphNode) float64 {
+	boost := 1.0
+	if kindBoost, ok := s.boosts.kinds[node.Kind]; ok {
+		boost *= kindBoost
+	}
+	loweredQualified := strings.ToLower(node.QualifiedName)
+	if s.boosts.qualified > 0 && strings.Contains(s.query, ".") &&
+		strings.Contains(loweredQualified, s.lowered) {
+		boost *= s.boosts.qualified
+	}
+	for _, identifier := range s.boosts.identifiers {
+		if strings.Contains(loweredQualified, identifier) {
+			boost *= 2.0
+			break
+		}
+	}
+	if len(s.contextual) > 0 && s.contextual[node.FilePath] {
+		boost *= 1.5
+	}
+	return boost
+}
+
+// boundSearchHits applies the kind filter INSIDE the bounded read, AFTER the
+// limit check, so `limit` counts only kind-matching results while the boosted
+// list is consumed in full.
+func boundSearchHits(boosted []SearchHit, kind string, limit int) []SearchHit {
 	hits := make([]SearchHit, 0, len(boosted))
 	for _, hit := range boosted {
 		if len(hits) >= limit {
@@ -1267,7 +1407,7 @@ func HybridSearch(
 		}
 		hits = append(hits, hit)
 	}
-	return hits, mode, nil
+	return hits
 }
 
 // queryBoosts is detect_query_kind_boost's output: per-kind multipliers plus
@@ -1409,19 +1549,9 @@ func releaseNodesBySize(
 	}
 	matched := make([]graphstore.GraphNode, 0, len(nodes))
 	for _, node := range nodes {
-		if node.LineStart == 0 || node.LineEnd == 0 || isVerilogSignal(node) {
-			continue
+		if nodeMatchesSizeQuery(node, minLines, kind, pattern) {
+			matched = append(matched, node)
 		}
-		if nodeLineCount(node) < minLines {
-			continue
-		}
-		if kind != "" && node.Kind != kind {
-			continue
-		}
-		if pattern != "" && !sqlLike(node.FilePath, pattern) {
-			continue
-		}
-		matched = append(matched, node)
 	}
 	sort.SliceStable(matched, func(i, j int) bool {
 		return nodeLineCount(matched[i]) > nodeLineCount(matched[j])
@@ -1430,6 +1560,24 @@ func releaseNodesBySize(
 		matched = matched[:limit]
 	}
 	return matched, nil
+}
+
+// nodeMatchesSizeQuery reports whether one node belongs in
+// find_large_functions' result set. A node missing either bound has no span to
+// measure and a Verilog signal has no body at all, so neither is a candidate
+// however the kind and file-pattern filters are set.
+func nodeMatchesSizeQuery(node graphstore.GraphNode, minLines int, kind, pattern string) bool {
+	switch {
+	case node.LineStart == 0 || node.LineEnd == 0 || isVerilogSignal(node):
+		return false
+	case nodeLineCount(node) < minLines:
+		return false
+	case kind != "" && node.Kind != kind:
+		return false
+	case pattern != "" && !sqlLike(node.FilePath, pattern):
+		return false
+	}
+	return true
 }
 
 // nodeLineCount is the inclusive span the release reports as `line_count`. A
@@ -1755,6 +1903,31 @@ func releaseEdgesByTargetName(
 	if err != nil {
 		return nil, err
 	}
+	compatible := compatibleSourceLanguages(language)
+	out := make([]graphstore.GraphEdge, 0, len(edges))
+	for _, edge := range edges {
+		if edge.Kind != kind {
+			continue
+		}
+		if compatible != nil {
+			accepted, err := sourceLanguageAccepted(store, edge, compatible)
+			if err != nil {
+				return nil, err
+			}
+			if !accepted {
+				continue
+			}
+		}
+		out = append(out, edge)
+	}
+	return out, nil
+}
+
+// compatibleSourceLanguages is the language filter's accepted set: a JS-family
+// language accepts the whole family, because a TypeScript caller of a
+// JavaScript function is a real call, while any other language accepts only
+// itself. A nil set means no language was given and nothing is filtered.
+func compatibleSourceLanguages(language string) map[string]bool {
 	var compatible map[string]bool
 	if language != "" {
 		compatible = map[string]bool{}
@@ -1766,23 +1939,20 @@ func releaseEdgesByTargetName(
 			compatible[language] = true
 		}
 	}
-	out := make([]graphstore.GraphEdge, 0, len(edges))
-	for _, edge := range edges {
-		if edge.Kind != kind {
-			continue
-		}
-		if compatible != nil {
-			source, err := store.GetNode(edge.SourceQualified)
-			if err != nil {
-				return nil, err
-			}
-			if source == nil || !compatible[source.Language] {
-				continue
-			}
-		}
-		out = append(out, edge)
+	return compatible
+}
+
+// sourceLanguageAccepted is the release's INNER JOIN on the source node: an
+// edge whose source has no node row at all, or whose source is in an
+// incompatible language, does not survive the filter.
+func sourceLanguageAccepted(
+	store graphstore.Store, edge graphstore.GraphEdge, compatible map[string]bool,
+) (bool, error) {
+	source, err := store.GetNode(edge.SourceQualified)
+	if err != nil {
+		return false, err
 	}
-	return out, nil
+	return source != nil && compatible[source.Language], nil
 }
 
 func isJSFamily(language string) bool {
@@ -1795,15 +1965,19 @@ func isJSFamily(language string) bool {
 	return false
 }
 
+// configTargetPrefix is the `config:` namespace every Spring property target
+// carries in the graph, which is what tells a property key from a symbol.
+const configTargetPrefix = "config:"
+
 // releaseConfigConsumers is GraphStore.get_config_consumers: the exact Spring
 // property key plus every `prefix.*` ancestor, so a class bound to
 // `app.mail.*` is reported as a consumer of `app.mail.host`. Targets are
 // de-duplicated in first-seen order and each is read in edge-id order.
 func releaseConfigConsumers(store graphstore.Store, key string) ([]graphstore.GraphEdge, error) {
 	parts := strings.Split(key, ".")
-	targets := []string{"config:" + key, "config:" + key + ".*"}
+	targets := []string{configTargetPrefix + key, configTargetPrefix + key + ".*"}
 	for i := 1; i < len(parts); i++ {
-		targets = append(targets, "config:"+strings.Join(parts[:i], ".")+".*")
+		targets = append(targets, configTargetPrefix+strings.Join(parts[:i], ".")+".*")
 	}
 	seen := map[string]bool{}
 	var out []graphstore.GraphEdge
@@ -1909,131 +2083,183 @@ const (
 	transitiveTestFrontier = 50
 )
 
+// transitiveTestSet accumulates get_transitive_tests' result rows. A qualified
+// name is recorded at most once and in first-seen order, and a name with no
+// node row is remembered as seen but never reported, so a later pass cannot
+// resurrect it.
+type transitiveTestSet struct {
+	byQualified map[string]graphstore.GraphNode
+	seen        map[string]bool
+	results     []transitiveTest
+}
+
+func (s *transitiveTestSet) record(qualified string, indirect bool) {
+	if s.seen[qualified] {
+		return
+	}
+	s.seen[qualified] = true
+	if _, ok := s.byQualified[qualified]; !ok {
+		return
+	}
+	s.results = append(s.results, transitiveTest{qualifiedName: qualified, indirect: indirect})
+}
+
 // releaseTransitiveTests is GraphStore.get_transitive_tests.
 //
 // TESTED_BY is stored source=production, target=test (#515), so coverage is
 // found by walking OUT of the node under test. Three passes contribute, in this
 // order: direct edges on the node (and, for a class or file, on the symbols it
 // contains), an EVIDENCE-GATED bare-name fallback, then one hop along CALLS.
-//
-// The bare-name gate is the subtle one. A matching name alone is not enough: a
-// bare TESTED_BY source is only accepted when exactly one same-named candidate
-// lives in the call-site file or in a file that file imports. Without the gate,
-// every same-named test in the repository would be attributed to this symbol.
 func releaseTransitiveTests(store graphstore.Store, qualifiedName string) ([]transitiveTest, error) {
 	nodes, err := store.ReadAllNodes()
 	if err != nil {
 		return nil, err
 	}
-	byQualified := make(map[string]graphstore.GraphNode, len(nodes))
+	set := &transitiveTestSet{
+		byQualified: make(map[string]graphstore.GraphNode, len(nodes)),
+		seen:        map[string]bool{},
+	}
 	for _, node := range nodes {
-		byQualified[node.QualifiedName] = node
+		set.byQualified[node.QualifiedName] = node
 	}
 
+	inputs, err := transitiveTestInputs(store, qualifiedName, set.byQualified)
+	if err != nil {
+		return nil, err
+	}
+	if err := recordDirectTests(store, inputs, set); err != nil {
+		return nil, err
+	}
+	if err := recordBareNameTests(store, nodes, qualifiedName, set); err != nil {
+		return nil, err
+	}
+	if err := recordCalledTests(store, uniqueStrings(inputs), set); err != nil {
+		return nil, err
+	}
+	return set.results, nil
+}
+
+// transitiveTestInputs expands the queried symbol into every symbol whose own
+// TESTED_BY edges count as covering it. A name the graph does not hold, and
+// any other kind, expands to itself.
+func transitiveTestInputs(
+	store graphstore.Store, qualifiedName string, byQualified map[string]graphstore.GraphNode,
+) ([]string, error) {
+	switch node := byQualified[qualifiedName]; node.Kind {
+	case "Class":
+		return classContainedInputs(store, qualifiedName)
+	case "File":
+		return fileContainedInputs(store, qualifiedName, node.FilePath)
+	}
+	return []string{qualifiedName}, nil
+}
+
+// classContainedInputs is a class plus its CONTAINS members: a test that covers
+// a method covers the class that was asked about.
+func classContainedInputs(store graphstore.Store, qualifiedName string) ([]string, error) {
+	edges, err := store.GetEdgesBySource(qualifiedName)
+	if err != nil {
+		return nil, err
+	}
 	inputs := []string{qualifiedName}
-	if node, ok := byQualified[qualifiedName]; ok {
-		switch node.Kind {
-		case "Class":
-			edges, err := store.GetEdgesBySource(qualifiedName)
-			if err != nil {
-				return nil, err
-			}
-			for _, edge := range edges {
-				if edge.Kind == "CONTAINS" {
-					inputs = append(inputs, edge.TargetQualified)
-				}
-			}
-		case "File":
-			// A file target must cover methods nested under classes as well as
-			// top-level functions, because the public tool accepts a path.
-			contained, err := store.GetNodesByFile(node.FilePath)
-			if err != nil {
-				return nil, err
-			}
-			for _, symbol := range contained {
-				if symbol.QualifiedName == qualifiedName {
-					continue
-				}
-				if symbol.Kind == "Class" || symbol.Kind == "Function" || symbol.Kind == "Method" {
-					inputs = append(inputs, symbol.QualifiedName)
-				}
-			}
+	for _, edge := range edges {
+		if edge.Kind == "CONTAINS" {
+			inputs = append(inputs, edge.TargetQualified)
 		}
 	}
+	return inputs, nil
+}
 
-	seen := map[string]bool{}
-	var results []transitiveTest
-	record := func(qualified string, indirect bool) {
-		if seen[qualified] {
-			return
-		}
-		if _, ok := byQualified[qualified]; !ok {
-			seen[qualified] = true
-			return
-		}
-		seen[qualified] = true
-		results = append(results, transitiveTest{qualifiedName: qualified, indirect: indirect})
+// fileContainedInputs is a file plus every symbol in it. A file target must
+// cover methods nested under classes as well as top-level functions, because
+// the public tool accepts a path.
+func fileContainedInputs(store graphstore.Store, qualifiedName, filePath string) ([]string, error) {
+	contained, err := store.GetNodesByFile(filePath)
+	if err != nil {
+		return nil, err
 	}
+	inputs := []string{qualifiedName}
+	for _, symbol := range contained {
+		if symbol.QualifiedName == qualifiedName {
+			continue
+		}
+		if symbol.Kind == "Class" || symbol.Kind == "Function" || symbol.Kind == "Method" {
+			inputs = append(inputs, symbol.QualifiedName)
+		}
+	}
+	return inputs, nil
+}
 
+// recordTestsOf records every evidence-backed TESTED_BY edge recorded ON one
+// symbol. An edge carrying a candidate-set marker is a guess, not a recorded
+// relationship, so it contributes nothing.
+func recordTestsOf(
+	store graphstore.Store, symbol string, indirect bool, set *transitiveTestSet,
+) error {
+	edges, err := store.GetEdgesBySource(symbol)
+	if err != nil {
+		return err
+	}
+	for _, edge := range edges {
+		if edge.Kind != "TESTED_BY" || hasUnresolvedTargets(edge.Extra) {
+			continue
+		}
+		set.record(edge.TargetQualified, indirect)
+	}
+	return nil
+}
+
+// recordDirectTests is the first pass: TESTED_BY edges on the input symbols
+// themselves, which is the only pass that can report a direct test.
+func recordDirectTests(store graphstore.Store, inputs []string, set *transitiveTestSet) error {
 	for _, input := range inputs {
-		edges, err := store.GetEdgesBySource(input)
-		if err != nil {
-			return nil, err
-		}
-		for _, edge := range edges {
-			if edge.Kind != "TESTED_BY" || hasUnresolvedTargets(edge.Extra) {
-				continue
-			}
-			record(edge.TargetQualified, false)
+		if err := recordTestsOf(store, input, false, set); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
+// recordBareNameTests is the second pass: TESTED_BY edges recorded against the
+// symbol's BARE name. It is the subtle one. A matching name alone is not
+// enough, so the edge is only accepted when exactly one same-named candidate
+// lives in the call-site file or in a file that file imports. Without the gate,
+// every same-named test in the repository would be attributed to this symbol.
+func recordBareNameTests(
+	store graphstore.Store, nodes []graphstore.GraphNode, qualifiedName string,
+	set *transitiveTestSet,
+) error {
 	bare := qualifiedName
 	if index := strings.LastIndex(qualifiedName, "::"); index >= 0 {
 		bare = qualifiedName[index+2:]
 	}
-	bareEdges, err := store.GetEdgesBySource(bare)
+	edges, err := store.GetEdgesBySource(bare)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if len(bareEdges) > 0 {
-		resolver := newEvidenceResolver(store, nodes)
-		for _, edge := range bareEdges {
-			if edge.Kind != "TESTED_BY" || hasUnresolvedTargets(edge.Extra) {
-				continue
-			}
-			backed, err := resolver.candidateFor(bare, edge.FilePath)
-			if err != nil {
-				return nil, err
-			}
-			if backed != qualifiedName {
-				continue
-			}
-			record(edge.TargetQualified, false)
+	resolver := newEvidenceResolver(store, nodes)
+	for _, edge := range edges {
+		if edge.Kind != "TESTED_BY" || hasUnresolvedTargets(edge.Extra) {
+			continue
+		}
+		backed, err := resolver.candidateFor(bare, edge.FilePath)
+		if err != nil {
+			return err
+		}
+		if backed == qualifiedName {
+			set.record(edge.TargetQualified, false)
 		}
 	}
+	return nil
+}
 
-	frontier := uniqueStrings(inputs)
+// recordCalledTests is the third pass: one hop along CALLS, so a test that
+// covers a callee covers its caller indirectly.
+func recordCalledTests(store graphstore.Store, frontier []string, set *transitiveTestSet) error {
 	for range transitiveTestDepth {
-		var next []string
-		nextSeen := map[string]bool{}
-		for _, current := range frontier {
-			edges, err := store.GetEdgesBySource(current)
-			if err != nil {
-				return nil, err
-			}
-			for _, edge := range edges {
-				if edge.Kind != "CALLS" || hasUnresolvedTargets(edge.Extra) {
-					continue
-				}
-				if !nextSeen[edge.TargetQualified] {
-					nextSeen[edge.TargetQualified] = true
-					next = append(next, edge.TargetQualified)
-				}
-			}
-		}
-		if len(next) > transitiveTestFrontier {
-			next = next[:transitiveTestFrontier]
+		next, err := calledFrontier(store, frontier)
+		if err != nil {
+			return err
 		}
 		for _, callee := range next {
 			// A bare callee has no stable identity; following TESTED_BY from it
@@ -2041,20 +2267,39 @@ func releaseTransitiveTests(store graphstore.Store, qualifiedName string) ([]tra
 			if !strings.Contains(callee, "::") {
 				continue
 			}
-			edges, err := store.GetEdgesBySource(callee)
-			if err != nil {
-				return nil, err
-			}
-			for _, edge := range edges {
-				if edge.Kind != "TESTED_BY" || hasUnresolvedTargets(edge.Extra) {
-					continue
-				}
-				record(edge.TargetQualified, true)
+			if err := recordTestsOf(store, callee, true, set); err != nil {
+				return err
 			}
 		}
 		frontier = next
 	}
-	return results, nil
+	return nil
+}
+
+// calledFrontier is the next CALLS hop: the distinct, evidence-backed call
+// targets of the current frontier, truncated to the frontier cap.
+func calledFrontier(store graphstore.Store, frontier []string) ([]string, error) {
+	var next []string
+	nextSeen := map[string]bool{}
+	for _, current := range frontier {
+		edges, err := store.GetEdgesBySource(current)
+		if err != nil {
+			return nil, err
+		}
+		for _, edge := range edges {
+			if edge.Kind != "CALLS" || hasUnresolvedTargets(edge.Extra) {
+				continue
+			}
+			if !nextSeen[edge.TargetQualified] {
+				nextSeen[edge.TargetQualified] = true
+				next = append(next, edge.TargetQualified)
+			}
+		}
+	}
+	if len(next) > transitiveTestFrontier {
+		next = next[:transitiveTestFrontier]
+	}
+	return next, nil
 }
 
 // evidenceResolver caches the two lookups the bare-name gate needs: the
@@ -2079,6 +2324,31 @@ func newEvidenceResolver(store graphstore.Store, nodes []graphstore.GraphNode) *
 // there is no unique one. Returning "" on ambiguity is the point: the caller
 // compares against the symbol it is resolving, so ambiguity means "no match".
 func (r *evidenceResolver) candidateFor(name, contextFile string) (string, error) {
+	candidates := r.sameNamedCandidates(name)
+	imported, err := r.importedFiles(contextFile)
+	if err != nil {
+		return "", err
+	}
+	supported := ""
+	count := 0
+	for _, candidate := range candidates {
+		if candidate.FilePath != contextFile && !imported[candidate.FilePath] {
+			continue
+		}
+		count++
+		if count == 1 {
+			supported = candidate.QualifiedName
+		}
+	}
+	if count != 1 {
+		return "", nil
+	}
+	return supported, nil
+}
+
+// sameNamedCandidates caches the callable and type nodes sharing one bare name,
+// which is the candidate set the gate counts.
+func (r *evidenceResolver) sameNamedCandidates(name string) []graphstore.GraphNode {
 	if _, ok := r.candidates[name]; !ok {
 		var found []graphstore.GraphNode
 		for _, node := range r.nodes {
@@ -2091,10 +2361,16 @@ func (r *evidenceResolver) candidateFor(name, contextFile string) (string, error
 		}
 		r.candidates[name] = found
 	}
+	return r.candidates[name]
+}
+
+// importedFiles caches the set of FILES one file imports from. An import edge
+// names a symbol, so the symbol suffix is stripped before the file is keyed.
+func (r *evidenceResolver) importedFiles(contextFile string) (map[string]bool, error) {
 	if _, ok := r.imports[contextFile]; !ok {
 		edges, err := r.store.ReadAllEdges()
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		imported := map[string]bool{}
 		for _, edge := range edges {
@@ -2109,21 +2385,7 @@ func (r *evidenceResolver) candidateFor(name, contextFile string) (string, error
 		}
 		r.imports[contextFile] = imported
 	}
-	supported := ""
-	count := 0
-	for _, candidate := range r.candidates[name] {
-		if candidate.FilePath != contextFile && !r.imports[contextFile][candidate.FilePath] {
-			continue
-		}
-		count++
-		if count == 1 {
-			supported = candidate.QualifiedName
-		}
-	}
-	if count != 1 {
-		return "", nil
-	}
-	return supported, nil
+	return r.imports[contextFile], nil
 }
 
 // ── small shared helpers ─────────────────────────────────────────────────────

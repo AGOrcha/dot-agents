@@ -152,42 +152,9 @@ func getFlowTool(e *Engine, args crgrelease.Args) (any, error) {
 		return flowToolError(err), nil
 	}
 
-	flowID, byID := args.OptInt("flow_id")
-	flowName, byName := args.OptString("flow_name")
-
-	var selected *graphstore.FlowRow
-	switch {
-	case byID:
-		for i := range rows {
-			if rows[i].ID == int64(flowID) {
-				selected = &rows[i]
-				break
-			}
-		}
-	case byName:
-		// Upstream searches the criticality-ordered list and takes the first
-		// case-insensitive substring match. An explicitly supplied empty
-		// name therefore matches the most critical flow rather than nothing,
-		// because `"" in name` is true — which is why the selector has to be
-		// read as "was it SET", not "is it non-empty".
-		candidates, err := releaseFlows(rows, "criticality", flowNameSearchLimit)
-		if err != nil {
-			return flowToolError(err), nil
-		}
-		needle := strings.ToLower(flowName)
-		for _, candidate := range candidates {
-			if !strings.Contains(strings.ToLower(candidate["name"].(string)), needle) {
-				continue
-			}
-			id := candidate["id"].(int64)
-			for i := range rows {
-				if rows[i].ID == id {
-					selected = &rows[i]
-					break
-				}
-			}
-			break
-		}
+	selected, err := selectFlowRow(rows, args)
+	if err != nil {
+		return flowToolError(err), nil
 	}
 
 	if selected == nil {
@@ -230,6 +197,54 @@ func getFlowTool(e *Engine, args crgrelease.Args) (any, error) {
 		"flow": flow,
 	}
 	return e.AttachHints("get_flow", result), nil
+}
+
+// selectFlowRow resolves get_flow's two mutually exclusive selectors, in
+// upstream's precedence: `flow_id` first, then `flow_name`. Neither selector
+// set reads as "no flow", which the caller reports as not_found.
+func selectFlowRow(rows []graphstore.FlowRow, args crgrelease.Args) (*graphstore.FlowRow, error) {
+	if flowID, byID := args.OptInt("flow_id"); byID {
+		return flowRowByID(rows, int64(flowID)), nil
+	}
+	if flowName, byName := args.OptString("flow_name"); byName {
+		return flowRowByName(rows, flowName)
+	}
+	return nil, nil
+}
+
+// flowRowByID finds a stored flow by primary key, reporting nil for an id the
+// graph does not have.
+func flowRowByID(rows []graphstore.FlowRow, id int64) *graphstore.FlowRow {
+	for i := range rows {
+		if rows[i].ID == id {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+// flowRowByName searches the criticality-ordered list and takes the first
+// case-insensitive substring match. An explicitly supplied empty name
+// therefore matches the most critical flow rather than nothing, because
+// `"" in name` is true — which is why the selector has to be read as "was it
+// SET", not "is it non-empty".
+//
+// The search stops at the first matching name even if that candidate's row has
+// since gone, which is upstream's unconditional `break`.
+func flowRowByName(rows []graphstore.FlowRow, flowName string) (*graphstore.FlowRow, error) {
+	candidates, err := releaseFlows(rows, "criticality", flowNameSearchLimit)
+	if err != nil {
+		return nil, err
+	}
+	needle := strings.ToLower(flowName)
+	var selected *graphstore.FlowRow
+	for _, candidate := range candidates {
+		if strings.Contains(strings.ToLower(candidate["name"].(string)), needle) {
+			selected = flowRowByID(rows, candidate["id"].(int64))
+			break
+		}
+	}
+	return selected, nil
 }
 
 // getAffectedFlowsTool answers get_affected_flows_tool.
@@ -479,29 +494,13 @@ func flowsAffectedByFiles(
 	if store == nil {
 		return []map[string]any{}, nil
 	}
-	// Graph identity is the absolute, POSIX-separated path, so a relative
-	// diff path has to be joined to the root before it can match a node.
-	// An already-absolute path passes through unchanged, the way pathlib's
-	// `/` operator does.
-	wanted := make(map[string]bool, len(changedFiles))
-	for _, file := range changedFiles {
-		absolute := file
-		if !filepath.IsAbs(absolute) {
-			absolute = filepath.Join(root, absolute)
-		}
-		wanted[NormalizeFilePath(absolute)] = true
-	}
+	wanted := changedFilePathSet(root, changedFiles)
 
 	nodes, err := store.ReadAllNodes()
 	if err != nil {
 		return nil, err
 	}
-	changedNodes := map[int64]bool{}
-	for _, node := range nodes {
-		if wanted[NormalizeFilePath(node.FilePath)] {
-			changedNodes[node.ID] = true
-		}
-	}
+	changedNodes := nodeIDsInFiles(nodes, wanted)
 	if len(changedNodes) == 0 {
 		return []map[string]any{}, nil
 	}
@@ -510,10 +509,62 @@ func flowsAffectedByFiles(
 	if err != nil {
 		return nil, err
 	}
-	// Memberships arrive in (flow_id, node_id) order — the table's primary
-	// key, and the scan order of upstream's `SELECT DISTINCT flow_id ...
-	// WHERE node_id IN (...)`. Preserving it keeps the criticality sort's
-	// tie-breaking identical.
+	flowIDs := flowIDsTouchingNodes(memberships, changedNodes)
+	if len(flowIDs) == 0 {
+		return []map[string]any{}, nil
+	}
+
+	rows, err := readFlowRows(store)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := affectedFlowMaps(rows, flowIDs, graphNodesByID(nodes))
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(affected, func(i, j int) bool {
+		return affected[i]["criticality"].(float64) > affected[j]["criticality"].(float64)
+	})
+	return affected, nil
+}
+
+// changedFilePathSet is the set of graph file paths a diff touches.
+//
+// Graph identity is the absolute, POSIX-separated path, so a relative diff
+// path has to be joined to the root before it can match a node. An
+// already-absolute path passes through unchanged, the way pathlib's `/`
+// operator does.
+func changedFilePathSet(root string, changedFiles []string) map[string]bool {
+	wanted := make(map[string]bool, len(changedFiles))
+	for _, file := range changedFiles {
+		absolute := file
+		if !filepath.IsAbs(absolute) {
+			absolute = filepath.Join(root, absolute)
+		}
+		wanted[NormalizeFilePath(absolute)] = true
+	}
+	return wanted
+}
+
+// nodeIDsInFiles selects the nodes that live in one of the wanted files.
+func nodeIDsInFiles(nodes []graphstore.GraphNode, wanted map[string]bool) map[int64]bool {
+	changed := map[int64]bool{}
+	for _, node := range nodes {
+		if wanted[NormalizeFilePath(node.FilePath)] {
+			changed[node.ID] = true
+		}
+	}
+	return changed
+}
+
+// flowIDsTouchingNodes lists the distinct flows whose membership includes one
+// of the changed nodes.
+//
+// Memberships arrive in (flow_id, node_id) order — the table's primary key,
+// and the scan order of upstream's `SELECT DISTINCT flow_id ... WHERE node_id
+// IN (...)`. Preserving it keeps the criticality sort's tie-breaking
+// identical.
+func flowIDsTouchingNodes(memberships []graphstore.FlowMembershipRow, changedNodes map[int64]bool) []int64 {
 	var flowIDs []int64
 	seen := map[int64]bool{}
 	for _, membership := range memberships {
@@ -523,23 +574,15 @@ func flowsAffectedByFiles(
 		seen[membership.FlowID] = true
 		flowIDs = append(flowIDs, membership.FlowID)
 	}
-	if len(flowIDs) == 0 {
-		return []map[string]any{}, nil
-	}
+	return flowIDs
+}
 
-	rows, err := readFlowRows(store)
-	if err != nil {
-		return nil, err
-	}
-	byID := make(map[int64]graphstore.FlowRow, len(rows))
-	for _, row := range rows {
-		byID[row.ID] = row
-	}
-	nodeIndex := make(map[int64]graphstore.GraphNode, len(nodes))
-	for _, node := range nodes {
-		nodeIndex[node.ID] = node
-	}
-
+// affectedFlowMaps projects the named flows, steps included. A flow id with no
+// surviving row is skipped: a membership can outlive the flow it named.
+func affectedFlowMaps(
+	rows []graphstore.FlowRow, flowIDs []int64, nodes map[int64]graphstore.GraphNode,
+) ([]map[string]any, error) {
+	byID := flowRowsByID(rows)
 	affected := make([]map[string]any, 0, len(flowIDs))
 	for _, id := range flowIDs {
 		row, ok := byID[id]
@@ -550,13 +593,19 @@ func flowsAffectedByFiles(
 		if err != nil {
 			return nil, err
 		}
-		flow["steps"] = flowSteps(path, nodeIndex)
+		flow["steps"] = flowSteps(path, nodes)
 		affected = append(affected, flow)
 	}
-	sort.SliceStable(affected, func(i, j int) bool {
-		return affected[i]["criticality"].(float64) > affected[j]["criticality"].(float64)
-	})
 	return affected, nil
+}
+
+// flowRowsByID indexes stored flows by primary key.
+func flowRowsByID(rows []graphstore.FlowRow) map[int64]graphstore.FlowRow {
+	byID := make(map[int64]graphstore.FlowRow, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	return byID
 }
 
 // ── source snippets ──────────────────────────────────────────────────────────
@@ -574,50 +623,75 @@ func attachFlowSource(root string, flow map[string]any, steps []map[string]any, 
 			flow["source_truncated"] = true
 			return
 		}
-		file, _ := step["file"].(string)
-		if file == "" {
+		source, spent, inlinable := flowStepSource(root, step, budget)
+		if !inlinable {
 			continue
 		}
-		if !filepath.IsAbs(file) {
-			file = filepath.Join(root, file)
-		}
-		info, err := os.Stat(file)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		data, err := os.ReadFile(file)
-		if err != nil {
-			step["source"] = "(could not read file)"
-			continue
-		}
-		// splitSourceLines is the package-shared port of Python's
-		// read_text(errors="replace").splitlines(), owned by tools_context.go:
-		// both this tool and get_review_context number source lines, and two
-		// splitters would mean two numberings for the same file.
-		lines := splitSourceLines(string(data))
-		start := flowLineNumber(step["line_start"])
-		if start < 1 {
-			start = 1
-		}
-		start--
-		end := flowLineNumber(step["line_end"])
-		if end < 1 {
-			end = len(lines)
-		}
-		end = min(len(lines), end, start+budget)
-
-		var rendered strings.Builder
-		for i := start; i < end; i++ {
-			if i > start {
-				rendered.WriteByte('\n')
-			}
-			fmt.Fprintf(&rendered, "%d: %s", i+1, lines[i])
-		}
-		step["source"] = rendered.String()
-		if end > start {
-			budget -= end - start
-		}
+		step["source"] = source
+		budget -= spent
 	}
+}
+
+// flowStepSource renders one step's numbered source slice within the remaining
+// shared line budget, reporting the lines that slice spends.
+//
+// The last result is false when the step carries nothing inlinable at all — no
+// file, or a file that is not a readable regular file — in which case the step
+// record is left exactly as it was, spending no budget.
+func flowStepSource(root string, step map[string]any, budget int) (source string, spent int, inlinable bool) {
+	file, _ := step["file"].(string)
+	if file == "" {
+		return "", 0, false
+	}
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(root, file)
+	}
+	info, err := os.Stat(file)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", 0, false
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return "(could not read file)", 0, true
+	}
+	// splitSourceLines is the package-shared port of Python's
+	// read_text(errors="replace").splitlines(), owned by tools_context.go:
+	// both this tool and get_review_context number source lines, and two
+	// splitters would mean two numberings for the same file.
+	lines := splitSourceLines(string(data))
+	start, end := flowStepLineRange(step, len(lines), budget)
+	return renderFlowSourceLines(lines, start, end), max(0, end-start), true
+}
+
+// flowStepLineRange turns a step's stored 1-based span into a 0-based
+// half-open range over a file of lineCount lines, clipped to the budget.
+//
+// A missing or non-positive start reads as the first line and a missing end as
+// the end of the file, which is what upstream's `or` defaults do.
+func flowStepLineRange(step map[string]any, lineCount, budget int) (start, end int) {
+	start = flowLineNumber(step["line_start"])
+	if start < 1 {
+		start = 1
+	}
+	start--
+	end = flowLineNumber(step["line_end"])
+	if end < 1 {
+		end = lineCount
+	}
+	return start, min(lineCount, end, start+budget)
+}
+
+// renderFlowSourceLines joins lines[start:end) one per line, each prefixed
+// with its 1-based number. An empty range renders as the empty string.
+func renderFlowSourceLines(lines []string, start, end int) string {
+	var rendered strings.Builder
+	for i := start; i < end; i++ {
+		if i > start {
+			rendered.WriteByte('\n')
+		}
+		fmt.Fprintf(&rendered, "%d: %s", i+1, lines[i])
+	}
+	return rendered.String()
 }
 
 // ── store access ─────────────────────────────────────────────────────────────
@@ -643,11 +717,16 @@ func nodesByID(store graphstore.Store) (map[int64]graphstore.GraphNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	return graphNodesByID(nodes), nil
+}
+
+// graphNodesByID indexes nodes by primary key.
+func graphNodesByID(nodes []graphstore.GraphNode) map[int64]graphstore.GraphNode {
 	index := make(map[int64]graphstore.GraphNode, len(nodes))
 	for _, node := range nodes {
 		index[node.ID] = node
 	}
-	return index, nil
+	return index
 }
 
 // entryPointKinds maps node id to kind for list_flows' `kind` filter, which
