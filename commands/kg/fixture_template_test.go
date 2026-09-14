@@ -67,6 +67,15 @@ func kgRepoTemplate() (string, error) {
 			{"init"},
 			{"config", "user.name", "test"},
 			{"config", "user.email", "test@example.com"},
+			// Git runs `maintenance run --auto --detach` after a commit. That
+			// DETACHED process keeps writing and unlinking transient paths
+			// (objects/maintenance.lock, multi-pack-index, bitmap-ref-tips_*)
+			// under .git long after the commit returns, so a fixture that
+			// commits races its own t.TempDir RemoveAll. Copies inherit this
+			// config, so turning maintenance off in the template turns it off
+			// for every repo cloned from it.
+			{"config", "maintenance.auto", "false"},
+			{"config", "gc.auto", "0"},
 		} {
 			if err := run(args...); err != nil {
 				kgRepoTemplateErr = err

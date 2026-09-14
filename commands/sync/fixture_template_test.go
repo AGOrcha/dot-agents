@@ -77,6 +77,16 @@ func syncRepoTemplate() (string, error) {
 			{"init"},
 			{"config", "user.name", "Test"},
 			{"config", "user.email", "test@example.com"},
+			// Git runs `maintenance run --auto --detach` after a commit. That
+			// DETACHED process keeps writing and unlinking transient paths
+			// (objects/maintenance.lock, multi-pack-index, bitmap-ref-tips_*)
+			// under .git long after the commit returns, so it races both the
+			// template WalkDir copy below (a walked path vanishes before it is
+			// opened) and every copy's own t.TempDir RemoveAll. Turning
+			// maintenance off here freezes the template — and, because copies
+			// inherit this config, every repo cloned from it too.
+			{"config", "maintenance.auto", "false"},
+			{"config", "gc.auto", "0"},
 			{"commit", "--allow-empty", "-m", "seed"},
 		} {
 			if err := run(args...); err != nil {
