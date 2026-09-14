@@ -66,6 +66,41 @@ func TestNormalizerPassesBareTargetsThrough(t *testing.T) {
 	}
 }
 
+// A FILE node's qualified name is its path, with no "::" separator. It must be
+// trimmed like any other path: left absolute it carries the materialization
+// root into the compared id space, so the native and bridge sides stop sharing
+// one id space and a recorded baseline becomes specific to the machine that
+// produced it.
+func TestNormalizerTrimsFileNodeQualifiedNames(t *testing.T) {
+	cases := map[string]struct {
+		root, in, want string
+		wantErr        bool
+	}{
+		"posix file node":     {root: "/abs/repo", in: "/abs/repo/pkg/a.go", want: "pkg/a.go"},
+		"the root itself":     {root: "/abs/repo", in: "/abs/repo", want: "."},
+		"windows file node":   {root: `c:\repo`, in: `C:\Repo\pkg\a.go`, want: "pkg/a.go"},
+		"outside the root":    {root: "/abs/repo", in: "/elsewhere/a.go", wantErr: true},
+		"prefix-like sibling": {root: "/abs/repo", in: "/abs/repo-vendor/a.go", wantErr: true},
+		// Still a bare target, not a path: no separator AND not absolute.
+		"bare target":        {root: "/abs/repo", in: "append", want: "append"},
+		"dotted bare target": {root: "/abs/repo", in: "console.log", want: "console.log"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := NewNormalizer(c.root).Qualified(c.in)
+			if c.wantErr {
+				if !errors.Is(err, ErrOutsideRoot) {
+					t.Fatalf("Qualified(%q) = %q, %v; want ErrOutsideRoot", c.in, got, err)
+				}
+				return
+			}
+			if err != nil || got != c.want {
+				t.Fatalf("Qualified(%q) = %q, %v; want %q", c.in, got, err, c.want)
+			}
+		})
+	}
+}
+
 // Under a Windows root the platform itself is case-insensitive, so a graph
 // built as C:\Repo must still normalize against a root spelled c:\repo. Under a
 // POSIX root the comparison stays case-sensitive.

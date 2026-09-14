@@ -79,15 +79,25 @@ func (n Normalizer) Path(value string) (string, error) {
 	return rel, nil
 }
 
-// Qualified normalizes a stored qualified name. Upstream spells it
-// "<file path>::<symbol>", so only the PATH part is rewritten; the symbol part
+// Qualified normalizes a stored qualified name. Upstream spells a SYMBOL as
+// "<file path>::<symbol>", so only the path part is rewritten; the symbol part
 // is preserved verbatim (it may legitimately contain separators, and for some
-// languages backslashes). A value with no separator is an unresolved bare
-// target (e.g. a call to `append`) and is returned unchanged — it names no file
-// and must not be run through path normalization.
+// languages backslashes).
+//
+// A value with no separator is one of two things, and telling them apart
+// matters. An ABSOLUTE one is a FILE node — the release spells a file's
+// qualified name as its path, and the build wrote it under the materialization
+// root, so it has to be trimmed like any other path or the comparison ids
+// carry "/home/runner/.cache/crg-behavior-worktrees/crg-<sha>/…" and the
+// recorded baseline becomes specific to the machine that produced it. A
+// RELATIVE one is an unresolved bare target (a call to `append`): it names no
+// file and must not be run through path normalization at all.
 func (n Normalizer) Qualified(value string) (string, error) {
 	i := strings.Index(value, qualifiedSep)
 	if i < 0 {
+		if looksAbsolute(cleanSlash(value)) {
+			return n.Path(value)
+		}
 		return value, nil
 	}
 	file, err := n.Path(value[:i])
