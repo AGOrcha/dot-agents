@@ -160,8 +160,7 @@ jobs:
     continue-on-error: true
     # Two isolated worktrees and two full release builds per pinned task —
     # one for the recording pass, one for the comparison pass — plus a
-    # standalone postprocess each. See CRG_GATE_TASKS for the measured cost
-    # and the corpus reduction that keeps it inside this budget.
+    # standalone postprocess each. See CRG_GATE_TASKS for the measured cost.
     timeout-minutes: 120
     env:
       # The ONE release criterion 2 certifies against. Pinned here and asserted
@@ -176,23 +175,21 @@ jobs:
       # certifies nothing. Recording first and comparing second means the
       # baseline is always what THIS release actually did on THIS corpus.
       CRG_GATE_RECORDINGS: crg-upstream-recordings
-      # Tasks per pass, and the sharpest trade in this job.
+      # Tasks per pass; 0 runs the whole pinned corpus.
       #
-      # MEASURED on this runner class (run 33837748527): one full pinned-
-      # release build of this repository takes ~15 min — ~25 s of parsing and
-      # ~14.5 min of file-based community detection ("igraph not available") —
-      # and every task ALSO runs a standalone postprocess for the lifecycle
-      # probe, so one task costs ~29 min per pass and ~58 min across the two
-      # passes of record-then-compare. The 25 pinned tasks would need ~24 h.
-      # Inside a 120-minute budget the honest capacity is ONE task per pass.
+      # MEASURED against the PINNED release on this runner class (run
+      # 34797081532): one task costs ~29 s per pass — a full 2.3.8 build of
+      # this repository plus the standalone postprocess the lifecycle probe
+      # needs — so ~58 s across both passes of record-then-compare, and the
+      # 25 pinned tasks come to ~25 min inside a 120-minute budget.
       #
-      # The cap softens no oracle: contract coverage is judged over the tasks
-      # that ACTUALLY ran (crgbehavior.Config.MaxTasks), so every required
-      # surface this one task does not exercise still FAILS the gate rather
-      # than being quietly waived, and the report's `corpus:` line states the
-      # reduction. Restoring corpus breadth needs a bigger budget or a faster
-      # community-detection path — NOT a weaker contract.
-      CRG_GATE_TASKS: '1'
+      # Do NOT re-derive this from an older release's logs: 2.2.0 spent ~14.5
+      # min per build in file-based community detection, which would have made
+      # the same corpus look like a day of work and forced a pointless cap.
+      # The cap knob stays because contract coverage is judged over the tasks
+      # that ACTUALLY ran (crgbehavior.Config.MaxTasks) — trimming the corpus
+      # can never buy a pass, so reducing it is safe if the cost ever changes.
+      CRG_GATE_TASKS: '0'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -261,12 +258,13 @@ jobs:
       - name: Publish the criterion-2 sign-off
         if: always()
         run: |
+          recorded=$(find "${CRG_GATE_RECORDINGS}" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
           {
             echo "## CRG behavior-preservation gate (§11.4 criterion 2)"
             echo
             echo "- bridge: \`$(cat crg-version.txt 2>/dev/null || echo 'not installed')\`"
             echo "- pinned: \`code-review-graph ${CRG_PINNED_VERSION}\` (graph schema v9)"
-            echo "- baseline: recorded in this job over ${CRG_GATE_TASKS} task(s) (\`${{ steps.record.outcome }}\`); nothing committed"
+            echo "- baseline: \`${recorded}\` recording(s) made in this job (\`${{ steps.record.outcome }}\`); nothing committed"
             echo "- outcome: \`${{ steps.gate.outcome }}\`"
             echo
             echo '```'

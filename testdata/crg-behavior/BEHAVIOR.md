@@ -231,20 +231,23 @@ go run ./tools/crgbehaviorgate -repo . -json crg-behavior-gate.json
 # useful flags: -tasks N (first N tasks), -depth N, -work-dir DIR
 ```
 
-CI caps both passes at the same prefix (`CRG_GATE_TASKS`, currently **1** of the
-25 pinned tasks). That cap is measured, not guessed: on the CI runner class one
-full pinned-release build of this repository takes ~15 min (~25 s parsing,
-~14.5 min file-based community detection — `igraph not available`), and each
-task additionally runs a standalone postprocess for the lifecycle probe, so one
-task costs ~29 min per pass and ~58 min across record-then-compare. The full
-corpus would need roughly a day; the job's budget is 120 minutes.
+CI runs both passes over the whole pinned corpus (`CRG_GATE_TASKS: '0'`). That is
+affordable and the number is measured, not guessed: against the **pinned 2.3.8
+release** on the CI runner class one task costs ~29 s per pass — a full build of
+this repository plus the standalone postprocess the lifecycle probe needs — so
+~58 s across record-then-compare, and all 25 tasks come to ~25 min inside the
+job's 120-minute budget.
 
-The cap softens no oracle. Contract coverage is judged over the tasks that
-**actually ran**, so every required surface the capped prefix does not exercise
-still `FAIL`s instead of being quietly waived, and the report's `corpus:` line
-states how many of the pinned tasks a run executed. Restoring corpus breadth
-needs a larger budget or a faster community-detection path — not a weaker
-contract.
+Do not re-derive that figure from an older release's logs. `code-review-graph`
+2.2.0 spent ~14.5 min per build in file-based community detection
+(`igraph not available`), which makes the same corpus look like a day of work
+and argues for a cap the pinned release does not need.
+
+The cap knob stays for the day the cost changes, and it softens no oracle:
+contract coverage is judged over the tasks that **actually ran**, so a required
+surface a capped prefix never exercises still `FAIL`s instead of being quietly
+waived, and the report's `corpus:` line states how many of the pinned tasks a
+run executed. Trimming the corpus can never buy a pass.
 
 PATH matters: each pinned commit is built inside a worktree **outside** the
 repository, so the bridge cannot be found as a sibling `.venv` from there. An

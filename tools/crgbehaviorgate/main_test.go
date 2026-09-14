@@ -442,8 +442,11 @@ func TestMtTRecordRefusesUnloadablePinnedInputs(t *testing.T) {
 // state or picked up by a build.
 func TestMtTDefaultWorkDirIsOutsideTheRepository(t *testing.T) {
 	dir := defaultWorkDir()
-	if parent := filepath.Dir(dir); parent != os.TempDir() {
-		t.Fatalf("work dir parent = %q, want the temp root %q", parent, os.TempDir())
+	// filepath.Clean, because os.TempDir() keeps TMPDIR's trailing separator
+	// on macOS ("/var/folders/.../T/") while filepath.Dir strips it.
+	wantParent := filepath.Clean(os.TempDir())
+	if parent := filepath.Dir(dir); parent != wantParent {
+		t.Fatalf("work dir parent = %q, want the temp root %q", parent, wantParent)
 	}
 	base := filepath.Base(dir)
 	if !strings.Contains(base, "crg") || !strings.Contains(base, "worktree") {
