@@ -780,23 +780,11 @@ func TestRunKGCodeStatus_JSONOutput(t *testing.T) {
 	cmd.Flags().Bool("json", true, "")
 
 	writeDiscoverableCRGStub(t, repo)
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-
-	if err := runKGCodeStatus(testDeps(), cmd, nil); err != nil {
-		t.Fatalf("runKGCodeStatus: %v", err)
-	}
-	_ = w.Close()
-	os.Stdout = oldStdout
-
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := captureStdout(t, func() {
+		if err := runKGCodeStatus(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGCodeStatus: %v", err)
+		}
+	})
 	var status graphstore.CRGStatus
 	if err := json.Unmarshal(out, &status); err != nil {
 		t.Fatalf("json output invalid: %v\n%s", err, string(out))
@@ -921,22 +909,42 @@ esac`)
 
 // captureStdout redirects os.Stdout for the duration of fn, then restores it.
 // Returns the bytes written to stdout during fn.
-func captureStdout(t *testing.T, fn func()) []byte {
+//
+// The reader runs CONCURRENTLY and the restore is deferred, because neither is
+// optional:
+//
+//   - Draining after fn returns deadlocks fn the moment it writes more than
+//     one pipe buffer, and the kg reports printed here are not bounded.
+//   - fn is test code, so it can t.Skip, t.Fatal or panic — each unwinds
+//     through this frame. Restoring inline would leave os.Stdout pointing at
+//     an abandoned pipe for the REST OF THE PACKAGE, and the next print
+//     anywhere would block forever once that pipe filled.
+func captureStdout(t *testing.T, fn func()) (captured []byte) {
 	t.Helper()
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
+	var buf bytes.Buffer
+	copied := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(&buf, r)
+		copied <- err
+	}()
+
 	os.Stdout = w
+	defer func() {
+		os.Stdout = oldStdout
+		_ = w.Close()
+		if err := <-copied; err != nil {
+			t.Errorf("drain captured stdout: %v", err)
+		}
+		_ = r.Close()
+		captured = buf.Bytes()
+	}()
 	fn()
-	_ = w.Close()
-	os.Stdout = oldStdout
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
+	return nil
 }
 
 // TestRunKGChanges_WarnOnUnbuiltGraph: without --require-graph, an unbuilt graph
