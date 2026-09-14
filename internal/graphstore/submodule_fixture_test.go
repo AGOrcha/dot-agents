@@ -62,6 +62,12 @@ func initRepo(t *testing.T, dir string, files map[string]string) string {
 	runGitFixture(t, dir, "config", "user.email", "fixture@example.test")
 	runGitFixture(t, dir, "config", "user.name", "Fixture")
 	runGitFixture(t, dir, "config", "commit.gpgsign", "false")
+	// `git commit` spawns `maintenance run --auto --detach`, and that detached
+	// process keeps writing and unlinking transient paths under .git
+	// (objects/maintenance.lock, multi-pack-index, bitmap-ref-tips_*) after the
+	// commit returns — racing t.TempDir's RemoveAll on teardown.
+	runGitFixture(t, dir, "config", "maintenance.auto", "false")
+	runGitFixture(t, dir, "config", "gc.auto", "0")
 	writeFiles(t, dir, files)
 	runGitFixture(t, dir, "add", "-A")
 	runGitFixture(t, dir, "commit", "--quiet", "-m", "fixture")
