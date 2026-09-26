@@ -202,7 +202,7 @@ jobs:
       - name: Deploy to Cloudflare Workers
         # Pinned to a full commit SHA per Sonar S7637 / supply-chain best practice.
         # Update via: gh api repos/cloudflare/wrangler-action/commits/v3 -q .sha
-        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        uses: cloudflare/wrangler-action@25853364521e0d392ece9b0c1e97a4b37b638087 # v4.1.2
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
