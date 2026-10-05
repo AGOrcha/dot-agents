@@ -139,7 +139,6 @@ homebrew_casks:
         enabled: true
         key: "{{ .Env.HOMEBREW_TAP_GPG_KEY_ID }}"
     url: &cask_url
-      verified: "github.com/AGOrcha/dot-agents/"
     repository: &cask_repository
       owner: AGOrcha
       name: homebrew-tap

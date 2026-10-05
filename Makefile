@@ -4,8 +4,10 @@
 run:
 	go run ./cmd/da
 
+# This Bash recipe uses Make's $$ escape. Do not copy it into PowerShell;
+# use `pwsh -File scripts/build-windows-local.ps1 -Sign` there.
 build:
-	go build -o ./bin/da ./cmd/da
+	go build -ldflags "-X github.com/AGOrcha/dot-agents/commands.Version=$$(git describe --tags --abbrev=0)-b$$(git rev-parse --short=6 HEAD) -X github.com/AGOrcha/dot-agents/commands.Commit=$$(git rev-parse HEAD) -X github.com/AGOrcha/dot-agents/commands.Describe=$$(git describe --tags --always --abbrev=6 HEAD)" -o ./bin/da ./cmd/da
 
 build-prod:
 	go build -ldflags "-s -w" -o ./bin/da ./cmd/da
