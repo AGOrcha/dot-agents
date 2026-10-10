@@ -329,6 +329,16 @@ func TestParseGraphNote_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseGraphNote_NormalizesWindowsLineEndings(t *testing.T) {
+	note, body, err := parseGraphNote([]byte("---\r\nid: note-crlf\r\ntype: decision\r\ntitle: Windows note\r\n---\r\n\r\nbody\r\n"))
+	if err != nil {
+		t.Fatalf("parse CRLF graph note: %v", err)
+	}
+	if note.ID != "note-crlf" || body != "body\n" {
+		t.Fatalf("note = %+v, body = %q", note, body)
+	}
+}
+
 func TestParseGraphNote_NoFrontmatter(t *testing.T) {
 	_, _, err := parseGraphNote([]byte("Just some markdown without frontmatter."))
 	if err == nil {
@@ -3132,6 +3142,10 @@ func TestParseRawSourceFrontmatter_DefaultsAndYAML(t *testing.T) {
 	src2, _ := parseRawSourceFrontmatter("plain content with no fm", "fallback")
 	if src2.ID != "fallback" || src2.Title != "fallback" || src2.SourceType != "markdown" {
 		t.Errorf("defaults: %+v", src2)
+	}
+	crOnly, crOnlyBody := parseRawSourceFrontmatter("---\rid: cr-only\rtitle: CR-only\r---\rbody", "fallback")
+	if crOnly.ID != "cr-only" || crOnly.Title != "CR-only" || crOnlyBody != "body" {
+		t.Fatalf("CR-only source = %+v, body = %q", crOnly, crOnlyBody)
 	}
 }
 

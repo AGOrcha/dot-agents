@@ -115,10 +115,20 @@ func resolveReviewDelegationContract(projectPath, taskFlag string) (string, *Del
 		return contract.ParentTaskID, contract, nil
 	}
 	contract, err := loadDelegationContract(projectPath, taskID)
-	if err != nil {
+	if err == nil {
+		return taskID, contract, nil
+	}
+	if !os.IsNotExist(err) {
 		return "", nil, fmt.Errorf("load delegation contract for task %q: %w", taskID, err)
 	}
-	return taskID, contract, nil
+	planID, _, taskErr := findCanonicalTaskAnyPlan(projectPath, taskID)
+	if taskErr != nil {
+		return "", nil, taskErr
+	}
+	return taskID, &DelegationContract{
+		ParentPlanID: planID,
+		ParentTaskID: taskID,
+	}, nil
 }
 
 // reviewRecordInputs bundles inputs for runWorkflowVerifyRecordReview so the

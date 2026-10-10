@@ -17,8 +17,8 @@ import (
 // Each seam mirrors a real `os.<Name>` function used in this package. Add a
 // seam only when a test needs to fault-inject the corresponding call.
 var (
-	osMkdirAll  = os.MkdirAll
-	osWriteFile = os.WriteFile
+	osMkdirAll  = workflowMkdirAll
+	osWriteFile = workflowWriteFile
 	osOpenFile  = os.OpenFile
 	osRemoveAll = os.RemoveAll
 	osRename    = os.Rename

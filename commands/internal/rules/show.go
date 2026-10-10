@@ -37,15 +37,14 @@ func ExtractRuleFrontmatterDescription(deps Deps, path string) string {
 		return ""
 	}
 	s := string(data)
-	rest := s
-	switch {
-	case strings.HasPrefix(s, "---\n"):
-		rest = strings.TrimPrefix(s, "---\n")
-	case strings.HasPrefix(s, "---\r\n"):
-		rest = strings.TrimPrefix(s, "---\r\n")
-	default:
+	if strings.Contains(s, "\r") {
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+		s = strings.ReplaceAll(s, "\r", "\n")
+	}
+	if !strings.HasPrefix(s, "---\n") {
 		return ""
 	}
+	rest := strings.TrimPrefix(s, "---\n")
 	end := strings.Index(rest, "\n---")
 	if end < 0 {
 		return ""

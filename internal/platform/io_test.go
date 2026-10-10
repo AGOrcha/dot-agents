@@ -192,6 +192,7 @@ func TestReadAgentBody(t *testing.T) {
 		hasErr        bool
 	}{
 		{"---\nname: x\n---\n\nbody\n", "body\n", false},
+		{"---\rname: x\r---\r\rbody\r", "body\n", false},
 		{"plain body\n", "plain body\n", false},
 		{"---\nno-end", "---\nno-end", false},
 	}

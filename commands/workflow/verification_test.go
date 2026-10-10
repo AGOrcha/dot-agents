@@ -934,6 +934,36 @@ func TestRunWorkflowVerifyRecord_DirectTaskNoContract(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowVerifyRecordReview_DirectTaskNoContract(t *testing.T) {
+	repo := setupTestProject(t)
+	chdirForCov(t, repo)
+	err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:     "repo",
+		Summary:   "direct review",
+		Phase1In:  "accept",
+		Phase2In:  "accept",
+		TaskFlag:  "task-001",
+	})
+	if err != nil {
+		t.Fatalf("expected direct-work review to record without a contract, got: %v", err)
+	}
+	decisionPath := filepath.Join(repo, ".agents", "active", "verification", "task-001", "review-decision.yaml")
+	data, err := os.ReadFile(decisionPath)
+	if err != nil {
+		t.Fatalf("read review decision: %v", err)
+	}
+	var doc ReviewDecisionDoc
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse review decision: %v", err)
+	}
+	if doc.ParentPlanID != "plan-001" {
+		t.Fatalf("expected plan-scoped parent_plan_id, got %q", doc.ParentPlanID)
+	}
+	if doc.DelegationID != "" {
+		t.Fatalf("direct review must not invent delegation_id, got %q", doc.DelegationID)
+	}
+}
+
 // TestRunWorkflowVerifyRecord_UnknownTaskErrors ensures a typo'd --task still
 // fails clearly instead of silently recording an unscoped entry.
 func TestRunWorkflowVerifyRecord_UnknownTaskErrors(t *testing.T) {

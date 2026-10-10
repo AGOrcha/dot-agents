@@ -147,6 +147,11 @@ func TestExtractRuleFrontmatterDescription(t *testing.T) {
 			want:    "CRLF desc",
 		},
 		{
+			name:    "cr_only_frontmatter",
+			content: "---\rdescription: CR-only desc\r---\r# body",
+			want:    "CR-only desc",
+		},
+		{
 			name:    "case_insensitive_key",
 			content: "---\nDescription: Caps Key\n---\n# body",
 			want:    "Caps Key",

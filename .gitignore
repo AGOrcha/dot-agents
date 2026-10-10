@@ -21,6 +21,7 @@ build/
 *.dylib
 dot-agents-go
 bin/da
+bin/da.exe
 # IDE
 .idea/
 .vscode/

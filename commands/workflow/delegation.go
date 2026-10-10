@@ -286,7 +286,7 @@ func loadMergeBack(projectPath, taskID string) (*MergeBackSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	content := string(data)
+	content := normalizeWorkflowArtifactNewlines(string(data))
 	if !strings.HasPrefix(content, "---\n") {
 		return nil, fmt.Errorf("merge-back %s: missing frontmatter", taskID)
 	}
@@ -300,6 +300,14 @@ func loadMergeBack(projectPath, taskID string) (*MergeBackSummary, error) {
 		return nil, fmt.Errorf("parse merge-back %s: %w", taskID, err)
 	}
 	return &s, nil
+}
+
+func normalizeWorkflowArtifactNewlines(content string) string {
+	if !strings.Contains(content, "\r") {
+		return content
+	}
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	return strings.ReplaceAll(content, "\r", "\n")
 }
 
 func foldBackDir(projectPath string) string {
@@ -396,7 +404,7 @@ func readFoldBackProposalFile(path string) (foldBackProposalFrontmatter, string,
 	if err != nil {
 		return zero, "", err
 	}
-	content := string(data)
+	content := normalizeWorkflowArtifactNewlines(string(data))
 	if !strings.HasPrefix(content, "---\n") {
 		return zero, "", fmt.Errorf("proposal %s: missing frontmatter", path)
 	}

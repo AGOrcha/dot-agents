@@ -1147,6 +1147,36 @@ func TestLoadMergeBack_UnterminatedFrontmatter(t *testing.T) {
 	}
 }
 
+func TestLoadMergeBack_CRLFFrontmatter(t *testing.T) {
+	repo := t.TempDir()
+	dir := mergeBackDir(repo)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\r\n" +
+		"schema_version: 1\r\n" +
+		"task_id: t1\r\n" +
+		"parent_plan_id: plan-1\r\n" +
+		"title: Windows closeout\r\n" +
+		"summary: passed\r\n" +
+		"verification_result:\r\n" +
+		"  status: pass\r\n" +
+		"  summary: tests passed\r\n" +
+		"created_at: 2026-07-16T00:00:00Z\r\n" +
+		"---\r\n\r\n" +
+		"## Summary\r\n\r\npassed\r\n"
+	if err := os.WriteFile(filepath.Join(dir, "t1.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadMergeBack(repo, "t1")
+	if err != nil {
+		t.Fatalf("load CRLF merge-back: %v", err)
+	}
+	if got.ParentPlanID != "plan-1" {
+		t.Fatalf("parent plan id = %q, want plan-1", got.ParentPlanID)
+	}
+}
+
 // TestLoadMergeBack_ParseError ensures malformed YAML inside the frontmatter
 // is reported as a parse error.
 func TestLoadMergeBack_ParseError(t *testing.T) {

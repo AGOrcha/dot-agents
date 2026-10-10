@@ -118,6 +118,14 @@ func TestParseLessonDoc_FrontmatterAndFallback(t *testing.T) {
 	if fallback.name != lessonTestFallback || fallback.description != "fallback heading" {
 		t.Fatalf("fallback mismatch: %+v", fallback)
 	}
+
+	windows, err := parseLessonDoc(".agents/lessons/windows/LESSON.md", "windows", "---\r\nname: windows\r\ndescription: CRLF lesson\r\n---\r\n\r\n# Lesson: body ignored\r\n")
+	if err != nil {
+		t.Fatalf("parse CRLF lesson: %v", err)
+	}
+	if windows.name != "windows" || windows.description != "CRLF lesson" {
+		t.Fatalf("CRLF lesson mismatch: %+v", windows)
+	}
 }
 
 func TestLessonCandidateFor_AppTypeAndScopeRules(t *testing.T) {

@@ -181,6 +181,10 @@ func parseLessonDoc(relPath, dirName, content string) (lessonDoc, error) {
 }
 
 func lessonFrontmatter(content string) (*yaml.Node, string, error) {
+	if strings.Contains(content, "\r") {
+		content = strings.ReplaceAll(content, "\r\n", "\n")
+		content = strings.ReplaceAll(content, "\r", "\n")
+	}
 	prefix := lessonFrontmatterFence + "\n"
 	if !strings.HasPrefix(content, prefix) {
 		return nil, content, nil

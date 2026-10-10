@@ -145,7 +145,7 @@ func isValidConfidence(c string) bool { return c == "" || validConfidenceLevels[
 // parseGraphNote splits YAML frontmatter from markdown body.
 // Returns (note, body, error).
 func parseGraphNote(content []byte) (*GraphNote, string, error) {
-	s := string(content)
+	s := normalizeKGNewlines(string(content))
 	if !strings.HasPrefix(s, "---") {
 		return nil, s, fmt.Errorf("no frontmatter found")
 	}
@@ -163,6 +163,14 @@ func parseGraphNote(content []byte) (*GraphNote, string, error) {
 		return nil, "", fmt.Errorf("parse frontmatter: %w", err)
 	}
 	return &note, body, nil
+}
+
+func normalizeKGNewlines(content string) string {
+	if !strings.Contains(content, "\r") {
+		return content
+	}
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	return strings.ReplaceAll(content, "\r", "\n")
 }
 
 // renderGraphNote serializes note + body back to bytes with YAML frontmatter.
@@ -821,7 +829,7 @@ func listPendingRawSources(io kgIO, kgHomeDir string) ([]RawSource, error) {
 			continue
 		}
 		// Parse YAML frontmatter into RawSource
-		s := string(data)
+		s := normalizeKGNewlines(string(data))
 		if !strings.HasPrefix(s, "---") {
 			continue
 		}
@@ -1082,6 +1090,7 @@ func ingestSource(io kgIO, kgHomeDir, sourceID string) (*IngestResult, error) {
 // parseRawSourceFrontmatter extracts the YAML frontmatter and remaining body
 // from a raw inbox source, applying default values when fields are absent.
 func parseRawSourceFrontmatter(s, sourceID string) (RawSource, string) {
+	s = normalizeKGNewlines(s)
 	var src RawSource
 	var rawBody string
 	if strings.HasPrefix(s, "---") {

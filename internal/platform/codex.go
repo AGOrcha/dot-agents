@@ -801,7 +801,11 @@ func readAgentBody(agentMD string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	text := string(data)
+	if strings.Contains(text, "\r") {
+		text = strings.ReplaceAll(text, "\r\n", "\n")
+		text = strings.ReplaceAll(text, "\r", "\n")
+	}
 	if !strings.HasPrefix(text, "---\n") {
 		return text, nil
 	}

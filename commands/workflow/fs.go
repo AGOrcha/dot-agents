@@ -7,13 +7,51 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
+const workflowWindowsWriteRetries = 5
+
+func workflowMkdirAll(path string, perm os.FileMode) error {
+	err := os.MkdirAll(path, perm)
+	if runtime.GOOS != "windows" || !os.IsPermission(err) {
+		return err
+	}
+	for range workflowWindowsWriteRetries {
+		time.Sleep(50 * time.Millisecond)
+		err = os.MkdirAll(path, perm)
+		if err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+func workflowWriteFile(path string, data []byte, perm os.FileMode) error {
+	if runtime.GOOS == "windows" {
+		if err := os.Chmod(path, perm); err != nil && !os.IsNotExist(err) && !os.IsPermission(err) {
+			return err
+		}
+	}
+	err := os.WriteFile(path, data, perm)
+	if runtime.GOOS != "windows" || (!os.IsPermission(err) && !os.IsTimeout(err)) {
+		return err
+	}
+	for range workflowWindowsWriteRetries {
+		time.Sleep(50 * time.Millisecond)
+		err = os.WriteFile(path, data, perm)
+		if err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
 // copyWorkflowArtifact copies a single file from src to dst, creating parent dirs as needed.
 func copyWorkflowArtifact(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := workflowMkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 	in, err := os.Open(src)
@@ -21,7 +59,7 @@ func copyWorkflowArtifact(src, dst string) error {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	out, err := os.Create(dst)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}

@@ -264,6 +264,14 @@ func TestParseNoteMetadata(t *testing.T) {
 		}
 	})
 
+	t.Run("crlf-frontmatter", func(t *testing.T) {
+		content := "---\r\nid: dec-crlf\r\ntitle: Windows\r\nsummary: supported\r\n---\r\nbody\r\n"
+		id, title, summary, _ := parseNoteMetadata(content)
+		if id != "dec-crlf" || title != "Windows" || summary != "supported" {
+			t.Fatalf("metadata = %q, %q, %q", id, title, summary)
+		}
+	})
+
 	t.Run("no-frontmatter", func(t *testing.T) {
 		id, title, summary, refs := parseNoteMetadata("just body text\n")
 		if id != "" || title != "" || summary != "" || refs != nil {

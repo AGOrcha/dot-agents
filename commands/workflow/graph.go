@@ -386,6 +386,7 @@ func (a *LocalGraphAdapter) Query(query GraphBridgeQuery) (GraphBridgeResponse, 
 }
 
 func parseNoteMetadata(content string) (id, title, summary string, sourceRefs []string) {
+	content = normalizeWorkflowArtifactNewlines(content)
 	if !strings.HasPrefix(content, "---") {
 		return
 	}

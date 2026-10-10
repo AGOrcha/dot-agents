@@ -92,6 +92,21 @@ Multiple lines allowed.
 	}
 }
 
+func TestReadFoldBackProposalFile_CRLFFrontmatter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "proposal.md")
+	content := "---\r\ntitle: Windows proposal\r\nobservation: preserved\r\nplan_id: p1\r\ntask_id: t1\r\ncreated_at: 2026-04-15T00:00:00Z\r\n---\r\n\r\nBody\r\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fm, body, err := readFoldBackProposalFile(path)
+	if err != nil {
+		t.Fatalf("read CRLF proposal: %v", err)
+	}
+	if fm.PlanID != "p1" || fm.TaskID != "t1" || body != "Body" {
+		t.Fatalf("proposal = %+v, body = %q", fm, body)
+	}
+}
+
 func TestReadFoldBackProposalFile_MissingFile(t *testing.T) {
 	_, _, err := readFoldBackProposalFile(filepath.Join(t.TempDir(), "no-such-file.md"))
 	if err == nil {
