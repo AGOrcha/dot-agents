@@ -22,7 +22,7 @@
     "@astrojs/markdown-satteri": "^0.3.8",
     "@astrojs/starlight": "^0.41.9",
     "@mermaid-js/layout-elk": "^0.2.3",
-    "astro": "^7.2.8",
+    "astro": "^7.3.3",
     "astro-mermaid": "^2.1.0",
     "cytoscape": "^3.34.2",
     "mermaid": "^11.17.2",
